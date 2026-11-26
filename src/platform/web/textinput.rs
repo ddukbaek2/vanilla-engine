@@ -258,6 +258,8 @@ thread_local! {
 	static DISPOSED_LISTENER_LIST: RefCell<Vec<EventListener>> = const { RefCell::new(Vec::new()) };
 	/// 문맥 메뉴 번호.
 	static NEXT_MENU_SERIAL: Cell<u64> = const { Cell::new(1) };
+	/// 캔버스 mousedown 을 브라우저가 센 수. (detail, 다음 프레임 시작에 글 입력 줄로 옮긴다. 입력 필드의 두 번, 세 번 누르기)
+	static PENDING_POINTER_CLICK_COUNT: Cell<Option<u32>> = const { Cell::new(None) };
 }
 
 //==============================================================================
@@ -286,6 +288,20 @@ fn describe_js_error(error: JsValue) -> String {
 //==============================================================================
 fn get_document() -> Option<web_sys::Document> {
 	web_sys::window().and_then(|window| window.document())
+}
+
+//==============================================================================
+/// 문서를 스크롤한 만큼. ((scrollX, scrollY), body 에 붙인 absolute 요소는 문서 좌표라 뷰포트 좌표인 getBoundingClientRect 와 clientX 에 더한다)
+//==============================================================================
+fn read_document_scroll() -> (f64, f64) {
+	match web_sys::window() {
+		Some(window) => {
+			(window.scroll_x().unwrap_or(0.0), window.scroll_y().unwrap_or(0.0))
+		}
+		None => {
+			(0.0, 0.0)
+		}
+	}
 }
 
 //==============================================================================
@@ -514,6 +530,9 @@ pub(super) fn begin_frame(engine: &mut Engine) {
 	});
 	let pending_event_list = PENDING_EVENT_LIST.with(|pending_event_cell| std::mem::take(&mut *pending_event_cell.borrow_mut()));
 	let text_input = engine.get_input_manager_mut().get_text_input_mut();
+	if let Some(pointer_click_count) = PENDING_POINTER_CLICK_COUNT.with(|click_count_cell| click_count_cell.take()) {
+		text_input.set_pointer_click_count(pointer_click_count);
+	}
 	WEB_TEXT_INPUT.with(|state_cell| {
 		let mut web_text_input_state = state_cell.borrow_mut();
 		for pending_event in pending_event_list {
@@ -642,8 +661,9 @@ pub(super) fn apply_frame(engine: &Engine) {
 fn apply_field_state_to_entry(entry: &mut HiddenInputEntry, field_state: &TextInputFieldState, canvas_rect: &web_sys::DomRect, focus_action_list: &mut Vec<(HiddenTextElement, bool)>) {
 	let input_style = entry.input_element.style();
 	let field_rect = field_state.field_rect;
-	let _ = input_style.set_property("left", &format!("{}px", canvas_rect.left() + field_rect.position.x as f64));
-	let _ = input_style.set_property("top", &format!("{}px", canvas_rect.top() + field_rect.position.y as f64));
+	let (scroll_x, scroll_y) = read_document_scroll();
+	let _ = input_style.set_property("left", &format!("{}px", canvas_rect.left() + scroll_x + field_rect.position.x as f64));
+	let _ = input_style.set_property("top", &format!("{}px", canvas_rect.top() + scroll_y + field_rect.position.y as f64));
 	let _ = input_style.set_property("width", &format!("{}px", field_rect.size.x));
 	let _ = input_style.set_property("height", &format!("{}px", field_rect.size.y));
 
@@ -825,7 +845,11 @@ fn translate_text_area_movement_key(keyboard_event: &web_sys::KeyboardEvent) -> 
 	let is_control = keyboard_event.ctrl_key();
 	let is_meta = keyboard_event.meta_key();
 	let is_alt = keyboard_event.alt_key();
+	let is_shift = keyboard_event.shift_key();
 	match keyboard_event.key().as_str() {
+		"ArrowLeft" | "ArrowRight" if is_mac && is_meta && is_control => {
+			None
+		}
 		"ArrowUp" if is_mac && is_meta => {
 			Some(TextInputKey::DocumentStart)
 		}
@@ -838,17 +862,35 @@ fn translate_text_area_movement_key(keyboard_event: &web_sys::KeyboardEvent) -> 
 		"ArrowRight" if is_mac && is_meta => {
 			Some(TextInputKey::End)
 		}
+		"ArrowLeft" if is_mac && is_control => {
+			Some(TextInputKey::Home)
+		}
+		"ArrowRight" if is_mac && is_control => {
+			Some(TextInputKey::End)
+		}
 		"ArrowUp" if !is_control && !is_meta && !is_alt => {
 			Some(TextInputKey::Up)
 		}
 		"ArrowDown" if !is_control && !is_meta && !is_alt => {
 			Some(TextInputKey::Down)
 		}
-		"PageUp" if !is_mac || is_alt => {
+		"PageUp" if !is_mac || is_alt != is_shift => {
 			Some(TextInputKey::PageUp)
 		}
-		"PageDown" if !is_mac || is_alt => {
+		"PageDown" if !is_mac || is_alt != is_shift => {
 			Some(TextInputKey::PageDown)
+		}
+		"PageUp" if is_mac && !is_alt && !is_shift => {
+			Some(TextInputKey::ScrollPageUp)
+		}
+		"PageDown" if is_mac && !is_alt && !is_shift => {
+			Some(TextInputKey::ScrollPageDown)
+		}
+		"Home" if is_mac && !is_control && !is_meta && !is_alt => {
+			Some(TextInputKey::ScrollToDocumentStart)
+		}
+		"End" if is_mac && !is_control && !is_meta && !is_alt => {
+			Some(TextInputKey::ScrollToDocumentEnd)
 		}
 		"Home" if !is_mac && is_control => {
 			Some(TextInputKey::DocumentStart)
@@ -856,10 +898,10 @@ fn translate_text_area_movement_key(keyboard_event: &web_sys::KeyboardEvent) -> 
 		"End" if !is_mac && is_control => {
 			Some(TextInputKey::DocumentEnd)
 		}
-		"Home" if !is_control && !is_meta => {
+		"Home" if !is_mac && !is_control && !is_meta => {
 			Some(TextInputKey::Home)
 		}
-		"End" if !is_control && !is_meta => {
+		"End" if !is_mac && !is_control && !is_meta => {
 			Some(TextInputKey::End)
 		}
 		_ => {
@@ -931,6 +973,10 @@ fn find_field_state_at_client_position(web_text_input_state: &WebTextInputState,
 //==============================================================================
 fn handle_canvas_pointer(event: web_sys::Event) {
 	let is_release = event.type_() == "touchend";
+	if let Some(mouse_event) = event.dyn_ref::<web_sys::MouseEvent>() {
+		let pointer_click_count = mouse_event.detail().max(1) as u32;
+		PENDING_POINTER_CLICK_COUNT.with(|click_count_cell| click_count_cell.set(Some(pointer_click_count)));
+	}
 	let (client_x, client_y) = match read_client_position(&event) {
 		Some(client_position) => {
 			client_position
@@ -1027,7 +1073,7 @@ fn handle_canvas_context_menu(event: web_sys::Event) {
 }
 
 //==============================================================================
-/// DOM 문맥 메뉴 열기. (잘라내기 / 복사 / 붙여넣기. 원본 show_context_menu)
+/// DOM 문맥 메뉴 열기. (잘라내기 / 복사 / 붙여넣기. 원본 show_context_menu, body 의 absolute 라 뷰포트 좌표 clientX, clientY 에 문서 스크롤을 더해 놓는다)
 //==============================================================================
 fn show_context_menu(field_id: u64, has_selection: bool, client_x: f64, client_y: f64) -> Result<(), String> {
 	hide_context_menu();
@@ -1037,8 +1083,9 @@ fn show_context_menu(field_id: u64, has_selection: bool, client_x: f64, client_y
 	for (property_name, property_value) in CONTEXT_MENU_STYLE_LIST {
 		let _ = menu_style.set_property(property_name, property_value);
 	}
-	let _ = menu_style.set_property("left", &format!("{}px", client_x));
-	let _ = menu_style.set_property("top", &format!("{}px", client_y));
+	let (scroll_x, scroll_y) = read_document_scroll();
+	let _ = menu_style.set_property("left", &format!("{}px", client_x + scroll_x));
+	let _ = menu_style.set_property("top", &format!("{}px", client_y + scroll_y));
 
 	let item_list = [("잘라내기", has_selection, TextInputKey::Cut), ("복사", has_selection, TextInputKey::Copy), ("붙여넣기", true, TextInputKey::Paste)];
 	let mut listener_list: Vec<EventListener> = Vec::new();

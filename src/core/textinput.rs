@@ -16,6 +16,8 @@
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use std::cell::{Cell, RefCell};
+use unicode_properties::{EmojiStatus, GeneralCategoryGroup, UnicodeEmoji, UnicodeGeneralCategory};
+use unicode_segmentation::UnicodeSegmentation;
 
 //==============================================================================
 /// 편집 키. (원본 handleCanvasKeydown 이 보는 키)
@@ -38,6 +40,14 @@ pub enum TextInputKey {
 	/// 글 앞과 끝. (Ctrl + Home, End. 맥은 Cmd + 위, 아래)
 	DocumentStart,
 	DocumentEnd,
+	/// 맥 Home, End. (맥 키 묶음의 scrollToBeginningOfDocument, scrollToEndOfDocument)
+	/// - 크롬 맥은 커서를 두고 넘길 수 있는 상자를 처음과 끝으로 넘기고, 넘길 것이 없으면 블링크 키 표대로 줄 앞과 끝으로 옮긴다.
+	/// - Shift 와 함께면(is_shift) 키 묶음의 moveToBeginningOfDocumentAndModifySelection 처럼 글 앞과 끝까지 고른다.
+	ScrollToDocumentStart,
+	ScrollToDocumentEnd,
+	/// 맥 PageUp, PageDown. (맥 키 묶음의 scrollPageUp, scrollPageDown, 크롬 맥은 커서를 두고 한 화면만큼 넘긴다)
+	ScrollPageUp,
+	ScrollPageDown,
 	Enter,
 	/// 원본 캔버스 모드처럼 필드는 쓰지 않는다. (게임이 다음 칸으로 옮길 때 보라고 넘긴다)
 	Tab,
@@ -145,6 +155,8 @@ pub struct TextInput {
 	context_menu_request_position: Option<Vector2>,
 	ime_commit_guard: RefCell<Option<(String, u32)>>,
 	is_ime_reset_requested: Cell<bool>,
+	/// 마지막 마우스 누름을 브라우저가 센 수. (웹 mousedown 의 detail, 입력 필드의 두 번, 세 번 누르기)
+	pointer_click_count: Cell<u32>,
 }
 
 impl TextInput {
@@ -159,6 +171,7 @@ impl TextInput {
 			context_menu_request_position: None,
 			ime_commit_guard: RefCell::new(None),
 			is_ime_reset_requested: Cell::new(false),
+			pointer_click_count: Cell::new(1),
 		}
 	}
 
@@ -305,6 +318,20 @@ impl TextInput {
 	}
 
 	//==============================================================================
+	/// 마우스 누름 수 넣기. (웹 플랫폼이 mousedown 의 detail 을 넣는다, 0 이면 1)
+	//==============================================================================
+	pub fn set_pointer_click_count(&self, pointer_click_count: u32) {
+		self.pointer_click_count.set(pointer_click_count.max(1));
+	}
+
+	//==============================================================================
+	/// 마지막 마우스 누름 수. (넣은 적이 없으면 1)
+	//==============================================================================
+	pub fn get_pointer_click_count(&self) -> u32 {
+		self.pointer_click_count.get()
+	}
+
+	//==============================================================================
 	/// IME 조합 끊기 부탁. (필드가 조합 글을 스스로 확정했을 때. 데스크탑 플랫폼이 IME 를 껐다 켠다)
 	//==============================================================================
 	pub fn request_ime_reset(&self) {
@@ -399,6 +426,311 @@ pub fn convert_character_index_to_utf16_index(text: &str, character_index: usize
 	text.chars().take(character_index).map(|character| character.len_utf16()).sum()
 }
 
+//==============================================================================
+/// 앞 글자 묶음 경계. (크롬 왼쪽 화살표의 PositionMoveType::kGraphemeCluster, 확장 자소 묶음 UAX #29)
+///
+/// # 인자
+/// - `text`: 글.
+/// - `character_index`: 문자 자리.
+///
+/// # 돌려줌
+/// 자리보다 앞인 가장 가까운 경계의 문자 자리. (0 이면 0, 묶음 가운데면 그 묶음 앞)
+//==============================================================================
+pub fn find_previous_grapheme_boundary(text: &str, character_index: usize) -> usize {
+	let mut previous_boundary = 0;
+	let mut boundary = 0;
+	for grapheme in text.graphemes(true) {
+		if boundary >= character_index {
+			break;
+		}
+		previous_boundary = boundary;
+		boundary += grapheme.chars().count();
+	}
+	previous_boundary
+}
+
+//==============================================================================
+/// 뒤 글자 묶음 경계. (크롬 오른쪽 화살표와 Delete 키의 PositionMoveType::kGraphemeCluster)
+///
+/// # 인자
+/// - `text`: 글.
+/// - `character_index`: 문자 자리.
+///
+/// # 돌려줌
+/// 자리보다 뒤인 가장 가까운 경계의 문자 자리. (글 끝이면 문자 수)
+//==============================================================================
+pub fn find_next_grapheme_boundary(text: &str, character_index: usize) -> usize {
+	let mut boundary = 0;
+	for grapheme in text.graphemes(true) {
+		boundary += grapheme.chars().count();
+		if boundary > character_index {
+			return boundary;
+		}
+	}
+	boundary
+}
+
+//==============================================================================
+/// 글자 묶음 경계 목록. (0 과 문자 수를 넣는다, 오름차순)
+//==============================================================================
+pub fn collect_grapheme_boundaries(text: &str) -> Vec<usize> {
+	let mut boundary_list = vec![0];
+	let mut boundary = 0;
+	for grapheme in text.graphemes(true) {
+		boundary += grapheme.chars().count();
+		boundary_list.push(boundary);
+	}
+	boundary_list
+}
+
+//==============================================================================
+/// 뒤로 지우기 상태. (블링크 backspace_state_machine.cc 의 BackspaceState)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BackspaceState {
+	Start,
+	BeforeLineFeed,
+	BeforeKeycap,
+	BeforeVariationSelectorAndKeycap,
+	BeforeEmojiModifier,
+	BeforeVariationSelectorAndEmojiModifier,
+	BeforeVariationSelector,
+	BeforeZeroWidthJoinerEmoji,
+	BeforeZeroWidthJoiner,
+	BeforeVariationSelectorAndZeroWidthJoiner,
+	OddNumberedRegionalIndicator,
+	EvenNumberedRegionalIndicator,
+	BeforeTagTerm,
+	InTagSequence,
+}
+
+//==============================================================================
+/// 그림 문자(Extended_Pictographic)인지. (unicode-segmentation 의 자소 묶음 규칙 GB11 로 읽는다)
+/// - GB11 은 그림 문자 ZWJ 뒤의 그림 문자 앞에서 나누지 않는다. 그림 문자(U+1F600) ZWJ 뒤에서 이어지고,
+///   그림 문자가 아닌 글자(a) ZWJ 뒤에서 나뉘면 그림 문자다. (Extend, ZWJ, SpacingMark 는 둘 다 이어져 빠진다)
+//==============================================================================
+fn is_extended_pictographic(character: char) -> bool {
+	let after_pictographic = format!("\u{1F600}\u{200D}{}", character);
+	let after_letter = format!("a\u{200D}{}", character);
+	after_pictographic.graphemes(true).count() == 1 && after_letter.graphemes(true).count() == 2
+}
+
+//==============================================================================
+/// 뒤로 지우기(Backspace)로 지울 범위의 앞. (블링크 BackspaceStateMachine 을 옮긴 것)
+/// - 크롬은 뒤로 지우기를 글자 묶음이 아니라 코드 포인트 하나씩 지운다. 다만 CR LF, 이모지 표현 선택자(VS)와 그 바탕,
+///   피부색 조정자와 그 바탕, ZWJ 로 이은 이모지, 국기(지역 표시 글자 둘), 키캡, 태그 묶음은 통째로 지운다.
+/// - 블링크의 그림 문자(IsExtendedPictographicGb11)는 Extended_Pictographic 이나 Emoji 다.
+/// - VS 앞 글자의 결합 등급(canonical combining class)이 0 인지는 원본(브라우저는 알려 주지 않는다)과 같게 결합 부호(일반 범주 M)가 아닌지로 본다.
+///
+/// # 인자
+/// - `text`: 글.
+/// - `character_index`: 커서의 문자 자리.
+///
+/// # 돌려줌
+/// 지울 범위 앞의 문자 자리.
+//==============================================================================
+pub fn find_backward_deletion_boundary(text: &str, character_index: usize) -> usize {
+	let preceding_list: Vec<char> = text.chars().take(character_index).collect();
+	let character_index = preceding_list.len();
+	let mut state = BackspaceState::Start;
+	let mut delete_count = 0;
+	let mut last_seen_variation_selector_count = 0;
+	let mut is_processing_tag_sequence_base = false;
+	for character in preceding_list.iter().rev().copied() {
+		let code_point = character as u32;
+		let is_variation_selector = matches!(code_point, 0x180B..=0x180D | 0x180F | 0xFE00..=0xFE0F | 0xE0100..=0xE01EF);
+		let is_regional_indicator = (0x1F1E6..=0x1F1FF).contains(&code_point);
+		let is_emoji_modifier = (0x1F3FB..=0x1F3FF).contains(&code_point);
+		let is_pictographic = character.is_emoji_char() || is_extended_pictographic(character);
+		let is_keycap_base = character.is_ascii_digit() || character == '#' || character == '*';
+		let is_tag_sequence = matches!(code_point, 0xE0030..=0xE0039 | 0xE0061..=0xE007A);
+		let is_emoji_modifier_base = matches!(character.emoji_status(), EmojiStatus::EmojiModifierBase | EmojiStatus::EmojiPresentationAndModifierBase);
+		let mut is_finished = false;
+		match state {
+			BackspaceState::Start => {
+				delete_count = 1;
+				if character == '\n' {
+					state = BackspaceState::BeforeLineFeed;
+				}
+				else if is_variation_selector {
+					state = BackspaceState::BeforeVariationSelector;
+				}
+				else if is_regional_indicator {
+					state = BackspaceState::OddNumberedRegionalIndicator;
+				}
+				else if is_emoji_modifier {
+					state = BackspaceState::BeforeEmojiModifier;
+				}
+				else if is_pictographic {
+					state = BackspaceState::BeforeZeroWidthJoinerEmoji;
+				}
+				else if code_point == 0x20E3 {
+					state = BackspaceState::BeforeKeycap;
+				}
+				else if code_point == 0xE007F {
+					state = BackspaceState::BeforeTagTerm;
+				}
+				else {
+					is_finished = true;
+				}
+			}
+			BackspaceState::BeforeLineFeed => {
+				if character == '\r' {
+					delete_count += 1;
+				}
+				is_finished = true;
+			}
+			BackspaceState::BeforeKeycap => {
+				if is_variation_selector {
+					last_seen_variation_selector_count = 1;
+					state = BackspaceState::BeforeVariationSelectorAndKeycap;
+				}
+				else {
+					if is_keycap_base {
+						delete_count += 1;
+					}
+					is_finished = true;
+				}
+			}
+			BackspaceState::BeforeVariationSelectorAndKeycap => {
+				if is_keycap_base {
+					delete_count += last_seen_variation_selector_count + 1;
+				}
+				is_finished = true;
+			}
+			BackspaceState::BeforeEmojiModifier => {
+				if is_variation_selector {
+					last_seen_variation_selector_count = 1;
+					state = BackspaceState::BeforeVariationSelectorAndEmojiModifier;
+				}
+				else if is_emoji_modifier_base {
+					delete_count += 1;
+					if is_processing_tag_sequence_base {
+						is_finished = true;
+					}
+					else {
+						state = BackspaceState::BeforeZeroWidthJoinerEmoji;
+					}
+				}
+				else {
+					is_finished = true;
+				}
+			}
+			BackspaceState::BeforeVariationSelectorAndEmojiModifier => {
+				if is_emoji_modifier_base {
+					delete_count += last_seen_variation_selector_count + 1;
+				}
+				is_finished = true;
+			}
+			BackspaceState::BeforeVariationSelector => {
+				if is_pictographic {
+					delete_count += 1;
+					if is_processing_tag_sequence_base {
+						is_finished = true;
+					}
+					else {
+						state = BackspaceState::BeforeZeroWidthJoinerEmoji;
+					}
+				}
+				else {
+					if !is_variation_selector && character.general_category_group() != GeneralCategoryGroup::Mark {
+						delete_count += 1;
+					}
+					is_finished = true;
+				}
+			}
+			BackspaceState::BeforeZeroWidthJoinerEmoji => {
+				if character == '\u{200D}' {
+					state = BackspaceState::BeforeZeroWidthJoiner;
+				}
+				else {
+					is_finished = true;
+				}
+			}
+			BackspaceState::BeforeZeroWidthJoiner => {
+				if is_pictographic {
+					delete_count += 2;
+					state = if is_emoji_modifier {
+						BackspaceState::BeforeEmojiModifier
+					}
+					else {
+						BackspaceState::BeforeZeroWidthJoinerEmoji
+					};
+				}
+				else if is_variation_selector {
+					last_seen_variation_selector_count = 1;
+					state = BackspaceState::BeforeVariationSelectorAndZeroWidthJoiner;
+				}
+				else {
+					is_finished = true;
+				}
+			}
+			BackspaceState::BeforeVariationSelectorAndZeroWidthJoiner => {
+				if is_pictographic {
+					delete_count += 2 + last_seen_variation_selector_count;
+					last_seen_variation_selector_count = 0;
+					state = BackspaceState::BeforeZeroWidthJoinerEmoji;
+				}
+				else {
+					is_finished = true;
+				}
+			}
+			BackspaceState::OddNumberedRegionalIndicator => {
+				if is_regional_indicator {
+					delete_count += 1;
+					state = BackspaceState::EvenNumberedRegionalIndicator;
+				}
+				else {
+					is_finished = true;
+				}
+			}
+			BackspaceState::EvenNumberedRegionalIndicator => {
+				if is_regional_indicator {
+					delete_count -= 1;
+					state = BackspaceState::OddNumberedRegionalIndicator;
+				}
+				else {
+					is_finished = true;
+				}
+			}
+			BackspaceState::BeforeTagTerm => {
+				if is_tag_sequence {
+					delete_count += 1;
+					state = BackspaceState::InTagSequence;
+				}
+				else {
+					is_finished = true;
+				}
+			}
+			BackspaceState::InTagSequence => {
+				if is_tag_sequence {
+					delete_count += 1;
+				}
+				else if is_emoji_modifier {
+					delete_count += 1;
+					is_processing_tag_sequence_base = true;
+					state = BackspaceState::BeforeEmojiModifier;
+				}
+				else if is_variation_selector {
+					delete_count += 1;
+					is_processing_tag_sequence_base = true;
+					state = BackspaceState::BeforeVariationSelector;
+				}
+				else {
+					if is_pictographic {
+						delete_count += 1;
+					}
+					is_finished = true;
+				}
+			}
+		}
+		if is_finished {
+			break;
+		}
+	}
+	character_index.saturating_sub(delete_count)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -406,6 +738,47 @@ mod tests {
 	//==============================================================================
 	/// 자리 바꾸기. (한글과 이모지가 섞인 글)
 	//==============================================================================
+	#[test]
+	fn grapheme_boundaries_and_backward_deletion_follow_blink() {
+		let text = "a\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}e\u{301}b";
+		assert_eq!(collect_grapheme_boundaries(text), vec![0, 1, 6, 8, 9]);
+		assert_eq!(find_next_grapheme_boundary(text, 0), 1);
+		assert_eq!(find_next_grapheme_boundary(text, 1), 6);
+		assert_eq!(find_next_grapheme_boundary(text, 3), 6);
+		assert_eq!(find_next_grapheme_boundary(text, 9), 9);
+		assert_eq!(find_previous_grapheme_boundary(text, 9), 8);
+		assert_eq!(find_previous_grapheme_boundary(text, 8), 6);
+		assert_eq!(find_previous_grapheme_boundary(text, 4), 1);
+		assert_eq!(find_previous_grapheme_boundary(text, 0), 0);
+		// 남는 글. (헤드리스 크롬 textarea 의 execCommand("delete") 와 같은 결과)
+		let case_list: [(&str, &str); 13] = [
+			("a\u{1F600}", "a"),
+			("e\u{301}", "e"),
+			("a\r\n", "a"),
+			("x\u{1F44D}\u{1F3FD}", "x"),
+			("x\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", "x"),
+			("x\u{1F1F0}\u{1F1F7}", "x"),
+			("x\u{1F1F0}\u{1F1F7}\u{1F1EF}", "x\u{1F1F0}\u{1F1F7}"),
+			("x1\u{FE0F}\u{20E3}", "x"),
+			("x\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}", "x"),
+			("x\u{2764}\u{FE0F}", "x"),
+			("x\u{6F22}\u{E0100}", "x"),
+			("\u{1100}\u{1161}\u{11A8}", "\u{1100}\u{1161}"),
+			("\u{AC00}", ""),
+		];
+		for (text, expected) in case_list {
+			let character_count = count_characters(text);
+			let start = find_backward_deletion_boundary(text, character_count);
+			let remaining: String = text.chars().take(start).collect();
+			assert_eq!(remaining, expected, "{:?}", text);
+		}
+		assert!(is_extended_pictographic('\u{1F600}'));
+		assert!(is_extended_pictographic('\u{1F094}'));
+		assert!(!is_extended_pictographic('a'));
+		assert!(!is_extended_pictographic('\u{1F3FB}'));
+		assert!(!is_extended_pictographic('\u{1F1F0}'));
+	}
+
 	#[test]
 	fn index_conversion() {
 		let text = "a한😀b";

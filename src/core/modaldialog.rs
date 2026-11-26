@@ -483,10 +483,10 @@ mod desktop_dialog {
 					};
 					self.edit_buffer.move_cursor(new_index, is_shift);
 				}
-				TextInputKey::Home => {
+				TextInputKey::Home | TextInputKey::ScrollToDocumentStart => {
 					self.edit_buffer.move_cursor(0, is_shift);
 				}
-				TextInputKey::End => {
+				TextInputKey::End | TextInputKey::ScrollToDocumentEnd => {
 					self.edit_buffer.move_cursor(character_count, is_shift);
 				}
 				TextInputKey::Undo => {
@@ -495,7 +495,7 @@ mod desktop_dialog {
 				TextInputKey::Redo => {
 					self.edit_buffer.redo();
 				}
-				TextInputKey::Enter | TextInputKey::Tab | TextInputKey::Up | TextInputKey::Down | TextInputKey::PageUp | TextInputKey::PageDown | TextInputKey::DocumentStart | TextInputKey::DocumentEnd => {
+				TextInputKey::Enter | TextInputKey::Tab | TextInputKey::Up | TextInputKey::Down | TextInputKey::PageUp | TextInputKey::PageDown | TextInputKey::DocumentStart | TextInputKey::DocumentEnd | TextInputKey::ScrollPageUp | TextInputKey::ScrollPageDown => {
 				}
 			}
 			self.bump_value_revision();

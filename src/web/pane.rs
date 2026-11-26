@@ -313,6 +313,116 @@ pub(crate) fn calculate_resized_size(previous_start: f64, next_end: f64, thickne
 	}
 }
 
+//==============================================================================
+/// 자리를 차지하는 스크롤 막대(클래식 막대)의 치수. (크롬과 같게, DIP)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClassicScrollbarMetrics {
+	/// 막대 두께. (내용 상자에서 이만큼 덜어 낸다)
+	pub thickness: f32,
+	/// 양끝 단추 길이. (썸은 그 사이에서 움직인다, 없으면 0)
+	pub button_length: f32,
+	/// 썸 두께와 막대 안쪽에서 썸까지. (막대의 가로지르는 쪽)
+	pub thumb_thickness: f32,
+	pub thumb_cross_offset: f32,
+	/// 썸이 움직이는 칸의 가장 짧은 썸 길이와 그린 썸이 칸 끝에서 떨어지는 만큼.
+	pub thumb_minimum_length: f32,
+	pub thumb_length_inset: f32,
+}
+
+//==============================================================================
+/// 이 플랫폼의 크롬이 쓰는 클래식 스크롤 막대 치수. (얹는 막대면 None)
+/// - 윈도우, 리눅스: 크롬은 Fluent 막대를 자리를 차지하는 막대로 쓴다. (native_theme_features.cc 의 IsFluentScrollbarEnabled 가 IS_WIN, IS_LINUX 에서 참,
+///   얹는 막대 기능 kOverlayScrollbar 는 두 운영체제에서 꺼져 있다) 두께 15, 단추 18, 썸 9 와 가장 짧은 길이 17 (native_theme_fluent.h, .cc).
+///   scrollbar-width: thin 은 크롬 ScrollbarThemeAura 처럼 2/3 배다.
+/// - 맥: 크롬은 시스템 설정(스크롤 막대 보기)을 NSScroller.preferredScrollerStyle 로 읽어(os_settings_provider_mac.mm) 얹는 막대면 자리를 차지하지 않는다.
+///   클래식이면 scrollbar_theme_mac.cc 의 legacy 값(두께 15, 얇으면 11, 가장 짧은 썸 칸 20, 16)이고 썸은 native_theme_mac.mm 처럼 둘레를 3 (막대 쪽은 테두리 1 더) 줄여 그린다.
+/// - 웹: 브라우저가 놓은 막대 두께(overflow: scroll 인 요소의 offsetWidth - clientWidth)를 읽는다. 0 이면 얹는 막대다.
+///
+/// # 인자
+/// - `is_thin`: CSS scrollbar-width 가 thin 인지.
+///
+/// # 돌려줌
+/// 클래식 막대의 치수. (얹는 막대면 None)
+//==============================================================================
+pub fn read_classic_scrollbar_metrics(is_thin: bool) -> Option<ClassicScrollbarMetrics> {
+	#[cfg(target_arch = "wasm32")]
+	{
+		let thickness = crate::platform::web::systemfont::measure_classic_scrollbar_thickness(is_thin);
+		if thickness <= 0.0 {
+			return None;
+		}
+		let proportion = thickness / 15.0;
+		Some(ClassicScrollbarMetrics {
+			thickness,
+			button_length: (18.0 * proportion).floor(),
+			thumb_thickness: (9.0 * proportion).floor(),
+			thumb_cross_offset: ((thickness - (9.0 * proportion).floor()) * 0.5).floor(),
+			thumb_minimum_length: (17.0 * proportion).floor(),
+			thumb_length_inset: 0.0,
+		})
+	}
+	#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+	{
+		if crate::platform::desktop::systemfont::is_overlay_scrollbar_preferred() {
+			return None;
+		}
+		let thickness = if is_thin {
+			11.0
+		}
+		else {
+			15.0
+		};
+		Some(ClassicScrollbarMetrics {
+			thickness,
+			button_length: 0.0,
+			thumb_thickness: thickness - 7.0,
+			thumb_cross_offset: 4.0,
+			thumb_minimum_length: if is_thin {
+				16.0
+			}
+			else {
+				20.0
+			},
+			thumb_length_inset: 3.0,
+		})
+	}
+	#[cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))]
+	{
+		let proportion = if is_thin {
+			2.0 / 3.0
+		}
+		else {
+			1.0
+		};
+		let thickness = (15.0_f32 * proportion).floor();
+		let thumb_thickness = (9.0_f32 * proportion).floor();
+		Some(ClassicScrollbarMetrics {
+			thickness,
+			button_length: (18.0_f32 * proportion).floor(),
+			thumb_thickness,
+			thumb_cross_offset: ((thickness - thumb_thickness) * 0.5).floor(),
+			thumb_minimum_length: (17.0_f32 * proportion).floor(),
+			thumb_length_inset: 0.0,
+		})
+	}
+}
+
+//==============================================================================
+/// 클래식 막대의 썸 자리. ((썸 시작, 썸 길이), 막대 길이 방향의 자리, 막대 시작이 0. 넘치지 않거나 썸 칸이 없으면 None)
+/// - 크롬 ScrollbarTheme 처럼 썸 칸은 양끝 단추 사이이고, 썸 길이는 칸 x 보이는 비율(가장 짧은 길이까지)이다.
+//==============================================================================
+pub fn calculate_classic_thumb_span(metrics: &ClassicScrollbarMetrics, track_length: f32, viewport_length: f32, extent_length: f32, offset: f32) -> Option<(f32, f32)> {
+	let thumb_room = track_length - metrics.button_length * 2.0;
+	if extent_length <= viewport_length + 0.5 || thumb_room < metrics.thumb_minimum_length || viewport_length <= 0.0 {
+		return None;
+	}
+	let thumb_length = (thumb_room * viewport_length / extent_length).round().max(metrics.thumb_minimum_length).min(thumb_room);
+	let maximum_offset = extent_length - viewport_length;
+	let thumb_start = metrics.button_length + (thumb_room - thumb_length) * (offset / maximum_offset).clamp(0.0, 1.0);
+	Some((thumb_start, thumb_length))
+}
+
 #[cfg(target_arch = "wasm32")]
 mod dompane;
 #[cfg(target_arch = "wasm32")]

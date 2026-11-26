@@ -212,6 +212,18 @@ fn translate_key(logical_key: &Key, physical_key: PhysicalKey, text: Option<&str
 			NamedKey::ArrowRight => {
 				Some(TextInputKey::Right)
 			}
+			// 맥 키 묶음: Home, End 는 scrollToBeginningOfDocument, scrollToEndOfDocument, Shift 와 함께면 글 앞과 끝까지 고르기(필드가 is_shift 로 가른다), Option 과 함께면 noop.
+			NamedKey::Home | NamedKey::End if cfg!(target_os = "macos") => {
+				if is_alt {
+					None
+				}
+				else if *named_key == NamedKey::End {
+					Some(TextInputKey::ScrollToDocumentEnd)
+				}
+				else {
+					Some(TextInputKey::ScrollToDocumentStart)
+				}
+			}
 			NamedKey::Home => {
 				Some(TextInputKey::Home)
 			}
@@ -224,12 +236,30 @@ fn translate_key(logical_key: &Key, physical_key: PhysicalKey, text: Option<&str
 			NamedKey::ArrowDown => {
 				Some(TextInputKey::Down)
 			}
-			// 블링크 키 표: 맥이 아니면 PageUp, PageDown 이 MovePageUp, MovePageDown, 맥은 Option 과 함께일 때.
-			NamedKey::PageUp if !cfg!(target_os = "macos") || is_alt => {
-				Some(TextInputKey::PageUp)
-			}
-			NamedKey::PageDown if !cfg!(target_os = "macos") || is_alt => {
-				Some(TextInputKey::PageDown)
+			// 블링크 키 표: 맥이 아니면 PageUp, PageDown 이 MovePageUp, MovePageDown.
+			// 맥 키 묶음: Option 과 함께면 pageUp, pageDown(옮기기), Shift 와 함께면 pageUpAndModifySelection(고르기), 홀로면 scrollPageUp, scrollPageDown.
+			NamedKey::PageUp | NamedKey::PageDown => {
+				let is_down = *named_key == NamedKey::PageDown;
+				let move_key = if is_down {
+					TextInputKey::PageDown
+				}
+				else {
+					TextInputKey::PageUp
+				};
+				if !cfg!(target_os = "macos") || is_alt != is_shift {
+					Some(move_key)
+				}
+				else if !is_alt {
+					Some(if is_down {
+						TextInputKey::ScrollPageDown
+					}
+					else {
+						TextInputKey::ScrollPageUp
+					})
+				}
+				else {
+					None
+				}
 			}
 			NamedKey::Enter => {
 				Some(TextInputKey::Enter)
@@ -261,7 +291,9 @@ fn translate_key(logical_key: &Key, physical_key: PhysicalKey, text: Option<&str
 //==============================================================================
 /// Ctrl/Cmd 와 함께 누른 이동 키. (없으면 None)
 /// - 맥이 아니면 블링크 키 표의 Ctrl + Home, End(MoveToBeginningOfDocument, MoveToEndOfDocument).
-/// - 맥은 Cmd + 왼쪽, 오른쪽이 줄 앞과 끝, Cmd + 위, 아래가 글 앞과 끝이다. (맥 기본 키 묶음. 크롬은 맥 키 묶음이 내는 Cocoa 명령을 블링크가 받는다)
+/// - 맥은 Cmd + 왼쪽, 오른쪽이 줄 앞과 끝, Cmd + 위, 아래가 글 앞과 끝이다. Ctrl + 왼쪽, 오른쪽도 줄 앞과 끝이다.
+///   (맥 키 묶음 StandardKeyBinding.dict 의 moveToLeftEndOfLine, moveToRightEndOfLine, moveToBeginningOfDocument, moveToEndOfDocument.
+///   크롬은 키 묶음이 내는 Cocoa 명령의 이름을 블링크 편집 명령으로 넘긴다. Cmd + Ctrl 은 쓰기 방향 명령이라 옮기지 않는다)
 //==============================================================================
 fn translate_modified_movement_key(logical_key: &Key, modifiers_state: ModifiersState) -> Option<TextInputKey> {
 	let named_key = match logical_key {
@@ -273,8 +305,21 @@ fn translate_modified_movement_key(logical_key: &Key, modifiers_state: Modifiers
 		}
 	};
 	if cfg!(target_os = "macos") {
-		if !modifiers_state.super_key() {
+		if modifiers_state.super_key() && modifiers_state.control_key() {
 			return None;
+		}
+		if !modifiers_state.super_key() {
+			return match named_key {
+				NamedKey::ArrowLeft => {
+					Some(TextInputKey::Home)
+				}
+				NamedKey::ArrowRight => {
+					Some(TextInputKey::End)
+				}
+				_ => {
+					None
+				}
+			};
 		}
 		match named_key {
 			NamedKey::ArrowLeft => {
@@ -513,9 +558,20 @@ mod tests {
 		assert_eq!(translate_named(NamedKey::ArrowDown, KeyCode::ArrowDown, ModifiersState::SHIFT), Some(TextInputKey::Down));
 		assert_eq!(translate_named(NamedKey::PageDown, KeyCode::PageDown, ModifiersState::ALT), Some(TextInputKey::PageDown));
 		if cfg!(target_os = "macos") {
-			assert_eq!(translate_named(NamedKey::PageDown, KeyCode::PageDown, no_modifiers), None);
+			assert_eq!(translate_named(NamedKey::PageDown, KeyCode::PageDown, no_modifiers), Some(TextInputKey::ScrollPageDown));
 			assert_eq!(translate_named(NamedKey::ArrowLeft, KeyCode::ArrowLeft, ModifiersState::SUPER), Some(TextInputKey::Home));
 			assert_eq!(translate_named(NamedKey::ArrowDown, KeyCode::ArrowDown, ModifiersState::SUPER), Some(TextInputKey::DocumentEnd));
+			// 맥 키 묶음 StandardKeyBinding.dict 의 Home, End, PageUp, PageDown, Ctrl + 왼쪽, 오른쪽.
+			assert_eq!(translate_named(NamedKey::Home, KeyCode::Home, no_modifiers), Some(TextInputKey::ScrollToDocumentStart));
+			assert_eq!(translate_named(NamedKey::End, KeyCode::End, no_modifiers), Some(TextInputKey::ScrollToDocumentEnd));
+			assert_eq!(translate_named(NamedKey::End, KeyCode::End, ModifiersState::SHIFT), Some(TextInputKey::ScrollToDocumentEnd));
+			assert_eq!(translate_named(NamedKey::Home, KeyCode::Home, ModifiersState::ALT), None);
+			assert_eq!(translate_named(NamedKey::PageUp, KeyCode::PageUp, no_modifiers), Some(TextInputKey::ScrollPageUp));
+			assert_eq!(translate_named(NamedKey::PageDown, KeyCode::PageDown, ModifiersState::SHIFT), Some(TextInputKey::PageDown));
+			assert_eq!(translate_named(NamedKey::PageDown, KeyCode::PageDown, ModifiersState::ALT | ModifiersState::SHIFT), None);
+			assert_eq!(translate_named(NamedKey::ArrowLeft, KeyCode::ArrowLeft, ModifiersState::CONTROL), Some(TextInputKey::Home));
+			assert_eq!(translate_named(NamedKey::ArrowRight, KeyCode::ArrowRight, ModifiersState::CONTROL | ModifiersState::SHIFT), Some(TextInputKey::End));
+			assert_eq!(translate_named(NamedKey::ArrowLeft, KeyCode::ArrowLeft, ModifiersState::CONTROL | ModifiersState::SUPER), None);
 		}
 		else {
 			assert_eq!(translate_named(NamedKey::PageUp, KeyCode::PageUp, no_modifiers), Some(TextInputKey::PageUp));

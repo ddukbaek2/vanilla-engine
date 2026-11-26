@@ -369,6 +369,82 @@ pub fn measure_text(font_description: &FontDescription, text: &str) -> TextMetri
 }
 
 thread_local! {
+	/// 브라우저가 놓은 클래식 스크롤 막대 두께. ((얇은지) → px, 0 이면 얹는 막대)
+	static CLASSIC_SCROLLBAR_THICKNESS_TABLE: RefCell<std::collections::HashMap<bool, f32>> = RefCell::new(std::collections::HashMap::new());
+}
+
+//==============================================================================
+/// 브라우저가 놓는 클래식 스크롤 막대 두께 재기. (px, 얹는 막대거나 문서가 없으면 0)
+/// - 문서 밖에 숨긴 overflow: scroll 요소의 offsetWidth - clientWidth 다. (scrollbar-width: thin 이면 그 값으로)
+//==============================================================================
+pub fn measure_classic_scrollbar_thickness(is_thin: bool) -> f32 {
+	if let Some(thickness) = CLASSIC_SCROLLBAR_THICKNESS_TABLE.with(|table_cell| table_cell.borrow().get(&is_thin).copied()) {
+		return thickness;
+	}
+	let measure = || -> Option<f32> {
+		let document = web_sys::window()?.document()?;
+		let body = document.body()?;
+		let probe_element = document.create_element("div").ok()?.dyn_into::<web_sys::HtmlElement>().ok()?;
+		let probe_style = probe_element.style();
+		let scrollbar_width = if is_thin {
+			"thin"
+		}
+		else {
+			"auto"
+		};
+		for (property_name, property_value) in [("position", "absolute"), ("visibility", "hidden"), ("left", "-10000px"), ("top", "-10000px"), ("width", "100px"), ("height", "100px"), ("overflow", "scroll"), ("scrollbar-width", scrollbar_width)] {
+			let _ = probe_style.set_property(property_name, property_value);
+		}
+		let _ = body.append_child(&probe_element);
+		let thickness = (probe_element.offset_width() - probe_element.client_width()) as f32;
+		probe_element.remove();
+		Some(thickness.max(0.0))
+	};
+	let thickness = measure().unwrap_or(0.0);
+	CLASSIC_SCROLLBAR_THICKNESS_TABLE.with(|table_cell| {
+		table_cell.borrow_mut().insert(is_thin, thickness);
+	});
+	thickness
+}
+
+thread_local! {
+	/// 브라우저가 놓은 line-height normal 의 줄 높이. ((CSS 폰트 문자열, 글꼴 바뀐 횟수) → px)
+	static NORMAL_LINE_HEIGHT_TABLE: RefCell<std::collections::HashMap<(String, u64), f32>> = RefCell::new(std::collections::HashMap::new());
+}
+
+//==============================================================================
+/// CSS line-height normal 의 줄 높이를 브라우저로 재기. (px, 문서가 없으면 None)
+/// - 문서 밖에 숨긴 블록 요소에 그 폰트와 line-height: normal 로 글 한 줄을 놓고 높이를 읽는다. 블록의 한 줄 높이는 크롬이 첫째로 쓸 수 있는 글꼴의 LineSpacing 이다.
+/// - 글꼴이 새로 받아지면(글꼴 바뀐 횟수) 다시 잰다.
+//==============================================================================
+pub fn measure_normal_line_height(font_description: &FontDescription) -> Option<f32> {
+	let font_string = build_css_font_string(font_description, 1.0);
+	let table_key = (font_string.clone(), read_font_change_count());
+	if let Some(line_height) = NORMAL_LINE_HEIGHT_TABLE.with(|table_cell| table_cell.borrow().get(&table_key).copied()) {
+		return Some(line_height);
+	}
+	let document = web_sys::window()?.document()?;
+	let body = document.body()?;
+	let probe_element = document.create_element("div").ok()?.dyn_into::<web_sys::HtmlElement>().ok()?;
+	let probe_style = probe_element.style();
+	for (property_name, property_value) in [("position", "absolute"), ("visibility", "hidden"), ("left", "-10000px"), ("top", "-10000px"), ("margin", "0"), ("padding", "0"), ("border", "0"), ("white-space", "pre"), ("line-height", "normal")] {
+		let _ = probe_style.set_property(property_name, property_value);
+	}
+	let _ = probe_style.set_property("font", &font_string);
+	probe_element.set_text_content(Some("x"));
+	let _ = body.append_child(&probe_element);
+	let line_height = probe_element.get_bounding_client_rect().height() as f32;
+	probe_element.remove();
+	if line_height <= 0.0 {
+		return None;
+	}
+	NORMAL_LINE_HEIGHT_TABLE.with(|table_cell| {
+		table_cell.borrow_mut().insert(table_key, line_height);
+	});
+	Some(line_height)
+}
+
+thread_local! {
 	/// 브라우저로 푼 글자 크기. (폰트 문자열과 창 크기 → px, 틀린 문자열이면 None)
 	static RESOLVED_FONT_SIZE_TABLE: RefCell<std::collections::HashMap<String, Option<f32>>> = RefCell::new(std::collections::HashMap::new());
 }

@@ -23,7 +23,9 @@
 //!   relative 요소는 부모 안쪽 여백 안에서 놓는다. 블록 부모는 세로로 차례로(div 는 폭을 채우고 그 밖은 제 폭), flex 부모는 CSS Flexbox 처럼
 //!   주축(flex-direction row, column)으로 기준 크기(flex-basis, 없으면 width 나 height, 그것도 auto 면 제 크기)를 놓고 남는 자리를 flex-grow 비로 나누거나
 //!   모자라면 flex-shrink 와 기준 크기를 곱한 비로 줄인다. (min, max 에 걸린 항목은 묶고 다시 나눈다, 넘침이 visible 인 항목의 자동 최소는 제 크기)
-//!   교차축은 align-items(기본 stretch, flex-start, center, flex-end), 주축 늘어놓기는 justify-content(flex-start, center, flex-end, space-between, space-around, space-evenly)와 gap.
+//!   교차축은 align-items(기본 stretch, flex-start, center, flex-end), 주축 늘어놓기는 justify-content(flex-start, center, flex-end, space-between, space-around, space-evenly)와 gap(줄 사이, 칸 사이).
+//!   flex-wrap(wrap, wrap-reverse)이면 CSS Flexbox 9.3 처럼 바깥 가정 주축 크기를 차례로 더하다 넘치는 항목에서 새 줄을 열고, 줄마다 늘고 줄이며,
+//!   줄의 교차 크기는 항목 바깥 교차 크기의 가장 큰 값이고 align-content(기본 stretch 는 남는 자리를 줄마다 고루 더한다)로 줄을 늘어놓는다. wrap-reverse 는 교차축의 시작과 끝을 바꾼다.
 //!   auto 크기 요소의 제 크기는 글과 자식(블록은 세로 합, 가로 flex 는 가로 합)에 안쪽 여백과 테두리를 더한 것이다.
 //! - overflow(overflow-x, overflow-y)가 visible 이 아니면 넘친 자식을 자르고(모서리 border-radius), auto, scroll 이면 휠로 넘기고 썸을 끌어 넘긴다.
 //!   원본 스크롤 상자처럼 그 쪽으로 더 넘길 수 없으면 휠을 부모에게 넘긴다. 썸은 scrollbar-color 의 썸 색(원본 에디터의 rgba(121, 121, 121, 0.4))이다.
@@ -34,8 +36,11 @@
 //!     display(flex, block, none), flex-direction, flex, flex-grow, flex-shrink, flex-basis, justify-content, align-items, gap,
 //!     padding, margin(1 ~ 4 값과 쪽마다), background, background-color, color, font-size, font-weight, font-family, line-height, text-align,
 //!     border, border-top, border-right, border-bottom, border-left, border-width, border-color, border-radius, cursor(pointer),
-//!     overflow, overflow-x, overflow-y, scrollbar-color. 그 밖(flex-wrap 줄넘김, white-space 와 text-overflow 의 말줄임, user-select, opacity 같은 것)은 읽지 않는다.
-//!   - 스크롤 막대는 자리를 차지하지 않고 내용 위에 얹는 두께 8 의 썸이다. (크롬은 운영체제와 scrollbar-width 에 따라 자리를 차지하는 막대일 수 있다)
+//!     overflow, overflow-x, overflow-y, scrollbar-color, scrollbar-width, flex-wrap, flex-flow, align-content, row-gap, column-gap, white-space, text-overflow.
+//!     그 밖(user-select, opacity 같은 것)은 읽지 않는다. 글은 줄바꿈하지 않는다. (white-space: nowrap 과 text-overflow: ellipsis 에 overflow 가 visible 이 아니면 넘친 끝을 말줄임표로)
+//!   - 스크롤 막대는 크롬처럼 운영체제를 따른다. 윈도우와 리눅스는 자리를 차지하는 Fluent 막대(두께 15, thin 10), 맥은 시스템 설정이 얹는 막대면 두께 8 의 얹는 썸,
+//!     클래식이면 자리를 차지하는 막대(두께 15, thin 11)다. 자리를 차지하는 막대는 테두리 안, 안쪽 여백 밖에서 overflow: scroll 은 늘, auto 는 넘칠 때만 내용 폭을 던다.
+//!     (web/pane.rs 의 read_classic_scrollbar_metrics, 단추 화살표는 그리지 않고 길은 scrollbar-color 의 둘째 값이 있을 때만 칠한다)
 //!   - textarea 태그는 엔진 여러 줄 입력 필드(UIInputField::set_multiline)가 글을 받는다. 원본 DOM textarea 처럼 줄을 넣고, 폭에 맞춰 나누고, 위아래로 옮기고, 넘치면 휠로 넘긴다.
 //!     프리셋의 탭 크기 4 를 쓴다. 글자, 색, 안쪽 여백은 만들 때의 스타일을 받는다. (PaneStyle::apply 로 나중에 바꾼 글꼴은 필드에 옮기지 않는다)
 //!   - canvas 태그는 아무것도 그리지 않는 노드다. 원본은 그 자리에 엔진 캔버스가 들어가고, 데스크탑은 창 전체가 엔진 화면이라 게임이 그 노드의 자리를 읽어 쓴다.
@@ -756,6 +761,31 @@ enum PaneJustifyContent {
 }
 
 //==============================================================================
+/// 줄넘김. (원본 flex-wrap, 기본 nowrap)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PaneFlexWrap {
+	NoWrap,
+	Wrap,
+	/// 줄이 교차축 끝에서 시작으로 쌓인다.
+	WrapReverse,
+}
+
+//==============================================================================
+/// 여러 줄의 교차축 늘어놓기. (원본 align-content, 기본 normal 은 flex 상자에서 stretch)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PaneAlignContent {
+	Stretch,
+	Start,
+	Center,
+	End,
+	SpaceBetween,
+	SpaceAround,
+	SpaceEvenly,
+}
+
+//==============================================================================
 /// 교차축 맞추기. (원본 align-items, 기본 stretch)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -844,7 +874,11 @@ pub struct PaneElement {
 	flex_direction: PaneFlexDirection,
 	justify_content: PaneJustifyContent,
 	align_items: PaneAlignItems,
-	gap: f32,
+	flex_wrap: PaneFlexWrap,
+	align_content: PaneAlignContent,
+	/// 줄 사이와 칸 사이. (원본 gap 의 row-gap, column-gap)
+	row_gap: f32,
+	column_gap: f32,
 	flex_grow: f32,
 	flex_shrink: f32,
 	flex_basis: PaneLength,
@@ -861,9 +895,17 @@ pub struct PaneElement {
 	font_family: String,
 	line_height: Option<f32>,
 	text_align: PaneTextAlign,
+	/// 글을 줄바꿈하지 않는지와 넘치면 말줄임표를 그릴지. (원본 white-space: nowrap 과 text-overflow: ellipsis)
+	is_nowrap_text: bool,
+	is_text_ellipsis: bool,
 	overflow_x: PaneOverflow,
 	overflow_y: PaneOverflow,
 	scrollbar_thumb_color: Color,
+	/// 스크롤 막대 길 색과 얇은 막대인지. (원본 scrollbar-color 의 둘째 값, scrollbar-width: thin)
+	scrollbar_track_color: Option<Color>,
+	is_thin_scrollbar: bool,
+	/// 클래식 스크롤 막대가 차지한 자리. (세로 막대의 폭, 가로 막대의 높이, 얹는 막대면 0)
+	scrollbar_gutter: Vector2,
 	/// 굴려 넘긴 만큼과 내용 끝. (안쪽 여백 상자 기준)
 	scroll_offset: Vector2,
 	scroll_extent: Vector2,
@@ -898,7 +940,10 @@ impl PaneElement {
 			flex_direction: PaneFlexDirection::Row,
 			justify_content: PaneJustifyContent::Start,
 			align_items: PaneAlignItems::Stretch,
-			gap: 0.0,
+			flex_wrap: PaneFlexWrap::NoWrap,
+			align_content: PaneAlignContent::Stretch,
+			row_gap: 0.0,
+			column_gap: 0.0,
 			flex_grow: 0.0,
 			flex_shrink: 1.0,
 			flex_basis: PaneLength::Auto,
@@ -914,9 +959,14 @@ impl PaneElement {
 			font_family: String::from(PaneTheme::FONT_FAMILY),
 			line_height: None,
 			text_align: PaneTextAlign::Left,
+			is_nowrap_text: false,
+			is_text_ellipsis: false,
 			overflow_x: PaneOverflow::Visible,
 			overflow_y: PaneOverflow::Visible,
 			scrollbar_thumb_color: Color::from(SCROLLBAR_DEFAULT_THUMB_COLOR),
+			scrollbar_track_color: None,
+			is_thin_scrollbar: false,
+			scrollbar_gutter: Vector2::zero(),
 			scroll_offset: Vector2::zero(),
 			scroll_extent: Vector2::zero(),
 			scroll_drag_start: None,
@@ -1069,7 +1119,64 @@ impl PaneElement {
 				};
 			}
 			"gap" => {
-				self.gap = parse_pixel(value.split_whitespace().next().unwrap_or("")).unwrap_or(0.0);
+				// gap: 줄 사이 [칸 사이]. (값 하나면 둘 다)
+				let mut part_list = value.split_whitespace();
+				self.row_gap = parse_pixel(part_list.next().unwrap_or("")).unwrap_or(0.0);
+				self.column_gap = part_list.next().and_then(parse_pixel).unwrap_or(self.row_gap);
+			}
+			"row-gap" => {
+				self.row_gap = parse_pixel(value).unwrap_or(0.0);
+			}
+			"column-gap" => {
+				self.column_gap = parse_pixel(value).unwrap_or(0.0);
+			}
+			"flex-wrap" => {
+				self.flex_wrap = parse_flex_wrap(value);
+			}
+			"flex-flow" => {
+				// flex-flow: 방향과 줄넘김을 차례 없이.
+				for part in value.split_whitespace() {
+					if part.starts_with("row") || part.starts_with("column") {
+						self.apply_style("flex-direction", part);
+					}
+					else {
+						self.flex_wrap = parse_flex_wrap(part);
+					}
+				}
+			}
+			"align-content" => {
+				self.align_content = match value {
+					"flex-start" | "start" => {
+						PaneAlignContent::Start
+					}
+					"center" => {
+						PaneAlignContent::Center
+					}
+					"flex-end" | "end" => {
+						PaneAlignContent::End
+					}
+					"space-between" => {
+						PaneAlignContent::SpaceBetween
+					}
+					"space-around" => {
+						PaneAlignContent::SpaceAround
+					}
+					"space-evenly" => {
+						PaneAlignContent::SpaceEvenly
+					}
+					_ => {
+						PaneAlignContent::Stretch
+					}
+				};
+			}
+			"white-space" => {
+				self.is_nowrap_text = matches!(value, "nowrap" | "pre");
+			}
+			"text-overflow" => {
+				self.is_text_ellipsis = value == "ellipsis";
+			}
+			"scrollbar-width" => {
+				self.is_thin_scrollbar = value == "thin";
 			}
 			"flex" => {
 				self.apply_flex_shorthand(value);
@@ -1213,11 +1320,13 @@ impl PaneElement {
 				self.normalize_overflow();
 			}
 			"scrollbar-color" => {
-				if let Some(thumb_text) = split_css_values(value).first() {
+				let color_text_list = split_css_values(value);
+				if let Some(thumb_text) = color_text_list.first() {
 					if *thumb_text != "auto" {
 						self.scrollbar_thumb_color = Color::from(thumb_text.as_str());
 					}
 				}
+				self.scrollbar_track_color = color_text_list.get(1).map(|track_text| Color::from(track_text.as_str()));
 			}
 			_ => {
 			}
@@ -1310,7 +1419,7 @@ impl PaneElement {
 	}
 
 	//==============================================================================
-	/// 줄 높이. (line-height 가 없으면 CSS normal 을 글꼴 크기의 1.2 배로 갈음한다)
+	/// 줄 높이. (line-height 가 없으면 CSS normal: 크롬 SimpleFontData 처럼 첫째 글꼴의 위아래 길이와 줄 사이로 셈한다. 글꼴을 읽지 못하면 글꼴 크기의 1.2 배)
 	//==============================================================================
 	fn read_line_height(&self) -> f32 {
 		match self.line_height {
@@ -1318,7 +1427,7 @@ impl PaneElement {
 				line_height
 			}
 			None => {
-				(self.font_size * 1.2).round()
+				crate::core::textstringtexturecache::measure_normal_line_height_without_graphic(&self.build_font_string()).unwrap_or_else(|| (self.font_size * 1.2).round())
 			}
 		}
 	}
@@ -1360,6 +1469,63 @@ impl PaneElement {
 	}
 
 	//==============================================================================
+	/// 주축의 칸 사이. (가로 flex 는 column-gap, 세로는 row-gap)
+	//==============================================================================
+	fn read_main_gap(&self) -> f32 {
+		if self.flex_direction == PaneFlexDirection::Row {
+			self.column_gap
+		}
+		else {
+			self.row_gap
+		}
+	}
+
+	//==============================================================================
+	/// 교차축의 줄 사이. (가로 flex 는 row-gap, 세로는 column-gap)
+	//==============================================================================
+	fn read_cross_gap(&self) -> f32 {
+		if self.flex_direction == PaneFlexDirection::Row {
+			self.row_gap
+		}
+		else {
+			self.column_gap
+		}
+	}
+
+	//==============================================================================
+	/// align-content 를 늘어놓기 꼴로. (stretch 는 줄을 늘인 뒤 처음부터)
+	//==============================================================================
+	fn align_content_as_justify(&self) -> PaneJustifyContent {
+		match self.align_content {
+			PaneAlignContent::Stretch | PaneAlignContent::Start => {
+				PaneJustifyContent::Start
+			}
+			PaneAlignContent::Center => {
+				PaneJustifyContent::Center
+			}
+			PaneAlignContent::End => {
+				PaneJustifyContent::End
+			}
+			PaneAlignContent::SpaceBetween => {
+				PaneJustifyContent::SpaceBetween
+			}
+			PaneAlignContent::SpaceAround => {
+				PaneJustifyContent::SpaceAround
+			}
+			PaneAlignContent::SpaceEvenly => {
+				PaneJustifyContent::SpaceEvenly
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 보이는 칸 크기. (노드 크기에서 테두리와 클래식 스크롤 막대 칸을 던 안쪽 여백 상자)
+	//==============================================================================
+	fn read_viewport_size(&self, node_size: Vector2) -> Vector2 {
+		Vector2::create((node_size.x - self.border_width_list[1] - self.border_width_list[3] - self.scrollbar_gutter.x).max(0.0), (node_size.y - self.border_width_list[0] - self.border_width_list[2] - self.scrollbar_gutter.y).max(0.0))
+	}
+
+	//==============================================================================
 	/// 폭을 채우는 요소인지. (div 같은 블록 요소, 단추와 입력과 span 은 제 폭)
 	//==============================================================================
 	fn is_block_level(&self) -> bool {
@@ -1368,16 +1534,38 @@ impl PaneElement {
 
 	//==============================================================================
 	/// 스크롤 막대 썸 자리. (노드 좌표, 세로 막대면 is_vertical, 넘치지 않으면 None)
+	/// - 얹는 막대는 보이는 칸 가장자리의 두께 8 썸이다. 클래식 막대는 막대 칸 안, 양끝 단추 사이에서 움직이는 크롬 치수의 썸이다. (그린 썸 자리)
 	//==============================================================================
 	fn calculate_scrollbar_thumb_rect(&self, content_size: Vector2, is_vertical: bool) -> Option<Rect> {
+		let viewport_size = self.read_viewport_size(content_size);
 		let (overflow, viewport_length, extent_length, offset) = if is_vertical {
-			(self.overflow_y, content_size.y - self.border_width_list[0] - self.border_width_list[2], self.scroll_extent.y, self.scroll_offset.y)
+			(self.overflow_y, viewport_size.y, self.scroll_extent.y, self.scroll_offset.y)
 		}
 		else {
-			(self.overflow_x, content_size.x - self.border_width_list[1] - self.border_width_list[3], self.scroll_extent.x, self.scroll_offset.x)
+			(self.overflow_x, viewport_size.x, self.scroll_extent.x, self.scroll_offset.x)
 		};
 		if !overflow.is_scrollable() || extent_length <= viewport_length + 0.5 || viewport_length <= 0.0 {
 			return None;
+		}
+		let gutter_thickness = if is_vertical {
+			self.scrollbar_gutter.x
+		}
+		else {
+			self.scrollbar_gutter.y
+		};
+		if gutter_thickness > 0.0 {
+			let metrics = crate::web::pane::read_classic_scrollbar_metrics(self.is_thin_scrollbar)?;
+			let (thumb_start, thumb_length) = crate::web::pane::calculate_classic_thumb_span(&metrics, viewport_length, viewport_length, extent_length, offset)?;
+			let painted_start = thumb_start + metrics.thumb_length_inset;
+			let painted_length = (thumb_length - metrics.thumb_length_inset * 2.0).max(0.0);
+			return if is_vertical {
+				let track_left = content_size.x - self.border_width_list[1] - gutter_thickness;
+				Some(Rect::create(track_left + metrics.thumb_cross_offset, self.border_width_list[0] + painted_start, metrics.thumb_thickness, painted_length))
+			}
+			else {
+				let track_top = content_size.y - self.border_width_list[2] - gutter_thickness;
+				Some(Rect::create(self.border_width_list[3] + painted_start, track_top + metrics.thumb_cross_offset, painted_length, metrics.thumb_thickness))
+			};
 		}
 		let track_length = viewport_length;
 		let thumb_length = (track_length * viewport_length / extent_length).max(SCROLLBAR_MINIMUM_THUMB_LENGTH).min(track_length);
@@ -1389,6 +1577,27 @@ impl PaneElement {
 		else {
 			Some(Rect::create(self.border_width_list[3] + thumb_start, content_size.y - self.border_width_list[2] - SCROLLBAR_THICKNESS, thumb_length, SCROLLBAR_THICKNESS))
 		}
+	}
+
+	//==============================================================================
+	/// 썸 끌기의 길이. ((썸 길이, 썸이 움직이는 칸 길이), 끈 거리를 넘길 거리로 바꾼다)
+	//==============================================================================
+	fn read_thumb_drag_lengths(&self, viewport_length: f32, extent_length: f32, is_vertical: bool) -> (f32, f32) {
+		let gutter_thickness = if is_vertical {
+			self.scrollbar_gutter.x
+		}
+		else {
+			self.scrollbar_gutter.y
+		};
+		if gutter_thickness > 0.0 {
+			if let Some(metrics) = crate::web::pane::read_classic_scrollbar_metrics(self.is_thin_scrollbar) {
+				let thumb_room = (viewport_length - metrics.button_length * 2.0).max(1.0);
+				let thumb_length = (thumb_room * viewport_length / extent_length.max(1.0)).round().max(metrics.thumb_minimum_length).min(thumb_room);
+				return (thumb_length, thumb_room);
+			}
+		}
+		let thumb_length = (viewport_length * viewport_length / extent_length.max(1.0)).max(SCROLLBAR_MINIMUM_THUMB_LENGTH).min(viewport_length);
+		(thumb_length, viewport_length)
 	}
 
 	//==============================================================================
@@ -1447,7 +1656,7 @@ fn measure_element_size(node_tree: &NodeTree, node_id: NodeId) -> Vector2 {
 		let child_outer_width = child_size.x + child_element.margin[1] + child_element.margin[3];
 		let child_outer_height = child_size.y + child_element.margin[0] + child_element.margin[2];
 		let gap = if flow_count > 0 && element.display == PaneDisplay::Flex {
-			element.gap
+			element.read_main_gap()
 		}
 		else {
 			0.0
@@ -1487,6 +1696,69 @@ fn measure_element_size(node_tree: &NodeTree, node_id: NodeId) -> Vector2 {
 }
 
 //==============================================================================
+/// 줄넘김 가로 flex 의 높이. (테두리 상자 폭에서 CSS Flexbox 9.3 처럼 줄을 모은 높이, 줄넘김 가로 flex 가 아니거나 높이를 정했으면 None)
+//==============================================================================
+fn measure_wrapped_flex_height(node_tree: &NodeTree, node_id: NodeId, border_box_width: f32) -> Option<f32> {
+	let element = node_tree[node_id].get_component::<PaneElement>()?;
+	if element.display != PaneDisplay::Flex || element.flex_wrap == PaneFlexWrap::NoWrap || element.flex_direction != PaneFlexDirection::Row || element.height != PaneLength::Auto {
+		return None;
+	}
+	let frame_size = element.read_frame_size();
+	let content_main = (border_box_width - frame_size.x).max(0.0);
+	let main_gap = element.read_main_gap();
+	let cross_gap = element.read_cross_gap();
+	let mut line_cross_list: Vec<f32> = Vec::new();
+	let mut used_main = 0.0;
+	let mut line_cross: f32 = 0.0;
+	let mut has_item = false;
+	for child_id in node_tree.get_child_ids(node_id).iter().copied() {
+		let child_element = match node_tree[child_id].get_component::<PaneElement>() {
+			Some(child_element) => {
+				child_element
+			}
+			None => {
+				continue;
+			}
+		};
+		if child_element.display == PaneDisplay::None || child_element.is_absolute {
+			continue;
+		}
+		let child_size = measure_element_size(node_tree, child_id);
+		let base_size = child_element.flex_basis.resolve(content_main).or_else(|| child_element.width.resolve(content_main)).unwrap_or(child_size.x);
+		let main_size = clamp_length(base_size, child_element.minimum_width.resolve(content_main).unwrap_or(0.0), child_element.maximum_width.resolve(content_main).unwrap_or(f32::INFINITY));
+		let outer_main = main_size + child_element.margin[1] + child_element.margin[3];
+		let outer_cross = child_size.y + child_element.margin[0] + child_element.margin[2];
+		if has_item && used_main + main_gap + outer_main > content_main {
+			line_cross_list.push(line_cross);
+			used_main = outer_main;
+			line_cross = outer_cross;
+		}
+		else {
+			used_main += if has_item {
+				main_gap + outer_main
+			}
+			else {
+				outer_main
+			};
+			line_cross = line_cross.max(outer_cross);
+		}
+		has_item = true;
+	}
+	if has_item {
+		line_cross_list.push(line_cross);
+	}
+	let lines_height: f32 = line_cross_list.iter().sum::<f32>() + cross_gap * (line_cross_list.len() as f32 - 1.0).max(0.0);
+	let mut height = lines_height.max(element.measure_text_size().y) + frame_size.y;
+	if let PaneLength::Pixel(maximum_height) = element.maximum_height {
+		height = height.min(maximum_height);
+	}
+	if let PaneLength::Pixel(minimum_height) = element.minimum_height {
+		height = height.max(minimum_height);
+	}
+	Some(height.ceil())
+}
+
+//==============================================================================
 /// flex 항목 하나. (배치 셈 동안)
 //==============================================================================
 struct PaneFlexItem {
@@ -1501,6 +1773,94 @@ struct PaneFlexItem {
 	flex_shrink: f32,
 	main_size: f32,
 	cross_size: f32,
+	/// 교차축 min, max 와 줄의 교차 크기로 늘일지. (align-items: stretch 이고 교차 크기가 auto)
+	cross_minimum: f32,
+	cross_maximum: f32,
+	is_cross_stretched: bool,
+}
+
+//==============================================================================
+/// 남는 자리 나누기. ((처음 자리, 항목 사이에 더할 자리), CSS justify-content 와 align-content 의 늘어놓기)
+/// - space-between 은 남는 자리가 없거나 항목이 하나면 처음으로, space-around 와 space-evenly 는 남는 자리가 없으면 가운데로 모은다.
+//==============================================================================
+fn distribute_space(justify_content: PaneJustifyContent, remaining_space: f32, item_count: f32) -> (f32, f32) {
+	match justify_content {
+		PaneJustifyContent::Start => {
+			(0.0, 0.0)
+		}
+		PaneJustifyContent::Center => {
+			(remaining_space * 0.5, 0.0)
+		}
+		PaneJustifyContent::End => {
+			(remaining_space, 0.0)
+		}
+		PaneJustifyContent::SpaceBetween => {
+			if remaining_space > 0.0 && item_count > 1.0 {
+				(0.0, remaining_space / (item_count - 1.0))
+			}
+			else {
+				(0.0, 0.0)
+			}
+		}
+		PaneJustifyContent::SpaceAround => {
+			if remaining_space > 0.0 {
+				(remaining_space / item_count * 0.5, remaining_space / item_count)
+			}
+			else {
+				(remaining_space * 0.5, 0.0)
+			}
+		}
+		PaneJustifyContent::SpaceEvenly => {
+			if remaining_space > 0.0 {
+				(remaining_space / (item_count + 1.0), remaining_space / (item_count + 1.0))
+			}
+			else {
+				(remaining_space * 0.5, 0.0)
+			}
+		}
+	}
+}
+
+//==============================================================================
+/// 말줄임한 글. (글이 폭을 넘으면 글자 묶음 앞부분 + 말줄임표, 넘지 않으면 None)
+/// - CSS Overflow 3 의 text-overflow: ellipsis: 말줄임표가 들어갈 만큼 끝의 글자 묶음을 숨긴다. 줄의 첫 글자 묶음은 숨기지 않는다.
+//==============================================================================
+fn truncate_text_with_ellipsis(text: &str, available_width: f32, measure_width: &dyn Fn(&str) -> f32) -> Option<String> {
+	use unicode_segmentation::UnicodeSegmentation;
+	if measure_width(text) <= available_width {
+		return None;
+	}
+	let ellipsis_width = measure_width("\u{2026}");
+	let mut kept_end = 0;
+	for (grapheme_index, grapheme) in text.grapheme_indices(true) {
+		let next_end = grapheme_index + grapheme.len();
+		if kept_end > 0 && measure_width(&text[..next_end]) + ellipsis_width > available_width {
+			break;
+		}
+		if kept_end == 0 && measure_width(&text[..next_end]) + ellipsis_width > available_width {
+			kept_end = next_end;
+			break;
+		}
+		kept_end = next_end;
+	}
+	Some(format!("{}\u{2026}", &text[..kept_end]))
+}
+
+//==============================================================================
+/// flex-wrap 값 읽기. (모르는 값은 nowrap)
+//==============================================================================
+fn parse_flex_wrap(value: &str) -> PaneFlexWrap {
+	match value {
+		"wrap" => {
+			PaneFlexWrap::Wrap
+		}
+		"wrap-reverse" => {
+			PaneFlexWrap::WrapReverse
+		}
+		_ => {
+			PaneFlexWrap::NoWrap
+		}
+	}
 }
 
 //==============================================================================
@@ -1722,16 +2082,16 @@ impl Component for PaneElement {
 			}
 		};
 		// 썸을 옮긴 만큼을 내용 길이의 비로 넘긴다.
-		let viewport_size = Vector2::create(content_size.x - self.border_width_list[1] - self.border_width_list[3], content_size.y - self.border_width_list[0] - self.border_width_list[2]);
+		let viewport_size = self.read_viewport_size(content_size);
 		if is_vertical {
-			let thumb_length = (viewport_size.y * viewport_size.y / self.scroll_extent.y.max(1.0)).max(SCROLLBAR_MINIMUM_THUMB_LENGTH).min(viewport_size.y);
-			let track_room = (viewport_size.y - thumb_length).max(1.0);
+			let (thumb_length, thumb_room) = self.read_thumb_drag_lengths(viewport_size.y, self.scroll_extent.y, true);
+			let track_room = (thumb_room - thumb_length).max(1.0);
 			let maximum_offset = (self.scroll_extent.y - viewport_size.y).max(0.0);
 			self.scroll_offset.y = start_offset.y + (local_position.y - start_position.y) / track_room * maximum_offset;
 		}
 		else {
-			let thumb_length = (viewport_size.x * viewport_size.x / self.scroll_extent.x.max(1.0)).max(SCROLLBAR_MINIMUM_THUMB_LENGTH).min(viewport_size.x);
-			let track_room = (viewport_size.x - thumb_length).max(1.0);
+			let (thumb_length, thumb_room) = self.read_thumb_drag_lengths(viewport_size.x, self.scroll_extent.x, false);
+			let track_room = (thumb_room - thumb_length).max(1.0);
 			let maximum_offset = (self.scroll_extent.x - viewport_size.x).max(0.0);
 			self.scroll_offset.x = start_offset.x + (local_position.x - start_position.x) / track_room * maximum_offset;
 		}
@@ -1775,7 +2135,7 @@ impl Component for PaneElement {
 		}
 		let node_id = context.get_node_id();
 		let content_size = context.get_node_tree()[node_id].get_content_size();
-		let viewport_size = Vector2::create(content_size.x - self.border_width_list[1] - self.border_width_list[3], content_size.y - self.border_width_list[0] - self.border_width_list[2]);
+		let viewport_size = self.read_viewport_size(content_size);
 		let previous_offset = self.scroll_offset;
 		self.scroll_offset = Vector2::create(self.scroll_offset.x + wheel_delta.x, self.scroll_offset.y + wheel_delta.y);
 		self.clamp_scroll_offset(viewport_size);
@@ -1842,18 +2202,34 @@ impl Component for PaneElement {
 			else {
 				frame_top + self.read_line_height() * 0.5
 			};
+			// 말줄임: white-space: nowrap 인 글이 overflow 가 visible 이 아닌 상자의 줄 끝을 넘으면 끝 글자 묶음을 숨기고 말줄임표(U+2026)를 붙인다.
+			// (CSS Overflow 3 의 text-overflow: ellipsis, 줄의 첫 글자는 줄이지 않고 잘리게 둔다. 넘친 글은 줄 시작부터 놓여 왼쪽 맞춤이 된다)
+			let is_truncation_enabled = self.is_text_ellipsis && self.is_nowrap_text && self.overflow_x != PaneOverflow::Visible;
+			let truncated_text = if is_truncation_enabled {
+				truncate_text_with_ellipsis(&self.text, inner_width, &|measured_text: &str| graphic.measure_text(measured_text).width)
+			}
+			else {
+				None
+			};
+			let horizontal_align = if truncated_text.is_some() {
+				PaneTextAlign::Left
+			}
+			else {
+				horizontal_align
+			};
+			let drawn_text = truncated_text.as_deref().unwrap_or(&self.text);
 			match horizontal_align {
 				PaneTextAlign::Left => {
 					graphic.set_text_align(TextAlign::Left);
-					graphic.draw_fill_text(&self.text, frame_left, text_y);
+					graphic.draw_fill_text(drawn_text, frame_left, text_y);
 				}
 				PaneTextAlign::Center => {
 					graphic.set_text_align(TextAlign::Center);
-					graphic.draw_fill_text(&self.text, frame_left + inner_width * 0.5, text_y);
+					graphic.draw_fill_text(drawn_text, frame_left + inner_width * 0.5, text_y);
 				}
 				PaneTextAlign::Right => {
 					graphic.set_text_align(TextAlign::Right);
-					graphic.draw_fill_text(&self.text, frame_left + inner_width, text_y);
+					graphic.draw_fill_text(drawn_text, frame_left + inner_width, text_y);
 				}
 			}
 		}
@@ -1867,6 +2243,20 @@ impl Component for PaneElement {
 			return;
 		}
 		let content_size = transform.get_content_size();
+		// 클래식 막대는 막대 칸에 길(scrollbar-color 의 둘째 값)과 양끝 단추를 깐다. 두 막대가 다 있으면 모서리 칸도. (단추 화살표는 그리지 않는다)
+		if self.scrollbar_gutter.x > 0.0 || self.scrollbar_gutter.y > 0.0 {
+			if let Some(track_color) = self.scrollbar_track_color {
+				graphic.set_fill_color(track_color);
+				let track_right = content_size.x - self.border_width_list[1];
+				let track_bottom = content_size.y - self.border_width_list[2];
+				if self.scrollbar_gutter.x > 0.0 {
+					graphic.draw_rect(Rect::create(track_right - self.scrollbar_gutter.x, self.border_width_list[0], self.scrollbar_gutter.x, (track_bottom - self.border_width_list[0]).max(0.0)));
+				}
+				if self.scrollbar_gutter.y > 0.0 {
+					graphic.draw_rect(Rect::create(self.border_width_list[3], track_bottom - self.scrollbar_gutter.y, (track_right - self.scrollbar_gutter.x - self.border_width_list[3]).max(0.0), self.scrollbar_gutter.y));
+				}
+			}
+		}
 		for is_vertical in [true, false] {
 			if let Some(thumb_rect) = self.calculate_scrollbar_thumb_rect(content_size, is_vertical) {
 				graphic.set_fill_color(self.scrollbar_thumb_color);
@@ -1916,13 +2306,50 @@ impl PaneElement {
 	/// 자식 배치. (absolute 는 부모 크기에, 그 밖은 안쪽 여백 안에서 블록(세로로 차례) 또는 flex 로. 넘침을 굴려 넘긴 만큼 옮긴다)
 	//==============================================================================
 	fn lay_out_children(&mut self, context: &mut ComponentContext) {
+		// 클래식 스크롤 막대는 테두리 안, 안쪽 여백 밖의 자리를 차지한다. scroll 은 늘, auto 는 넘칠 때만. (CSS Overflow 3 의 스크롤 막대 칸)
+		// auto 는 막대 없이 놓아 보고 넘치면 막대 자리를 덜고 다시 놓는다. (크롬 LayoutBox 의 스크롤 막대를 넣은 다시 배치)
+		let scrollbar_thickness = if self.is_clipping() {
+			crate::web::pane::read_classic_scrollbar_metrics(self.is_thin_scrollbar).map(|metrics| metrics.thickness).unwrap_or(0.0)
+		}
+		else {
+			0.0
+		};
+		let read_gutter = |overflow: PaneOverflow, is_overflowing: bool| -> f32 {
+			if overflow == PaneOverflow::Scroll || (overflow == PaneOverflow::Auto && is_overflowing) {
+				scrollbar_thickness
+			}
+			else {
+				0.0
+			}
+		};
+		self.scrollbar_gutter = Vector2::create(read_gutter(self.overflow_y, false), read_gutter(self.overflow_x, false));
+		self.place_children(context);
+		if scrollbar_thickness > 0.0 {
+			for _ in 0..2 {
+				let node_size = context.get_node_tree()[context.get_node_id()].get_content_size();
+				let viewport_size = self.read_viewport_size(node_size);
+				let next_gutter = Vector2::create(read_gutter(self.overflow_y, self.scroll_extent.y > viewport_size.y + 0.5), read_gutter(self.overflow_x, self.scroll_extent.x > viewport_size.x + 0.5));
+				let gutter = Vector2::create(next_gutter.x.max(self.scrollbar_gutter.x), next_gutter.y.max(self.scrollbar_gutter.y));
+				if gutter.x == self.scrollbar_gutter.x && gutter.y == self.scrollbar_gutter.y {
+					break;
+				}
+				self.scrollbar_gutter = gutter;
+				self.place_children(context);
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 자식 놓기. (스크롤 막대 칸을 던 안쪽 여백 안에서 블록 또는 flex, 넘침을 굴려 넘긴 만큼 옮긴다)
+	//==============================================================================
+	fn place_children(&mut self, context: &mut ComponentContext) {
 		let node_id = context.get_node_id();
 		let node_size = context.get_node_tree()[node_id].get_content_size();
 		let frame_size = self.read_frame_size();
 		let content_left = self.padding[3] + self.border_width_list[3];
 		let content_top = self.padding[0] + self.border_width_list[0];
-		let content_width = (node_size.x - frame_size.x).max(0.0);
-		let content_height = (node_size.y - frame_size.y).max(0.0);
+		let content_width = (node_size.x - frame_size.x - self.scrollbar_gutter.x).max(0.0);
+		let content_height = (node_size.y - frame_size.y - self.scrollbar_gutter.y).max(0.0);
 		let child_id_list: Vec<NodeId> = context.get_node_tree().get_child_ids(node_id).to_vec();
 		// (노드, 자리와 크기, 스크롤을 받는지)
 		let mut placement_list: Vec<(NodeId, Option<(Vector2, Vector2)>, bool)> = Vec::new();
@@ -1997,18 +2424,11 @@ impl PaneElement {
 				};
 				let minimum_main = main_minimum.resolve(content_main).unwrap_or(automatic_minimum);
 				let maximum_main = main_maximum.resolve(content_main).unwrap_or(f32::INFINITY);
-				let cross_size = match cross_length.resolve(content_cross) {
-					Some(cross_size) => {
-						cross_size
-					}
-					None if self.align_items == PaneAlignItems::Stretch => {
-						(content_cross - cross_margin.0 - cross_margin.1).max(0.0)
-					}
-					None => {
-						cross_intrinsic
-					}
-				};
-				let cross_size = clamp_length(cross_size, cross_minimum.resolve(content_cross).unwrap_or(0.0), cross_maximum.resolve(content_cross).unwrap_or(f32::INFINITY));
+				// 교차축 크기: 정한 값, 아니면 가정 크기(제 크기). stretch 는 줄의 교차 크기를 안 뒤에 늘린다. (CSS Flexbox 9.4)
+				let cross_minimum = cross_minimum.resolve(content_cross).unwrap_or(0.0);
+				let cross_maximum = cross_maximum.resolve(content_cross).unwrap_or(f32::INFINITY);
+				let is_cross_stretched = cross_length.resolve(content_cross).is_none() && self.align_items == PaneAlignItems::Stretch;
+				let cross_size = clamp_length(cross_length.resolve(content_cross).unwrap_or(cross_intrinsic), cross_minimum, cross_maximum);
 				flex_item_list.push(PaneFlexItem {
 					node_id: child_id,
 					main_margin,
@@ -2020,6 +2440,9 @@ impl PaneElement {
 					flex_shrink: child_element.flex_shrink,
 					main_size: clamp_length(base_size, minimum_main, maximum_main),
 					cross_size,
+					cross_minimum,
+					cross_maximum,
+					is_cross_stretched,
 				});
 			}
 			else {
@@ -2031,73 +2454,111 @@ impl PaneElement {
 					intrinsic_size.x
 				};
 				let width = clamp_length(child_element.width.resolve(content_width).unwrap_or(auto_width), child_element.minimum_width.resolve(content_width).unwrap_or(0.0), child_element.maximum_width.resolve(content_width).unwrap_or(f32::INFINITY));
-				let height = clamp_length(child_element.height.resolve(content_height).unwrap_or(intrinsic_size.y), child_element.minimum_height.resolve(content_height).unwrap_or(0.0), child_element.maximum_height.resolve(content_height).unwrap_or(f32::INFINITY));
+				// 높이가 auto 인 줄넘김 가로 flex 는 이 폭에서 모은 줄의 높이다. (제 크기는 한 줄로 잰 값이라)
+				let auto_height = measure_wrapped_flex_height(context.get_node_tree(), child_id, width).unwrap_or(intrinsic_size.y);
+				let height = clamp_length(child_element.height.resolve(content_height).unwrap_or(auto_height), child_element.minimum_height.resolve(content_height).unwrap_or(0.0), child_element.maximum_height.resolve(content_height).unwrap_or(f32::INFINITY));
 				flow_y += margin[0];
 				placement_list.push((child_id, Some((Vector2::create(content_left + margin[3], flow_y), Vector2::create(width, height))), true));
 				flow_y += height + margin[2];
 			}
 		}
 		if !flex_item_list.is_empty() {
-			self.resolve_flexible_lengths(&mut flex_item_list, content_main);
-			let used_main: f32 = flex_item_list.iter().map(|item| item.main_size + item.main_margin.0 + item.main_margin.1).sum::<f32>() + self.gap * (flex_item_list.len() as f32 - 1.0);
-			let remaining_main = content_main - used_main;
-			let item_count = flex_item_list.len() as f32;
-			let (mut main_position, between_space) = match self.justify_content {
-				PaneJustifyContent::Start => {
-					(0.0, 0.0)
-				}
-				PaneJustifyContent::Center => {
-					(remaining_main * 0.5, 0.0)
-				}
-				PaneJustifyContent::End => {
-					(remaining_main, 0.0)
-				}
-				PaneJustifyContent::SpaceBetween => {
-					if remaining_main > 0.0 && item_count > 1.0 {
-						(0.0, remaining_main / (item_count - 1.0))
+			let main_gap = self.read_main_gap();
+			let cross_gap = self.read_cross_gap();
+			// 1. 줄 모으기. (CSS Flexbox 9.3: 줄넘김이 있으면 바깥 가정 주축 크기를 차례로 더하다 처음 넘치는 항목에서 새 줄, 첫 항목은 넘쳐도 그 줄에)
+			let mut line_list: Vec<Vec<PaneFlexItem>> = Vec::new();
+			let mut used_main = 0.0;
+			for item in flex_item_list {
+				let outer_main = item.main_size + item.main_margin.0 + item.main_margin.1;
+				let is_new_line = match line_list.last() {
+					Some(line) => {
+						self.flex_wrap != PaneFlexWrap::NoWrap && !line.is_empty() && used_main + main_gap + outer_main > content_main
 					}
-					else {
-						(0.0, 0.0)
-					}
-				}
-				PaneJustifyContent::SpaceAround => {
-					if remaining_main > 0.0 {
-						(remaining_main / item_count * 0.5, remaining_main / item_count)
-					}
-					else {
-						(remaining_main * 0.5, 0.0)
-					}
-				}
-				PaneJustifyContent::SpaceEvenly => {
-					if remaining_main > 0.0 {
-						(remaining_main / (item_count + 1.0), remaining_main / (item_count + 1.0))
-					}
-					else {
-						(remaining_main * 0.5, 0.0)
-					}
-				}
-			};
-			for item in flex_item_list.iter() {
-				main_position += item.main_margin.0;
-				let cross_position = match self.align_items {
-					PaneAlignItems::Center => {
-						(content_cross - item.cross_size - item.cross_margin.0 - item.cross_margin.1) * 0.5 + item.cross_margin.0
-					}
-					PaneAlignItems::End => {
-						content_cross - item.cross_size - item.cross_margin.1
-					}
-					PaneAlignItems::Start | PaneAlignItems::Stretch => {
-						item.cross_margin.0
+					None => {
+						true
 					}
 				};
-				let (position, size) = if is_row {
-					(Vector2::create(content_left + main_position, content_top + cross_position), Vector2::create(item.main_size, item.cross_size))
+				if is_new_line {
+					line_list.push(Vec::new());
+					used_main = outer_main;
 				}
 				else {
-					(Vector2::create(content_left + cross_position, content_top + main_position), Vector2::create(item.cross_size, item.main_size))
-				};
-				placement_list.push((item.node_id, Some((position, size)), true));
-				main_position += item.main_size + item.main_margin.1 + self.gap + between_space;
+					used_main += main_gap + outer_main;
+				}
+				if let Some(line) = line_list.last_mut() {
+					line.push(item);
+				}
+			}
+			// 2. 줄마다 늘고 줄 길이 정하기. (9.7)
+			for line in line_list.iter_mut() {
+				self.resolve_flexible_lengths(line, content_main);
+			}
+			// 3. 줄의 교차 크기. (9.4: 한 줄 상자는 상자의 안쪽 교차 크기, 여러 줄은 항목 바깥 교차 크기의 가장 큰 값, align-content: stretch 면 남는 자리를 줄마다 고루 더한다)
+			let is_single_line = self.flex_wrap == PaneFlexWrap::NoWrap;
+			let mut line_cross_list: Vec<f32> = line_list
+				.iter()
+				.map(|line| {
+					if is_single_line {
+						content_cross
+					}
+					else {
+						line.iter().map(|item| item.cross_size + item.cross_margin.0 + item.cross_margin.1).fold(0.0, f32::max)
+					}
+				})
+				.collect();
+			let line_count = line_list.len() as f32;
+			let used_cross: f32 = line_cross_list.iter().sum::<f32>() + cross_gap * (line_count - 1.0);
+			let mut remaining_cross = content_cross - used_cross;
+			if !is_single_line && self.align_content == PaneAlignContent::Stretch && remaining_cross > 0.0 {
+				for line_cross in line_cross_list.iter_mut() {
+					*line_cross += remaining_cross / line_count;
+				}
+				remaining_cross = 0.0;
+			}
+			// 4. 줄 늘어놓기. (8.4 align-content, 한 줄 상자는 줄이 상자를 채운다)
+			let (mut line_position, line_between_space) = if is_single_line {
+				(0.0, 0.0)
+			}
+			else {
+				distribute_space(self.align_content_as_justify(), remaining_cross, line_count)
+			};
+			for (line_index, line) in line_list.iter_mut().enumerate() {
+				let line_cross = line_cross_list[line_index];
+				// 줄 안 주축 늘어놓기. (justify-content)
+				let line_used_main: f32 = line.iter().map(|item| item.main_size + item.main_margin.0 + item.main_margin.1).sum::<f32>() + main_gap * (line.len() as f32 - 1.0);
+				let (mut main_position, between_space) = distribute_space(self.justify_content, content_main - line_used_main, line.len() as f32);
+				for item in line.iter_mut() {
+					// stretch 항목은 줄의 교차 크기를 채운다. (9.4 의 11)
+					if item.is_cross_stretched {
+						item.cross_size = clamp_length((line_cross - item.cross_margin.0 - item.cross_margin.1).max(0.0), item.cross_minimum, item.cross_maximum);
+					}
+					main_position += item.main_margin.0;
+					let cross_in_line = match self.align_items {
+						PaneAlignItems::Center => {
+							(line_cross - item.cross_size - item.cross_margin.0 - item.cross_margin.1) * 0.5 + item.cross_margin.0
+						}
+						PaneAlignItems::End => {
+							line_cross - item.cross_size - item.cross_margin.1
+						}
+						PaneAlignItems::Start | PaneAlignItems::Stretch => {
+							item.cross_margin.0
+						}
+					};
+					// wrap-reverse 는 교차축의 시작과 끝을 바꾼다. (줄이 끝에서 쌓이고 flex-start 가 줄의 끝 쪽)
+					let mut cross_position = line_position + cross_in_line;
+					if self.flex_wrap == PaneFlexWrap::WrapReverse {
+						cross_position = content_cross - cross_position - item.cross_size;
+					}
+					let (position, size) = if is_row {
+						(Vector2::create(content_left + main_position, content_top + cross_position), Vector2::create(item.main_size, item.cross_size))
+					}
+					else {
+						(Vector2::create(content_left + cross_position, content_top + main_position), Vector2::create(item.cross_size, item.main_size))
+					};
+					placement_list.push((item.node_id, Some((position, size)), true));
+					main_position += item.main_size + item.main_margin.1 + main_gap + between_space;
+				}
+				line_position += line_cross + cross_gap + line_between_space;
 			}
 		}
 
@@ -2111,7 +2572,7 @@ impl PaneElement {
 				}
 			}
 			self.scroll_extent = extent;
-			let viewport_size = Vector2::create(node_size.x - self.border_width_list[1] - self.border_width_list[3], node_size.y - self.border_width_list[0] - self.border_width_list[2]);
+			let viewport_size = self.read_viewport_size(node_size);
 			self.clamp_scroll_offset(viewport_size);
 		}
 		else {
@@ -2147,7 +2608,7 @@ impl PaneElement {
 	/// flex 길이 정하기. (CSS Flexbox 9.7: 남는 자리는 grow 비로 나누고, 모자라면 shrink 와 기준 크기를 곱한 비로 줄인다. min, max 에 걸린 항목은 묶고 다시 나눈다)
 	//==============================================================================
 	fn resolve_flexible_lengths(&self, item_list: &mut [PaneFlexItem], content_main: f32) {
-		let gap_total = self.gap * (item_list.len() as f32 - 1.0);
+		let gap_total = self.read_main_gap() * (item_list.len() as f32 - 1.0);
 		let read_outer = |item: &PaneFlexItem, size: f32| -> f32 {
 			size + item.main_margin.0 + item.main_margin.1
 		};
@@ -2617,6 +3078,151 @@ mod tests {
 		node_tree.dispatch_touch(list_id, &engine, TouchKind::Release, Vector2::create(thumb_center.x, thumb_center.y - 400.0));
 		assert_eq!(node_tree[list_id].get_component::<PaneElement>().expect("list").get_scroll_offset(), Vector2::zero());
 		assert_eq!(node_tree[row_id_list[1]].get_local_position(), Vector2::create(0.0, 24.0));
+	}
+
+	//==============================================================================
+	/// 줄넘김 flex: 헤드리스 크롬이 놓은 자리와 같다. (CSS Flexbox 9.3 줄 모으기, 9.4 align-content: stretch, wrap-reverse, 세로 줄넘김, 블록 안 auto 높이)
+	//==============================================================================
+	#[test]
+	fn pane_flex_wrap_matches_chrome() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let lay_out = |container_style: &[(&str, &str)], item_style_list: &[&[(&str, &str)]]| -> Vec<[f32; 4]> {
+			let mut node_tree = NodeTree::new();
+			let root_id = node_tree.get_root_id();
+			node_tree[root_id].set_content_size(Vector2::create(800.0, 600.0));
+			let holder_id = node_tree.create_child(root_id, "holder");
+			{
+				let holder_node = &mut node_tree[holder_id];
+				holder_node.set_pivot(Pivot::TOP_LEFT);
+				holder_node.set_anchor(Vector2::zero());
+				holder_node.set_content_size(Vector2::create(800.0, 600.0));
+			}
+			let container_id = PaneStyle::create(&mut node_tree, "div", "", &PaneStyleOptions { style: container_style, ..Default::default() });
+			node_tree.add_child(holder_id, container_id);
+			let item_id_list: Vec<NodeId> = item_style_list
+				.iter()
+				.map(|item_style| {
+					let item_id = PaneStyle::create(&mut node_tree, "div", "", &PaneStyleOptions { style: item_style, ..Default::default() });
+					node_tree.add_child(container_id, item_id);
+					item_id
+				})
+				.collect();
+			for _ in 0..3 {
+				node_tree.tick(&engine, 1.0 / 60.0);
+			}
+			item_id_list
+				.iter()
+				.map(|item_id| {
+					let position = node_tree[*item_id].get_local_position();
+					let size = node_tree[*item_id].get_content_size();
+					[position.x, position.y, size.x, size.y]
+				})
+				.collect()
+		};
+		let assert_rects = |actual_list: Vec<[f32; 4]>, expected_list: &[[f32; 4]]| {
+			for (actual, expected) in actual_list.iter().zip(expected_list.iter()) {
+				for (actual_value, expected_value) in actual.iter().zip(expected.iter()) {
+					assert!((actual_value - expected_value).abs() < 0.01, "{:?} != {:?}", actual_list, expected_list);
+				}
+			}
+		};
+		let item_list: [&[(&str, &str)]; 5] = [
+			&[("position", "relative"), ("width", "120px"), ("height", "30px")],
+			&[("position", "relative"), ("width", "100px"), ("height", "40px")],
+			&[("position", "relative"), ("width", "90px"), ("height", "20px")],
+			&[("position", "relative"), ("width", "150px"), ("height", "50px")],
+			&[("position", "relative"), ("width", "60px"), ("height", "25px")],
+		];
+		let container_base: [(&str, &str); 5] = [("display", "flex"), ("width", "300px"), ("height", "200px"), ("flex-wrap", "wrap"), ("gap", "10px 20px")];
+		// align-content 기본(stretch): 남는 65 를 세 줄에 고루. (크롬 71.671875, 153.328125)
+		assert_rects(lay_out(&container_base, &item_list), &[[0.0, 0.0, 120.0, 30.0], [140.0, 0.0, 100.0, 40.0], [0.0, 71.666664, 90.0, 20.0], [110.0, 71.666664, 150.0, 50.0], [0.0, 153.33333, 60.0, 25.0]]);
+		let mut center_style = container_base.to_vec();
+		center_style.push(("align-content", "center"));
+		assert_rects(lay_out(&center_style, &item_list), &[[0.0, 32.5, 120.0, 30.0], [140.0, 32.5, 100.0, 40.0], [0.0, 82.5, 90.0, 20.0], [110.0, 82.5, 150.0, 50.0], [0.0, 142.5, 60.0, 25.0]]);
+		// 높이 auto 항목은 늘인 줄의 교차 크기를 채운다.
+		let auto_item_list: [&[(&str, &str)]; 5] = [item_list[0], &[("position", "relative"), ("width", "100px"), ("height", "auto")], item_list[2], item_list[3], &[("position", "relative"), ("width", "60px"), ("height", "auto")]];
+		assert_rects(lay_out(&container_base, &auto_item_list), &[[0.0, 0.0, 120.0, 30.0], [140.0, 0.0, 100.0, 63.333332], [0.0, 73.33333, 90.0, 20.0], [110.0, 73.33333, 150.0, 50.0], [0.0, 166.66667, 60.0, 33.333332]]);
+		// wrap-reverse: 줄이 아래에서 쌓이고 flex-start 는 줄의 아래.
+		let reverse_style: [(&str, &str); 6] = [("display", "flex"), ("width", "300px"), ("height", "200px"), ("flex-wrap", "wrap-reverse"), ("gap", "10px 20px"), ("align-items", "flex-start")];
+		assert_rects(lay_out(&reverse_style, &item_list), &[[0.0, 170.0, 120.0, 30.0], [140.0, 160.0, 100.0, 40.0], [0.0, 108.33333, 90.0, 20.0], [110.0, 78.33333, 150.0, 50.0], [0.0, 21.666668, 60.0, 25.0]]);
+		// 세로 줄넘김.
+		let column_style: [(&str, &str); 6] = [("display", "flex"), ("flex-direction", "column"), ("width", "300px"), ("height", "100px"), ("flex-wrap", "wrap"), ("gap", "10px")];
+		let column_item_list: [&[(&str, &str)]; 4] = [
+			&[("position", "relative"), ("width", "50px"), ("height", "40px")],
+			&[("position", "relative"), ("width", "70px"), ("height", "50px")],
+			&[("position", "relative"), ("width", "40px"), ("height", "30px")],
+			&[("position", "relative"), ("width", "60px"), ("height", "60px")],
+		];
+		assert_rects(lay_out(&column_style, &column_item_list), &[[0.0, 0.0, 50.0, 40.0], [0.0, 50.0, 70.0, 50.0], [160.0, 0.0, 40.0, 30.0], [160.0, 40.0, 60.0, 60.0]]);
+		// align-content: space-between 과 justify-content: center.
+		let between_style: [(&str, &str); 6] = [("display", "flex"), ("width", "300px"), ("height", "200px"), ("flex-wrap", "wrap"), ("align-content", "space-between"), ("justify-content", "center")];
+		assert_rects(lay_out(&between_style, &item_list), &[[40.0, 0.0, 120.0, 30.0], [160.0, 0.0, 100.0, 40.0], [0.0, 150.0, 90.0, 20.0], [90.0, 150.0, 150.0, 50.0], [240.0, 150.0, 60.0, 25.0]]);
+		// 블록 안의 높이 auto 줄넘김 flex 는 이 폭에서 모은 줄 높이. (크롬 70)
+		let block_item_list: [&[(&str, &str)]; 1] = [&[("position", "relative"), ("display", "flex"), ("flex-wrap", "wrap"), ("gap", "10px"), ("height", "auto")]];
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		node_tree[root_id].set_content_size(Vector2::create(300.0, 600.0));
+		let block_id = PaneStyle::create(&mut node_tree, "div", "", &PaneStyleOptions { style: &[("width", "300px"), ("height", "600px")], ..Default::default() });
+		node_tree.add_child(root_id, block_id);
+		let wrap_id = PaneStyle::create(&mut node_tree, "div", "", &PaneStyleOptions { style: block_item_list[0], ..Default::default() });
+		node_tree.add_child(block_id, wrap_id);
+		for _ in 0..3 {
+			let item_id = PaneStyle::create(&mut node_tree, "div", "", &PaneStyleOptions { style: &[("position", "relative"), ("width", "120px"), ("height", "30px")], ..Default::default() });
+			node_tree.add_child(wrap_id, item_id);
+		}
+		for _ in 0..3 {
+			node_tree.tick(&engine, 1.0 / 60.0);
+		}
+		assert!((node_tree[wrap_id].get_content_size().y - 70.0).abs() < 0.01);
+	}
+
+	//==============================================================================
+	/// 말줄임: 폭을 넘는 글은 끝 글자 묶음을 숨기고 말줄임표를 붙인다. 첫 글자는 숨기지 않는다.
+	//==============================================================================
+	#[test]
+	fn pane_text_ellipsis_truncates_like_css() {
+		let measure_fixed = |text: &str| -> f32 {
+			text.chars().count() as f32 * 10.0
+		};
+		assert_eq!(truncate_text_with_ellipsis("Hello", 50.0, &measure_fixed), None);
+		assert_eq!(truncate_text_with_ellipsis("Hello world", 50.0, &measure_fixed).as_deref(), Some("Hell\u{2026}"));
+		assert_eq!(truncate_text_with_ellipsis("Hello", 5.0, &measure_fixed).as_deref(), Some("H\u{2026}"));
+		assert_eq!(truncate_text_with_ellipsis("e\u{301}xyz", 25.0, &measure_fixed).as_deref(), Some("e\u{301}\u{2026}"));
+	}
+
+	//==============================================================================
+	/// 스크롤 막대 칸: 클래식 막대(윈도우, 리눅스, 맥 클래식 설정)는 넘칠 때 내용 폭에서 막대 두께를 던다. 얹는 막대는 덜지 않는다.
+	//==============================================================================
+	#[test]
+	fn pane_classic_scrollbar_takes_space() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		node_tree[root_id].set_content_size(Vector2::create(200.0, 100.0));
+		let scroller_id = PaneStyle::create(&mut node_tree, "div", "", &PaneStyleOptions { style: &[("width", "200px"), ("height", "100px"), ("overflow", "auto")], ..Default::default() });
+		node_tree.add_child(root_id, scroller_id);
+		let child_id = PaneStyle::create(&mut node_tree, "div", "", &PaneStyleOptions { style: &[("position", "relative"), ("height", "300px")], ..Default::default() });
+		node_tree.add_child(scroller_id, child_id);
+		for _ in 0..3 {
+			node_tree.tick(&engine, 1.0 / 60.0);
+		}
+		let thickness = crate::web::pane::read_classic_scrollbar_metrics(false).map(|metrics| metrics.thickness).unwrap_or(0.0);
+		assert!((node_tree[child_id].get_content_size().x - (200.0 - thickness)).abs() < 0.01);
+		// 넘치지 않으면 auto 는 막대가 없다.
+		PaneStyle::apply(&mut node_tree, child_id, &[("height", "50px")]);
+		node_tree.tick(&engine, 1.0 / 60.0);
+		assert!((node_tree[child_id].get_content_size().x - 200.0).abs() < 0.01);
+		// scroll 은 넘치지 않아도 막대 자리를 둔다.
+		PaneStyle::apply(&mut node_tree, scroller_id, &[("overflow", "scroll")]);
+		node_tree.tick(&engine, 1.0 / 60.0);
+		assert!((node_tree[child_id].get_content_size().x - (200.0 - thickness)).abs() < 0.01);
+		// 크롬 치수: 윈도우, 리눅스 Fluent 15 (thin 10), 맥 클래식 15 (thin 11).
+		if let Some(metrics) = crate::web::pane::read_classic_scrollbar_metrics(false) {
+			assert_eq!(metrics.thickness, 15.0);
+		}
+		if let Some(metrics) = crate::web::pane::read_classic_scrollbar_metrics(true) {
+			assert!(metrics.thickness == 10.0 || metrics.thickness == 11.0);
+		}
 	}
 
 	//==============================================================================

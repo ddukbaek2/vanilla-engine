@@ -24,6 +24,8 @@ pub(crate) struct TextAreaLine {
 	pub top: f32,
 	/// 줄 안 글자 경계 x. (offsets[i] 는 start + i 자리의 x, 길이는 end - start + 1)
 	pub offsets: Vec<f32>,
+	/// 줄 안 글자 묶음 경계. (start 기준 문자 자리, 0 과 end - start 를 넣는다. 누른 자리는 이 경계에만 선다)
+	pub grapheme_boundary_list: Vec<usize>,
 	/// 줄바꿈 문자로 끝났는지. (아니면 폭으로 나뉘었거나 글 끝)
 	pub is_hard_break: bool,
 }
@@ -169,6 +171,7 @@ pub(crate) fn build_text_area_layout(text: &str, wrap_width: f32, line_height: f
 				end: start + character_count,
 				top: line_index as f32 * line_height,
 				offsets,
+				grapheme_boundary_list: crate::core::textinput::collect_grapheme_boundaries(piece_text),
 				is_hard_break: piece_index + 1 == piece_count && !is_last_paragraph,
 			});
 		}
@@ -246,7 +249,7 @@ impl TextAreaLayout {
 				return (0, false);
 			}
 		};
-		let local_index = crate::ui::uiinputfield::find_character_index_at_offset(&line.offsets, x);
+		let local_index = crate::ui::uiinputfield::find_boundary_index_at_offset(&line.offsets, &line.grapheme_boundary_list, x);
 		let character_index = line.start + local_index;
 		let is_soft_end = character_index == line.end && !line.is_hard_break && line_index + 1 < self.line_list.len();
 		(character_index, is_soft_end)
