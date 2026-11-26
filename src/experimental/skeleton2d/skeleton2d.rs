@@ -952,6 +952,19 @@ impl Skeleton2D {
 	}
 
 	//==============================================================================
+	/// IK 제약 번호 찾기. (apply_ik_constraint 에 넘길 번호, 원본 findIkConstraintIndex)
+	///
+	/// # 인자
+	/// - `ik_constraint_name`: 제약 이름.
+	///
+	/// # 돌려줌
+	/// 제약 번호. (없으면 None)
+	//==============================================================================
+	pub fn find_ik_constraint_index(&self, ik_constraint_name: &str) -> Option<usize> {
+		self.ik_constraints.iter().position(|ik_constraint| ik_constraint.get_name() == ik_constraint_name)
+	}
+
+	//==============================================================================
 	/// 스킨 고르기. (고른 스킨에 없는 붙임은 처음 스킨에서 찾는다)
 	///
 	/// # 인자
@@ -1211,13 +1224,15 @@ impl Skeleton2D {
 	}
 
 	//==============================================================================
-	/// IK 제약 하나 걸기.
+	/// IK 제약 하나 걸기. (원본 applyIkConstraint(제약) 자리, 번호는 find_ik_constraint_index 로 찾는다)
 	///
 	/// # 인자
-	/// - `ik_constraint_index`: 제약 번호.
+	/// - `ik_constraint_index`: 제약 번호. (범위 밖이면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn apply_ik_constraint(&mut self, ik_constraint_index: usize) {
-		let ik_constraint = &self.ik_constraints[ik_constraint_index];
+		let Some(ik_constraint) = self.ik_constraints.get(ik_constraint_index) else {
+			return;
+		};
 		let mix = ik_constraint.get_mix();
 		if mix <= 0.0 {
 			return;
@@ -1478,6 +1493,10 @@ mod tests {
 		aim_skeleton.update_world_transform();
 		assert_near("IK 하나 세기 반", aim_skeleton.find_bone("arm").expect("arm").get_world_rotation(), 75.0);
 		assert_near("IK 하나 걸린 회전", aim_skeleton.find_bone("arm").expect("arm").get_applied_rotation(), 45.0);
+		// 번호 찾기와 범위 밖 번호. (원본 findIkConstraintIndex, 범위 밖은 아무것도 하지 않는다)
+		assert_eq!(aim_skeleton.find_ik_constraint_index("aim"), Some(0));
+		assert_eq!(aim_skeleton.find_ik_constraint_index("none"), None);
+		aim_skeleton.apply_ik_constraint(5);
 	}
 
 	//==============================================================================
