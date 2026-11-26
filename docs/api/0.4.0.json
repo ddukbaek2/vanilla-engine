@@ -8204,8 +8204,8 @@
 		{
 			"name": "base/math",
 			"summary": {
-				"ko": "수학 보조 함수. (원본 base/math.js)\n- 원본 수는 f64 이고 러스트 판은 엔진의 다른 값처럼 f32 다. random_int 만 i32 다.\n- 원본의 floor, ceil, sqrt, abs, sin, cos, tan, asin, acos, pow 를 같은 이름의 함수로 둔다. (쓰는 코드가 원본과 같게)\n  원본 sin, cos 는 [-π, π] 로 접은 테일러 급수 10 항이라 f32 정밀도에서는 표준 함수와 같아 f32 메서드로 셈한다.\n  round 는 반을 +무한대 쪽으로 올리는 점(-2.5 → -2)이 f32::round(-2.5 → -3)와 달라 원본 식 그대로 옮겼다.\n- 무작위는 엔진의 random(xorshift64*)을 쓴다. (원본 Math.random 자리)\n- 원본 shuffle 의 randomFunction 기본 인자는 shuffle(엔진 random), shuffle_with_random_function(넘긴 함수)으로 나눴다.",
-				"en": "Math helper functions. (the original base/math.js)\n- The original numbers are f64; the Rust version uses f32 like the engine's other values. Only random_int is i32.\n- The original floor, ceil, sqrt, abs, sin, cos, tan, asin, acos and pow are kept as functions of the same names. (so using code matches the original)\n  The original sin and cos are a 10-term Taylor series folded into [-π, π], which equals the standard functions at f32 precision, so they compute with f32 methods.\n  round rounds halves toward +infinity (-2.5 → -2), which differs from f32::round (-2.5 → -3), so the original formula was ported as is.\n- Randomness uses the engine's random (xorshift64*). (in place of the original Math.random)\n- The default randomFunction argument of the original shuffle is split into shuffle (engine random) and shuffle_with_random_function (a passed function)."
+				"ko": "수학 보조 함수. (원본 base/math.js)\n- 원본 수는 f64 이고 러스트 판은 엔진의 다른 값처럼 f32 다. random_int 만 i32 다.\n- 원본의 floor, ceil, sqrt, abs, sin, cos, tan, asin, acos, pow 를 같은 이름의 함수로 둔다. (쓰는 코드가 원본과 같게)\n  sin, cos, tan 은 원본처럼 크롬 Math.sin, cos, tan 과 같은 셈(바르게 반올림한 f64, base/trigonometry.rs)을 하고 f32 로 담는다. (시스템 libm 은 플랫폼마다 끝자리가 다르다)\n  round 는 반을 +무한대 쪽으로 올리는 점(-2.5 → -2)이 f32::round(-2.5 → -3)와 달라 원본 식 그대로 옮겼다.\n- 무작위는 엔진의 random(xorshift64*)을 쓴다. (원본 Math.random 자리)\n- 원본 shuffle 의 randomFunction 기본 인자는 shuffle(엔진 random), shuffle_with_random_function(넘긴 함수)으로 나눴다.",
+				"en": "Math helper functions. (the original base/math.js)\n- The original numbers are f64; the Rust version uses f32 like the engine's other values. Only random_int is i32.\n- The original floor, ceil, sqrt, abs, sin, cos, tan, asin, acos and pow are kept as functions of the same names. (so using code matches the original)\n  sin, cos and tan compute what Chrome's Math.sin, cos and tan compute, as in the original (correctly rounded f64, base/trigonometry.rs), and store the result in f32. (the system libm has different last digits on each platform)\n  round rounds halves toward +infinity (-2.5 → -2), which differs from f32::round (-2.5 → -3), so the original formula was ported as is.\n- Randomness uses the engine's random (xorshift64*). (in place of the original Math.random)\n- The default randomFunction argument of the original shuffle is split into shuffle (engine random) and shuffle_with_random_function (a passed function)."
 			},
 			"examples": [
 				{
@@ -8641,13 +8641,13 @@
 					"returns": {
 						"type": "f32",
 						"description": {
-							"ko": "sin(value) / cos(value).",
-							"en": "sin(value) / cos(value)."
+							"ko": "탄젠트 값.",
+							"en": "Tangent value."
 						}
 					},
 					"description": {
-						"ko": "탄젠트. (원본처럼 사인을 코사인으로 나눈다)",
-						"en": "Tangent. (divides the sine by the cosine, as in the original)"
+						"ko": "탄젠트.",
+						"en": "Tangent."
 					},
 					"since": "0.4.0",
 					"source": "src/base/math.rs",

@@ -17,6 +17,7 @@ pub mod quaternion;
 pub mod rect;
 pub mod seededrandom;
 pub mod timer;
+pub(crate) mod trigonometry;
 pub mod transformmatrix;
 pub mod vector2;
 pub mod vector3;

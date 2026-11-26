@@ -3484,7 +3484,7 @@ mod tests {
 			}
 		}
 		let color_track = json!({ "property": "color", "keys": [{ "time": 0, "value": "#ff000080", "easing": "sinusoidal.inOut" }, { "time": 2, "value": "#0000ffff" }] });
-		// 1 초의 빨강은 원본 엔진 sin(급수 근사)이 0.5000000000000017 을 내서 7f 로 내림된다. 실제 sin 은 0.5 라 80 이다.
+		// 1 초는 두 엔진 sin, cos 가 같은 비트(크롬 Math.cos)라 빨강이 80 이다. 원본은 감속 비율을 f64(0.49999999999999994)로 셈해 파랑이 7f(#80007fc0), 러스트 감속 함수는 f32(0.5)라 80 이다. (f32 셈 차이, 전수 조사 25)
 		let expected_colors = ["#ff000080", "#ff000080", "#f1000e87", "#da002593", "#82007dbf", "#800080c0", "#3500cae5", "#0000ffff", "#0000ffff", "#0000ffff"];
 		for (time, expected_color) in time_list.iter().zip(expected_colors.iter()) {
 			assert_eq!(Timeline::sample_track(&color_track, *time), TimelineValue::String(expected_color.to_string()), "color at {}", time);

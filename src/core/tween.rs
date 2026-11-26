@@ -1171,7 +1171,7 @@ pub mod easing_function {
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn r#in(progress: f32) -> f32 {
-			1.0 - (progress * PI / 2.0).cos()
+			1.0 - crate::base::math::cos(progress * PI / 2.0)
 		}
 
 		//==============================================================================
@@ -1184,7 +1184,7 @@ pub mod easing_function {
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn out(progress: f32) -> f32 {
-			(progress * PI / 2.0).sin()
+			crate::base::math::sin(progress * PI / 2.0)
 		}
 
 		//==============================================================================
@@ -1197,7 +1197,7 @@ pub mod easing_function {
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn in_out(progress: f32) -> f32 {
-			0.5 * (1.0 - (PI * progress).cos())
+			0.5 * (1.0 - crate::base::math::cos(PI * progress))
 		}
 	}
 
@@ -1371,7 +1371,7 @@ pub mod easing_function {
 				return 1.0;
 			}
 			let shifted_progress = progress - 1.0;
-			let wave = ((shifted_progress - ELASTIC_SHIFT) * (2.0 * PI) / ELASTIC_PERIOD).sin();
+			let wave = crate::base::math::sin((shifted_progress - ELASTIC_SHIFT) * (2.0 * PI) / ELASTIC_PERIOD);
 			-(ELASTIC_AMPLITUDE * 2.0f32.powf(10.0 * shifted_progress) * wave)
 		}
 
@@ -1391,7 +1391,7 @@ pub mod easing_function {
 			if progress == 1.0 {
 				return 1.0;
 			}
-			let wave = ((progress - ELASTIC_SHIFT) * (2.0 * PI) / ELASTIC_PERIOD).sin();
+			let wave = crate::base::math::sin((progress - ELASTIC_SHIFT) * (2.0 * PI) / ELASTIC_PERIOD);
 			ELASTIC_AMPLITUDE * 2.0f32.powf(-10.0 * progress) * wave + 1.0
 		}
 
@@ -1413,7 +1413,7 @@ pub mod easing_function {
 			}
 			let doubled_progress = progress * 2.0;
 			let shifted_progress = doubled_progress - 1.0;
-			let wave = ((shifted_progress - ELASTIC_SHIFT) * (2.0 * PI) / ELASTIC_PERIOD).sin();
+			let wave = crate::base::math::sin((shifted_progress - ELASTIC_SHIFT) * (2.0 * PI) / ELASTIC_PERIOD);
 			if doubled_progress < 1.0 {
 				return -0.5 * (ELASTIC_AMPLITUDE * 2.0f32.powf(10.0 * shifted_progress) * wave);
 			}
