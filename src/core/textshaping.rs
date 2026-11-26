@@ -8,8 +8,10 @@
 //!   - 모양 짓기: rustybuzz (HarfBuzz 를 옮긴 것). 아랍어 글자 잇기, 합자, 커닝, 결합 부호 자리를 브라우저처럼 잡는다.
 //!   - 래스터: fontdue 의 글리프 번호 래스터. 굵은 얼굴이 없으면 가짜 굵게, 기울인 얼굴이 없으면 가짜 기울임을 글리프마다 입힌다.
 //!     색 글리프(sbix, CBDT, COLR)는 colorglyph.rs 가 제 색으로 그린다. 크롬처럼 가짜 기울임은 입히고 가짜 굵게는 입히지 않는다.
-//! - 이모지 표시: VS16(FE0F), Emoji_Presentation 글자, 피부색 조정자, 국기, 키캡, 태그 묶음은 색 글리프를 가진 얼굴을 먼저 고른다. 그 밖(VS15 포함)은 색이 아닌 얼굴을 먼저.
+//! - 이모지 표시: 이름 목록의 얼굴은 색과 상관없이 글리프가 있으면 먼저 쓰고, 운영체제 대체 글꼴 단계에서 VS16(FE0F), Emoji_Presentation 글자, 피부색 조정자, 국기, 키캡, 태그 묶음은
+//!   색 글리프를 가진 얼굴을, 그 밖(VS15 포함)은 색이 아닌 얼굴을 먼저 고른다. 이형 선택자가 붙은 묶음은 이름 목록에서도 그 표시에 맞는 얼굴만 받는다.
 //!   크롬은 지정한 글꼴에 흑백 ❤ 가 있어도 ❤️ (FE0F) 는 색 이모지 글꼴로, 맨 ❤ 는 지정한 글꼴로 그린다. (맥 크롬에서 Canvas2D 로 확인)
+//!   리눅스 크롬 157 은 "16px DejaVu Sans" 의 맨 😀 를 DejaVu Sans 의 흑백 글리프로 그린다. (CI 의 measureText)
 //! - 가짜 기울임과 가짜 굵게는 Chromium 이 Skia 에 주는 값과 같다:
 //!   기울기 1/4 (font_platform_data.cc 의 setSkewX(-SK_Scalar1 / 4)), 굵게는 글자 크기의 1/24 (9px 이하) ~ 1/32 (36px 이상) 두께로 윤곽을 칠해 넓힌다.
 //!   (Skia SkTextFormatParams.h 의 kStdFakeBoldInterpKeys / Values) 둘 다 전진폭은 그대로다.
@@ -113,6 +115,8 @@ pub struct FontFaceDescriptors {
 	pub unicode_range_list: Vec<(u32, u32)>,
 	/// 얼굴 열쇠. (기본 빈 글)
 	pub source_key: String,
+	/// 운영체제가 고른 대체 글꼴의 얼굴인지. (글자마다 이름 목록의 얼굴을 다 본 뒤에 보는 대체 단계, 이모지 표시는 이 단계에서 색 글리프 얼굴을 먼저 고른다. 기본 false)
+	pub is_system_fallback: bool,
 }
 
 impl FontFaceDescriptors {
@@ -129,6 +133,7 @@ impl FontFaceDescriptors {
 			is_italic: false,
 			unicode_range_list: Vec::new(),
 			source_key: String::new(),
+			is_system_fallback: false,
 		}
 	}
 
@@ -1431,8 +1436,12 @@ pub struct ShapedText {
 //==============================================================================
 /// 글자 묶음에 쓸 얼굴 고르기. (묶음의 글자를 모두 가진 첫 얼굴, 없으면 첫 글자를 가진 첫 얼굴, 그것도 없으면 0)
 /// - 브라우저처럼 결합 부호까지 한 얼굴로 그린다. 이음 문자, 이형 선택자처럼 보이지 않는 글자는 따지지 않는다.
-/// - 이모지 표시 묶음은 첫 글자를 색 글리프로 가진 얼굴을, 글 표시 묶음은 첫 글자를 색이 아닌 글리프로 가진 얼굴을 같은 조건 안에서 먼저 고른다. (is_emoji_presentation)
-///   차례: 글자를 모두 가지고 색이 맞는 얼굴 → 글자를 모두 가진 얼굴 → 첫 글자를 가지고 색이 맞는 얼굴 → 첫 글자를 가진 얼굴.
+/// - 크롬 FontFallbackIterator 처럼 이름 목록의 얼굴(운영체제 대체 글꼴이 아닌 것)을 먼저 본다. 색인지는 따지지 않는다.
+///   다만 이형 선택자가 붙은 묶음(❤️ 의 FE0F, FE0E)은 그 표시에 맞는 얼굴만 받는다. (크롬은 글꼴에 이형 글리프가 없으면 다음 글꼴로 넘어간다)
+/// - 운영체제 대체 글꼴의 얼굴(FontFaceDescriptors 의 is_system_fallback)에서는 이모지 표시 묶음은 첫 글자를 색 글리프로 가진 얼굴을,
+///   글 표시 묶음은 색이 아닌 글리프로 가진 얼굴을 같은 조건 안에서 먼저 고른다. (is_emoji_presentation, 크롬의 이모지 우선 글꼴 단계)
+///   차례: 이름 목록에서 글자를 모두 가진 얼굴 → 대체에서 글자를 모두 가지고 색이 맞는 얼굴 → 대체에서 글자를 모두 가진 얼굴
+///   → 이름 목록에서 첫 글자를 가진 얼굴 → 대체에서 첫 글자를 가지고 색이 맞는 얼굴 → 대체에서 첫 글자를 가진 얼굴.
 //==============================================================================
 fn select_face_index(face_list: &[ResolvedFontFace], grapheme: &str) -> Option<usize> {
 	let base_character = grapheme.chars().next()?;
@@ -1446,23 +1455,38 @@ fn select_face_index(face_list: &[ResolvedFontFace], grapheme: &str) -> Option<u
 	let is_color_matched = |face: &ResolvedFontFace| -> bool {
 		face.font.has_color_character(base_character) == is_color_wanted
 	};
-	if grapheme.chars().nth(1).is_some() {
-		let has_all_characters = |face: &ResolvedFontFace| -> bool {
-			grapheme.chars().filter(|character| !is_ignorable(*character)).all(|character| has_character(face, character))
-		};
+	let has_presentation_selector = grapheme.contains('\u{FE0F}') || grapheme.contains('\u{FE0E}');
+	let is_list_face_accepted = |face: &ResolvedFontFace| -> bool {
+		!face.descriptors.is_system_fallback && (!has_presentation_selector || is_color_matched(face))
+	};
+	let has_all_characters = |face: &ResolvedFontFace| -> bool {
+		grapheme.chars().filter(|character| !is_ignorable(*character)).all(|character| has_character(face, character))
+	};
+	let is_multiple_character = grapheme.chars().nth(1).is_some();
+	if is_multiple_character {
 		for (face_index, face) in face_list.iter().enumerate() {
-			if has_all_characters(face) && is_color_matched(face) {
+			if is_list_face_accepted(face) && has_all_characters(face) {
 				return Some(face_index);
 			}
 		}
 		for (face_index, face) in face_list.iter().enumerate() {
-			if has_all_characters(face) {
+			if face.descriptors.is_system_fallback && has_all_characters(face) && is_color_matched(face) {
+				return Some(face_index);
+			}
+		}
+		for (face_index, face) in face_list.iter().enumerate() {
+			if face.descriptors.is_system_fallback && has_all_characters(face) {
 				return Some(face_index);
 			}
 		}
 	}
 	for (face_index, face) in face_list.iter().enumerate() {
-		if has_character(face, base_character) && is_color_matched(face) {
+		if is_list_face_accepted(face) && has_character(face, base_character) {
+			return Some(face_index);
+		}
+	}
+	for (face_index, face) in face_list.iter().enumerate() {
+		if face.descriptors.is_system_fallback && has_character(face, base_character) && is_color_matched(face) {
 			return Some(face_index);
 		}
 	}
@@ -2515,7 +2539,8 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 얼굴 고르기: ❤️ 는 색 글리프 얼굴로, 맨 ❤ 는 흑백 얼굴로. 시스템 조각을 쓸 수 있으면(웹) 색 얼굴이 없을 때 ❤️ 는 브라우저 조각으로.
+	/// 얼굴 고르기: 대체 단계에서 ❤️ 는 색 글리프 얼굴로, 맨 ❤ 는 흑백 얼굴로. 시스템 조각을 쓸 수 있으면(웹) 색 얼굴이 없을 때 ❤️ 는 브라우저 조각으로.
+	/// 이름 목록의 흑백 얼굴은 맨 ❤ 를 그리고 ❤️ 는 넘긴다.
 	/// (운영체제가 고른 ❤ 의 흑백 대체 글꼴과 색 이모지 글꼴이 있을 때만 본다, 맥은 ZapfDingbats 와 Apple Color Emoji)
 	//==============================================================================
 	#[test]
@@ -2545,8 +2570,10 @@ mod tests {
 				return;
 			}
 		};
-		let create_face = |font: LoadedFont| ResolvedFontFace { font: Rc::new(font), descriptors: FontFaceDescriptors::new(), is_synthetic_bold: false, is_synthetic_italic: false };
-		let face_list = vec![create_face(text_font), create_face(color_font)];
+		let create_face = |font: Rc<LoadedFont>, is_system_fallback: bool| ResolvedFontFace { font, descriptors: FontFaceDescriptors { is_system_fallback, ..FontFaceDescriptors::new() }, is_synthetic_bold: false, is_synthetic_italic: false };
+		let text_font = Rc::new(text_font);
+		let color_font = Rc::new(color_font);
+		let face_list = vec![create_face(text_font.clone(), true), create_face(color_font.clone(), true)];
 		let emoji_shaped_text = shape_text(&face_list, "\u{2764}\u{FE0F}", 32.0, ShapingDirection::LeftToRight, None);
 		assert_eq!(emoji_shaped_text.glyph_list[0].face_index, 1);
 		let text_shaped_text = shape_text(&face_list, "\u{2764}", 32.0, ShapingDirection::LeftToRight, None);
@@ -2561,6 +2588,10 @@ mod tests {
 		let text_face_list = vec![face_list[0].clone()];
 		let system_shaped_text = shape_text(&text_face_list, "\u{2764}\u{FE0F}", 32.0, ShapingDirection::LeftToRight, Some(&system_font_measure));
 		assert_eq!(system_shaped_text.glyph_list[0].face_index, SYSTEM_FACE_INDEX);
+		// 이름 목록의 흑백 글꼴은 맨 ❤ 를 그리고, ❤️ 는 이형 글리프가 없어 대체의 색 글꼴로 넘긴다. (크롬 맥 Canvas2D)
+		let list_face_list = vec![create_face(text_font, false), create_face(color_font, true)];
+		assert_eq!(shape_text(&list_face_list, "\u{2764}", 32.0, ShapingDirection::LeftToRight, None).glyph_list[0].face_index, 0);
+		assert_eq!(shape_text(&list_face_list, "\u{2764}\u{FE0F}", 32.0, ShapingDirection::LeftToRight, None).glyph_list[0].face_index, 1);
 	}
 
 	//==============================================================================

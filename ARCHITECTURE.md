@@ -50,6 +50,10 @@ src/platform/        창, GL 컨텍스트, 입력 이벤트, 프레임 루프, �
   framelimiter.rs    웹 최대 FPS 의 프레임 세기
   audio/             데스크탑 cpal 위의 엔진 믹서(mixer.rs, 크롬 WebAudio 와 같은 노드 그래프와 셈), 웹 WebAudio
     decode/          데스크탑 소리 해석 (크롬 decodeAudioData 와 같게: symphonia 0.6, Opus 는 opus-pure, 앞뒤 다듬기, SincResampler, 내리기)
+tests/               데스크탑 플랫폼 시험 desktopplatform.rs (#[ignore], 시스템 글꼴과 대체 글꼴, 색 이모지, 클립보드, 같은 기계의 크롬 measureText 견주기)
+  assets/            크롬 기대값 자료와 그것을 찍는 스크립트 (소리 해석, 믹서, 비프, PannerNode, 글 재기)
+.github/workflows/   CI platforms.yml: 윈도우, 리눅스(X11 과 웨이랜드), 인텔 맥에서 시험, 예제 찍기(메사 llvmpipe 소프트웨어 GL), 같은 기계의 크롬과 견주기, wasm32 빌드
+.github/scripts/     CI 도구 (captureexamples.cjs 예제 찍기, chromecompare.cjs 원본 예제를 헤드리스 크롬으로 찍어 화소 견주기)
 ```
 
 레이어 방향은 원본처럼 아래에서 위로만 의존한다: base ← core ← (resource, effect, misc). platform 은 core 밑에서 창과 GL 과 입력을 대 준다. 엔진 본체(core::engine::EngineRunner)는 플랫폼을 모른다.

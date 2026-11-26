@@ -1,6 +1,6 @@
 # 플랫폼 확인. (윈도우, 리눅스 X11 과 웨이랜드, 인텔 맥에서 시험을 돌리고 예제를 찍어 같은 기계의 크롬과 견준다)
 # - 시험: cargo test --workspace (doctest 포함), 데스크탑 플랫폼 시험(tests/desktopplatform.rs 의 #[ignore] 시험: 시스템 글꼴, 대체 글꼴, 색 이모지, 클립보드, 크롬 measureText 견주기)
-# - 그림: GPU 가 없는 기계라 메사 llvmpipe 소프트웨어 GL 로 그린다. (리눅스는 Xvfb 의 GLX 와 weston headless 의 EGL, 윈도우는 mesa-dist-win 의 opengl32.dll 을 예제 옆에 둔 WGL)
+# - 그림: GPU 가 없는 기계라 메사 llvmpipe 소프트웨어 GL 로 그린다. (리눅스는 Xvfb 의 GLX 와 weston headless 의 EGL, 윈도우는 메사 opengl32.dll 을 예제 옆에 둔 WGL)
 #   예제는 찍기 모드(VANILLA_CAPTURE_PATH)로 돌려 그림을 아티팩트로 올린다. (.github/scripts/captureexamples.cjs)
 # - 크롬 견주기: 원본 vanilla.js 를 옆에 받아 같은 장면의 예제 페이지를 헤드리스 크롬으로 찍어 화소 차이를 낸다. (.github/scripts/chromecompare.cjs)
 #   소리 해석, 믹서, 비프, PannerNode 의 크롬 기대값(tests/assets/*/chrome*.cjs)을 같은 기계의 크롬으로 다시 찍어 견준다. (x86 크롬)
@@ -126,20 +126,16 @@ jobs:
         if: success() || failure()
         run: cargo build --examples
 
-      - name: 윈도우 소프트웨어 GL (mesa-dist-win 의 llvmpipe 를 예제 실행 파일 옆에 둔다)
+      - name: 윈도우 소프트웨어 GL (메사 llvmpipe 의 opengl32.dll 을 예제 실행 파일 옆에 둔다)
         if: runner.os == 'Windows' && (success() || failure())
         run: |
-          # 드라이버가 없는 윈도우의 opengl32.dll 은 GDI 의 GL 1.1 이라, 메사의 opengl32.dll 을 실행 파일 옆에 두어 먼저 읽게 한다. (mesa-dist-win 의 앱별 배치)
+          # 드라이버가 없는 윈도우의 opengl32.dll 은 GDI 의 GL 1.1 이라, 메사 opengl32.dll 을 실행 파일 옆에 두어 먼저 읽게 한다. (앱별 배치)
+          # mesa-dist-win 26.x 의 MSVC 묶음은 d3d12 비디오 가속 빌드 회귀로 OpenGL 소프트웨어 렌더링이 빠져 있어(그 릴리스 설명), llvmpipe 만 든 mmozeiko/build-mesa 빌드를 쓴다.
           temporary_path=$(cygpath -m "$RUNNER_TEMP")
-          curl -sSfL -o "$temporary_path/mesa.7z" https://github.com/pal1000/mesa-dist-win/releases/download/26.2.6/mesa3d-26.2.6-release-msvc.7z
-          7z x -y -o"$temporary_path/mesa" "$temporary_path/mesa.7z" "x64/*" > /dev/null
-          ls "$temporary_path/mesa/x64"
-          for dll_name in opengl32.dll libgallium_wgl.dll libglapi.dll; do
-            if [ -f "$temporary_path/mesa/x64/$dll_name" ]; then
-              cp "$temporary_path/mesa/x64/$dll_name" target/debug/examples/
-            fi
-          done
-          echo "GALLIUM_DRIVER=llvmpipe" >> "$GITHUB_ENV"
+          curl -sSfL -o "$temporary_path/mesa-llvmpipe.7z" https://github.com/mmozeiko/build-mesa/releases/download/26.2.6/mesa-llvmpipe-x64-26.2.6.7z
+          7z x -y -o"$temporary_path/mesa-llvmpipe" "$temporary_path/mesa-llvmpipe.7z" opengl32.dll > /dev/null
+          cp "$temporary_path/mesa-llvmpipe/opengl32.dll" target/debug/examples/
+          ls -la target/debug/examples/opengl32.dll
 
       - name: 데스크탑 플랫폼 시험 (시스템 글꼴, 대체 글꼴, 클립보드, 크롬 measureText)
         if: success() || failure()

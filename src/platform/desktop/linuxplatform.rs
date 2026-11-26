@@ -29,6 +29,11 @@ const X11_VIRTUAL_CORE_POINTER_NAME: &str = "Virtual core pointer";
 /// 빼는 X11 시험 장치 이름의 조각. (크로미엄 IsTestDevice)
 const X11_TEST_DEVICE_NAME_PART: &str = "XTEST";
 
+/// X11 입력 장치 읽기를 한 번에 하나로. (libXi 는 확장 정보 표를 처음 쓸 때 잠그지 않고 만들어, 두 스레드가 함께 XIQueryVersion 을 부르면 libXext 의 XextAddDisplay 에서 깨진다)
+/// - 엔진은 메인 스레드에서 부르지만 시험처럼 여러 스레드가 InputManager 를 만들 때 겹친다. (CI 리눅스에서 SIGSEGV 로 확인)
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+static X11_INPUT_DEVICE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 thread_local! {
 	/// 마지막으로 읽은 손가락 여부와 읽은 때.
@@ -268,10 +273,11 @@ fn read_wayland_seat_capabilities(wayland_display: &std::ffi::OsStr) -> Option<P
 }
 
 //==============================================================================
-/// X11 입력 장치 목록 읽기. (DISPLAY 에 따로 붙어 읽고 닫는다, libX11, libXi 가 없거나 XI 2.2 가 안 되면 None)
+/// X11 입력 장치 목록 읽기. (DISPLAY 에 따로 붙어 읽고 닫는다, libX11, libXi 가 없거나 XI 2.2 가 안 되면 None, 스레드끼리 한 번에 하나)
 //==============================================================================
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 fn read_x11_input_devices() -> Option<Vec<X11InputDeviceRecord>> {
+	let _x11_input_device_guard = X11_INPUT_DEVICE_LOCK.lock().unwrap_or_else(|poisoned_guard| poisoned_guard.into_inner());
 	let xlib_library = x11_dl::xlib::Xlib::open().ok()?;
 	let xinput_library = x11_dl::xinput::XInput::open().ok()?;
 	let xinput2_library = x11_dl::xinput2::XInput2::open().ok()?;

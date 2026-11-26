@@ -857,7 +857,7 @@ impl TextStringTextureCache {
 		let font = Rc::new(load_font(font_bytes)?);
 		self.face_order_number += 1;
 		self.fallback_face_list.borrow_mut().push(RegisteredFontFace {
-			descriptors: FontFaceDescriptors::new(),
+			descriptors: FontFaceDescriptors { is_system_fallback: true, ..FontFaceDescriptors::new() },
 			font,
 			order_number: self.face_order_number,
 		});
@@ -1168,6 +1168,7 @@ impl TextStringTextureCache {
 			match load_system_font_face(&mut state.shared_bytes_table, &source, font_description.font_weight, font_description.is_italic) {
 				Ok(mut registered_font_face) => {
 					registered_font_face.descriptors.source_key = read_fallback_source_key(&source);
+					registered_font_face.descriptors.is_system_fallback = true;
 					let is_duplicate = state.fallback_face_list.iter().any(|face| Rc::ptr_eq(face.font.get_font_bytes(), registered_font_face.font.get_font_bytes()) && face.font.get_face_index() == registered_font_face.font.get_face_index() && face.descriptors == registered_font_face.descriptors);
 					if !is_duplicate {
 						state.fallback_face_list.push(registered_font_face);
@@ -1254,7 +1255,7 @@ impl TextStringTextureCache {
 				}
 			};
 			self.fallback_face_list.borrow_mut().push(RegisteredFontFace {
-				descriptors: FontFaceDescriptors::new(),
+				descriptors: FontFaceDescriptors { is_system_fallback: true, ..FontFaceDescriptors::new() },
 				font,
 				order_number: 0,
 			});
