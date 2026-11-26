@@ -225,7 +225,12 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 - 글자는 원본(브라우저 Canvas2D)과 맞췄다. 오른쪽에서 왼쪽 글(양방향 정렬과 글자 모양 짓기, core/textshaping.rs), CSS 같은 글꼴 얼굴 고르기, 가짜 기울임과 굵게(Chromium 과 Skia 의 값), 크롬 캔버스처럼 낱말마다 모양 짓기, 폰트 문자열의 CSS 단위와 calc(), 낱말 나누기(데스크탑은 ICU4X 사전에 ICU4C CjkBreakEngine 의 셈을 옮겨 크롬 Intl.Segmenter 와 같게), 색 이모지(sbix, CBDT, COLR v0/v1, 맥은 CoreText 로 크롬처럼 작은 크기에서 키우고 내림), 맥 시스템 UI 글꼴의 opsz 축과 trak 자간(HarfBuzz 15 처럼).
 - 작게 남은 차이:
   - rustybuzz 는 글리프 위치를 글꼴 단위 정수로 들어 GPOS 가변 델타를 반올림한다. HarfBuzz 15 는 소수로 든다. 맥 SFNS 18, 20, 21, 24px 의 "Hello World Wifi" 너비가 크롬과 0.002 ~ 0.004px 다르다.
-  - 윈도우와 리눅스의 글꼴 갈래(DirectWrite, 메뉴 글꼴, fontconfig, 부모 글꼴 치수)는 그 대상으로 컴파일해 보았고 실행해 크롬과 견주지는 못했다.
+  - 윈도우, 리눅스, 맥의 글꼴 갈래(DirectWrite, fontconfig, CoreText)는 CI 에서 같은 기계의 크롬 measureText 와 전진폭, 글꼴 위아래 길이를 217 글로 견준다. (tests/desktopplatform.rs) 리눅스 크롬 157 은 216, 윈도우 크롬 157 은 181, 인텔 맥(영어 화면) 크롬 151 은 114 가 같다. 윈도우 system-ui 의 메뉴 글꼴(NONCLIENTMETRICS)은 크롬과 같은 글꼴이다. 다른 것은 거의 대체 글꼴 고르기다:
+    - 엔진은 이름 목록 뒤에 기본 글꼴 사슬(원본 SYSTEM_FONT_STRING)을 늘 붙여, 이름이 맞은 글꼴에 없는 글자를 크롬의 시스템 대체보다 사슬에서 먼저 찾는다. (맥 영어에서 Times, Helvetica 의 한중일이 사슬의 Apple SD Gothic Neo 로, 윈도우 Consolas 의 아랍어가 사슬의 Segoe UI 로 그려진다) 크롬은 이름이 맞으면 사슬 없이 시스템 대체로 간다.
+    - 윈도우 크롬은 DirectWrite 대체 전에 블링크 font_fallback_win.cc 의 유니코드 블록과 문자별 표(태국어 Tahoma, monospace 의 아랍어와 히브리어 Courier New, 한자는 로캘별 같은 것)를 먼저 본다. 엔진은 IDWriteFontFallback 만 묻는다. (태국어가 Leelawadee UI 로 그려져 16px 에서 8.5px 좁다)
+    - 맥 크롬은 갈음할 글꼴(font_data_to_substitute)을 바탕으로 CTFontCreateForString 을 묻는다. (font_cache_mac.mm) 엔진은 시스템 UI 글꼴을 바탕으로 묻는다.
+    - 리눅스 Norasi(태국어 글꼴)로 그린 "Ünïcödé ñ 0123456789" 의 폭이 3.8px 다르다. (까닭은 아직 찾지 않았다)
+  - 실제로 닿는 상자(actualBoundingBox)는 찍기만 하고 견주지 않는다. (리눅스 "Hello World Wifi" 의 아래가 엔진 1, 크롬 0 처럼 1px 안팎으로 다르다) 부모 글꼴 치수(ex, ch 단위의 글꼴)는 윈도우, 리눅스 크롬과 견주지 못했다.
   - 데스크탑 AVIF 는 색 프로필 변환과 움직이는 AVIF 를 하지 않는다.
   - 데스크탑 Canvas2D 의 그림자 흐림은 상자 흐림 세 번이다. 경로의 arc, ellipse, arcTo, roundRect 는 크롬과 같은 스키아 원뿔 곡선 점과 무게이고(블링크 canvas_path.cc, 스키아 SkPathBuilder 의 셈), 칠할 때는 스키아 CPU 래스터처럼 기기 픽셀 0.25 안의 2 차 곡선으로 나눈다. 크롬이 GPU 로 칠하는 캔버스의 곡선 나누기와는 가장자리 픽셀이 다를 수 있다. font 는 블링크 Font::ParseShorthand 와 font 게터대로 읽고 직렬화하는데(desktop_font.rs), 윈도우 크롬의 small-caption, menu, status-bar 는 운영체제 글꼴이라 다를 수 있다. getImageData 의 프리멀티플라이 풀기는 크롬 CPU 캔버스의 스키아 셈이라 크롬 GPU 캔버스의 되읽기와는 반이 딱 떨어지는 값에서 1 다를 수 있다.
   - 데스크탑 PaneStyle 은 프리셋과 원본 도구가 쓰는 CSS(블록과 flex 배치, flex 비율과 세로 flex, min, max, 쪽마다 여백과 테두리, overflow 자르기와 휠, 썸 끌기 스크롤)를 읽는다. flex-wrap 줄넘김과 말줄임(white-space, text-overflow)은 읽지 않고, 스크롤 막대는 자리를 차지하지 않는 얹는 썸이다. (여러 줄 입력 필드도 같다) textarea 는 엔진 여러 줄 입력 필드가 받는다.
