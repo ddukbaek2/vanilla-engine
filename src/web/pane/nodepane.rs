@@ -588,6 +588,10 @@ struct PaneContainer {
 	state: Weak<RefCell<PaneState>>,
 }
 
+#[crate::reflect]
+impl PaneContainer {}
+
+#[crate::reflect]
 impl Component for PaneContainer {
 	//==============================================================================
 	/// 공통 상태 반환.
@@ -664,6 +668,7 @@ struct PaneResizerHandle {
 	is_hovered: bool,
 }
 
+#[crate::reflect]
 impl PaneResizerHandle {
 	//==============================================================================
 	/// 포인터의 부모 컨테이너 좌표. (나누는 방향 쪽)
@@ -697,6 +702,7 @@ impl PaneResizerHandle {
 	}
 }
 
+#[crate::reflect]
 impl Component for PaneResizerHandle {
 	//==============================================================================
 	/// 공통 상태 반환.
@@ -1078,6 +1084,7 @@ pub struct PaneElement {
 	click_callback: Option<PaneClickCallback>,
 }
 
+#[crate::reflect]
 impl PaneElement {
 	//==============================================================================
 	/// 생성. (원본 PaneStyle.create 의 공통 기본 스타일: absolute, 왼쪽 위, 100%, 13px sans-serif, COLOR_TEXT)
@@ -2162,6 +2169,7 @@ fn scale_brightness(color: Color, brightness: f32) -> Color {
 	Color::create((color.red * brightness).min(1.0), (color.green * brightness).min(1.0), (color.blue * brightness).min(1.0), color.alpha)
 }
 
+#[crate::reflect]
 impl Component for PaneElement {
 	//==============================================================================
 	/// 공통 상태 반환.

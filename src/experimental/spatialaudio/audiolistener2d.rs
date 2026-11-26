@@ -37,6 +37,7 @@ pub struct AudioListener2D {
 	depth: f64,
 }
 
+#[crate::reflect]
 impl AudioListener2D {
 	//==============================================================================
 	/// 생성. (리스너 없음, 한 단위 1 픽셀, 깊이 0)
@@ -150,6 +151,7 @@ impl Default for AudioListener2D {
 	}
 }
 
+#[crate::reflect]
 impl Component for AudioListener2D {
 	//==============================================================================
 	/// 공통 상태 반환.

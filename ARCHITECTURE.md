@@ -252,7 +252,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 
 | 차이 | 까닭 |
 | --- | --- |
-| 반사(UIDocument 의 반사 저장과 읽기, DevTools 인스펙터의 게터 목록)는 #[vanilla::reflect] 를 붙인 타입만 된다. 엔진 컴포넌트는 모두 붙였고, 게임 컴포넌트는 impl 블록과 impl Component 블록에 붙인다 (원본은 모든 객체). 빠뜨린 것은 알 수 있다: 한쪽만 붙이면 컴파일 에러가 붙일 곳을 알려 주고, 둘 다 빠뜨리면 UIDocument 가 쓸 때 경고를 내고 인스펙터가 "반사 없음" 줄을 보인다 | 러스트에는 실행 중에 필드와 메서드를 훑는 길이 없다. C++ 엔진(언리얼 UCLASS 와 UHT, Qt moc)처럼 컴파일 때 절차 매크로가 함수 목록과 부르는 코드를 짓는다 |
+| 반사(UIDocument 의 반사 저장과 읽기, DevTools 인스펙터의 게터 목록)는 원본처럼 모든 컴포넌트가 된다. 원본은 실행 중에 훑고, 러스트 판은 #[vanilla::reflect] 가 컴파일 때 짓는다. Reflect 가 Component 의 상위 트레이트라 impl 블록이나 impl Component 블록에 매크로를 빠뜨린 컴포넌트는 컴파일되지 않는다 (게터가 없는 타입은 빈 블록에 붙인다) | 러스트에는 실행 중에 필드와 메서드를 훑는 길이 없다. C++ 엔진(언리얼 UCLASS 와 UHT, Qt moc)처럼 컴파일 때 절차 매크로가 함수 목록과 부르는 코드를 짓는다 |
 | 웨이랜드에서 xdg_toplevel 의 suspended 상태는 받지 못한다. 가려짐(페이지 이벤트 Hidden)은 크롬의 다른 갈래인 프레임 콜백 3 초 규칙으로만 본다 | xdg_toplevel 은 winit(sctk)이 리스너를 달아 쥐고 있고 libwayland 는 프록시 하나에 리스너 하나만 단다. winit 0.30.13 은 configure 의 suspended 를 받아 두기만 하고 알리지 않는다 (0.31 베타 4 와 본줄기도 같다). suspended 를 보내면서 프레임 콜백도 계속 보내는 컴포지터에서만 크롬과 달라진다 |
 | DevTools 메모리 칸은 자바스크립트 힙 대신 시스템 할당자의 힙이고, jsHeapSizeLimit 는 (N/A) 다 | 데스크탑에는 V8 힙이 없다. 시스템 할당자에는 V8 처럼 정한 힙 상한이 없다 |
 | 윈도우와 리눅스 데스크탑의 글자 래스터 픽셀이 크롬과 다르다 (글자 너비는 크롬 measureText 와 맞췄다. 맥은 같은 장면의 글자 픽셀이 크롬과 같다) | 맥은 크롬처럼 CoreText 로 스키아 SkScalerContext_Mac 과 같은 설정으로 칠한다. 윈도우(크롬은 DirectWrite)와 리눅스(크롬은 FreeType)는 아직 fontdue 와 skrifa 가 칠하고 서브픽셀 자리와 감마 전보정이 없다. 같은 길(SkScalerContext_DW, SkScalerContext_FreeType 의 설정)로 옮길 일이 남았다 |

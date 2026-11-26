@@ -81,7 +81,7 @@ The panel has four tabs. The tab shown first is Node Hierarchy.
 
 - Clicking a tree row's A column toggles that node's active state, and the G column toggles its gizmo. Clicking a component header in the inspector collapses or expands that component's values.
 - Nodes in the Rust version are all `WorldNode`, so the type column always reads `WorldNode`.
-- Where the original walks objects at run time, the inspector's component values come from a list the `#[vanilla::reflect]` macro builds at compile time. Every engine component has it, and game components need the macro for their values to appear. Components without it show a "no reflection" line. (See the "Reflection Macro" chapter.)
+- Where the original walks objects at run time, the inspector's component values come from a list the `#[vanilla::reflect]` macro builds at compile time. `Reflect` is a supertrait of `Component`, so a component without the macro does not compile, and like the original the values of every component appear. (See the "Reflection Macro" chapter.)
 - Adding, editing, and removing in the Local Storage tab ask through `Engine::prompt` and `Engine::confirm`, which stand in for the original `prompt` and `confirm`. The web shows the browser's dialogs, and the desktop shows an equivalent dialog drawn by the engine. Clear is `LocalStorage::clear()`, so it removes every value in that storage.
 - Dim Background in Settings darkens the screen outside the panel. Show All Gizmos (on at first) draws every node's gizmo while the panel is open. The two aspect guides draw a rectangle in the middle of the screen only when the view scale mode is a stretch mode (`StretchWidth`, `StretchHeight`, `StretchShort`, and their `Expand` variants). Show FPS only stores its value, as in the original, and the panel draws nothing for it (read it with `is_frame_per_second_visible()`).
 - Settings values are saved as JSON under the `hierarchy.settings` key in `LocalStorage`, in the same form as the original, so they persist to the next launch.
@@ -204,6 +204,10 @@ struct SightGizmo {
 	radius: f32,
 }
 
+#[vanilla::reflect]
+impl SightGizmo {}
+
+#[vanilla::reflect]
 impl Component for SightGizmo {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

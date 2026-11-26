@@ -5,8 +5,9 @@
 //!   러스트에는 실행 중 반사가 없어, 언리얼의 UHT(UPROPERTY), Qt 의 moc 처럼 컴파일 때 코드를 지어 같은 일을 한다.
 //! - `#[reflect]` 를 컴포넌트의 impl 블록에 붙이면 블록 안의 `pub fn get_*(&self) -> T`, `pub fn is_*(&self) -> T` 와
 //!   그 짝 `pub fn set_*(&mut self, value)` 를 모아 vanilla::core::reflection::Reflect 구현을 짓는다.
-//! - `#[reflect]` 를 impl Component 블록에 붙이면 get_reflection, get_reflection_mut 을 넣고,
-//!   그 블록에서 다시 정의한 게터(원본 하위 클래스가 덮어쓴 isTickNeeded 같은 것)를 인스펙터용으로 모은다. 두 블록 모두 붙여야 한다.
+//! - `#[reflect]` 를 impl Component 블록에 붙이면 그 블록에서 다시 정의한 게터(원본 하위 클래스가 덮어쓴 isTickNeeded 같은 것)를 인스펙터용으로 모은다.
+//!   두 블록 모두 붙여야 한다. Reflect 가 Component 의 상위 트레이트라 어느 쪽을 빠뜨려도 컴파일 에러다. (원본처럼 모든 컴포넌트가 반사된다)
+//!   게터가 없는 타입은 빈 블록 `#[reflect] impl 타입 {}` 에 붙인다.
 //! - 원본 규칙을 그대로 따른다:
 //!   - 게터는 인자 없는 `get*`, `is*` 함수다. (원본 `getterFunction.length === 0`) 저장 속성은 같은 키의 `set*` 이 있는 게터만이다. (원본 `"set" + baseName`)
 //!     &mut self 게터도 게터다. (원본 함수에는 &self, &mut self 구별이 없다) 반사가 &mut 를 받는 갈래(get_reflected_value_mut, collect_reflected_getters_mut)로 부른다.
@@ -1043,7 +1044,7 @@ fn expand_inherent_impl(block_options: &BlockOptions, mut item_impl: ItemImpl) -
 }
 
 //==============================================================================
-/// impl Component 블록 펼치기. (반사를 꺼내는 함수를 넣고, 이 블록에서 다시 정의한 게터를 모으는 구현을 덧붙인다)
+/// impl Component 블록 펼치기. (이 블록에서 다시 정의한 게터를 모으는 구현을 덧붙인다)
 /// - 원본 클래스에 없는 덮어쓰기(러스트 판의 is_tick_needed 같은 것)는 #[reflect(skip)] 으로 빼고,
 ///   원본 클래스 몸통에서 다른 게터 뒤에 있던 것은 #[reflect(after = "원본 게터 이름")] 로 그 자리에 둔다.
 //==============================================================================
@@ -1078,9 +1079,6 @@ fn expand_component_impl(block_options: &BlockOptions, mut item_impl: ItemImpl) 
 			}
 		};
 		let method_text = method.sig.ident.to_string();
-		if method_text == "get_reflection" || method_text == "get_reflection_mut" {
-			return Err(syn::Error::new(method.sig.ident.span(), "#[reflect] 를 붙인 impl Component 블록에는 get_reflection 을 쓰지 않는다. (매크로가 넣는다)"));
-		}
 		let method_options = take_method_options(&mut method.attrs)?;
 		if method_options.is_skipped || COMPONENT_BASE_GETTER_NAMES.contains(&method_text.as_str()) {
 			continue;
@@ -1115,17 +1113,6 @@ fn expand_component_impl(block_options: &BlockOptions, mut item_impl: ItemImpl) 
 			}
 		}
 	}
-
-	item_impl.items.push(syn::parse_quote! {
-		fn get_reflection(&self) -> ::core::option::Option<&dyn #reflect_path::Reflect> {
-			::core::option::Option::Some(self)
-		}
-	});
-	item_impl.items.push(syn::parse_quote! {
-		fn get_reflection_mut(&mut self) -> ::core::option::Option<&mut dyn #reflect_path::Reflect> {
-			::core::option::Option::Some(self)
-		}
-	});
 
 	let self_type = &item_impl.self_ty;
 	let (impl_generics, _, where_clause) = item_impl.generics.split_for_impl();

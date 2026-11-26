@@ -11,8 +11,9 @@
 //!   WorldNode::add_component 가 붙이기 전에 그 타입이 없으면 만들어 붙인다. 떼어질 때는 원본처럼 detach 를 부른다.
 //! - 원본 setNode, getNode, setComponentType 은 옮기지 않았다. 러스트 판은 노드를 문맥으로 넘기고(전역 객체 참조가 없다) 이름은 타입이 정한다.
 //! - 반사(원본이 실행 중에 프로토타입을 훑어 get, is, set 함수를 찾는 것): impl 블록과 impl Component 블록에 `#[vanilla::reflect]` 를 붙이면
-//!   매크로가 컴파일 때 그 목록과 부르는 코드를 짓고, get_reflection 이 그것을 돌려준다. (core/reflection.rs) 붙이지 않은 컴포넌트는 None 이다.
-//!   러스트에는 실행 중에 메서드 목록을 읽는 길이 없어 붙인 타입만 반사된다. (원본은 모든 객체, 언리얼 UCLASS 와 같은 꼴)
+//!   매크로가 컴파일 때 그 목록과 부르는 코드를 짓는다. (core/reflection.rs, 언리얼 UHT 와 같은 꼴)
+//!   Reflect 가 Component 의 상위 트레이트라 매크로를 빠뜨린 컴포넌트는 컴파일되지 않는다. 그래서 원본처럼 모든 컴포넌트가 반사된다.
+//!   반사를 쓰는 쪽은 `&dyn Component` 를 `&dyn Reflect` 로 올려 부른다. (트레이트 업캐스팅)
 //!   구체 타입으로 꺼내기(C++ RTTI 의 dynamic_cast 자리)는 AsAny 다.
 //==============================================================================
 pub mod mask;
@@ -48,6 +49,10 @@ use std::any::{Any, TypeId};
 /// 	component_base: ComponentBase,
 /// }
 ///
+/// #[vanilla::reflect]
+/// impl Body {}
+///
+/// #[vanilla::reflect]
 /// impl Component for Body {
 /// 	fn get_component_base(&self) -> &ComponentBase {
 /// 		&self.component_base
@@ -67,6 +72,10 @@ use std::any::{Any, TypeId};
 /// 	component_base: ComponentBase,
 /// }
 ///
+/// #[vanilla::reflect]
+/// impl Walker {}
+///
+/// #[vanilla::reflect]
 /// impl Component for Walker {
 /// 	fn get_component_base(&self) -> &ComponentBase {
 /// 		&self.component_base
@@ -341,19 +350,33 @@ impl Default for ComponentBase {
 
 //==============================================================================
 /// 컴포넌트 트레이트.
-/// - 구현할 때 impl 블록과 이 트레이트의 impl 블록 둘 다에 `#[vanilla::reflect]` 를 붙이면 UI 문서와 DevTools 인스펙터가 원본처럼 속성을 다룬다.
-///   빠뜨리면: 한쪽만 붙이면 컴파일 에러, 둘 다 빠뜨리면 UIDocument 쓰기 경고와 인스펙터의 "반사 없음" 줄로 알 수 있다.
+/// - 원본은 모든 객체가 반사된다. 러스트 판은 반사(Reflect)를 상위 트레이트로 두어 반사 없는 컴포넌트가 생길 수 없다.
+///   컴포넌트를 만드는 길은 `#[vanilla::reflect]` 하나다. 타입의 impl 블록과 이 트레이트의 impl 블록 둘 다에 붙인다.
+///   게터가 없는 타입은 빈 블록 `#[vanilla::reflect] impl 타입 {}` 에 붙인다. 빠뜨리면 컴파일 에러가 붙일 자리를 알려 준다.
+/// - UI 문서 저장과 DevTools 인스펙터는 `&dyn Component` 를 `&dyn Reflect` 로 올려(트레이트 업캐스팅) 원본처럼 모든 컴포넌트의 속성을 다룬다.
 ///
 /// # 예제
 /// 노드를 돌리는 컴포넌트를 만들어 붙이고 tick 하기
 /// ```rust
-/// use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineConfiguration, NodeTree};
+/// use vanilla::{reflect, Component, ComponentBase, ComponentContext, Engine, EngineConfiguration, NodeTree};
 ///
 /// struct Spin {
 /// 	component_base: ComponentBase,
 /// 	degrees_per_second: f32,
 /// }
 ///
+/// #[reflect]
+/// impl Spin {
+/// 	pub fn get_degrees_per_second(&self) -> f32 {
+/// 		self.degrees_per_second
+/// 	}
+///
+/// 	pub fn set_degrees_per_second(&mut self, degrees_per_second: f32) {
+/// 		self.degrees_per_second = degrees_per_second;
+/// 	}
+/// }
+///
+/// #[reflect]
 /// impl Component for Spin {
 /// 	fn get_component_base(&self) -> &ComponentBase {
 /// 		&self.component_base
@@ -386,7 +409,7 @@ impl Default for ComponentBase {
 /// assert_eq!(node_tree[node_id].get_local_rotation(), 45.0);
 /// ```
 //==============================================================================
-pub trait Component: AsAny {
+pub trait Component: AsAny + Reflect {
 	//==============================================================================
 	/// 공통 상태 반환.
 	///
@@ -457,6 +480,10 @@ pub trait Component: AsAny {
 	/// 	label_id: Option<NodeId>,
 	/// }
 	///
+	/// #[vanilla::reflect]
+	/// impl Badge {}
+	///
+	/// #[vanilla::reflect]
 	/// impl Component for Badge {
 	/// 	fn get_component_base(&self) -> &ComponentBase {
 	/// 		&self.component_base
@@ -529,6 +556,10 @@ pub trait Component: AsAny {
 	/// 	saved_alpha: f32,
 	/// }
 	///
+	/// #[vanilla::reflect]
+	/// impl HalfFade {}
+	///
+	/// #[vanilla::reflect]
 	/// impl Component for HalfFade {
 	/// 	fn get_component_base(&self) -> &ComponentBase {
 	/// 		&self.component_base
@@ -705,26 +736,6 @@ pub trait Component: AsAny {
 	//==============================================================================
 	fn get_intrinsic_content_size(&self) -> Vector2 {
 		Vector2::create(-1.0, -1.0)
-	}
-
-	//==============================================================================
-	/// 반사 구현. (`#[reflect]` 를 붙인 impl Component 블록에서 매크로가 Some(self) 로 채운다. 원본은 모든 객체가 반사된다)
-	///
-	/// # 돌려줌
-	/// 반사 구현. `#[reflect]` 를 붙이지 않은 컴포넌트는 None.
-	//==============================================================================
-	fn get_reflection(&self) -> Option<&dyn Reflect> {
-		None
-	}
-
-	//==============================================================================
-	/// 반사 구현. (변경용)
-	///
-	/// # 돌려줌
-	/// 반사 구현. (변경용) `#[reflect]` 를 붙이지 않은 컴포넌트는 None.
-	//==============================================================================
-	fn get_reflection_mut(&mut self) -> Option<&mut dyn Reflect> {
-		None
 	}
 
 	//==============================================================================

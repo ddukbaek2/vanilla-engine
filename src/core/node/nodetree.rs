@@ -1695,6 +1695,10 @@ impl NodeTree {
 	/// 	scroll_offset: f32,
 	/// }
 	///
+	/// #[vanilla::reflect]
+	/// impl Scroller {}
+	///
+	/// #[vanilla::reflect]
 	/// impl Component for Scroller {
 	/// # 	fn get_component_base(&self) -> &ComponentBase {
 	/// # 		&self.component_base
@@ -1796,6 +1800,7 @@ struct ComponentPlaceholder {
 	component_base: ComponentBase,
 }
 
+#[crate::reflect]
 impl ComponentPlaceholder {
 	//==============================================================================
 	/// 생성. (꺼진 상태)
@@ -1809,6 +1814,7 @@ impl ComponentPlaceholder {
 	}
 }
 
+#[crate::reflect]
 impl Component for ComponentPlaceholder {
 	//==============================================================================
 	/// 공통 상태 반환.
@@ -1852,6 +1858,10 @@ impl Component for ComponentPlaceholder {
 /// 	component_base: ComponentBase,
 /// }
 ///
+/// #[vanilla::reflect]
+/// impl Follower {}
+///
+/// #[vanilla::reflect]
 /// impl Component for Follower {
 /// # 	fn get_component_base(&self) -> &ComponentBase {
 /// # 		&self.component_base
@@ -1995,6 +2005,10 @@ impl<'a> ComponentContext<'a> {
 	/// 	count: u32,
 	/// }
 	///
+	/// #[vanilla::reflect]
+	/// impl Counter {}
+	///
+	/// #[vanilla::reflect]
 	/// impl Component for Counter {
 	/// # 	fn get_component_base(&self) -> &ComponentBase {
 	/// # 		&self.component_base
@@ -2012,6 +2026,10 @@ impl<'a> ComponentContext<'a> {
 	/// 	counter_id: NodeId,
 	/// }
 	///
+	/// #[vanilla::reflect]
+	/// impl Clicker {}
+	///
+	/// #[vanilla::reflect]
 	/// impl Component for Clicker {
 	/// # 	fn get_component_base(&self) -> &ComponentBase {
 	/// # 		&self.component_base
@@ -2074,6 +2092,10 @@ mod tests {
 		component_base: ComponentBase,
 	}
 
+	#[crate::reflect]
+	impl SelfDestroyer {}
+
+	#[crate::reflect]
 	impl Component for SelfDestroyer {
 		//==============================================================================
 		/// 공통 상태 반환.
@@ -2113,6 +2135,10 @@ mod tests {
 		is_sibling_created: bool,
 	}
 
+	#[crate::reflect]
+	impl Mover {}
+
+	#[crate::reflect]
 	impl Component for Mover {
 		//==============================================================================
 		/// 공통 상태 반환.
@@ -2157,6 +2183,10 @@ mod tests {
 		wheel_total: f32,
 	}
 
+	#[crate::reflect]
+	impl WheelCatcher {}
+
+	#[crate::reflect]
 	impl Component for WheelCatcher {
 		//==============================================================================
 		/// 공통 상태 반환.
@@ -2456,6 +2486,10 @@ mod sibling_tests {
 		component_base: ComponentBase,
 	}
 
+	#[crate::reflect]
+	impl SiblingPainter {}
+
+	#[crate::reflect]
 	impl Component for SiblingPainter {
 		//==============================================================================
 		/// 공통 상태 반환.
@@ -2613,6 +2647,10 @@ mod sibling_tests {
 		component_base: ComponentBase,
 	}
 
+	#[crate::reflect]
+	impl RequiredMarker {}
+
+	#[crate::reflect]
 	impl Component for RequiredMarker {
 		//==============================================================================
 		/// 공통 상태 반환.
@@ -2648,6 +2686,10 @@ mod sibling_tests {
 		component_base: ComponentBase,
 	}
 
+	#[crate::reflect]
+	impl NeedsMarker {}
+
+	#[crate::reflect]
 	impl Component for NeedsMarker {
 		//==============================================================================
 		/// 공통 상태 반환.
@@ -2701,6 +2743,10 @@ mod sibling_tests {
 		component_base: ComponentBase,
 	}
 
+	#[crate::reflect]
+	impl RequiredTreeMarker {}
+
+	#[crate::reflect]
 	impl Component for RequiredTreeMarker {
 		//==============================================================================
 		/// 공통 상태 반환.
@@ -2743,6 +2789,10 @@ mod sibling_tests {
 		component_base: ComponentBase,
 	}
 
+	#[crate::reflect]
+	impl NeedsTreeMarker {}
+
+	#[crate::reflect]
 	impl Component for NeedsTreeMarker {
 		//==============================================================================
 		/// 공통 상태 반환.

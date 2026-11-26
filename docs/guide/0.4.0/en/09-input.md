@@ -110,6 +110,10 @@ struct PressHighlight {
 	click_count: u32,
 }
 
+#[vanilla::reflect]
+impl PressHighlight {}
+
+#[vanilla::reflect]
 impl Component for PressHighlight {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

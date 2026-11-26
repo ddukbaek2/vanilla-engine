@@ -195,6 +195,7 @@ ui_document.register_component_type("Spin", || Spin {
 });
 ```
 
+- `Reflect` 가 `Component` 의 상위 트레이트라 vanilla.js 처럼 모든 컴포넌트가 반사됩니다. 두 블록 가운데 어느 쪽을 빠뜨려도 컴파일 에러가 붙일 자리를 알려 줍니다. 게터가 없는 타입은 빈 블록 `#[vanilla::reflect] impl 타입 {}` 에 붙입니다.
 - 게터는 인자 없는 `pub fn get_*`, `pub fn is_*` 이고, 같은 이름의 `set_*` 이 있으면 저장 속성입니다. 키는 접두어를 뗀 vanilla.js 이름(`get_line_width` → `LineWidth`)입니다.
 - 저장할 수 없는 꼴의 게터(그림, 콜백 같은 것)도 컴파일 에러 없이 저장에서 빠지고 인스펙터에는 `[종류 이름]` 으로 보입니다.
 - 트리를 받는 게터(`fn get_leader_name<'a>(&self, node_tree: &'a NodeTree) -> &'a str`)는 인스펙터가 트리를 넘겨 부르고, `&mut self` 게터는 인스펙터가 tick 에서, 문서는 `to_json_text_mut` 가 부릅니다. 트리와 값을 받는 세터(`fn set_slot(&mut self, node_tree: &mut NodeTree, slot: usize)`)는 문서를 읽을 때 vanilla.js 처럼 그 자리에서 부릅니다.
