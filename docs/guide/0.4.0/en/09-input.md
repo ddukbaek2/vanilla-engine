@@ -513,7 +513,7 @@ assert_eq!(read_gamepad_kind(&gamepad_id), GamepadKind::PlayStation);
 `update_all_gamepads_with_list` feeds a pad list without a device. (for tests or other input sources) In a game the engine reads the pads.
 
 ```rust,no_run
-use vanilla::{read_gamepad_kind, Engine, EngineConfiguration, GamepadAnalogStickCode, GamepadButtonCode, GamepadKind, Scene, SceneBase, Vector2};
+use vanilla::{read_gamepad_kind, Engine, EngineConfiguration, Gamepad, GamepadAnalogStickCode, GamepadButtonCode, GamepadKind, Scene, SceneBase, Vector2};
 
 struct GamepadScene {
 	scene_base: SceneBase,
@@ -530,9 +530,11 @@ impl Scene for GamepadScene {
 
 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
 		self.scene_base.tick(engine, time_delta);
-		let gamepad_manager = engine.get_input_manager().get_gamepad_manager();
+		let gamepad_manager = engine.get_input_manager_mut().get_gamepad_manager_mut();
 		let mut is_confirm_pressed = false;
-		for gamepad in gamepad_manager.get_all_connected_gamepads() {
+		// The list is read in place when called (like the original navigator.getGamepads()), so borrow it with &mut and keep copies.
+		let gamepad_list: Vec<Gamepad> = gamepad_manager.get_all_connected_gamepads().into_iter().cloned().collect();
+		for gamepad in gamepad_list.iter() {
 			if !gamepad_manager.is_button_just_pressed(gamepad.index, GamepadButtonCode::A_CROSS) {
 				continue;
 			}

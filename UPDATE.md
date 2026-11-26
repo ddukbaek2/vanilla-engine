@@ -1,6 +1,9 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- SceneBase.set_touch_dispatch_enabled(is_enabled), is_touch_dispatch_enabled(): 원본 Scene.setTouchRaycaster(null)(와 새 setTouchDispatchEnabled) 처럼 씬 기본 터치 넘기기를 끈다. 끄면 tick_touch 가 노드에 누름, 이동, 뗌, 휠을 넘기지 않고(첫 터치 콜백도) 씬의 터치 훅만 불려 훅에서 가로채 직접 넘길 수 있다.
+- SpriteAnimator.play: 원본 play 처럼 그 자리에서 Sprite 에 첫 프레임을 넣는 노드를 받는 꼴이 기본이다. SpriteAnimator::play(&mut node, clip_name, options) (옛 play_on_node). 애니메이터만 받던 옛 play(&mut self, ...) 는 play_clip 이고, 노드가 없을 때(완료 콜백 안) 쓴다. 완료 콜백 뒤에는 같은 tick 에 프레임을 넣어 바로 바뀐다.
+  - 옮기는 법: SpriteAnimator::play_on_node(node, ...) 는 SpriteAnimator::play(node, ...) 로, animator.play(...) 는 노드가 있으면 SpriteAnimator::play(node, ...), 완료 콜백 안이면 animator.play_clip(...) 으로 바꾼다.
 - GamepadManager: get_all_connected_gamepads, get_connected_gamepad 가 원본 navigator.getGamepads() 처럼 부를 때 그 자리에서 읽는다(데스크탑은 gilrs 사건을 비워 지금 상태, 그 사이 연결과 해제는 다음 갱신이 받음, 웹은 navigator.getGamepads()). 그래서 &mut self 를 받는다. gilrs 는 처음 부를 때(갱신, 진동, 목록 읽기) 만들어 첫 tick 전 vibrate 도 데스크탑에서 떤다. update_all_gamepads_with_list 로 목록을 넣은 관리자는 넣은 목록을 돌려준다.
   - 옮기는 법: get_gamepad_manager() 로 빌려 목록을 읽던 코드는 get_gamepad_manager_mut() 로 빌린다.
 - AudioPlayer 버리기: 플레이어를 버려도 트는 소리는 원본 WebAudio 소스 노드처럼 끝까지 운다. 데스크탑은 믹서가 소스가 끝날 때까지 플레이어 노드(와 그리로 내는 버스 노드)를 들고 끝나면 뺀다. 웹은 onended 를 스스로 풀리는 콜백으로 바꿔 소스가 끝까지 울고, 끝나면 GainNode 를 뗀다. 컨텍스트 재개를 기다리던 재생도 원본처럼 재개 뒤에 튼다. (지금까지는 버리면 소리가 멈췄다)

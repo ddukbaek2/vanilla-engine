@@ -412,7 +412,7 @@ struct GamepadState {
 
 //==============================================================================
 /// 게임패드 관리자.
-/// - InputManager 가 하나 들고 tick 에서 폴링한다. 씬은 engine.get_input_manager().get_gamepad_manager() 로 읽는다.
+/// - InputManager 가 하나 들고 tick 에서 폴링한다. 씬은 engine.get_input_manager().get_gamepad_manager() 로 읽는다. (패드 목록 읽기는 그 자리에서 읽어 get_gamepad_manager_mut)
 ///
 /// # 예제
 /// 콜백으로 버튼 변화 받기
@@ -439,8 +439,8 @@ struct GamepadState {
 /// ```rust,no_run
 /// use vanilla::{Engine, GamepadAnalogStickCode, GamepadButtonCode};
 ///
-/// fn read_first_gamepad(engine: &Engine) {
-/// 	let gamepad_manager = engine.get_input_manager().get_gamepad_manager();
+/// fn read_first_gamepad(engine: &mut Engine) {
+/// 	let gamepad_manager = engine.get_input_manager_mut().get_gamepad_manager_mut();
 /// 	let gamepad_index = match gamepad_manager.get_connected_gamepad(0) {
 /// 		Some(gamepad) => {
 /// 			gamepad.index

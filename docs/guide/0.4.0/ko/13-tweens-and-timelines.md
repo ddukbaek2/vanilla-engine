@@ -327,9 +327,9 @@ fn main() {
 
 - `add_clip(clip_name, image, &frame_rects, frame_per_second, is_loop)` 는 클립을 등록합니다. 러스트에는 기본 인자가 없어서 늘 다 넘깁니다. 원본 기본값은 `SpriteAnimator::DEFAULT_FRAME_PER_SECOND`(10)과 `true` 입니다. 같은 이름이 있으면 바꿉니다.
 - `add_clip_from_atlas(clip_name, image, &atlas_json, &frame_ids, frame_per_second, is_loop)` 는 TexturePacker 꼴(`{ "frames": { 이름: { "frame": { "x", "y", "w", "h" } } } }`) 표에서 프레임을 뽑습니다. 표는 `serde_json::Value` 이고 없는 칸 이름은 건너뜁니다.
-- `play(clip_name, options)` 는 클립을 바꿉니다. `options` 는 `SpriteAnimatorPlayOptions { on_complete, restart_if_same }` 이고 `SpriteAnimatorPlayOptions::default()` 는 콜백 없음, 다시 틀지 않음입니다. 같은 클립이 이미 돌고 있으면 다시 시작하지 않고(`restart_if_same: true` 면 다시 시작) 완료 콜백만 바꿉니다. 처음부터 틀었으면 `true` 를 돌려줍니다.
+- `SpriteAnimator::play(&mut node, clip_name, options)` 는 노드의 애니메이터로 클립을 바꾸고 그 자리에서 첫 프레임을 `Sprite` 에 넣습니다(원본 `play` 와 같음, 노드에 애니메이터가 없으면 `false`). `options` 는 `SpriteAnimatorPlayOptions { on_complete, restart_if_same }` 이고 `SpriteAnimatorPlayOptions::default()` 는 콜백 없음, 다시 틀지 않음입니다. 같은 클립이 이미 돌고 있으면 다시 시작하지 않고(`restart_if_same: true` 면 다시 시작) 완료 콜백만 바꿉니다. 처음부터 틀었으면 `true` 를 돌려줍니다.
 - 완료 콜백은 애니메이터를 받는 한 번짜리 함수(`FnOnce(&mut SpriteAnimator)`)입니다. `SpriteAnimatorPlayOptions::create_with_on_complete(|animator| {})` 로 콜백만 정한 옵션을 만들 수 있습니다.
-- `play` 는 프레임을 다음 노드 갱신에 `Sprite` 에 넣습니다. 그 자리에서 첫 프레임까지 넣으려면 노드를 받는 `SpriteAnimator::play_on_node(&mut node, clip_name, options)` 를 씁니다(원본 `play` 와 같은 효과, 노드에 애니메이터가 없으면 `false`).
+- 노드 없이 애니메이터만 있을 때(완료 콜백 안)는 `play_clip(clip_name, options)` 를 씁니다. 완료 콜백 뒤에는 같은 갱신에 프레임을 넣어 바로 바뀝니다.
 - `stop()`(첫 프레임으로, 완료 콜백 없음), `get_clip_name()`(`Option<&str>`), `is_playing()`, `get_current_frame_index()`, `has_clip(clip_name)`, `apply_current_frame(&mut sprite)` 가 있습니다.
 
 ```rust,no_run
@@ -377,7 +377,7 @@ impl Scene for AnimatorScene {
 		let sprite_animator = hero_node.add_component(SpriteAnimator::new());
 		sprite_animator.add_clip("idle", image.clone(), &idle_rects, 4.0, true);
 		sprite_animator.add_clip("attack", image, &attack_rects, 12.0, false);
-		SpriteAnimator::play_on_node(hero_node, "idle", SpriteAnimatorPlayOptions::default());
+		SpriteAnimator::play(hero_node, "idle", SpriteAnimatorPlayOptions::default());
 		self.hero_id = Some(hero_id);
 	}
 
@@ -385,12 +385,12 @@ impl Scene for AnimatorScene {
 		if let Some(hero_id) = self.hero_id {
 			let options = SpriteAnimatorPlayOptions {
 				on_complete: Some(Box::new(|sprite_animator: &mut SpriteAnimator| {
-					sprite_animator.play("idle", SpriteAnimatorPlayOptions::default());
+					sprite_animator.play_clip("idle", SpriteAnimatorPlayOptions::default());
 				})),
 				restart_if_same: true,
 			};
 			let hero_node = &mut self.scene_base.get_node_tree_mut()[hero_id];
-			SpriteAnimator::play_on_node(hero_node, "attack", options);
+			SpriteAnimator::play(hero_node, "attack", options);
 		}
 	}
 }
@@ -716,7 +716,7 @@ assert!(!animator.is_in_transition());
 assert_eq!(animator.get_current_frame().map(|frame| frame.position.y), Some(32.0));
 ```
 
-`Animator` 는 프레임 영역만 고르고 그리지 않으므로, 고른 영역은 게임이 `Sprite` 에 겁니다. 캐릭터의 상태에 따라 클립만 바꾸는 간단한 일은 `FiniteStateMachine` 과 `SpriteAnimator` 를 함께 써도 됩니다. 러스트 판의 상태 처리 함수는 노드 트리를 빌릴 수 없으므로, 씬의 `tick` 에서 기계를 갱신한 뒤 지금 상태 이름으로 `play_on_node` 를 부릅니다. 같은 클립이 이미 돌고 있으면 `play` 는 다시 시작하지 않으므로 매 프레임 불러도 됩니다. 처리 함수 안에서 상태를 바꿀 때는 `get_state_change_requester()` 로 받은 손잡이의 `change_state` 로 부탁합니다.
+`Animator` 는 프레임 영역만 고르고 그리지 않으므로, 고른 영역은 게임이 `Sprite` 에 겁니다. 캐릭터의 상태에 따라 클립만 바꾸는 간단한 일은 `FiniteStateMachine` 과 `SpriteAnimator` 를 함께 써도 됩니다. 러스트 판의 상태 처리 함수는 노드 트리를 빌릴 수 없으므로, 씬의 `tick` 에서 기계를 갱신한 뒤 지금 상태 이름으로 `SpriteAnimator::play` 를 부릅니다. 같은 클립이 이미 돌고 있으면 `play` 는 다시 시작하지 않으므로 매 프레임 불러도 됩니다. 처리 함수 안에서 상태를 바꿀 때는 `get_state_change_requester()` 로 받은 손잡이의 `change_state` 로 부탁합니다.
 
 ```rust,no_run
 use vanilla::{Engine, EngineConfiguration, FiniteStateMachine, ImageAsset, NodeId, Rect, Scene, SceneBase, Sprite, SpriteAnimator, SpriteAnimatorPlayOptions, StateHandlers, Vector2};
@@ -789,7 +789,7 @@ impl Scene for StateScene {
 		self.state_machine.tick(time_delta);
 		if let (Some(hero_id), Some(state_name)) = (self.hero_id, self.state_machine.get_state_name()) {
 			let hero_node = &mut self.scene_base.get_node_tree_mut()[hero_id];
-			SpriteAnimator::play_on_node(hero_node, state_name, SpriteAnimatorPlayOptions::default());
+			SpriteAnimator::play(hero_node, state_name, SpriteAnimatorPlayOptions::default());
 		}
 	}
 }
@@ -846,7 +846,7 @@ assert!(action.is_done());
 - `Animation`, `Timeline`, `FiniteStateMachine`, `Action` 은 스스로 시간이 가지 않습니다. 씬의 `tick` 에서 `tick(time_delta)` 나 `step` 을 불러 줍니다. 트윈은 `scene_base.start_tween` 으로 맡기면 `SceneBase::tick` 이 갱신하므로, `Scene::tick` 을 덮어쓸 때 `self.scene_base.tick(engine, time_delta)` 를 빼면 트윈이 멈춥니다.
 - 트윈과 타임라인의 콜백은 원본처럼 노드 객체를 받지 않고 `&mut NodeTree` 를 받습니다. 붙잡아 둔 `NodeId` 로 `node_tree[node_id]` 를 꺼내 씁니다. 콜백 밖의 값을 바꾸려면 `Rc<Cell>` 이나 `Rc<RefCell>` 을 잡아 넣습니다.
 - 타임라인 처리기는 `Box::new` 로 감싸 `Some` 에 넣고, 위 예제처럼 클로저 인자의 꼴을 적어 줍니다.
-- `SpriteAnimator` 는 같은 노드의 `Sprite` 를 찾아 씁니다. `Sprite` 가 없으면 그림이 바뀌지 않습니다. `play` 는 다음 노드 갱신에 프레임을 넣으므로, 그 자리에서 보이게 하려면 `play_on_node` 를 씁니다.
+- `SpriteAnimator` 는 같은 노드의 `Sprite` 를 찾아 씁니다. `Sprite` 가 없으면 그림이 바뀌지 않습니다. 노드를 받는 `SpriteAnimator::play` 는 그 자리에서 첫 프레임을 넣고, 애니메이터만 받는 `play_clip` 은 다음 프레임 넣기에 넣습니다.
 - `Timeline::seek` 는 이벤트와 마커를 내지 않습니다. 이벤트는 `tick` 이 시간을 지나갈 때만 납니다.
 - `Timeline::load_from_url` 은 받기에 실패하면 JSON 해석 전에 `Err` 를 돌려줍니다. 원본은 응답 상태를 보지 않고 JSON 으로 읽어 해석 오류로 실패합니다.
 

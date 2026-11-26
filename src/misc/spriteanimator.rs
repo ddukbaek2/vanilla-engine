@@ -9,14 +9,14 @@
 //!     let animator = node_tree[hero_id].add_component(SpriteAnimator::new());
 //!     animator.add_clip("idle", image.clone(), &idleRects, 10.0, true);
 //!     animator.add_clip("attack", image.clone(), &attackRects, 12.0, false);
-//!     SpriteAnimator::play_on_node(&mut node_tree[hero_id], "attack", SpriteAnimatorPlayOptions::create_with_on_complete(|animator| {
-//!         animator.play("idle", SpriteAnimatorPlayOptions::default());
+//!     SpriteAnimator::play(&mut node_tree[hero_id], "attack", SpriteAnimatorPlayOptions::create_with_on_complete(|animator| {
+//!         animator.play_clip("idle", SpriteAnimatorPlayOptions::default());
 //!     }));
 //!   ```
+//! - play 는 원본처럼 그 자리에서 Sprite 에 첫 프레임을 넣는다. 러스트 컴포넌트는 자기 노드를 가리키지 않아(노드는 NodeTree 가 든다) 노드를 받는다.
+//!     SpriteAnimator::play(&mut node, "run", 옵션)
+//!   노드 없이 애니메이터만 있을 때(완료 콜백 안)는 play_clip 이다. 완료 콜백 뒤에는 같은 tick 에 프레임을 넣어 원본처럼 바로 바뀐다.
 //! - 원본과 다른 점:
-//!   play 는 원본처럼 그 자리에서 Sprite 에 프레임을 넣지 못한다. 러스트 컴포넌트는 자기 노드를 가리키지 않고(노드는 NodeTree 가 들고,
-//!     컴포넌트에게 노드를 넘겨주는 것은 tick 의 ComponentContext 뿐이다), 노드에서 애니메이터를 &mut 로 빌린 동안 같은 노드의 Sprite 를 함께 빌릴 수 없다.
-//!     그래서 다음 tick 에 넣는다. 그 자리에서 넣으려면 노드를 받는 play_on_node 를 쓴다.
 //!   on_complete 는 애니메이터를 받는 한 번짜리 콜백(FnOnce(&mut SpriteAnimator))이다. 원본은 클로저가 애니메이터를 붙잡아 썼다.
 //!   fps 는 이름을 줄이지 않아 frame_per_second 다. 기본값(10, 반복)은 DEFAULT_FRAME_PER_SECOND 와 true 를 넘긴다.
 //!   아틀라스 JSON 은 serde_json::Value 로 받는다. 원본 findSprite(찾아서 들고 있기)는 형제 컴포넌트의 참조를 들고 있을 수 없어(빌림이 tick 을 넘어 살 수 없다)
@@ -59,13 +59,13 @@ struct SpriteAnimatorClip {
 /// let frame_rects = [Rect::create(0.0, 0.0, 16.0, 16.0), Rect::create(16.0, 0.0, 16.0, 16.0)];
 /// let mut animator = SpriteAnimator::new();
 /// animator.add_clip("idle", image, &frame_rects, 10.0, true);
-/// assert!(animator.play("idle", SpriteAnimatorPlayOptions::default()));
-/// assert!(!animator.play("idle", SpriteAnimatorPlayOptions::default()));
+/// assert!(animator.play_clip("idle", SpriteAnimatorPlayOptions::default()));
+/// assert!(!animator.play_clip("idle", SpriteAnimatorPlayOptions::default()));
 /// let restart_options = SpriteAnimatorPlayOptions {
 /// 	restart_if_same: true,
 /// 	..SpriteAnimatorPlayOptions::default()
 /// };
-/// assert!(animator.play("idle", restart_options));
+/// assert!(animator.play_clip("idle", restart_options));
 /// ```
 //==============================================================================
 #[derive(Default)]
@@ -115,8 +115,8 @@ impl SpriteAnimatorPlayOptions {
 /// let animator = node_tree[hero_id].add_component(SpriteAnimator::new());
 /// animator.add_clip("idle", image.clone(), &idle_rects, 10.0, true);
 /// animator.add_clip("attack", image.clone(), &attack_rects, 12.0, false);
-/// SpriteAnimator::play_on_node(&mut node_tree[hero_id], "attack", SpriteAnimatorPlayOptions::create_with_on_complete(|animator| {
-/// 	animator.play("idle", SpriteAnimatorPlayOptions::default());
+/// SpriteAnimator::play(&mut node_tree[hero_id], "attack", SpriteAnimatorPlayOptions::create_with_on_complete(|animator| {
+/// 	animator.play_clip("idle", SpriteAnimatorPlayOptions::default());
 /// }));
 /// assert_eq!(node_tree[hero_id].get_component::<Sprite>().unwrap().get_image_rect(), Rect::create(64.0, 0.0, 16.0, 16.0));
 ///
@@ -202,7 +202,7 @@ impl SpriteAnimator {
 	/// let mut animator = SpriteAnimator::new();
 	/// animator.add_clip_from_atlas("run", image, &atlas_json, &["run_0", "run_1"], SpriteAnimator::DEFAULT_FRAME_PER_SECOND, true);
 	/// assert!(animator.has_clip("run"));
-	/// assert!(animator.play("run", SpriteAnimatorPlayOptions::default()));
+	/// assert!(animator.play_clip("run", SpriteAnimatorPlayOptions::default()));
 	/// ```
 	//==============================================================================
 	pub fn add_clip_from_atlas(&mut self, clip_name: &str, image: Rc<Image>, atlas_json: &serde_json::Value, frame_ids: &[&str], frame_per_second: f32, is_loop: bool) {
@@ -235,9 +235,10 @@ impl SpriteAnimator {
 	}
 
 	//==============================================================================
-	/// 재생. (처음부터 틀었으면 true)
+	/// 애니메이터만으로 재생. (처음부터 틀었으면 true)
 	/// - 같은 클립이 이미 도는 중이면 다시 틀지 않고 완료 콜백만 바꾼다. (restart_if_same 이면 처음부터)
-	/// - Sprite 에는 다음 tick 에 들어간다. 그 자리에서 넣으려면 play_on_node.
+	/// - 노드가 없을 때(완료 콜백 안처럼) 쓴다. Sprite 에는 다음 프레임 넣기(tick, 완료 콜백 뒤의 같은 tick, apply_current_frame)에 들어간다.
+	///   노드가 있으면 그 자리에서 첫 프레임까지 넣는 SpriteAnimator::play 를 쓴다.
 	///
 	/// # 인자
 	/// - `clip_name`: 틀 클립 이름.
@@ -246,7 +247,7 @@ impl SpriteAnimator {
 	/// # 돌려줌
 	/// 처음부터 틀었으면 true. 없는 클립이거나 같은 클립이 도는 중이라 다시 틀지 않았으면 false.
 	//==============================================================================
-	pub fn play(&mut self, clip_name: &str, options: SpriteAnimatorPlayOptions) -> bool {
+	pub fn play_clip(&mut self, clip_name: &str, options: SpriteAnimatorPlayOptions) -> bool {
 		let clip = match self.clip_table.get(clip_name) {
 			Some(clip) => {
 				clip
@@ -272,7 +273,8 @@ impl SpriteAnimator {
 	}
 
 	//==============================================================================
-	/// 노드의 애니메이터로 재생하고 같은 노드의 Sprite 에 그 자리에서 첫 프레임을 넣는다. (원본 play 와 같은 효과)
+	/// 재생. (원본 play, 노드의 애니메이터로 틀고 같은 노드의 Sprite 에 그 자리에서 첫 프레임을 넣는다)
+	/// - 같은 클립이 이미 도는 중이면 다시 틀지 않고 완료 콜백만 바꾼다. (restart_if_same 이면 처음부터)
 	/// - 애니메이터가 없으면 false.
 	///
 	/// # 인자
@@ -281,12 +283,12 @@ impl SpriteAnimator {
 	/// - `options`: 완료 콜백과 같은 클립 다시 틀기.
 	///
 	/// # 돌려줌
-	/// play 의 결과. (처음부터 틀었으면 true) 노드에 애니메이터가 없으면 false.
+	/// 처음부터 틀었으면 true. 없는 클립이거나 같은 클립이 도는 중이라 다시 틀지 않았거나 노드에 애니메이터가 없으면 false.
 	//==============================================================================
-	pub fn play_on_node(node: &mut WorldNode, clip_name: &str, options: SpriteAnimatorPlayOptions) -> bool {
+	pub fn play(node: &mut WorldNode, clip_name: &str, options: SpriteAnimatorPlayOptions) -> bool {
 		let (is_started, current_frame) = match node.get_component_mut::<SpriteAnimator>() {
 			Some(sprite_animator) => {
-				let is_started = sprite_animator.play(clip_name, options);
+				let is_started = sprite_animator.play_clip(clip_name, options);
 				let current_frame = sprite_animator.animation.get_current_frame().cloned();
 				(is_started, current_frame)
 			}
@@ -324,7 +326,7 @@ impl SpriteAnimator {
 	/// let image = Image::create_from_pixels(32, 16, vec![0u8; 32 * 16 * 4]);
 	/// let mut animator = SpriteAnimator::new();
 	/// animator.add_clip("blink", image, &[Rect::create(16.0, 0.0, 16.0, 16.0)], 10.0, true);
-	/// animator.play("blink", SpriteAnimatorPlayOptions::default());
+	/// animator.play_clip("blink", SpriteAnimatorPlayOptions::default());
 	/// let mut sprite = Sprite::new();
 	/// animator.apply_current_frame(&mut sprite);
 	/// assert_eq!(sprite.get_image_rect(), Rect::create(16.0, 0.0, 16.0, 16.0));
@@ -471,21 +473,21 @@ mod tests {
 		animator.add_clip("idle", image.clone(), &create_sheet_rects(0, 2), 10.0, true);
 		animator.add_clip("attack", image.clone(), &create_sheet_rects(4, 3), 10.0, false);
 		assert!(animator.has_clip("idle"));
-		assert!(!animator.play("missing", SpriteAnimatorPlayOptions::default()));
+		assert!(!animator.play_clip("missing", SpriteAnimatorPlayOptions::default()));
 
 		let complete_count = std::rc::Rc::new(Cell::new(0));
 		let complete_count_for_event = complete_count.clone();
-		let is_started = SpriteAnimator::play_on_node(&mut node_tree[hero_id], "attack", SpriteAnimatorPlayOptions::create_with_on_complete(move |animator| {
+		let is_started = SpriteAnimator::play(&mut node_tree[hero_id], "attack", SpriteAnimatorPlayOptions::create_with_on_complete(move |animator| {
 			complete_count_for_event.set(complete_count_for_event.get() + 1);
-			animator.play("idle", SpriteAnimatorPlayOptions::default());
+			animator.play_clip("idle", SpriteAnimatorPlayOptions::default());
 		}));
 		assert!(is_started);
 		assert_eq!(node_tree[hero_id].get_component::<Sprite>().expect("sprite").get_image_rect(), Rect::create(64.0, 0.0, 16.0, 16.0));
 
 		// 같은 클립은 다시 틀지 않는다.
 		let animator = node_tree[hero_id].get_component_mut::<SpriteAnimator>().expect("animator");
-		assert!(!animator.play("attack", SpriteAnimatorPlayOptions::create_with_on_complete(|animator| {
-			animator.play("idle", SpriteAnimatorPlayOptions::default());
+		assert!(!animator.play_clip("attack", SpriteAnimatorPlayOptions::create_with_on_complete(|animator| {
+			animator.play_clip("idle", SpriteAnimatorPlayOptions::default());
 		})));
 
 		node_tree.tick(&engine, 0.1);
@@ -525,7 +527,7 @@ mod tests {
 		node_tree[hero_id].add_component(Sprite::new());
 		let animator = node_tree[hero_id].add_component(SpriteAnimator::new());
 		animator.add_clip_from_atlas("run", image, &atlas_json, &["run_0", "missing", "run_1"], SpriteAnimator::DEFAULT_FRAME_PER_SECOND, true);
-		assert!(animator.play("run", SpriteAnimatorPlayOptions::default()));
+		assert!(animator.play_clip("run", SpriteAnimatorPlayOptions::default()));
 
 		// play 만 하면 다음 tick 에 들어간다.
 		assert!(node_tree[hero_id].get_component::<Sprite>().expect("sprite").get_image().is_none());

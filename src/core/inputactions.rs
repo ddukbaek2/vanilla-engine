@@ -8,9 +8,9 @@
 //! - 축은 죽은 구역(set_dead_zone)을 빼고 나머지를 0 ~ 1 로 다시 편다. 스틱은 길이로, 묶은 축은 한쪽 값으로 거른다.
 //! - 바깥 입력원(add_source)은 엔진이 모르는 입력(플랫폼 SDK 의 패드 같은 것)을 게임이 끼우는 자리다. InputActionSource 트레이트를 단다.
 //! - 글자 입력칸에 쓰는 동안은 키를 듣지 않는다. (set_keys_ignored_while_typing 으로 끈다)
-//! - 원본과 다른 점: 원본은 읽을 때 입력 매니저를 다시 보지만, 러스트 판은 입력 매니저를 들고 있을 수 없어
-//!   update 때 이동 키, 패드 축, 바깥 입력원의 이동 축을 적어 두고 read_gamepad_stick, read_move_axis 가 그 값을 읽는다. (같은 프레임의 값이다)
-//!   바깥 입력원은 JS 객체 대신 트레이트이고, 빼기는 add_source 가 준 번호로 한다.
+//! - 유니티 Input System 처럼 프레임 처음의 update 에서 한 번 갱신하고, 그 프레임 안의 읽기는 그때 적은 값이다. (원본과 같다)
+//!   update 때 이동 키, 패드 축, 바깥 입력원의 이동 축을 적어 두고 read_gamepad_stick, read_move_axis 가 그 값을 읽는다.
+//! - 원본과 다른 점: 바깥 입력원은 JS 객체 대신 트레이트이고, 빼기는 add_source 가 준 번호로 한다.
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::gamepadmanager::{GamepadAnalogStickCode, GamepadKind};

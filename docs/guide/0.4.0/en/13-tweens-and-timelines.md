@@ -327,9 +327,9 @@ fn main() {
 
 - `add_clip(clip_name, image, &frame_rects, frame_per_second, is_loop)` registers a clip. Rust has no default arguments, so you always pass everything. The original defaults are `SpriteAnimator::DEFAULT_FRAME_PER_SECOND` (10) and `true`. A clip with the same name is replaced.
 - `add_clip_from_atlas(clip_name, image, &atlas_json, &frame_ids, frame_per_second, is_loop)` extracts frames from a TexturePacker style table (`{ "frames": { name: { "frame": { "x", "y", "w", "h" } } } }`). The table is a `serde_json::Value`, and missing cell names are skipped.
-- `play(clip_name, options)` switches clips. `options` is `SpriteAnimatorPlayOptions { on_complete, restart_if_same }`, and `SpriteAnimatorPlayOptions::default()` means no callback and no restart. If the same clip is already playing, it does not restart (it does with `restart_if_same: true`) and only replaces the complete callback. Returns `true` if it started from the beginning.
+- `SpriteAnimator::play(&mut node, clip_name, options)` switches clips with the node's animator and puts the first frame into the `Sprite` right away (same as the original `play`; returns `false` if the node has no animator). `options` is `SpriteAnimatorPlayOptions { on_complete, restart_if_same }`, and `SpriteAnimatorPlayOptions::default()` means no callback and no restart. If the same clip is already playing, it does not restart (it does with `restart_if_same: true`) and only replaces the complete callback. Returns `true` if it started from the beginning.
 - The complete callback is a one-shot function that receives the animator (`FnOnce(&mut SpriteAnimator)`). `SpriteAnimatorPlayOptions::create_with_on_complete(|animator| {})` makes options with only the callback set.
-- `play` puts the frame into the `Sprite` on the next node update. To put the first frame in right away, use `SpriteAnimator::play_on_node(&mut node, clip_name, options)`, which takes the node (same effect as the original `play`; returns `false` if the node has no animator).
+- When only the animator is at hand (inside the complete callback), use `play_clip(clip_name, options)`. After the complete callback the frame goes in during the same update, so it changes right away.
 - Also available: `stop()` (back to the first frame, no complete callback), `get_clip_name()` (`Option<&str>`), `is_playing()`, `get_current_frame_index()`, `has_clip(clip_name)`, `apply_current_frame(&mut sprite)`.
 
 ```rust,no_run
@@ -377,7 +377,7 @@ impl Scene for AnimatorScene {
 		let sprite_animator = hero_node.add_component(SpriteAnimator::new());
 		sprite_animator.add_clip("idle", image.clone(), &idle_rects, 4.0, true);
 		sprite_animator.add_clip("attack", image, &attack_rects, 12.0, false);
-		SpriteAnimator::play_on_node(hero_node, "idle", SpriteAnimatorPlayOptions::default());
+		SpriteAnimator::play(hero_node, "idle", SpriteAnimatorPlayOptions::default());
 		self.hero_id = Some(hero_id);
 	}
 
@@ -385,12 +385,12 @@ impl Scene for AnimatorScene {
 		if let Some(hero_id) = self.hero_id {
 			let options = SpriteAnimatorPlayOptions {
 				on_complete: Some(Box::new(|sprite_animator: &mut SpriteAnimator| {
-					sprite_animator.play("idle", SpriteAnimatorPlayOptions::default());
+					sprite_animator.play_clip("idle", SpriteAnimatorPlayOptions::default());
 				})),
 				restart_if_same: true,
 			};
 			let hero_node = &mut self.scene_base.get_node_tree_mut()[hero_id];
-			SpriteAnimator::play_on_node(hero_node, "attack", options);
+			SpriteAnimator::play(hero_node, "attack", options);
 		}
 	}
 }
@@ -716,7 +716,7 @@ assert!(!animator.is_in_transition());
 assert_eq!(animator.get_current_frame().map(|frame| frame.position.y), Some(32.0));
 ```
 
-`Animator` only picks frame regions and does not draw, so the game puts the chosen region on a `Sprite`. For the simple case of only switching clips by character state, you can also combine `FiniteStateMachine` and `SpriteAnimator`. State handlers in the Rust version cannot borrow the node tree, so update the machine in the scene's `tick` and then call `play_on_node` with the current state name. `play` does not restart a clip that is already playing, so calling it every frame is fine. To change state inside a handler, ask through the `change_state` of the handle obtained from `get_state_change_requester()`.
+`Animator` only picks frame regions and does not draw, so the game puts the chosen region on a `Sprite`. For the simple case of only switching clips by character state, you can also combine `FiniteStateMachine` and `SpriteAnimator`. State handlers in the Rust version cannot borrow the node tree, so update the machine in the scene's `tick` and then call `SpriteAnimator::play` with the current state name. `play` does not restart a clip that is already playing, so calling it every frame is fine. To change state inside a handler, ask through the `change_state` of the handle obtained from `get_state_change_requester()`.
 
 ```rust,no_run
 use vanilla::{Engine, EngineConfiguration, FiniteStateMachine, ImageAsset, NodeId, Rect, Scene, SceneBase, Sprite, SpriteAnimator, SpriteAnimatorPlayOptions, StateHandlers, Vector2};
@@ -789,7 +789,7 @@ impl Scene for StateScene {
 		self.state_machine.tick(time_delta);
 		if let (Some(hero_id), Some(state_name)) = (self.hero_id, self.state_machine.get_state_name()) {
 			let hero_node = &mut self.scene_base.get_node_tree_mut()[hero_id];
-			SpriteAnimator::play_on_node(hero_node, state_name, SpriteAnimatorPlayOptions::default());
+			SpriteAnimator::play(hero_node, state_name, SpriteAnimatorPlayOptions::default());
 		}
 	}
 }
@@ -846,7 +846,7 @@ assert!(action.is_done());
 - `Animation`, `Timeline`, `FiniteStateMachine` and `Action` do not advance time by themselves. Call `tick(time_delta)` or `step` from the scene's `tick`. Tweens handed over with `scene_base.start_tween` are updated by `SceneBase::tick`, so if you override `Scene::tick` and leave out `self.scene_base.tick(engine, time_delta)`, tweens stop.
 - Tween and timeline callbacks do not receive node objects as in the original; they receive `&mut NodeTree`. Look up `node_tree[node_id]` with a `NodeId` you captured. To change values outside the callback, capture an `Rc<Cell>` or `Rc<RefCell>`.
 - Wrap timeline handlers in `Box::new`, put them in `Some`, and write out the closure argument types as in the examples above.
-- `SpriteAnimator` looks up the `Sprite` on the same node. Without a `Sprite`, the image does not change. `play` puts the frame in on the next node update, so use `play_on_node` to show it right away.
+- `SpriteAnimator` looks up the `Sprite` on the same node. Without a `Sprite`, the image does not change. `SpriteAnimator::play`, which takes the node, puts the first frame in right away, and `play_clip`, which takes only the animator, puts it in at the next frame update.
 - `Timeline::seek` does not fire events or markers. Events fire only when `tick` passes over their time.
 - `Timeline::load_from_url` returns an `Err` before JSON parsing when fetching fails. The original reads the response as JSON without checking its status and fails with a parse error.
 

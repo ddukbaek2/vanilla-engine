@@ -229,7 +229,7 @@ impl Scene for MiscTourScene {
 		let animator = hero_node.add_component(SpriteAnimator::new());
 		let frame_rects: Vec<Rect> = (0..4).map(|frame_index| Rect::create(frame_index as f32 * 32.0, 0.0, 32.0, 32.0)).collect();
 		animator.add_clip("spin", sheet_image, &frame_rects, 6.0, true);
-		SpriteAnimator::play_on_node(hero_node, "spin", SpriteAnimatorPlayOptions::default());
+		SpriteAnimator::play(hero_node, "spin", SpriteAnimatorPlayOptions::default());
 
 		// 떠오르는 숫자와 빛 입자.
 		self.floating_text_id = Some(FloatingText::create(node_tree, root_id));

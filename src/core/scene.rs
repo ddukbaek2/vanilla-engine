@@ -143,6 +143,8 @@ pub struct SceneBase {
 	tracked_unload_list: Vec<TrackedLoad>,
 	has_ever_touched: bool,
 	first_touch_callback: Option<Box<dyn FnMut()>>,
+	/// 노드에 터치를 넘기는지. (원본 Scene 의 터치 레이캐스터가 있는지, 기본 참)
+	is_touch_dispatch_enabled: bool,
 	scene_id: Option<SceneId>,
 	/// 이번 프레임의 휠을 받아 쓴 컴포넌트가 있었는지.
 	is_wheel_handled: bool,
@@ -172,6 +174,7 @@ impl SceneBase {
 			tracked_unload_list: Vec::new(),
 			has_ever_touched: false,
 			first_touch_callback: None,
+			is_touch_dispatch_enabled: true,
 			scene_id: None,
 			is_wheel_handled: false,
 			tracked_assets_finished_time: None,
@@ -214,6 +217,37 @@ impl SceneBase {
 	//==============================================================================
 	pub fn set_first_touch_callback(&mut self, first_touch_callback: Box<dyn FnMut()>) {
 		self.first_touch_callback = Some(first_touch_callback);
+	}
+
+	//==============================================================================
+	/// 노드에 터치 넘기기 켜고 끄기. (원본 Scene.setTouchDispatchEnabled, setTouchRaycaster(null) 과 같은 효과)
+	/// - 끄면 tick_touch 가 노드에 누름, 이동, 뗌, 휠을 넘기지 않고(첫 터치 콜백도 부르지 않는다) 씬의 터치 훅만 불린다. (훅에서 가로채 직접 넘길 때)
+	///
+	/// # 인자
+	/// - `is_enabled`: 노드에 넘기면 참. (기본 참)
+	///
+	/// # 예제
+	/// 씬 기본 넘기기를 끄고 훅에서 직접 받기
+	/// ```rust
+	/// use vanilla::SceneBase;
+	///
+	/// let mut scene_base = SceneBase::new();
+	/// scene_base.set_touch_dispatch_enabled(false);
+	/// assert!(!scene_base.is_touch_dispatch_enabled());
+	/// ```
+	//==============================================================================
+	pub fn set_touch_dispatch_enabled(&mut self, is_enabled: bool) {
+		self.is_touch_dispatch_enabled = is_enabled;
+	}
+
+	//==============================================================================
+	/// 노드에 터치를 넘기는지.
+	///
+	/// # 돌려줌
+	/// 넘기면 참.
+	//==============================================================================
+	pub fn is_touch_dispatch_enabled(&self) -> bool {
+		self.is_touch_dispatch_enabled
 	}
 
 	//==============================================================================
@@ -675,6 +709,11 @@ impl SceneBase {
 	pub fn tick_touch(&mut self, engine: &Engine) {
 		let input_manager = engine.get_input_manager();
 		let view_input_position = input_manager.get_view_input_position();
+		self.is_wheel_handled = false;
+		// 넘기기를 껐으면 노드에 넘기지 않는다. (원본 setTouchRaycaster(null))
+		if !self.is_touch_dispatch_enabled {
+			return;
+		}
 
 		// 휠. (누름과 상관없이 그 자리의 가장 앞 스크롤 칸이나 누를 수 있는 노드부터 부모 쪽으로)
 		let wheel_delta = Vector2::create(input_manager.get_wheel_delta_x(), input_manager.get_wheel_delta_y());
