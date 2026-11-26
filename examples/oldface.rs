@@ -26,6 +26,8 @@ use vanilla::{
 //==============================================================================
 // 원본 예제 애셋 폴더. (vanilla.js 저장소를 이 저장소 옆에 받아 둔 것으로 본다. 읽기만 한다)
 const EXAMPLE_ASSET_DIRECTORY: &str = "../vanilla.js/examples/oldface/assets";
+/// 화면 아래 저작자 표기. (머리 꼴과 피부 텍스처는 Lee Perry-Smith 의 Infinite 머리 스캔 CC BY 3.0, 얼굴 위상과 표정은 ICT FaceKit MIT)
+const ATTRIBUTION_TEXT: &str = "HEAD SCAN: \"INFINITE, 3D HEAD SCAN\" BY LEE PERRY-SMITH (CC BY 3.0, BASED ON A WORK AT WWW.TRIPLEGANGERS.COM, RE-BAKED AND RECOLOURED), FACE RIG: ICT FACEKIT (MIT) ARKIT SHAPES, PROCEDURAL WRINKLE MAPS AND HAIR CARDS";
 
 // 카메라. (원본 값)
 const CAMERA_FIELD_OF_VIEW: f32 = 0.44;
@@ -990,6 +992,10 @@ impl Scene for OldFaceScene {
 		graphic.set_text_baseline(TextBaseline::Middle);
 		graphic.set_fill_color(Color::create(0.95, 0.92, 0.86, 0.85));
 		graphic.draw_fill_text(&status_line, 22.0, canvas_native_size.y - 26.0);
+		// 머리 스캔은 CC BY 3.0 이라 화면에 저작자를 적는다. (원본 footerNote 와 같은 문구)
+		graphic.set_font_string("11px default");
+		graphic.set_fill_color(Color::create(0.95, 0.92, 0.86, 0.6));
+		graphic.draw_fill_text(ATTRIBUTION_TEXT, 14.0, canvas_native_size.y - 52.0);
 	}
 }
 
