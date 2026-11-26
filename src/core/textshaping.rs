@@ -1441,6 +1441,32 @@ pub struct ShapedText {
 }
 
 //==============================================================================
+/// 글꼴이 글자를 그릴 수 있는지. (글자가 있거나, 없으면 정준 분해한 글자들이 있으면. HarfBuzz 정규화의 decompose 와 같은 셈)
+/// - 크롬은 첫 글꼴로 HarfBuzz 모양을 짓고 .notdef 가 남은 글자만 대체로 넘긴다. HarfBuzz 는 글꼴에 합친 글자(ï)가 없고 분해한 글자(i, U+0308)가 있으면 분해해 그린다.
+///   (맥 Apple SD Gothic Neo 에 ï 가 없어 크롬은 i 와 결합 분음 부호로 그리고, 대체 글꼴로 넘기지 않는다)
+///
+/// # 인자
+/// - `font`: 볼 글꼴.
+/// - `character`: 볼 글자.
+///
+/// # 돌려줌
+/// 글자의 글리프가 있거나, 분해의 앞 글자를 (거듭) 그릴 수 있고 뒤 글자의 글리프가 있으면 true.
+//==============================================================================
+pub(crate) fn has_character_or_decomposition(font: &LoadedFont, character: char) -> bool {
+	if font.has_character(character) {
+		return true;
+	}
+	match rustybuzz::decompose_character(character) {
+		Some((first_character, second_character)) => {
+			(second_character == '\0' || font.has_character(second_character)) && has_character_or_decomposition(font, first_character)
+		}
+		None => {
+			false
+		}
+	}
+}
+
+//==============================================================================
 /// 글자 묶음에 쓸 얼굴 고르기. (묶음의 글자를 모두 가진 첫 얼굴, 없으면 첫 글자를 가진 첫 얼굴, 그것도 없으면 0)
 /// - 브라우저처럼 결합 부호까지 한 얼굴로 그린다. 이음 문자, 이형 선택자처럼 보이지 않는 글자는 따지지 않는다.
 /// - 크롬 FontFallbackIterator 처럼 이름 목록의 얼굴(운영체제 대체 글꼴이 아닌 것)을 먼저 본다. 색인지는 따지지 않는다.
@@ -1453,7 +1479,7 @@ pub struct ShapedText {
 fn select_face_index(face_list: &[ResolvedFontFace], grapheme: &str) -> Option<usize> {
 	let base_character = grapheme.chars().next()?;
 	let has_character = |face: &ResolvedFontFace, character: char| -> bool {
-		face.descriptors.contains_character(character) && face.font.has_character(character)
+		face.descriptors.contains_character(character) && has_character_or_decomposition(&face.font, character)
 	};
 	let is_ignorable = |character: char| -> bool {
 		('\u{200B}'..='\u{200F}').contains(&character) || ('\u{FE00}'..='\u{FE0F}').contains(&character) || ('\u{E0100}'..='\u{E01EF}').contains(&character) || ('\u{2060}'..='\u{206F}').contains(&character)

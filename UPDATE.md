@@ -1,6 +1,13 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- 대체 글꼴 고르기(데스크탑)를 크롬 FontCache::PlatformFallbackFontForCharacter 처럼: 맥 크롬 158 과 measureText 217 글이 모두 같다. (전에는 144)
+  - 기본 글꼴 사슬(원본 SYSTEM_FONT_STRING)은 기본 글꼴 이름 default 를 청했을 때만 잇는다. "16px Arial" 처럼 다른 이름이면 사슬 없이 운영체제 대체로 간다. (원본도 기본 글꼴일 때만 폰트 문자열이 그 사슬이다)
+  - 대체는 첫 글꼴(빈칸을 가진 첫 얼굴)과 폰트 문자열마다 따로 묻고, 대체 얼굴은 운영체제가 그 얼굴을 고른 글자만 그린다. 굵게를 청하면 같은 파일의 굵은 얼굴(Helvetica.ttc 의 Helvetica-Bold, GeezaPro-Bold)도 따로 읽는다.
+  - 이름 목록의 얼굴이 합친 글자(ï)가 없어도 정준 분해한 글자(i, U+0308)가 있으면 HarfBuzz 처럼 그 얼굴로 그린다. (third_party/rustybuzz 에 decompose_character 를 더했다)
+  - 맥: 첫 글꼴의 CTFont(올린 글꼴은 바이트로 지은 것)에서 CTFontCreateForString 을 묻고, 특성이나 굵기가 다르면 같은 이름에서 다시 고른다. (지금까지는 시스템 UI 글꼴에서 물어 아랍어가 다른 글꼴로 그려졌다)
+  - 윈도우: 굵게나 기울임이면 첫 이름의 보통 얼굴, 블링크 font_fallback_win.cc 의 블록과 문자별 표(태국어 Tahoma, monospace 아랍어 Courier New, 한자는 화면 언어), 넓은 글꼴 목록, 첫 이름을 바탕으로 한 DirectWrite 차례. (지금까지는 Segoe UI 바탕의 DirectWrite 만 물어 태국어가 Leelawadee UI 였다)
+  - 옮기는 법: 바꿀 것 없다. 폰트 문자열에 이름을 준 글이 기본 글꼴 사슬의 글꼴(맥 Apple SD Gothic Neo, 윈도우 Segoe UI, 맑은 고딕)로 그려지던 글자는 이제 크롬처럼 운영체제 대체 글꼴로 그려진다. 사슬을 쓰려면 이름 목록 끝에 default 를 둔다.
 - SceneBase.set_touch_dispatch_enabled(is_enabled), is_touch_dispatch_enabled(): 원본 Scene.setTouchRaycaster(null)(와 새 setTouchDispatchEnabled) 처럼 씬 기본 터치 넘기기를 끈다. 끄면 tick_touch 가 노드에 누름, 이동, 뗌, 휠을 넘기지 않고(첫 터치 콜백도) 씬의 터치 훅만 불려 훅에서 가로채 직접 넘길 수 있다.
 - SpriteAnimator.play: 원본 play 처럼 그 자리에서 Sprite 에 첫 프레임을 넣는 노드를 받는 꼴이 기본이다. SpriteAnimator::play(&mut node, clip_name, options) (옛 play_on_node). 애니메이터만 받던 옛 play(&mut self, ...) 는 play_clip 이고, 노드가 없을 때(완료 콜백 안) 쓴다. 완료 콜백 뒤에는 같은 tick 에 프레임을 넣어 바로 바뀐다.
   - 옮기는 법: SpriteAnimator::play_on_node(node, ...) 는 SpriteAnimator::play(node, ...) 로, animator.play(...) 는 노드가 있으면 SpriteAnimator::play(node, ...), 완료 콜백 안이면 animator.play_clip(...) 으로 바꾼다.

@@ -228,11 +228,13 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 - 글자는 원본(브라우저 Canvas2D)과 맞췄다. 오른쪽에서 왼쪽 글(양방향 정렬과 글자 모양 짓기, core/textshaping.rs), CSS 같은 글꼴 얼굴 고르기, 가짜 기울임과 굵게(Chromium 과 Skia 의 값), 크롬 캔버스처럼 낱말마다 모양 짓기, 폰트 문자열의 CSS 단위와 calc(), 낱말 나누기(데스크탑은 ICU4X 사전에 ICU4C CjkBreakEngine 의 셈을 옮겨 크롬 Intl.Segmenter 와 같게), 색 이모지(sbix, CBDT, COLR v0/v1, 맥은 CoreText 로 크롬처럼 작은 크기에서 키우고 내림), 맥 시스템 UI 글꼴의 opsz 축과 trak 자간(HarfBuzz 15 처럼).
 - 작게 남은 차이:
   - 글자 자리는 크롬 HarfBuzz 처럼 16.16 배율에서 셈한다(third_party/rustybuzz). 맥 SFNS(system-ui) 8 ~ 128px, 굵기 300, 400, 700 과 기울임의 세 글 228 개 가운데 222 개가 크롬 158 measureText 와 끝자리까지 같고, 나머지 6 개는 커닝 짝 하나에서 HarfBuzz 위치 단위 1(1/65536px)이 드물게 달라 6.1e-5px 안이다. (그 한 단위의 까닭은 찾지 못했다)
-  - 윈도우, 리눅스, 맥의 글꼴 갈래(DirectWrite, fontconfig, CoreText)는 CI 에서 같은 기계의 크롬 measureText 와 전진폭, 글꼴 위아래 길이를 217 글로 견준다. (tests/desktopplatform.rs) 리눅스 크롬 157 은 216, 윈도우 크롬 157 은 181, 인텔 맥(영어 화면) 크롬 151 은 114 가 같다. 윈도우 system-ui 의 메뉴 글꼴(NONCLIENTMETRICS)은 크롬과 같은 글꼴이다. 다른 것은 거의 대체 글꼴 고르기다:
-    - 엔진은 이름 목록 뒤에 기본 글꼴 사슬(원본 SYSTEM_FONT_STRING)을 늘 붙여, 이름이 맞은 글꼴에 없는 글자를 크롬의 시스템 대체보다 사슬에서 먼저 찾는다. (맥 영어에서 Times, Helvetica 의 한중일이 사슬의 Apple SD Gothic Neo 로, 윈도우 Consolas 의 아랍어가 사슬의 Segoe UI 로 그려진다) 크롬은 이름이 맞으면 사슬 없이 시스템 대체로 간다.
-    - 윈도우 크롬은 DirectWrite 대체 전에 블링크 font_fallback_win.cc 의 유니코드 블록과 문자별 표(태국어 Tahoma, monospace 의 아랍어와 히브리어 Courier New, 한자는 로캘별 같은 것)를 먼저 본다. 엔진은 IDWriteFontFallback 만 묻는다. (태국어가 Leelawadee UI 로 그려져 16px 에서 8.5px 좁다)
-    - 맥 크롬은 갈음할 글꼴(font_data_to_substitute)을 바탕으로 CTFontCreateForString 을 묻는다. (font_cache_mac.mm) 엔진은 시스템 UI 글꼴을 바탕으로 묻는다.
-    - 리눅스 Norasi(태국어 글꼴)로 그린 "Ünïcödé ñ 0123456789" 의 폭이 3.8px 다르다. (까닭은 아직 찾지 않았다)
+  - 윈도우, 리눅스, 맥의 글꼴 갈래(DirectWrite, fontconfig, CoreText)는 CI 에서 같은 기계의 크롬 measureText 와 전진폭, 글꼴 위아래 길이를 217 글로 견준다. (tests/desktopplatform.rs) 맥 26 arm64(한국어 화면) 크롬 158 은 217 이 모두 같다. 윈도우 system-ui 의 메뉴 글꼴(NONCLIENTMETRICS)은 크롬과 같은 글꼴이다. 대체 글꼴은 크롬 FontCache::PlatformFallbackFontForCharacter 의 운영체제별 차례를 따른다:
+    - 기본 글꼴 사슬(원본 SYSTEM_FONT_STRING)은 기본 글꼴 이름 default 를 청했을 때만 잇는다. 원본도 기본 글꼴일 때만 폰트 문자열이 그 사슬이고, 다른 이름이면 크롬은 사슬 없이 시스템 대체로 간다.
+    - 대체는 첫 글꼴(빈칸을 가진 첫 얼굴, FontFallbackList::PrimarySimpleFontDataWithSpace)과 폰트 문자열마다 따로 묻고, 대체 얼굴은 운영체제가 그 얼굴을 고른 글자만 그린다. (다른 글자를 위해 읽은 Geeza Pro 가 é 를 가로채지 않는다)
+    - 이름 목록의 얼굴이 합친 글자(ï)를 갖지 않아도 정준 분해한 글자(i, U+0308)를 가지면 그 얼굴로 그린다. (HarfBuzz 정규화의 decompose, 크롬은 .notdef 가 남은 글자만 대체로 넘긴다)
+    - 맥: 첫 글꼴의 CTFont(이름으로 찾은 글꼴은 청한 굵기와 기울기, 올린 글꼴은 바이트로 지은 것)에서 CTFontCreateForString, 고른 글꼴의 특성이나 굵기가 다르면 같은 이름에서 청한 특성과 굵기로 다시 고른다. (font_cache_mac.mm 의 GetSubstituteFont, GetAlternateFontPlatformData)
+    - 윈도우: 굵게나 기울임이면 첫 이름의 보통 얼굴, 블링크 font_fallback_win.cc 의 블록과 문자별 표(태국어 Tahoma, monospace 의 아랍어와 히브리어 Courier New, 한자는 화면 언어), 넓은 글꼴 목록, 폰트 문자열의 첫 이름을 바탕으로 한 DirectWrite 대체 차례. (font_cache_skia_win.cc)
+    - 리눅스: 첫 글꼴과 상관없이 fontconfig 에 글자로 묻는다. (font_cache_linux.cc)
   - 실제로 닿는 상자(actualBoundingBox)는 찍기만 하고 견주지 않는다. (리눅스 "Hello World Wifi" 의 아래가 엔진 1, 크롬 0 처럼 1px 안팎으로 다르다) 부모 글꼴 치수(ex, ch 단위의 글꼴)는 윈도우, 리눅스 크롬과 견주지 못했다.
   - 데스크탑 그림의 색 프로필은 크롬 WebGL texImage2D 길과 같게 sRGB 로 바꾼다(core/colorprofile.rs, PNG, WebP 는 비트까지 같다). AVIF 는 YUV 를 RGB 로 바꾸는 셈이 libavif 의 실수 셈이라 크롬의 WebGL, CPU 캔버스 길(libyuv)과 한두 단계 다르고, 색 프로필이 붙으면 몇 단계까지 벌어진다. JPEG 은 해독기(zune-jpeg 와 libjpeg-turbo) 차이로 한두 단계 다르다. 크롬 Canvas2D 는 알파 그림을 알파를 곱한 뒤 바꾸고 PQ, HLG 를 더 어둡게 그려, 그 둘은 Canvas2D 에서 다르다. (엔진은 한 픽셀 묶음을 두 길에 같이 써 WebGL 길에 맞췄다) CMYK JPEG, BMP 와 ICO 안의 프로필, prem AVIF 의 프로필, mini 상자 AVIF 는 다루지 않는다.
   - 움직이는 AVIF 는 첫 장만 푼다. 원본 그림은 HTMLImageElement 이고, 크롬은 그것을 drawImage 와 texImage2D 로 그릴 때 늘 첫 장을 쓴다(bitmap_image.cc ImageForDefaultFrame, image_extractor.cc 의 DecodeFrameBufferAtIndex(0), 문서에 붙여 화면에서 움직이는 동안에도 같다). 어느 첫 장인지는 크롬 CrabbyAvif 처럼 주 상표 avis 면 트랙, avif 면 주 그림 항목, 그 밖은 트랙이 있으면 트랙이다.
