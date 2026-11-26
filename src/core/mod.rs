@@ -45,3 +45,4 @@ pub(crate) mod avifimage;
 pub(crate) mod maskgamma;
 pub(crate) mod blurshadow;
 pub(crate) mod colorprofile;
+pub(crate) mod jpegimage;

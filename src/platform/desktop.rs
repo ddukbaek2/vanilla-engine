@@ -1521,7 +1521,8 @@ fn create_custom_cursor_source(image_path: &std::path::Path, image_path_2x: Opti
 	};
 	let image_bytes = std::fs::read(source_path).map_err(|error| format!("{} ({})", error, source_path.display()))?;
 	crate::base::platform::record_loaded_file(&source_path.to_string_lossy(), image_bytes.len() as u64);
-	let source_image = image::load_from_memory(&image_bytes).map_err(|error| format!("{} ({})", error, source_path.display()))?.to_rgba8();
+	let (source_width, source_height, source_pixels) = crate::core::image::Image::decode_straight_pixels(&image_bytes).map_err(|error| format!("{} ({})", error, source_path.display()))?;
+	let source_image = image::RgbaImage::from_raw(source_width, source_height, source_pixels).ok_or_else(|| format!("그림 크기가 틀렸다 ({})", source_path.display()))?;
 	let base_width = source_image.width() as f64 / source_scale;
 	let base_height = source_image.height() as f64 / source_scale;
 	let cursor_width = ((base_width * cursor_scale).round() as u32).max(1);
