@@ -158,7 +158,6 @@ The two engines keep no feature differences. The remaining differences are only 
 **What truly cannot match**
 
 - Reflection (reflective saving and loading in UI documents, the getter list in the developer tools inspector) works only for types marked with `#[vanilla::reflect]`. All engine components are marked; game components put it on their `impl` block and `impl Component` block. Rust has no way to scan methods at run time.
-- The Chrome edit-field menu of desktop input fields has no items for Chrome's own browser features (spell check, translate, print and so on).
 - On desktop `set_no_cache` has no meaning. (There is no browser cache)
 - The memory field in the desktop developer tools shows the system allocator's heap instead of the JavaScript heap.
 - On desktop, glyph raster pixels and shape edge antialiasing differ from Chrome. (Text widths and shape interior colors are the same)

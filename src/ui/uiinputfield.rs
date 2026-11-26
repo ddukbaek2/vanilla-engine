@@ -22,7 +22,7 @@
 //!     (원본 캔버스 모드는 다른 필드를 눌러도 앞 필드가 포커스를 쥐고 있다. 러스트 판은 나중에 포커스를 얻은 필드만 남긴다)
 //!   - 포커스를 잃을 때 조합 중이던 글은 확정해 값에 넣는다. (브라우저가 DOM 입력에 하는 일과 같다)
 //!   - 데스크탑 문맥 메뉴(오른쪽 단추)는 DOM 이 없어 캔버스에 그린다. 루트의 마지막 자식 노드로 만들어 위에 그린다. 웹은 원본처럼 DOM 메뉴다.
-//!     DOM 입력을 직접 누르게 한 필드(use_direct_touch)는 원본에서 크롬이 띄우는 편집 칸 메뉴를 같은 항목과 단축키 글로 그린다. (ui/uiinputfieldmenu.rs)
+//!     항목은 원본처럼 잘라내기, 복사, 붙여넣기, 모두 선택이다. DOM 입력을 직접 누르게 한 필드(use_direct_touch)도 원본처럼 브라우저 편집 칸 메뉴 대신 같은 메뉴다.
 //!     그 필드는 크롬 데스크탑 터치처럼 손가락 길게 누르기(650ms, 15 DIP 안)로 낱말을 고르고 터치 손잡이와 빠른 메뉴를 띄운다. (윈도우는 뗄 때 메뉴를 정한다)
 //!   - 데스크탑 DOM 입력 필드는 원본 DOM 입력 칸처럼 되돌리기와 다시 하기를 한다. (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, 맥은 Cmd, 블링크의 묶음 규칙, TextEditBuffer)
 //!   - 데스크탑 한 줄 DOM 입력 필드는 블링크 입력 칸처럼 넣는 글의 끝 줄바꿈을 지우고 가운데 줄바꿈을 공백으로 바꾸고, 위와 page 위는 글 앞, 아래와 page 아래는 글 끝으로 옮긴다.
@@ -129,7 +129,7 @@ static NEXT_FOCUS_SERIAL: AtomicU64 = AtomicU64::new(1);
 pub type UIInputFieldEvent = Box<dyn FnMut(&mut UIInputField, &mut ComponentContext)>;
 
 //==============================================================================
-/// 문맥 메뉴 항목. (원본 잘라내기 / 복사 / 붙여넣기, 그 밖은 크롬 편집 칸 메뉴의 항목)
+/// 문맥 메뉴 항목. (원본 UIInputFieldMenuAction 의 잘라내기 / 복사 / 붙여넣기 / 모두 선택, request_menu_action 이 받는다)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UIInputFieldMenuAction {
@@ -139,37 +139,8 @@ pub enum UIInputFieldMenuAction {
 	Copy,
 	/// 붙여넣기.
 	Paste,
-	/// 실행 취소.
-	Undo,
-	/// 다시 실행.
-	Redo,
-	/// 일반 텍스트로 붙여넣기. (맥 붙여넣고 스타일 일치시킴, 글만 받는 칸이라 붙여넣기와 같다)
-	PasteAsPlainText,
-	/// 전체 선택.
+	/// 모두 선택.
 	SelectAll,
-	/// 운영체제 이모티콘 창.
-	Emoji,
-	/// 쓰기 방향.
-	WritingDirectionDefault,
-	/// 왼쪽에서 오른쪽으로.
-	WritingDirectionLeftToRight,
-	/// 오른쪽에서 왼쪽으로.
-	WritingDirectionRightToLeft,
-	/// 검사. (엔진 개발자 도구에서 이 필드의 노드를 고른다)
-	Inspect,
-}
-
-//==============================================================================
-/// 쓰기 방향. (원본 DOM 입력 칸의 dir, 크롬 문맥 메뉴의 쓰기 방향이 바꾼다. 엔진이 그린 글은 원본처럼 그대로다)
-//==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UIInputFieldWritingDirection {
-	/// 쓰기 방향 기본값.
-	Default,
-	/// 왼쪽에서 오른쪽으로.
-	LeftToRight,
-	/// 오른쪽에서 왼쪽으로.
-	RightToLeft,
 }
 
 //==============================================================================
@@ -956,7 +927,6 @@ pub struct UIInputField {
 	value_revision: u64,
 	context_menu_node_id: Option<NodeId>,
 	pending_menu_action: Option<UIInputFieldMenuAction>,
-	writing_direction: UIInputFieldWritingDirection,
 	/// 글 라벨을 마지막으로 놓은 노드 크기. (원본 refreshTextPositions 가 tick 에서 크기가 있을 때만 놓는다. 처음은 0, UI 문서가 원본 자식 꼴로 적는다)
 	text_layout_size: Vector2,
 	/// 커서의 줄 위와 높이. (IME 후보 창 자리, 한 줄 필드는 0 과 노드 높이)
@@ -1097,7 +1067,6 @@ impl UIInputField {
 			value_revision: 0,
 			context_menu_node_id: None,
 			pending_menu_action: None,
-			writing_direction: UIInputFieldWritingDirection::LeftToRight,
 			text_layout_size: Vector2::zero(),
 			caret_local_top: 0.0,
 			caret_local_height: 0.0,
@@ -1225,12 +1194,13 @@ impl UIInputField {
 	//==============================================================================
 	/// DOM 입력을 필드 위에서 직접 누르게 할지 설정. (use_dom_input 을 켠 필드에서 뜻이 있다, 기본 꺼짐)
 	/// - 웹: 원본처럼 투명한 DOM 입력이 필드 자리에서 누름을 받아, 브라우저 기본 동작으로 포커스와 키보드를 연다. (코드로 준 포커스를 받지 않는 웹뷰용)
-	///   그 필드의 오른쪽 단추 메뉴와 손가락 길게 누르기는 크롬이 그 DOM 입력에 띄우는 것이다.
-	/// - 데스크탑: 원본에서 크롬이 그 DOM 입력에 하는 일을 엔진이 한다. 오른쪽 단추는 크롬 편집 칸 메뉴(같은 항목과 단축키 글, ui/uiinputfieldmenu.rs)를 그리고,
+	///   그 필드의 오른쪽 단추는 원본처럼 브라우저 편집 칸 메뉴 대신 다른 필드와 같은 엔진 문맥 메뉴(잘라내기, 복사, 붙여넣기, 모두 선택)다.
+	///   손가락 길게 누르기는 크롬이 그 DOM 입력에 띄우는 것이다.
+	/// - 데스크탑: 원본에서 크롬이 그 DOM 입력에 하는 일을 엔진이 한다. 오른쪽 단추는 같은 엔진 문맥 메뉴이고,
 	///   손가락으로 650ms 길게 누르면(15 DIP 안) 낱말을 고르고 터치 손잡이와 빠른 메뉴를 띄운다. (크롬 데스크탑 터치, 윈도우는 뗄 때 메뉴를 정한다)
 	///
 	/// # 인자
-	/// - `use_direct_touch`: 참이면 필드 자리의 누름을 DOM 입력이 직접 받는다. (데스크탑은 그 DOM 입력처럼 크롬 편집 칸 메뉴와 길게 누르기를 한다, 기본 거짓)
+	/// - `use_direct_touch`: 참이면 필드 자리의 누름을 DOM 입력이 직접 받는다. (데스크탑은 그 DOM 입력처럼 길게 누르기를 한다, 기본 거짓)
 	//==============================================================================
 	pub fn set_use_direct_touch(&mut self, use_direct_touch: bool) {
 		self.use_direct_touch = use_direct_touch;
@@ -1346,28 +1316,6 @@ impl UIInputField {
 	#[reflect(skip)]
 	pub fn set_scroll_top(&mut self, scroll_top: f32) {
 		self.scroll_top = scroll_top.max(0.0);
-	}
-
-	//==============================================================================
-	/// 쓰기 방향 설정. (크롬 문맥 메뉴의 쓰기 방향, 처음은 왼쪽에서 오른쪽. 원본 필드의 속성이 아니라 반사에서 뺀다)
-	///
-	/// # 인자
-	/// - `writing_direction`: 쓰기 방향.
-	//==============================================================================
-	#[reflect(skip)]
-	pub fn set_writing_direction(&mut self, writing_direction: UIInputFieldWritingDirection) {
-		self.writing_direction = writing_direction;
-	}
-
-	//==============================================================================
-	/// 쓰기 방향.
-	///
-	/// # 돌려줌
-	/// 쓰기 방향. (처음 LeftToRight)
-	//==============================================================================
-	#[reflect(skip)]
-	pub fn get_writing_direction(&self) -> UIInputFieldWritingDirection {
-		self.writing_direction
 	}
 
 	//==============================================================================
@@ -2441,54 +2389,23 @@ impl UIInputField {
 			UIInputFieldMenuAction::Copy => {
 				self.copy(context.get_engine());
 			}
-			UIInputFieldMenuAction::Paste | UIInputFieldMenuAction::PasteAsPlainText => {
+			UIInputFieldMenuAction::Paste => {
 				self.paste(context);
-			}
-			UIInputFieldMenuAction::Undo => {
-				self.apply_edit_history(context, false);
-			}
-			UIInputFieldMenuAction::Redo => {
-				self.apply_edit_history(context, true);
 			}
 			UIInputFieldMenuAction::SelectAll => {
 				self.select_all();
-			}
-			UIInputFieldMenuAction::Emoji => {
-				#[cfg(not(target_arch = "wasm32"))]
-				{
-					crate::platform::desktop::emojipanel::show_emoji_panel();
-				}
-			}
-			UIInputFieldMenuAction::WritingDirectionDefault => {
-				self.writing_direction = UIInputFieldWritingDirection::Default;
-			}
-			UIInputFieldMenuAction::WritingDirectionLeftToRight => {
-				self.writing_direction = UIInputFieldWritingDirection::LeftToRight;
-			}
-			UIInputFieldMenuAction::WritingDirectionRightToLeft => {
-				self.writing_direction = UIInputFieldWritingDirection::RightToLeft;
-			}
-			UIInputFieldMenuAction::Inspect => {
-				let node_id = context.get_node_id();
-				context.get_engine().request_dev_tools_inspect(node_id);
 			}
 		}
 	}
 
 	//==============================================================================
-	/// 문맥 메뉴 열기. (루트의 마지막 자식 노드로 만들어 위에 그린다. 원본 showContextMenu)
+	/// 문맥 메뉴 열기. (루트의 마지막 자식 노드로 만들어 위에 그린다. 원본 showContextMenu, 직접 누름 필드도 같다)
 	//==============================================================================
 	fn show_context_menu(&mut self, context: &mut ComponentContext, view_position: Vector2) {
 		self.hide_context_menu(context);
-		#[cfg(not(target_arch = "wasm32"))]
-		{
-			if self.use_direct_touch && self.use_dom_input {
-				self.show_browser_context_menu(context, view_position);
-				return;
-			}
-		}
 		let owner_node_id = context.get_node_id();
 		let is_selection_available = self.has_selection();
+		let is_text_available = !self.get_text().is_empty();
 		let node_tree = context.get_node_tree_mut();
 		let root_id = node_tree.get_root_id();
 		let local_position = node_tree.convert_view_position_to_node_position(root_id, view_position).unwrap_or(view_position);
@@ -2498,38 +2415,7 @@ impl UIInputField {
 		menu_node.set_anchor(Vector2::zero());
 		menu_node.set_local_position(local_position);
 		menu_node.set_content_size(Vector2::create(CONTEXT_MENU_WIDTH, CONTEXT_MENU_PADDING_Y * 2.0 + CONTEXT_MENU_ITEM_HEIGHT * CONTEXT_MENU_ITEM_LIST.len() as f32));
-		node_tree.add_component(menu_id, UIInputFieldContextMenu::new(owner_node_id, is_selection_available));
-		self.context_menu_node_id = Some(menu_id);
-	}
-
-	//==============================================================================
-	/// 크롬 편집 칸 메뉴 열기. (데스크탑, DOM 입력을 직접 누르게 한 필드. 원본은 크롬이 띄운다)
-	//==============================================================================
-	#[cfg(not(target_arch = "wasm32"))]
-	fn show_browser_context_menu(&mut self, context: &mut ComponentContext, view_position: Vector2) {
-		self.show_browser_context_menu_with_anchor(context, view_position, false);
-	}
-
-	//==============================================================================
-	/// 크롬 편집 칸 메뉴 열기. (is_touch_anchor 면 크롬 터치 메뉴 자리: 점 위 가운데에 15 띄워, 위로 넘치면 아래)
-	//==============================================================================
-	#[cfg(not(target_arch = "wasm32"))]
-	fn show_browser_context_menu_with_anchor(&mut self, context: &mut ComponentContext, view_position: Vector2, is_touch_anchor: bool) {
-		let field_state = crate::ui::uiinputfieldmenu::BrowserMenuFieldState {
-			can_undo: self.edit_buffer.can_undo(),
-			can_redo: self.edit_buffer.can_redo(),
-			has_selection: self.edit_buffer.has_selection(),
-			has_clipboard_text: context.get_engine().read_clipboard_text().map(|clipboard_text| !clipboard_text.is_empty()).unwrap_or(false),
-			is_empty: self.edit_buffer.get_text().is_empty(),
-			writing_direction: self.writing_direction,
-		};
-		let entry_list = crate::ui::uiinputfieldmenu::build_browser_menu(&field_state);
-		let view_manager = context.get_engine().get_view_manager();
-		let view_size = view_manager.get_view_size();
-		let canvas_native_size = view_manager.get_canvas_native_size();
-		let view_scale = Vector2::create(canvas_native_size.x / view_size.x.max(1.0), canvas_native_size.y / view_size.y.max(1.0));
-		let owner_node_id = context.get_node_id();
-		let menu_id = crate::ui::uiinputfieldmenu::create_browser_menu_node(context.get_node_tree_mut(), owner_node_id, view_position, view_scale, view_size, entry_list, is_touch_anchor);
+		node_tree.add_component(menu_id, UIInputFieldContextMenu::new(owner_node_id, is_selection_available, is_text_available));
 		self.context_menu_node_id = Some(menu_id);
 	}
 
@@ -2559,14 +2445,7 @@ impl UIInputField {
 		let is_inside = is_node_visible_in_hierarchy(node_tree, node_id) && is_view_position_inside_node(node_tree, node_id, view_input_position);
 		let is_inside_menu = match self.context_menu_node_id {
 			Some(context_menu_node_id) => {
-				#[cfg(not(target_arch = "wasm32"))]
-				{
-					crate::ui::uiinputfieldmenu::is_view_position_inside_menu(node_tree, context_menu_node_id, view_input_position)
-				}
-				#[cfg(target_arch = "wasm32")]
-				{
-					is_view_position_inside_node(node_tree, context_menu_node_id, view_input_position)
-				}
+				is_view_position_inside_node(node_tree, context_menu_node_id, view_input_position)
 			}
 			None => {
 				false
@@ -3353,8 +3232,7 @@ impl UIInputField {
 			}
 			QuickMenuCommand::Ellipsis => {
 				let anchor_point = Vector2::create(anchor_rect.position.x + anchor_rect.size.x * 0.5, anchor_rect.position.y);
-				self.hide_context_menu(context);
-				self.show_browser_context_menu_with_anchor(context, anchor_point, true);
+				self.show_context_menu(context, anchor_point);
 			}
 		}
 	}
@@ -3956,11 +3834,12 @@ fn is_node_visible_in_hierarchy(node_tree: &NodeTree, node_id: NodeId) -> bool {
 	true
 }
 
-/// 문맥 메뉴 항목. (글, 항목)
-const CONTEXT_MENU_ITEM_LIST: [(&str, UIInputFieldMenuAction); 3] = [
+/// 문맥 메뉴 항목. (글, 항목, 원본 showContextMenu 의 차례)
+const CONTEXT_MENU_ITEM_LIST: [(&str, UIInputFieldMenuAction); 4] = [
 	("잘라내기", UIInputFieldMenuAction::Cut),
 	("복사", UIInputFieldMenuAction::Copy),
 	("붙여넣기", UIInputFieldMenuAction::Paste),
+	("모두 선택", UIInputFieldMenuAction::SelectAll),
 ];
 
 //==============================================================================
@@ -3972,6 +3851,7 @@ struct UIInputFieldContextMenu {
 	component_base: ComponentBase,
 	owner_node_id: NodeId,
 	is_selection_available: bool,
+	is_text_available: bool,
 	hovered_item_index: Option<usize>,
 	is_first_tick: bool,
 }
@@ -3979,13 +3859,14 @@ struct UIInputFieldContextMenu {
 #[crate::reflect]
 impl UIInputFieldContextMenu {
 	//==============================================================================
-	/// 생성. (선택이 없으면 잘라내기와 복사는 흐리게)
+	/// 생성. (선택이 없으면 잘라내기와 복사, 글이 없으면 모두 선택은 흐리게)
 	//==============================================================================
-	fn new(owner_node_id: NodeId, is_selection_available: bool) -> UIInputFieldContextMenu {
+	fn new(owner_node_id: NodeId, is_selection_available: bool, is_text_available: bool) -> UIInputFieldContextMenu {
 		UIInputFieldContextMenu {
 			component_base: ComponentBase::new(),
 			owner_node_id,
 			is_selection_available,
+			is_text_available,
 			hovered_item_index: None,
 			is_first_tick: true,
 		}
@@ -3999,7 +3880,10 @@ impl UIInputFieldContextMenu {
 			UIInputFieldMenuAction::Cut | UIInputFieldMenuAction::Copy => {
 				self.is_selection_available
 			}
-			_ => {
+			UIInputFieldMenuAction::SelectAll => {
+				self.is_text_available
+			}
+			UIInputFieldMenuAction::Paste => {
 				true
 			}
 		}
@@ -4296,27 +4180,22 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 직접 누르는 DOM 입력 필드의 오른쪽 클릭은 크롬 편집 칸 메뉴를 연다. 메뉴의 검사는 개발자 도구 부탁을 남긴다.
+	/// 직접 누르는 DOM 입력 필드의 오른쪽 클릭도 원본처럼 엔진 문맥 메뉴(잘라내기, 복사, 붙여넣기, 모두 선택)를 연다. 모두 선택 항목은 글을 모두 고른다.
 	//==============================================================================
-	#[cfg(not(target_arch = "wasm32"))]
 	#[test]
-	fn direct_touch_field_opens_browser_menu() {
+	fn direct_touch_field_opens_engine_context_menu() {
 		let mut engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		let root_id = node_tree.get_root_id();
 		get_field(&mut node_tree, field_id).set_use_direct_touch(true);
+		get_field(&mut node_tree, field_id).set_text("hello");
 		engine.get_input_manager_mut().get_text_input_mut().set_context_menu_request_position(Some(Vector2::create(200.0, 120.0)));
 		run_frame(&mut node_tree, &mut engine);
-		let menu_id = node_tree.find_child_by_name(root_id, "uiInputFieldBrowserMenu").expect("browser menu");
-		assert!(node_tree.find_child_by_name(root_id, "uiInputFieldContextMenu").is_none());
-		assert!(node_tree[menu_id].get_content_size().x >= 160.0);
-		get_field(&mut node_tree, field_id).request_menu_action(UIInputFieldMenuAction::Inspect);
-		get_field(&mut node_tree, field_id).request_menu_action(UIInputFieldMenuAction::WritingDirectionRightToLeft);
+		let menu_id = node_tree.find_child_by_name(root_id, "uiInputFieldContextMenu").expect("engine context menu");
+		assert_eq!(node_tree[menu_id].get_content_size(), Vector2::create(CONTEXT_MENU_WIDTH, CONTEXT_MENU_PADDING_Y * 2.0 + CONTEXT_MENU_ITEM_HEIGHT * 4.0));
+		get_field(&mut node_tree, field_id).request_menu_action(UIInputFieldMenuAction::SelectAll);
 		run_frame(&mut node_tree, &mut engine);
-		assert_eq!(get_field(&mut node_tree, field_id).get_writing_direction(), UIInputFieldWritingDirection::RightToLeft);
-		get_field(&mut node_tree, field_id).request_menu_action(UIInputFieldMenuAction::Inspect);
-		run_frame(&mut node_tree, &mut engine);
-		assert_eq!(engine.take_dev_tools_inspect_request(&node_tree), Some(field_id));
+		assert_eq!(get_field(&mut node_tree, field_id).get_selection_text(), "hello");
 	}
 
 	//==============================================================================

@@ -33,7 +33,7 @@ src/graphics3d/      Material, SkinnedModel(glTF/GLB), FbxLoader, SkinnedModelRe
                      BloomEffect, MultiLevelBloomEffect, AmbientOcclusionEffect, SubsurfaceScatteringEffect, Camera3D (FullscreenPass 는 core)
 src/graphics3d/toon/ 툰 3D: MeshBuilder, glbmeshreader, ToonRenderer, ToonLightSet, ToonMaterial, ToonDrawQueue, ToonScreenOutline, ToonVfx, ToonPostProcess, ToonView3D
 src/ui/              UIView, UIControl, UILabel, UIButton, UIToggleButton, UISlider, UIProgressView, UIProgressRing, UIImageView, UIScrollView, UIScrollBar,
-                     TouchRecognizer, UIInputField(데스크탑 winit IME, 웹 숨긴 DOM input, 클립보드 arboard, 데스크탑 크롬 편집 칸 메뉴 uiinputfieldmenu), UIListView, UISnapScrollView, UIDropdown,
+                     TouchRecognizer, UIInputField(데스크탑 winit IME, 웹 숨긴 DOM input, 클립보드 arboard, 데스크탑 터치 빠른 메뉴 uiinputfieldmenu), UIListView, UISnapScrollView, UIDropdown,
                      UIDialog, UIToast, UISpinner, UIContextMenu, UIChart, UIDraggable, UIHitArea, PopupMotion, ButtonMotion, ToastMotion, UIScale,
                      UIWindow, UIWindowLayer, UIConfirmWindow, UIDocument, UINode, UIScene(UISceneBase), autolayout(LayoutSolver 등)
 src/game/            GameSceneBase, GameScene 트레이트와 game_scene! (원본 GameScene: 로딩 화면, 터치 라우팅, 세이프 에어리어, 크기 바뀌면 다시 놓기, 페이드, 놀이 입력, 개발자 도구)
@@ -239,7 +239,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
   - 데스크탑 Canvas2D 의 그림자 흐림은 상자 흐림 세 번이다. 경로의 arc, ellipse, arcTo, roundRect 는 크롬과 같은 스키아 원뿔 곡선 점과 무게이고(블링크 canvas_path.cc, 스키아 SkPathBuilder 의 셈), 칠할 때는 스키아 CPU 래스터처럼 기기 픽셀 0.25 안의 2 차 곡선으로 나눈다. 크롬이 GPU 로 칠하는 캔버스의 곡선 나누기와는 가장자리 픽셀이 다를 수 있다. font 는 블링크 Font::ParseShorthand 와 font 게터대로 읽고 직렬화하는데(desktop_font.rs), 윈도우 크롬의 small-caption, menu, status-bar 는 운영체제 글꼴이라 다를 수 있다. getImageData 의 프리멀티플라이 풀기는 크롬 CPU 캔버스의 스키아 셈이라 크롬 GPU 캔버스의 되읽기와는 반이 딱 떨어지는 값에서 1 다를 수 있다.
   - 데스크탑 PaneStyle 은 프리셋과 원본 도구가 쓰는 CSS(블록과 flex 배치, flex 비율과 세로 flex, min, max, 쪽마다 여백과 테두리, overflow 자르기와 휠, 썸 끌기 스크롤)를 읽는다. flex-wrap 줄넘김과 말줄임(white-space, text-overflow)은 읽지 않고, 스크롤 막대는 자리를 차지하지 않는 얹는 썸이다. (여러 줄 입력 필드도 같다) textarea 는 엔진 여러 줄 입력 필드가 받는다.
   - 데스크탑 질문 창과 브라우저 문맥 메뉴의 치수와 색은 크롬 main 의 값(MessageBoxView 폭 400, 여백 20, 제목 16px, 기본 밝은 팔레트 같은 것)이고, 흐린 그림자는 겹친 둥근 사각형으로 갈음한다. 단추와 입력 칸 높이는 크롬 셈을 기본 글꼴로 갈음한 값이다.
-  - 직접 누르는 입력 필드는 데스크탑에서 크롬 데스크탑 터치처럼 손가락으로 650ms 길게 누르면(15 DIP 안) 낱말을 고르고 손잡이와 빠른 메뉴(잘라내기, 복사, 붙여넣기, ...)를 띄운다. 고른 것도 붙여 넣을 것도 없으면 크롬 편집 칸 메뉴다. (윈도우는 뗄 때 정한다) 손잡이 그림의 자리(크롬 그림 창의 6 여백 다루기)와 빠른 메뉴의 흐린 그림자는 갈음한 값이다. 크롬 안드로이드의 떠 있는 빠른 메뉴(안드로이드 ActionMode)는 데스크탑 대상이 없어 넣지 않았다.
+  - 직접 누르는 입력 필드는 데스크탑에서 크롬 데스크탑 터치처럼 손가락으로 650ms 길게 누르면(15 DIP 안) 낱말을 고르고 손잡이와 빠른 메뉴(잘라내기, 복사, 붙여넣기, ...)를 띄운다. 고른 것도 붙여 넣을 것도 없으면 엔진 문맥 메뉴다. (윈도우는 뗄 때 정한다) 손잡이 그림의 자리(크롬 그림 창의 6 여백 다루기)와 빠른 메뉴의 흐린 그림자는 갈음한 값이다. 크롬 안드로이드의 떠 있는 빠른 메뉴(안드로이드 ActionMode)는 데스크탑 대상이 없어 넣지 않았다.
 
 ## 10. 두 엔진의 차이
 
@@ -250,7 +250,6 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 차이 | 까닭 |
 | --- | --- |
 | 반사(UIDocument 의 반사 저장과 읽기, DevTools 인스펙터의 게터 목록)는 #[vanilla::reflect] 를 붙인 타입만 된다. 엔진 컴포넌트는 모두 붙였고, 게임 컴포넌트는 impl 블록과 impl Component 블록에 붙인다 (원본은 모든 객체). 빠뜨린 것은 알 수 있다: 한쪽만 붙이면 컴파일 에러가 붙일 곳을 알려 주고, 둘 다 빠뜨리면 UIDocument 가 쓸 때 경고를 내고 인스펙터가 "반사 없음" 줄을 보인다 | 러스트에는 실행 중에 필드와 메서드를 훑는 길이 없다. C++ 엔진(언리얼 UCLASS 와 UHT, Qt moc)처럼 컴파일 때 절차 매크로가 함수 목록과 부르는 코드를 짓는다 |
-| 직접 누르는 입력 필드의 크롬 편집 칸 메뉴에 크롬 자체 기능 항목(읽기 모드로 열기, 맞춤법 검사와 언어 설정, 선택이 있을 때의 검색, 인쇄, 번역, 맥의 찾기와 음성, 비밀번호와 Gemini 항목)이 없다. 그 밖의 항목(그림 이모티콘, 실행 취소, 다시 실행, 잘라내기, 복사, 붙여넣기, 일반 텍스트로 붙여넣기, 전체 선택, 쓰기 방향, 검사)은 같은 차례와 단축키 글로 같은 일을 한다 | 그 항목들은 페이지가 아니라 크롬 브라우저(옆 패널, 맞춤법 사전 설정, 검색 엔진, 인쇄 대화 상자, 번역, 계정)와 맥 서비스를 부른다. 데스크탑 앱에는 그 브라우저가 없다. (입력 필드는 spellcheck=false 라 맞춤법 설정이 페이지에 보이는 것도 없다) |
 | 데스크탑에서 뜻이 없는 set_no_cache | 데스크탑에는 브라우저 캐시가 없다 (파일을 늘 그 자리에서 읽는다) |
 | 웨이랜드에서 xdg_toplevel 의 suspended 상태는 받지 못한다. 가려짐(페이지 이벤트 Hidden)은 크롬의 다른 갈래인 프레임 콜백 3 초 규칙으로만 본다 | xdg_toplevel 은 winit(sctk)이 리스너를 달아 쥐고 있고 libwayland 는 프록시 하나에 리스너 하나만 단다. winit 0.30.13 은 configure 의 suspended 를 받아 두기만 하고 알리지 않는다 (0.31 베타 4 와 본줄기도 같다). suspended 를 보내면서 프레임 콜백도 계속 보내는 컴포지터에서만 크롬과 달라진다 |
 | DevTools 메모리 칸은 자바스크립트 힙 대신 시스템 할당자의 힙이고, jsHeapSizeLimit 는 (N/A) 다 | 데스크탑에는 V8 힙이 없다. 시스템 할당자에는 V8 처럼 정한 힙 상한이 없다 |
