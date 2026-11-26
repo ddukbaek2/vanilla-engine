@@ -2906,6 +2906,9 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn multiple_materials_split_by_polygon() {
+		//==============================================================================
+		/// 시험용 FBX 노드 기록 하나를 만든다.
+		//==============================================================================
 		fn record(name: &str, properties: Vec<FbxPropertyValue>, children: Vec<FbxNodeRecord>) -> FbxNodeRecord {
 			FbxNodeRecord {
 				name: String::from(name),
@@ -2913,9 +2916,15 @@ mod tests {
 				children,
 			}
 		}
+		//==============================================================================
+		/// 시험용 FBX 글 속성 값을 만든다.
+		//==============================================================================
 		fn text(value: &str) -> FbxPropertyValue {
 			FbxPropertyValue::String(String::from(value))
 		}
+		//==============================================================================
+		/// 시험용 연결(OO, 원천 번호에서 목적 번호로) 기록을 만든다.
+		//==============================================================================
 		fn connect(source_id: i64, destination_id: i64) -> FbxNodeRecord {
 			record("C", vec![text("OO"), FbxPropertyValue::Int64(source_id), FbxPropertyValue::Int64(destination_id)], Vec::new())
 		}
