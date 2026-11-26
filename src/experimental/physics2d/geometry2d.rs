@@ -190,7 +190,7 @@ impl Segment2D {
 /// assert_eq!(box_polygon.vertices.len(), 4);
 /// assert_eq!(box_polygon.normals[0], PhysicsVector2::create(0.0, -1.0));
 /// let point_list = [PhysicsVector2::create(0.0, 0.0), PhysicsVector2::create(30.0, 0.0), PhysicsVector2::create(15.0, 5.0), PhysicsVector2::create(15.0, 25.0)];
-/// let hull = Polygon2D::make_polygon(&point_list, 0.0).expect("껍질");
+/// let hull = Polygon2D::make_polygon(&point_list, 0.0).expect("hull");
 /// assert_eq!(hull.vertices.len(), 3);
 /// assert!((hull.centroid.x - 15.0).abs() < 1e-12);
 /// ```

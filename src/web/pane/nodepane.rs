@@ -61,7 +61,7 @@ use crate::ui::uiview::is_view_position_inside_node;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
-// 단추를 누르고 떼면 부르는 함수. (원본 click 리스너)
+/// 단추를 누르고 떼면 부르는 함수. (원본 click 리스너)
 pub type PaneClickCallback = Box<dyn FnMut(&mut ComponentContext)>;
 
 //==============================================================================
@@ -102,6 +102,27 @@ struct PaneState {
 
 //==============================================================================
 /// 화면 분할 패널. (원본 Pane, clone 은 같은 패널을 가리킨다)
+///
+/// # 예제
+/// 왼쪽 목록과 오른쪽 화면으로 나누어 뿌리 노드에 붙이고, 목록을 숨기기
+/// ```rust
+/// use vanilla::{NodeTree, Pane, PaneOptions, PaneSize, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// node_tree[root_id].set_content_size(Vector2::create(1000.0, 600.0));
+/// let main_pane = Pane::new(&mut node_tree, PaneOptions::default());
+/// let left_pane = Pane::new(&mut node_tree, PaneOptions { size: PaneSize::Fixed(240.0), min_size: 170.0, ..Default::default() });
+/// let view_pane = Pane::new(&mut node_tree, PaneOptions { min_size: 200.0, ..Default::default() });
+/// main_pane.add_pane(&mut node_tree, &left_pane);
+/// main_pane.add_pane(&mut node_tree, &view_pane);
+/// main_pane.attach_to(&mut node_tree, root_id);
+/// assert_eq!(node_tree[left_pane.get_container()].get_content_size(), Vector2::create(240.0, 600.0));
+/// assert_eq!(node_tree[view_pane.get_container()].get_local_position(), Vector2::create(245.0, 0.0));
+/// left_pane.set_visible(&mut node_tree, false);
+/// assert_eq!(node_tree[view_pane.get_container()].get_local_position(), Vector2::create(0.0, 0.0));
+/// assert_eq!(node_tree[view_pane.get_container()].get_content_size(), Vector2::create(1000.0, 600.0));
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct Pane {
@@ -111,6 +132,13 @@ pub struct Pane {
 impl Pane {
 	//==============================================================================
 	/// 생성. (떨어진 컨테이너 노드를 만든다. 바탕과 자르기)
+	///
+	/// # 인자
+	/// - `node_tree`: 컨테이너 노드를 만들 트리.
+	/// - `options`: 패널 옵션.
+	///
+	/// # 돌려줌
+	/// 새 패널. (컨테이너 노드는 아직 어디에도 붙지 않았다, attach_to 나 부모의 add_pane 으로 붙인다)
 	//==============================================================================
 	pub fn new(node_tree: &mut NodeTree, options: PaneOptions) -> Pane {
 		let fixed_size = match options.size {
@@ -157,6 +185,10 @@ impl Pane {
 
 	//==============================================================================
 	/// 자식 추가. (앞 자식이 있으면 그 사이에 리사이저 노드를 둔다)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드 트리.
+	/// - `pane`: 붙일 자식 패널. (그 컨테이너 노드가 이 패널 컨테이너의 자식이 된다)
 	//==============================================================================
 	pub fn add_pane(&self, node_tree: &mut NodeTree, pane: &Pane) {
 		pane.state.borrow_mut().parent_pane = Rc::downgrade(&self.state);
@@ -198,6 +230,13 @@ impl Pane {
 
 	//==============================================================================
 	/// 배치. (자기 자리를 놓고, 같은 셈으로 자식과 리사이저를 놓는다. 원본 updateLayout)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드 트리.
+	/// - `x`: 컨테이너 왼쪽. (부모 노드 좌표)
+	/// - `y`: 컨테이너 위. (부모 노드 좌표)
+	/// - `width`: 컨테이너 폭.
+	/// - `height`: 컨테이너 높이.
 	//==============================================================================
 	pub fn update_layout(&self, node_tree: &mut NodeTree, x: f64, y: f64, width: f64, height: f64) {
 		let (container_id, direction, children, resizer_list) = {
@@ -285,6 +324,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 부모 노드 크기에 맞춰 다시 놓는다. (부모가 없으면 아무것도 하지 않는다)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드 트리.
 	//==============================================================================
 	pub fn refresh(&self, node_tree: &mut NodeTree) {
 		let parent_id = match node_tree.get_parent_id(self.get_container()) {
@@ -302,6 +344,10 @@ impl Pane {
 
 	//==============================================================================
 	/// 노드에 단다. (그 자리에서 놓고, 뒤로 부모 크기가 바뀌면 다시 놓는다. 원본 attachTo 의 창 resize 리스너)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드 트리.
+	/// - `parent_id`: 붙일 부모 노드.
 	//==============================================================================
 	pub fn attach_to(&self, node_tree: &mut NodeTree, parent_id: NodeId) {
 		node_tree.add_child(parent_id, self.get_container());
@@ -311,6 +357,10 @@ impl Pane {
 
 	//==============================================================================
 	/// 보이기 / 숨기기. (숨긴 패널은 자리를 차지하지 않고, 맞닿은 리사이저도 숨는다)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드 트리.
+	/// - `is_visible`: 보일지.
 	//==============================================================================
 	pub fn set_visible(&self, node_tree: &mut NodeTree, is_visible: bool) {
 		let container_id = {
@@ -344,6 +394,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 보이는지.
+	///
+	/// # 돌려줌
+	/// 보이면 true.
 	//==============================================================================
 	pub fn is_visible(&self) -> bool {
 		self.state.borrow().is_visible
@@ -351,6 +404,9 @@ impl Pane {
 
 	//==============================================================================
 	/// flex 인지. (처음 크기가 Flex)
+	///
+	/// # 돌려줌
+	/// 처음 크기가 Flex 면 true.
 	//==============================================================================
 	pub fn is_flex(&self) -> bool {
 		self.state.borrow().initial_size == PaneSize::Flex
@@ -358,6 +414,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 처음 크기.
+	///
+	/// # 돌려줌
+	/// 만들 때 받은 처음 크기. (PaneOptions::size)
 	//==============================================================================
 	pub fn get_initial_size(&self) -> PaneSize {
 		self.state.borrow().initial_size
@@ -365,6 +424,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 고정 크기. (픽셀, 0 이면 처음 크기로 잰다)
+	///
+	/// # 돌려줌
+	/// 고정 크기. (픽셀, 끌어서 정했거나 처음 크기가 Fixed 면 그 값, reset_layout 뒤나 그 밖은 0)
 	//==============================================================================
 	pub fn get_fixed_size(&self) -> f64 {
 		self.state.borrow().fixed_size
@@ -372,6 +434,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 고정 크기 설정. (다음 배치부터 쓴다. flex 패널에는 쓰이지 않는다)
+	///
+	/// # 인자
+	/// - `fixed_size`: 새 고정 크기. (픽셀, 0 이면 처음 크기로 잰다)
 	//==============================================================================
 	pub fn set_fixed_size(&self, fixed_size: f64) {
 		self.state.borrow_mut().fixed_size = fixed_size;
@@ -379,6 +444,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 최소 크기.
+	///
+	/// # 돌려줌
+	/// 가장 작은 크기. (픽셀)
 	//==============================================================================
 	pub fn get_min_size(&self) -> f64 {
 		self.state.borrow().min_size
@@ -386,6 +454,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 최대 크기.
+	///
+	/// # 돌려줌
+	/// 가장 큰 크기. (픽셀)
 	//==============================================================================
 	pub fn get_max_size(&self) -> f64 {
 		self.state.borrow().max_size
@@ -393,6 +464,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 컨테이너 노드. (내용을 여기의 자식으로 붙인다)
+	///
+	/// # 돌려줌
+	/// 컨테이너 노드.
 	//==============================================================================
 	pub fn get_container(&self) -> NodeId {
 		self.state.borrow().container_id
@@ -400,6 +474,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 배치 콜백 설정. (update_layout 이 끝날 때마다 부른다. None 이면 비운다)
+	///
+	/// # 인자
+	/// - `resize_callback`: update_layout 이 끝날 때마다 부를 함수. (None 이면 비운다)
 	//==============================================================================
 	pub fn set_callback(&self, resize_callback: Option<PaneResizeCallback>) {
 		self.state.borrow_mut().resize_callback = resize_callback;
@@ -407,12 +484,18 @@ impl Pane {
 
 	//==============================================================================
 	/// 리사이저로 끌 수 있는지.
+	///
+	/// # 돌려줌
+	/// 리사이저로 끌 수 있으면 true.
 	//==============================================================================
 	pub fn is_resizable(&self) -> bool {
 		self.state.borrow().is_resizable
 	}
 
 	//==============================================================================
+	/// 끌 수 있는 가장자리.
+	///
+	/// # 돌려줌
 	/// 끌 수 있는 가장자리.
 	//==============================================================================
 	pub fn get_resizable_edges(&self) -> PaneResizableEdges {
@@ -506,18 +589,30 @@ struct PaneContainer {
 }
 
 impl Component for PaneContainer {
+	//==============================================================================
+	/// 공통 상태 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 공통 상태 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 이름. ("PaneContainer")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"PaneContainer"
 	}
 
+	//==============================================================================
+	/// 갱신. (attach_to 한 뿌리 패널은 부모 크기가 바뀌면 다시 놓는다)
+	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
 		let state = match self.state.upgrade() {
 			Some(state) => {
@@ -548,6 +643,9 @@ impl Component for PaneContainer {
 		}
 	}
 
+	//==============================================================================
+	/// 출력. (바탕을 COLOR_BACKGROUND 로 칠한다)
+	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		let content_size = transform.get_content_size();
 		graphic.set_fill_color(PaneTheme::COLOR_BACKGROUND);
@@ -600,22 +698,37 @@ impl PaneResizerHandle {
 }
 
 impl Component for PaneResizerHandle {
+	//==============================================================================
+	/// 공통 상태 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 공통 상태 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 이름. ("PaneResizerHandle")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"PaneResizerHandle"
 	}
 
+	//==============================================================================
+	/// 트리에 붙음. (끌 수 있는 리사이저만 interactable)
+	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		node_tree[node_id].set_interactable(self.can_resize);
 	}
 
+	//==============================================================================
+	/// 갱신. (올려 두었는지 보고, 올려 두거나 끄는 동안 col-resize, row-resize 커서)
+	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
 		if !self.can_resize {
 			return;
@@ -644,6 +757,9 @@ impl Component for PaneResizerHandle {
 		}
 	}
 
+	//==============================================================================
+	/// 터치 누름. (끌기 시작)
+	//==============================================================================
 	fn touch_press(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		let state = match self.state.upgrade() {
 			Some(state) => {
@@ -659,6 +775,9 @@ impl Component for PaneResizerHandle {
 		}
 	}
 
+	//==============================================================================
+	/// 터치 이동. (앞이나 뒤 자식의 고정 크기를 바꾸고 다시 놓는다)
+	//==============================================================================
 	fn touch_move(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		let state = match self.state.upgrade() {
 			Some(state) => {
@@ -674,18 +793,27 @@ impl Component for PaneResizerHandle {
 		}
 	}
 
+	//==============================================================================
+	/// 터치 뗌. (끌기 끝)
+	//==============================================================================
 	fn touch_release(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 		if let Some(state) = self.state.upgrade() {
 			Pane { state }.end_resize();
 		}
 	}
 
+	//==============================================================================
+	/// 터치 취소. (끌기 끝)
+	//==============================================================================
 	fn touch_cancel(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 		if let Some(state) = self.state.upgrade() {
 			Pane { state }.end_resize();
 		}
 	}
 
+	//==============================================================================
+	/// 출력. (올려 두거나 끄는 동안 COLOR_RESIZER_HOVER, 아니면 COLOR_RESIZER 로 칠한다)
+	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		let content_size = transform.get_content_size();
 		let color = if self.can_resize && (self.is_hovered || self.is_dragging()) {
@@ -854,6 +982,39 @@ const SCROLLBAR_DEFAULT_THUMB_COLOR: &str = "rgba(121, 121, 121, 0.4)";
 
 //==============================================================================
 /// PaneStyle 이 지은 요소. (원본 DOM 요소의 스타일과 글, 블록과 flex 배치, 넘침 자르기와 스크롤, 단추 누르기)
+///
+/// # 예제
+/// 패널 안의 단추를 누르고 떼면 함수 부르기
+/// ```rust
+/// use std::cell::Cell;
+/// use std::rc::Rc;
+/// use vanilla::{Engine, EngineConfiguration, NodeTree, PaneElement, PaneStyle, PaneStyleOptions, TouchKind, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// node_tree[root_id].set_content_size(Vector2::create(400.0, 300.0));
+/// let panel_id = PaneStyle::create(&mut node_tree, "div", "panel", &PaneStyleOptions::default());
+/// let button_id = PaneStyle::create(&mut node_tree, "button", "button", &PaneStyleOptions { text: "Save", ..Default::default() });
+/// node_tree.add_child(root_id, panel_id);
+/// node_tree.add_child(panel_id, button_id);
+/// let click_count = Rc::new(Cell::new(0));
+/// let click_count_for_callback = click_count.clone();
+/// let button = node_tree[button_id].get_component_mut::<PaneElement>().unwrap();
+/// assert_eq!(button.get_tag_name(), "button");
+/// assert_eq!(button.get_text(), "Save");
+/// button.set_on_click(Some(Box::new(move |_context| {
+/// 	click_count_for_callback.set(click_count_for_callback.get() + 1);
+/// })));
+/// node_tree.tick(&engine, 1.0 / 60.0);
+/// node_tree.tick(&engine, 1.0 / 60.0);
+/// assert_eq!(node_tree[button_id].get_local_position(), Vector2::create(10.0, 10.0));
+/// let button_size = node_tree[button_id].get_content_size();
+/// let button_center = Vector2::create(10.0 + button_size.x * 0.5, 10.0 + button_size.y * 0.5);
+/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Press, button_center);
+/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Release, button_center);
+/// assert_eq!(click_count.get(), 1);
+/// ```
 //==============================================================================
 pub struct PaneElement {
 	component_base: ComponentBase,
@@ -980,6 +1141,9 @@ impl PaneElement {
 
 	//==============================================================================
 	/// 누르고 떼면 부를 함수. (원본 요소의 addEventListener("click"))
+	///
+	/// # 인자
+	/// - `click_callback`: 누르고 떼면 부를 함수. (button 프리셋 요소만 부른다, None 이면 비운다)
 	//==============================================================================
 	pub fn set_on_click(&mut self, click_callback: Option<PaneClickCallback>) {
 		self.click_callback = click_callback;
@@ -987,6 +1151,9 @@ impl PaneElement {
 
 	//==============================================================================
 	/// 글 설정. (원본 innerText)
+	///
+	/// # 인자
+	/// - `text`: 보일 글.
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
 		self.text = text.to_string();
@@ -994,6 +1161,9 @@ impl PaneElement {
 
 	//==============================================================================
 	/// 글.
+	///
+	/// # 돌려줌
+	/// 보이는 글. (textarea 의 글은 입력 필드가 들어 여기는 비어 있다)
 	//==============================================================================
 	pub fn get_text(&self) -> &str {
 		&self.text
@@ -1001,6 +1171,9 @@ impl PaneElement {
 
 	//==============================================================================
 	/// 태그 이름. (소문자)
+	///
+	/// # 돌려줌
+	/// 소문자 태그 이름.
 	//==============================================================================
 	pub fn get_tag_name(&self) -> &str {
 		&self.tag_name
@@ -1008,6 +1181,9 @@ impl PaneElement {
 
 	//==============================================================================
 	/// 굴려 넘긴 만큼. (원본 scrollLeft, scrollTop)
+	///
+	/// # 돌려줌
+	/// 굴려 넘긴 만큼. (x 가 scrollLeft, y 가 scrollTop)
 	//==============================================================================
 	pub fn get_scroll_offset(&self) -> Vector2 {
 		self.scroll_offset
@@ -1015,6 +1191,9 @@ impl PaneElement {
 
 	//==============================================================================
 	/// 굴려 넘기기. (원본 scrollLeft, scrollTop 넣기. 다음 배치에서 내용 끝 안으로 줄인다)
+	///
+	/// # 인자
+	/// - `scroll_offset`: 굴려 넘길 만큼. (음수는 0 으로)
 	//==============================================================================
 	pub fn set_scroll_offset(&mut self, scroll_offset: Vector2) {
 		self.scroll_offset = Vector2::create(scroll_offset.x.max(0.0), scroll_offset.y.max(0.0));
@@ -1022,6 +1201,10 @@ impl PaneElement {
 
 	//==============================================================================
 	/// CSS 속성 하나 넣기. (머리 주석의 속성만 읽는다, 그 밖은 무시)
+	///
+	/// # 인자
+	/// - `property_name`: CSS 속성 이름. (background-color 같은 이름)
+	/// - `property_value`: 값. (앞뒤 빈칸은 뗀다)
 	//==============================================================================
 	pub fn apply_style(&mut self, property_name: &str, property_value: &str) {
 		let value = property_value.trim();
@@ -1980,24 +2163,39 @@ fn scale_brightness(color: Color, brightness: f32) -> Color {
 }
 
 impl Component for PaneElement {
+	//==============================================================================
+	/// 공통 상태 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 공통 상태 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 이름. ("PaneElement")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"PaneElement"
 	}
 
+	//==============================================================================
+	/// 트리에 붙음. (단추와 넘친 자식을 자르는 요소는 interactable)
+	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		if self.is_button || self.is_clipping() {
 			node_tree[node_id].set_interactable(true);
 		}
 	}
 
+	//==============================================================================
+	/// 갱신. (단추와 pointer 커서 요소의 올려 둠, absolute 요소의 자리와 크기, 자식 배치)
+	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
 		let node_id = context.get_node_id();
 		// 올려 둠. (단추의 밝기와 pointer 커서)
@@ -2036,6 +2234,9 @@ impl Component for PaneElement {
 		self.lay_out_children(context);
 	}
 
+	//==============================================================================
+	/// 터치 누름. (스크롤 막대 썸을 누르면 썸 끌기 시작)
+	//==============================================================================
 	fn touch_press(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		self.scroll_drag_start = None;
 		if !self.is_clipping() {
@@ -2062,6 +2263,9 @@ impl Component for PaneElement {
 		}
 	}
 
+	//==============================================================================
+	/// 터치 이동. (썸을 끈 만큼 내용을 넘긴다)
+	//==============================================================================
 	fn touch_move(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		let (start_position, start_offset, is_vertical) = match self.scroll_drag_start {
 			Some(scroll_drag_start) => {
@@ -2099,6 +2303,9 @@ impl Component for PaneElement {
 		self.lay_out_children(context);
 	}
 
+	//==============================================================================
+	/// 터치 뗌. (썸 끌기가 아니고 단추 안에서 떼면 set_on_click 의 함수를 부른다)
+	//==============================================================================
 	fn touch_release(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		if self.scroll_drag_start.take().is_some() {
 			return;
@@ -2118,10 +2325,16 @@ impl Component for PaneElement {
 		}
 	}
 
+	//==============================================================================
+	/// 터치 취소. (썸 끌기 끝)
+	//==============================================================================
 	fn touch_cancel(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 		self.scroll_drag_start = None;
 	}
 
+	//==============================================================================
+	/// 휠을 받는지. (overflow 가 auto 나 scroll 인 축이 있으면 true)
+	//==============================================================================
 	fn is_wheel_receiver(&self) -> bool {
 		self.overflow_x.is_scrollable() || self.overflow_y.is_scrollable()
 	}
@@ -2146,6 +2359,9 @@ impl Component for PaneElement {
 		true
 	}
 
+	//==============================================================================
+	/// 자식 출력을 자를지. (overflow 가 visible 이 아닌 축이 있으면 border-radius 의 둥근 크기로 자른다)
+	//==============================================================================
 	fn get_clip_round_size(&self) -> Option<f32> {
 		if self.is_clipping() {
 			Some(self.border_radius)
@@ -2155,6 +2371,9 @@ impl Component for PaneElement {
 		}
 	}
 
+	//==============================================================================
+	/// 출력. (바탕, 테두리, 글. 스크롤 막대는 pop_transform 이 그린다)
+	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		if self.display == PaneDisplay::None {
 			return;
@@ -2731,12 +2950,37 @@ fn convert_view_to_local(node_tree: &NodeTree, node_id: NodeId, view_position: V
 
 //==============================================================================
 /// 스타일 및 요소 생성 유틸리티. (원본 PaneStyle)
+///
+/// # 예제
+/// 도구 막대에 단추를 놓고 스타일을 나중에 바꾸기
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, NodeTree, PaneStyle, PaneStyleOptions, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// node_tree[root_id].set_content_size(Vector2::create(600.0, 40.0));
+/// let toolbar_id = PaneStyle::create(&mut node_tree, "div", "toolbar", &PaneStyleOptions::default());
+/// let play_button_id = PaneStyle::create(&mut node_tree, "button", "button", &PaneStyleOptions { text: "Play", accent: true, ..Default::default() });
+/// node_tree.add_child(root_id, toolbar_id);
+/// node_tree.add_child(toolbar_id, play_button_id);
+/// PaneStyle::apply(&mut node_tree, toolbar_id, &[("justify-content", "flex-start"), ("padding", "0 8px")]);
+/// node_tree.tick(&engine, 1.0 / 60.0);
+/// node_tree.tick(&engine, 1.0 / 60.0);
+/// assert_eq!(node_tree[toolbar_id].get_content_size(), Vector2::create(600.0, 40.0));
+/// assert_eq!(node_tree[play_button_id].get_local_position().x, 8.0);
+/// ```
 //==============================================================================
 pub struct PaneStyle;
 
 impl PaneStyle {
 	//==============================================================================
 	/// 요소에 여러 스타일을 한꺼번에 넣는다. ((CSS 속성 이름, 값) 목록, PaneElement 가 없는 노드면 아무것도 하지 않는다)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드 트리.
+	/// - `node_id`: 스타일을 넣을 요소 노드.
+	/// - `styles`: (CSS 속성 이름, 값) 목록.
 	//==============================================================================
 	pub fn apply(node_tree: &mut NodeTree, node_id: NodeId, styles: &[(&str, &str)]) {
 		if let Some(element) = node_tree.get_node_mut(node_id).and_then(|node| node.get_component_mut::<PaneElement>()) {
@@ -2749,6 +2993,15 @@ impl PaneStyle {
 	//==============================================================================
 	/// 스타일 프리셋을 넣은 요소 노드를 만든다. (떨어진 노드, node_tree.add_child 로 붙인다)
 	/// (preset: "panel" | "toolbar" | "button" | "input" | "textarea" | "text", 그 밖은 공통 스타일만)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드를 만들 트리.
+	/// - `tag_name`: 태그 이름. (input 과 textarea 는 엔진 입력 필드가 글을 받는다)
+	/// - `preset`: 스타일 프리셋. ("panel" | "toolbar" | "button" | "input" | "textarea" | "text")
+	/// - `options`: id, 글, 덧붙이는 스타일, 안내 글, 단추 색.
+	///
+	/// # 돌려줌
+	/// 만든 요소 노드. (떨어진 노드)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, tag_name: &str, preset: &str, options: &PaneStyleOptions) -> NodeId {
 		let node_name = if options.id.is_empty() {

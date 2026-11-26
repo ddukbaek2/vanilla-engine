@@ -417,8 +417,8 @@ impl WheelJointDefinition2D {
 /// let mut joint_definition = RevoluteJointDefinition2D::new();
 /// joint_definition.body_id_a = Some(ground_id);
 /// joint_definition.body_id_b = Some(body_id);
-/// let joint_id = world.create_revolute_joint(&joint_definition).expect("관절");
-/// let joint = world.get_joint_mut(joint_id).expect("관절");
+/// let joint_id = world.create_revolute_joint(&joint_definition).expect("joint");
+/// let joint = world.get_joint_mut(joint_id).expect("joint");
 /// joint.set_motor_enabled(true);
 /// joint.set_max_motor_torque(10.0);
 /// joint.set_motor_speed(-1.5);

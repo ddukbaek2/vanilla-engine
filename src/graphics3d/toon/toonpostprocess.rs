@@ -1,26 +1,26 @@
 //==============================================================================
-// 툰 HDR 마무리. (vanilla.js graphics3d/toon/toonpostprocess.js 의 ToonPostProcess)
-// - 실수 렌더 타겟에 그린 선형 색을 블룸, 노출, 톤매핑, 감마로 화면에 낸다.
-// - 엔진의 RenderTarget(반정밀 실수 색, 깊이), BloomEffect(또는 MultiLevelBloomEffect), FullscreenPass 를 엮는다.
-// - 사용: ToonRenderer::set_hdr_output(true) 뒤
-//   begin(gl, 바탕 선형 색) → ToonRenderer 로 그리기 → end(gl, 낼 프레임버퍼, 뷰포트)
-//   end 는 (멀티샘플이면 풀고) 블룸을 셈하고 톤매핑한 색을 낼 프레임버퍼(None 이면 화면)에 그린다. 2D 와 섞으려면 그 뒤 Graphic::restore_render_state.
-// - 생성 옵션: new_with_options(gl, 너비, 높이, ToonPostProcessOptions { sample_count, use_float_color, depth_bits, use_depth_texture }) (원본 생성자의 options, new 는 기본 옵션으로 지금과 같은 RGBA16F, 깊이 16, 멀티샘플 없음)
-//   sample_count 가 2 이상이면 씬을 멀티샘플(MSAA) 렌더버퍼에 그리고 end 앞에서 텍스처로 푼다. 기기가 받는 수로 줄인다. (get_sample_count, set_sample_count)
-//   depth_bits 24 는 깊이 24 비트. (먼 면이 먼 장면) use_depth_texture 는 씬 깊이를 텍스처로 남긴다. (set_lit_area 가 쓴다)
-// - 색 공간: 씬 렌더 타겟에는 선형 색을 쓴다. (ToonRenderer::set_hdr_output(true), ToonScreenOutline::set_hdr_output(true), ToonVfx 색도 선형으로 본다)
-//   감마를 건 색 g 를 실수 판에 쓰고 합성에서 g^2.2 로 되돌리던 게임은 그 값을 미리 선형으로 바꿔 넘긴다. 색은 c^2.2, 감마 쪽에서 곱하던 밝기 배 k 는 선형 k^2.2 다.
-//   (예: 1.37 은 선형 2, 1.6 은 2.81, 2.08 은 5, 밝기 1.6 에 배 1.6 이면 (1.6 x 1.6)^2.2 = 7.9) 블룸 문턱과 무릎은 선형 밝기다.
-// - 실수 판을 못 쓰는 기기: use_float_color(기본 true)여도 is_float_color_supported 가 false 면 RGBA8 판으로 짓는다. (get_use_float_color 가 false)
-//   그때와 use_float_color: false 는 LDR 길이다. 씬에는 화면 색(감마를 건 색, ToonRenderer::set_hdr_output(false))을 그리고, 합성은 톤매핑과 감마 없이 블룸을 더해 색 보정만 건다.
-// - 블룸: 기본은 반 해상도 9 탭 가우시안(BloomEffect, 문턱 0.9 ~ 1.6, 주고받는 판 RGBA8, set_bloom_float_color 로 RGBA16F).
-//   set_bloom_levels(gl, 단 수, 문턱, 무릎) 로 단 수를 1 이상 주면 MultiLevelBloomEffect(반씩 줄였다 천막 꼴로 키우며 더함, 씬과 같은 정밀도의 판)로 바꾼다. 0 이면 기본으로 돌린다. 세기는 set_bloom 이 둘 다에 쓴다.
-// - 톤매핑은 ACES 근사(Narkowicz)다. 노출(set_exposure)을 곱한 뒤 매핑하고 sRGB 감마를 건다.
-// - 색 보정: 감마를 건 뒤 밝기(set_brightness, 밝힌 자리 set_lit_area 안은 1 쪽으로), 채도, 색조(밝기 1 로 맞춘 색을 곱함), 안개빛(어두운 곳을 그 색 쪽으로), 대비, 가장자리 어둡게 차례로 건다. (set_color_grade, set_vignette)
-//   기본은 밝기 1, 채도 1, 대비 1, 색조 0, 안개빛 0, 가장자리 0 이라 보정이 없다.
-// - 해상도 배율: set_resolution_scale(gl, 배율) 이면 씬 판을 출력 크기 x 배율로 짓고 end 의 뷰포트로 키워(선형 거르기) 낸다. (3D 만 낮춰 그리고 UI 는 기기 화소 그대로 둘 때, 기본 1)
-// - 노드 사각형 안에 낼 때: resize(사각형 너비, 높이) → begin → 그리기(ToonRenderer 의 화면 사각형은 풀어 둔다) → end(None, [x, 드로잉 버퍼 높이 - y - 높이, 너비, 높이]).
-// - 원본과 다른 점: GL 객체를 다시 짓는 설정(set_sample_count, set_resolution_scale, set_bloom_levels, set_bloom_float_color)은 gl 을 받고 Result 를 돌려준다.
+//! 툰 HDR 마무리. (vanilla.js graphics3d/toon/toonpostprocess.js 의 ToonPostProcess)
+//! - 실수 렌더 타겟에 그린 선형 색을 블룸, 노출, 톤매핑, 감마로 화면에 낸다.
+//! - 엔진의 RenderTarget(반정밀 실수 색, 깊이), BloomEffect(또는 MultiLevelBloomEffect), FullscreenPass 를 엮는다.
+//! - 사용: ToonRenderer::set_hdr_output(true) 뒤
+//!   begin(gl, 바탕 선형 색) → ToonRenderer 로 그리기 → end(gl, 낼 프레임버퍼, 뷰포트)
+//!   end 는 (멀티샘플이면 풀고) 블룸을 셈하고 톤매핑한 색을 낼 프레임버퍼(None 이면 화면)에 그린다. 2D 와 섞으려면 그 뒤 Graphic::restore_render_state.
+//! - 생성 옵션: new_with_options(gl, 너비, 높이, ToonPostProcessOptions { sample_count, use_float_color, depth_bits, use_depth_texture }) (원본 생성자의 options, new 는 기본 옵션으로 지금과 같은 RGBA16F, 깊이 16, 멀티샘플 없음)
+//!   sample_count 가 2 이상이면 씬을 멀티샘플(MSAA) 렌더버퍼에 그리고 end 앞에서 텍스처로 푼다. 기기가 받는 수로 줄인다. (get_sample_count, set_sample_count)
+//!   depth_bits 24 는 깊이 24 비트. (먼 면이 먼 장면) use_depth_texture 는 씬 깊이를 텍스처로 남긴다. (set_lit_area 가 쓴다)
+//! - 색 공간: 씬 렌더 타겟에는 선형 색을 쓴다. (ToonRenderer::set_hdr_output(true), ToonScreenOutline::set_hdr_output(true), ToonVfx 색도 선형으로 본다)
+//!   감마를 건 색 g 를 실수 판에 쓰고 합성에서 g^2.2 로 되돌리던 게임은 그 값을 미리 선형으로 바꿔 넘긴다. 색은 c^2.2, 감마 쪽에서 곱하던 밝기 배 k 는 선형 k^2.2 다.
+//!   (예: 1.37 은 선형 2, 1.6 은 2.81, 2.08 은 5, 밝기 1.6 에 배 1.6 이면 (1.6 x 1.6)^2.2 = 7.9) 블룸 문턱과 무릎은 선형 밝기다.
+//! - 실수 판을 못 쓰는 기기: use_float_color(기본 true)여도 is_float_color_supported 가 false 면 RGBA8 판으로 짓는다. (get_use_float_color 가 false)
+//!   그때와 use_float_color: false 는 LDR 길이다. 씬에는 화면 색(감마를 건 색, ToonRenderer::set_hdr_output(false))을 그리고, 합성은 톤매핑과 감마 없이 블룸을 더해 색 보정만 건다.
+//! - 블룸: 기본은 반 해상도 9 탭 가우시안(BloomEffect, 문턱 0.9 ~ 1.6, 주고받는 판 RGBA8, set_bloom_float_color 로 RGBA16F).
+//!   set_bloom_levels(gl, 단 수, 문턱, 무릎) 로 단 수를 1 이상 주면 MultiLevelBloomEffect(반씩 줄였다 천막 꼴로 키우며 더함, 씬과 같은 정밀도의 판)로 바꾼다. 0 이면 기본으로 돌린다. 세기는 set_bloom 이 둘 다에 쓴다.
+//! - 톤매핑은 ACES 근사(Narkowicz)다. 노출(set_exposure)을 곱한 뒤 매핑하고 sRGB 감마를 건다.
+//! - 색 보정: 감마를 건 뒤 밝기(set_brightness, 밝힌 자리 set_lit_area 안은 1 쪽으로), 채도, 색조(밝기 1 로 맞춘 색을 곱함), 안개빛(어두운 곳을 그 색 쪽으로), 대비, 가장자리 어둡게 차례로 건다. (set_color_grade, set_vignette)
+//!   기본은 밝기 1, 채도 1, 대비 1, 색조 0, 안개빛 0, 가장자리 0 이라 보정이 없다.
+//! - 해상도 배율: set_resolution_scale(gl, 배율) 이면 씬 판을 출력 크기 x 배율로 짓고 end 의 뷰포트로 키워(선형 거르기) 낸다. (3D 만 낮춰 그리고 UI 는 기기 화소 그대로 둘 때, 기본 1)
+//! - 노드 사각형 안에 낼 때: resize(사각형 너비, 높이) → begin → 그리기(ToonRenderer 의 화면 사각형은 풀어 둔다) → end(None, [x, 드로잉 버퍼 높이 - y - 높이, 너비, 높이]).
+//! - 원본과 다른 점: GL 객체를 다시 짓는 설정(set_sample_count, set_resolution_scale, set_bloom_levels, set_bloom_float_color)은 gl 을 받고 Result 를 돌려준다.
 //==============================================================================
 use glow::HasContext;
 
@@ -31,7 +31,7 @@ use crate::graphics3d::multilevelbloomeffect::MultiLevelBloomEffect;
 use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 use crate::graphics3d::{read_framebuffer_binding, read_texture_binding, GlFramebuffer};
 
-// 합성 프래그먼트 셰이더. (씬에 블룸을 더해 HDR 길은 노출, 톤매핑, 감마를 걸고 LDR 길은 그대로 자른 뒤, 밝기(밝힌 자리 안은 1 쪽으로), 채도, 색조, 안개빛, 대비, 가장자리 어둡게 차례로 건다)
+/// 합성 프래그먼트 셰이더. (씬에 블룸을 더해 HDR 길은 노출, 톤매핑, 감마를 걸고 LDR 길은 그대로 자른 뒤, 밝기(밝힌 자리 안은 1 쪽으로), 채도, 색조, 안개빛, 대비, 가장자리 어둡게 차례로 건다)
 const COMPOSITE_FRAGMENT_SHADER: &str = "#version 300 es
 precision highp float;
 in vec2 fragmentTextureCoordinate;
@@ -81,23 +81,33 @@ void main() {
 ";
 
 //==============================================================================
-// 생성 옵션. (원본 생성자의 options, 기본값은 멀티샘플 없음 / 실수 판 / 깊이 16 / 깊이 텍스처 없음)
+/// 생성 옵션. (원본 생성자의 options, 기본값은 멀티샘플 없음 / 실수 판 / 깊이 16 / 깊이 텍스처 없음)
+///
+/// # 예제
+/// 멀티샘플 넷에 깊이 24 비트 옵션
+/// ```rust
+/// use vanilla::ToonPostProcessOptions;
+///
+/// let options = ToonPostProcessOptions { sample_count: 4, depth_bits: 24, ..ToonPostProcessOptions::default() };
+/// assert!(options.use_float_color);
+/// assert!(!options.use_depth_texture);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ToonPostProcessOptions {
-	// 멀티샘플 표본 수. (2 밑이면 없음)
+	/// 멀티샘플 표본 수. (2 밑이면 없음)
 	pub sample_count: i32,
-	// 실수 판을 쓸지. (기기가 못 쓰면 false 로 짓는다)
+	/// 실수 판을 쓸지. (기기가 못 쓰면 false 로 짓는다)
 	pub use_float_color: bool,
-	// 깊이 렌더버퍼 비트 수. (16 이나 24)
+	/// 깊이 렌더버퍼 비트 수. (16 이나 24)
 	pub depth_bits: i32,
-	// 씬 깊이를 텍스처로 남길지. (set_lit_area)
+	/// 씬 깊이를 텍스처로 남길지. (set_lit_area)
 	pub use_depth_texture: bool,
 }
 
 impl Default for ToonPostProcessOptions {
 	//==============================================================================
-	// 기본 옵션. (멀티샘플 없음, 실수 판, 깊이 16, 깊이 텍스처 없음)
+	/// 기본 옵션. (멀티샘플 없음, 실수 판, 깊이 16, 깊이 텍스처 없음)
 	//==============================================================================
 	fn default() -> ToonPostProcessOptions {
 		ToonPostProcessOptions { sample_count: 0, use_float_color: true, depth_bits: 16, use_depth_texture: false }
@@ -105,7 +115,7 @@ impl Default for ToonPostProcessOptions {
 }
 
 //==============================================================================
-// 밝힌 자리. (가운데, 안쪽과 바깥 반지름, 보기와 투영의 역행렬)
+/// 밝힌 자리. (가운데, 안쪽과 바깥 반지름, 보기와 투영의 역행렬)
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 struct LitArea {
@@ -116,37 +126,64 @@ struct LitArea {
 }
 
 //==============================================================================
-// 툰 HDR 마무리. (머리말 참고)
+/// 툰 HDR 마무리. (머리말 참고)
+///
+/// # 예제
+/// 툰 장면을 실수 판에 그리고 블룸과 톤매핑으로 내기
+/// ```rust,no_run
+/// use vanilla::{create_sphere_geometry, Camera3D, Matrix4, MeshBuilder, ToonDrawOptions, ToonPartOptions, ToonPostProcess, ToonPostProcessOptions, ToonRenderer, Vector3};
+///
+/// fn draw_glowing_ball(gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
+/// 	let mut post_process = ToonPostProcess::new_with_options(gl, width, height, ToonPostProcessOptions { sample_count: 4, ..ToonPostProcessOptions::default() })?;
+/// 	post_process.set_exposure(1.2);
+/// 	post_process.set_bloom(true, 0.8, 0.9, 1.6);
+/// 	let mut renderer = ToonRenderer::new(gl)?;
+/// 	renderer.set_hdr_output(post_process.get_use_float_color());
+/// 	let mut builder = MeshBuilder::new();
+/// 	builder.add_part(&create_sphere_geometry(0.5, 32, 20, std::f32::consts::PI), &Matrix4::create_identity(), "#ffd080", ToonPartOptions { glow: 2.0, ..ToonPartOptions::default() });
+/// 	let mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("mesh failed")?;
+/// 	let mut camera = Camera3D::new();
+/// 	camera.set_perspective(0.8, 0.1, 100.0);
+/// 	camera.set_aspect_ratio(width as f32 / height as f32);
+/// 	camera.look_at(Vector3::create(0.0, 1.0, 3.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
+/// 	post_process.begin(gl, [0.02, 0.02, 0.04]);
+/// 	renderer.begin_frame_with_camera(gl, &camera);
+/// 	renderer.draw_mesh(gl, &mesh, &Matrix4::create_identity(), ToonDrawOptions::default());
+/// 	renderer.end_frame(gl);
+/// 	post_process.end(gl, None, [0, 0, width, height]);
+/// 	Ok(())
+/// }
+/// ```
 //==============================================================================
 pub struct ToonPostProcess {
-	// 씬을 그리는 렌더 타겟. (출력 크기 x 해상도 배율, 멀티샘플이면 end 앞에서 푼다)
+	/// 씬을 그리는 렌더 타겟. (출력 크기 x 해상도 배율, 멀티샘플이면 end 앞에서 푼다)
 	scene_render_target: RenderTarget,
 	bloom_effect: BloomEffect,
-	// 단 수를 주면 쓰는 다단 블룸.
+	/// 단 수를 주면 쓰는 다단 블룸.
 	multi_level_bloom_effect: Option<MultiLevelBloomEffect>,
 	composite_pass: FullscreenPass,
-	// 씬 판이 실수인지. (HDR 길)
+	/// 씬 판이 실수인지. (HDR 길)
 	use_float_color: bool,
-	// 요청한 멀티샘플 표본 수. (실제 수는 씬 판의 get_sample_count)
+	/// 요청한 멀티샘플 표본 수. (실제 수는 씬 판의 get_sample_count)
 	requested_sample_count: i32,
 	depth_bits: i32,
 	use_depth_texture: bool,
-	// resize 로 받은 출력 크기.
+	/// resize 로 받은 출력 크기.
 	output_width: i32,
 	output_height: i32,
 	resolution_scale: f32,
 	exposure: f32,
 	bloom_strength: f32,
 	is_bloom_enabled: bool,
-	// 다단 블룸의 문턱과 무릎.
+	/// 다단 블룸의 문턱과 무릎.
 	bloom_threshold: f32,
 	bloom_knee: f32,
 	brightness: f32,
-	// 밝힌 자리. (깊이 텍스처가 있을 때만 쓴다)
+	/// 밝힌 자리. (깊이 텍스처가 있을 때만 쓴다)
 	lit_area: Option<LitArea>,
 	saturation: f32,
 	contrast: f32,
-	// 밝기 1 로 맞춘 색조 곱.
+	/// 밝기 1 로 맞춘 색조 곱.
 	tone_color: [f32; 3],
 	tone_amount: f32,
 	haze_color: [f32; 3],
@@ -154,19 +191,36 @@ pub struct ToonPostProcess {
 	vignette_strength: f32,
 }
 
-// 밝기의 무게. (Rec. 709)
+/// 밝기의 무게. (Rec. 709)
 const LUMINANCE_WEIGHTS: [f32; 3] = [0.2126, 0.7152, 0.0722];
 
 impl ToonPostProcess {
 	//==============================================================================
-	// 생성. (화면 픽셀 크기, 기본 옵션)
+	/// 생성. (화면 픽셀 크기, 기본 옵션)
+	///
+	/// # 인자
+	/// - `gl`: 툰 렌더러와 같은 컨텍스트.
+	/// - `width`: 출력 너비. (픽셀)
+	/// - `height`: 출력 높이. (픽셀)
+	///
+	/// # 돌려줌
+	/// 새 툰 HDR 마무리. 씬 렌더 타겟, 블룸, 합성 셰이더를 못 지으면 Err(오류 글).
 	//==============================================================================
 	pub fn new(gl: &glow::Context, width: i32, height: i32) -> Result<ToonPostProcess, String> {
 		ToonPostProcess::new_with_options(gl, width, height, ToonPostProcessOptions::default())
 	}
 
 	//==============================================================================
-	// 옵션을 주어 생성. (원본 new ToonPostProcess(gl, 너비, 높이, options))
+	/// 옵션을 주어 생성. (원본 new ToonPostProcess(gl, 너비, 높이, options))
+	///
+	/// # 인자
+	/// - `gl`: 툰 렌더러와 같은 컨텍스트.
+	/// - `width`: 출력 너비. (픽셀)
+	/// - `height`: 출력 높이. (픽셀)
+	/// - `options`: 생성 옵션. (멀티샘플 표본 수, 실수 판, 깊이 비트 16 이나 24, 깊이 텍스처)
+	///
+	/// # 돌려줌
+	/// 새 툰 HDR 마무리. 씬 렌더 타겟, 블룸, 합성 셰이더를 못 지으면 Err(오류 글).
 	//==============================================================================
 	pub fn new_with_options(gl: &glow::Context, width: i32, height: i32, options: ToonPostProcessOptions) -> Result<ToonPostProcess, String> {
 		let use_float_color = options.use_float_color && ToonPostProcess::is_float_color_supported(gl);
@@ -212,7 +266,13 @@ impl ToonPostProcess {
 	}
 
 	//==============================================================================
-	// 실수 컬러 판을 그릴 수 있는지. (웹은 EXT_color_buffer_float 나 EXT_color_buffer_half_float 가 있어야, 1 x 1 RGBA16F 를 붙인 프레임버퍼가 완성되는지)
+	/// 실수 컬러 판을 그릴 수 있는지. (웹은 EXT_color_buffer_float 나 EXT_color_buffer_half_float 가 있어야, 1 x 1 RGBA16F 를 붙인 프레임버퍼가 완성되는지)
+	///
+	/// # 인자
+	/// - `gl`: 알아볼 컨텍스트.
+	///
+	/// # 돌려줌
+	/// RGBA16F 판에 그릴 수 있으면 true.
 	//==============================================================================
 	pub fn is_float_color_supported(gl: &glow::Context) -> bool {
 		#[cfg(target_arch = "wasm32")]
@@ -246,7 +306,7 @@ impl ToonPostProcess {
 	}
 
 	//==============================================================================
-	// 씬 렌더 타겟 짓기. (출력 크기 x 해상도 배율, 지금 옵션으로)
+	/// 씬 렌더 타겟 짓기. (출력 크기 x 해상도 배율, 지금 옵션으로)
 	//==============================================================================
 	fn create_scene_render_target(&self, gl: &glow::Context) -> Result<RenderTarget, String> {
 		let options = RenderTargetOptions { color_attachment_count: 1, use_float_color: self.use_float_color, use_depth_texture: self.use_depth_texture, sample_count: self.requested_sample_count, depth_bits: self.depth_bits };
@@ -254,21 +314,29 @@ impl ToonPostProcess {
 	}
 
 	//==============================================================================
-	// 씬 판의 너비. (출력 너비 x 해상도 배율, 1 이상)
+	/// 씬 판의 너비. (출력 너비 x 해상도 배율, 1 이상)
 	//==============================================================================
 	fn read_scene_width(&self) -> i32 {
 		((self.output_width as f32 * self.resolution_scale).round() as i32).max(1)
 	}
 
 	//==============================================================================
-	// 씬 판의 높이. (출력 높이 x 해상도 배율, 1 이상)
+	/// 씬 판의 높이. (출력 높이 x 해상도 배율, 1 이상)
 	//==============================================================================
 	fn read_scene_height(&self) -> i32 {
 		((self.output_height as f32 * self.resolution_scale).round() as i32).max(1)
 	}
 
 	//==============================================================================
-	// 크기 바꾸기. (출력 크기, 씬 판은 해상도 배율을 곱함, 같으면 그대로)
+	/// 크기 바꾸기. (출력 크기, 씬 판은 해상도 배율을 곱함, 같으면 그대로)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `width`: 출력 너비. (픽셀)
+	/// - `height`: 출력 높이. (픽셀)
+	///
+	/// # 돌려줌
+	/// 판을 맞췄으면 Ok. 다시 짓다 GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
 	pub fn resize(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
 		self.output_width = width.max(1);
@@ -287,7 +355,14 @@ impl ToonPostProcess {
 	}
 
 	//==============================================================================
-	// 해상도 배율 설정. (씬 판 = 출력 크기 x 배율, 0.05 ~ 4, 기본 1)
+	/// 해상도 배율 설정. (씬 판 = 출력 크기 x 배율, 0.05 ~ 4, 기본 1)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `resolution_scale`: 씬 판의 배율. (0.05 ~ 4)
+	///
+	/// # 돌려줌
+	/// 판을 맞췄으면 Ok. 다시 짓다 GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
 	pub fn set_resolution_scale(&mut self, gl: &glow::Context, resolution_scale: f32) -> Result<(), String> {
 		self.resolution_scale = resolution_scale.clamp(0.05, 4.0);
@@ -295,14 +370,24 @@ impl ToonPostProcess {
 	}
 
 	//==============================================================================
-	// 해상도 배율 반환.
+	/// 해상도 배율 반환.
+	///
+	/// # 돌려줌
+	/// 씬 판의 배율.
 	//==============================================================================
 	pub fn get_resolution_scale(&self) -> f32 {
 		self.resolution_scale
 	}
 
 	//==============================================================================
-	// 멀티샘플 표본 수 설정. (2 밑이면 없음, 바뀌면 씬 판을 다시 짓는다)
+	/// 멀티샘플 표본 수 설정. (2 밑이면 없음, 바뀌면 씬 판을 다시 짓는다)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `sample_count`: 멀티샘플 표본 수. (2 밑이면 멀티샘플 없음)
+	///
+	/// # 돌려줌
+	/// 같은 수거나 씬 판을 다시 지었으면 Ok. 새 판을 못 지으면 Err(GL 의 오류 글, 앞의 판은 그대로 둔다).
 	//==============================================================================
 	pub fn set_sample_count(&mut self, gl: &glow::Context, sample_count: i32) -> Result<(), String> {
 		let safe_sample_count = sample_count.max(0);
@@ -317,21 +402,31 @@ impl ToonPostProcess {
 	}
 
 	//==============================================================================
-	// 실제로 쓰는 멀티샘플 표본 수 반환. (0 이면 없음)
+	/// 실제로 쓰는 멀티샘플 표본 수 반환. (0 이면 없음)
+	///
+	/// # 돌려줌
+	/// 씬 판이 실제로 쓰는 표본 수. (기기가 받는 수로 줄인 것, 0 이면 없음)
 	//==============================================================================
 	pub fn get_sample_count(&self) -> i32 {
 		self.scene_render_target.get_sample_count()
 	}
 
 	//==============================================================================
-	// 씬 판이 실수인지 반환. (false 면 LDR 길)
+	/// 씬 판이 실수인지 반환. (false 면 LDR 길)
+	///
+	/// # 돌려줌
+	/// 씬 판이 실수면 true. (ToonRenderer::set_hdr_output 에 그대로 넘긴다)
 	//==============================================================================
 	pub fn get_use_float_color(&self) -> bool {
 		self.use_float_color
 	}
 
 	//==============================================================================
-	// 씬 그리기 시작. (씬 렌더 타겟을 묶고 바탕 색과 깊이로 비운다, HDR 길은 선형 색, LDR 길은 화면 색)
+	/// 씬 그리기 시작. (씬 렌더 타겟을 묶고 바탕 색과 깊이로 비운다, HDR 길은 선형 색, LDR 길은 화면 색)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `clear_color`: [r, g, b] 바탕 색. (HDR 길은 선형 색, LDR 길은 화면 색)
 	//==============================================================================
 	pub fn begin(&self, gl: &glow::Context, clear_color: [f32; 3]) {
 		self.scene_render_target.bind(gl);
@@ -344,7 +439,12 @@ impl ToonPostProcess {
 	}
 
 	//==============================================================================
-	// 마무리. (멀티샘플이면 풂 → 블룸 → 톤매핑해 낼 프레임버퍼에, viewport 는 [x, y, 너비, 높이])
+	/// 마무리. (멀티샘플이면 풂 → 블룸 → 톤매핑해 낼 프레임버퍼에, viewport 는 [x, y, 너비, 높이])
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `output_framebuffer`: 낼 프레임버퍼. (None 이면 화면)
+	/// - `viewport`: [x, y, 너비, 높이] 낼 자리. (드로잉 버퍼 픽셀, 왼쪽 아래가 원점)
 	//==============================================================================
 	pub fn end(&self, gl: &glow::Context, output_framebuffer: Option<GlFramebuffer>, viewport: [i32; 4]) {
 		self.scene_render_target.resolve(gl);
@@ -419,14 +519,23 @@ impl ToonPostProcess {
 	}
 
 	//==============================================================================
-	// 노출 설정. (톤매핑 전에 곱한다, 1 이 기본)
+	/// 노출 설정. (톤매핑 전에 곱한다, 1 이 기본)
+	///
+	/// # 인자
+	/// - `exposure`: 노출 배. (0 이상, 1 이 기본)
 	//==============================================================================
 	pub fn set_exposure(&mut self, exposure: f32) {
 		self.exposure = exposure.max(0.0);
 	}
 
 	//==============================================================================
-	// 블룸 설정. (켜기, 세기, 밝은 곳을 뽑는 문턱의 시작과 끝, 문턱은 기본 9 탭 블룸에만 쓴다)
+	/// 블룸 설정. (켜기, 세기, 밝은 곳을 뽑는 문턱의 시작과 끝, 문턱은 기본 9 탭 블룸에만 쓴다)
+	///
+	/// # 인자
+	/// - `is_bloom_enabled`: 블룸을 켤지.
+	/// - `bloom_strength`: 블룸 세기. (씬 색에 더하는 배, 기본 0.6)
+	/// - `threshold_start`: 밝은 곳을 뽑기 시작하는 선형 밝기. (기본 0.9)
+	/// - `threshold_end`: 다 뽑는 선형 밝기. (기본 1.6)
 	//==============================================================================
 	pub fn set_bloom(&mut self, is_bloom_enabled: bool, bloom_strength: f32, threshold_start: f32, threshold_end: f32) {
 		self.is_bloom_enabled = is_bloom_enabled;
@@ -435,8 +544,17 @@ impl ToonPostProcess {
 	}
 
 	//==============================================================================
-	// 블룸 단 수 설정. (0 이면 기본 9 탭 블룸, 1 이상이면 그 단 수의 다단 블룸, 문턱과 무릎은 다단 블룸의 선형 밝기)
-	// - 다단 블룸 판은 씬 판과 같은 정밀도다. (HDR 길은 RGBA16F)
+	/// 블룸 단 수 설정. (0 이면 기본 9 탭 블룸, 1 이상이면 그 단 수의 다단 블룸, 문턱과 무릎은 다단 블룸의 선형 밝기)
+	/// - 다단 블룸 판은 씬 판과 같은 정밀도다. (HDR 길은 RGBA16F)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `level_count`: 단 수. (0 이면 기본 9 탭 블룸으로 돌린다)
+	/// - `threshold`: 다단 블룸의 문턱. (선형 밝기)
+	/// - `knee`: 문턱 둘레를 부드럽게 넘기는 폭. (선형 밝기)
+	///
+	/// # 돌려줌
+	/// 바꿨으면 Ok. 다단 블룸의 셰이더나 판을 못 지으면 Err(오류 글).
 	//==============================================================================
 	pub fn set_bloom_levels(&mut self, gl: &glow::Context, level_count: usize, threshold: f32, knee: f32) -> Result<(), String> {
 		self.bloom_threshold = threshold.max(0.0);
@@ -460,14 +578,24 @@ impl ToonPostProcess {
 	}
 
 	//==============================================================================
-	// 블룸 단 수 반환. (0 이면 기본 9 탭 블룸)
+	/// 블룸 단 수 반환. (0 이면 기본 9 탭 블룸)
+	///
+	/// # 돌려줌
+	/// 다단 블룸의 단 수. (0 이면 기본 9 탭 블룸)
 	//==============================================================================
 	pub fn get_bloom_level_count(&self) -> usize {
 		self.multi_level_bloom_effect.as_ref().map_or(0, |multi_level_bloom_effect| multi_level_bloom_effect.get_level_count())
 	}
 
 	//==============================================================================
-	// 기본 9 탭 블룸의 주고받는 판을 실수로. (true 면 RGBA16F, 기본 false 는 RGBA8, 씬 판이 실수가 아니면 무시)
+	/// 기본 9 탭 블룸의 주고받는 판을 실수로. (true 면 RGBA16F, 기본 false 는 RGBA8, 씬 판이 실수가 아니면 무시)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `is_float_color`: true 면 RGBA16F, false 면 RGBA8.
+	///
+	/// # 돌려줌
+	/// 바꿨거나 이미 같으면 Ok. 새 판을 못 지으면 Err(GL 의 오류 글, 앞의 판은 그대로 둔다).
 	//==============================================================================
 	pub fn set_bloom_float_color(&mut self, gl: &glow::Context, is_float_color: bool) -> Result<(), String> {
 		let use_float_color = is_float_color && self.use_float_color;
@@ -475,16 +603,25 @@ impl ToonPostProcess {
 	}
 
 	//==============================================================================
-	// 밝기 설정. (색 보정 맨 앞에서 곱한다, 1 이 그대로)
+	/// 밝기 설정. (색 보정 맨 앞에서 곱한다, 1 이 그대로)
+	///
+	/// # 인자
+	/// - `brightness`: 밝기 배. (0 이상, 1 이 그대로)
 	//==============================================================================
 	pub fn set_brightness(&mut self, brightness: f32) {
 		self.brightness = brightness.max(0.0);
 	}
 
 	//==============================================================================
-	// 밝힌 자리 설정. (그 자리에서 수평 거리 inner_radius 안은 밝기 1, outer_radius 밖은 set_brightness 의 밝기, 사이는 부드럽게)
-	// - 씬 깊이 텍스처(옵션 use_depth_texture)와 그 프레임의 보기와 투영의 역행렬로 화소마다 월드 자리를 되짚는다. 깊이 텍스처가 없으면 무시한다.
-	// - 카메라가 움직이면 프레임마다 다시 준다. 아무것도 그리지 않은 바탕은 먼 면의 자리로 셈한다.
+	/// 밝힌 자리 설정. (그 자리에서 수평 거리 inner_radius 안은 밝기 1, outer_radius 밖은 set_brightness 의 밝기, 사이는 부드럽게)
+	/// - 씬 깊이 텍스처(옵션 use_depth_texture)와 그 프레임의 보기와 투영의 역행렬로 화소마다 월드 자리를 되짚는다. 깊이 텍스처가 없으면 무시한다.
+	/// - 카메라가 움직이면 프레임마다 다시 준다. 아무것도 그리지 않은 바탕은 먼 면의 자리로 셈한다.
+	///
+	/// # 인자
+	/// - `center`: 밝힐 자리. ([x, y, z] 월드 자리, 수평 거리는 x 와 z 로 잰다)
+	/// - `inner_radius`: 밝기 1 인 수평 반지름. (월드 길이)
+	/// - `outer_radius`: 이 밖은 set_brightness 의 밝기인 수평 반지름. (월드 길이)
+	/// - `inverse_view_projection_matrix`: 이번 프레임 보기와 투영의 역행렬.
 	//==============================================================================
 	pub fn set_lit_area(&mut self, center: [f32; 3], inner_radius: f32, outer_radius: f32, inverse_view_projection_matrix: &Matrix4) {
 		let safe_outer_radius = outer_radius.max(0.0001);
@@ -492,16 +629,24 @@ impl ToonPostProcess {
 	}
 
 	//==============================================================================
-	// 밝힌 자리 풀기.
+	/// 밝힌 자리 풀기.
 	//==============================================================================
 	pub fn clear_lit_area(&mut self) {
 		self.lit_area = None;
 	}
 
 	//==============================================================================
-	// 색 보정 설정. (채도와 대비는 1 이 그대로, 색조와 안개빛은 sRGB [r, g, b] 0 ~ 1 과 섞는 양 0 ~ 1)
-	// - 색조 색은 밝기(Rec. 709)를 1 로 맞춰 곱하므로 밝기는 그대로 두고 빛깔만 물든다.
-	// - 안개빛은 어두운 곳일수록 그 색 쪽으로 끌어올린다. (양 x (1 - 밝기))
+	/// 색 보정 설정. (채도와 대비는 1 이 그대로, 색조와 안개빛은 sRGB [r, g, b] 0 ~ 1 과 섞는 양 0 ~ 1)
+	/// - 색조 색은 밝기(Rec. 709)를 1 로 맞춰 곱하므로 밝기는 그대로 두고 빛깔만 물든다.
+	/// - 안개빛은 어두운 곳일수록 그 색 쪽으로 끌어올린다. (양 x (1 - 밝기))
+	///
+	/// # 인자
+	/// - `saturation`: 채도. (1 이 그대로, 0 이면 흑백)
+	/// - `contrast`: 대비. (1 이 그대로)
+	/// - `tone_color`: [r, g, b] 색조 색. (sRGB 0 ~ 1, 밝기를 1 로 맞춰 곱한다)
+	/// - `tone_amount`: 색조를 섞는 양. (0 ~ 1)
+	/// - `haze_color`: [r, g, b] 안개빛 색. (sRGB 0 ~ 1)
+	/// - `haze_amount`: 안개빛을 섞는 양. (0 ~ 1, 어두운 곳일수록 세다)
 	//==============================================================================
 	pub fn set_color_grade(&mut self, saturation: f32, contrast: f32, tone_color: [f32; 3], tone_amount: f32, haze_color: [f32; 3], haze_amount: f32) {
 		let tone_luminance = tone_color[0] * LUMINANCE_WEIGHTS[0] + tone_color[1] * LUMINANCE_WEIGHTS[1] + tone_color[2] * LUMINANCE_WEIGHTS[2];
@@ -515,21 +660,30 @@ impl ToonPostProcess {
 	}
 
 	//==============================================================================
-	// 가장자리 어둡게 설정. (0 이 없음, 1 이면 구석이 까맣게)
+	/// 가장자리 어둡게 설정. (0 이 없음, 1 이면 구석이 까맣게)
+	///
+	/// # 인자
+	/// - `vignette_strength`: 가장자리를 어둡게 하는 세기. (0 이 없음, 1 이면 구석이 까맣게)
 	//==============================================================================
 	pub fn set_vignette(&mut self, vignette_strength: f32) {
 		self.vignette_strength = vignette_strength.max(0.0);
 	}
 
 	//==============================================================================
-	// 씬 렌더 타겟. (다른 후처리를 끼울 때)
+	/// 씬 렌더 타겟. (다른 후처리를 끼울 때)
+	///
+	/// # 돌려줌
+	/// 씬을 그리는 렌더 타겟. (해상도 배율이나 표본 수를 바꾸면 다시 지어질 수 있다)
 	//==============================================================================
 	pub fn get_scene_render_target(&self) -> &RenderTarget {
 		&self.scene_render_target
 	}
 
 	//==============================================================================
-	// 지우기.
+	/// 지우기.
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		self.scene_render_target.destroy(gl);

@@ -1,90 +1,174 @@
 //==============================================================================
-// 툰 머티리얼과 인스턴스 꼴. (vanilla.js graphics3d/toon/toonmaterial.js)
-// - ToonMaterial: ToonRenderer 의 몸 셰이더에 끼울 셰이더 조각, 게임마다의 확장 자리.
-//   엔진의 표준 기능(텍스처, 빛, 틴트, 섞기)으로 되지 않는 무늬나 연출만 조각으로 넣는다. 조각이 없는 칸은 엔진의 빈 함수가 들어간다.
-//   - uniform_chunk: 조각 셰이더의 맨 위 칸에 들어간다. 유니폼, 상수, 함수, 정점 조각이 내보낸 in 을 적는다.
-//   - surface_chunk: void applySurface(inout ToonSurface surface) 를 정의한다. 엔진이 꼭짓점 색, 텍스처, 데칼을 셈한 뒤, 틴트와 빛 전에 부른다.
-//     ToonSurface { vec3 baseColor (sRGB), float alpha, vec3 emission (선형), vec3 normal (월드, 단위), float glow (꼭짓점 빛남), bool isUnlit,
-//                   vec4 detail (꼭짓점 무늬 번호와 무늬 색), vec2 uv, vec2 uv1 (2 번 UV, 없으면 (0, 1)), vec3 localPosition (모형 좌표), vec3 worldPosition, vec3 viewDirection (면에서 카메라 쪽, 단위),
-//                 float shadeOffset (빛을 받는 몫에 더할 값, 그늘 경계를 옮김), float specularMask (하이라이트 배), float rimMask (림 빛 배) }
-//   - light_chunk: void applyLight(ToonSurface surface, inout ToonLighting lighting) 를 정의한다. 엔진이 해, 바탕빛, 채움, 점광과 스포트라이트, 하이라이트, 림을 모은 뒤 합치기 전에 부른다.
-//     ToonLighting { vec3 irradiance (바탕색에 곱할 빛, 그늘 램프를 거친 것), vec3 specular (더할 하이라이트), vec3 rim (더할 림 빛), float shadow (0 ~ 1), float sunLevel (해를 받는 밝기 단계 0 ~ 1) }
-//   합치기는 바탕색 x irradiance + specular x specularMask + rim x rimMask + 빛남 이다.
-//   - vertex_chunk: 정점 셰이더(몸, 바깥선, 그림자 깊이 셋 모두)의 맨 위 칸에 들어가고 void applyVertex(inout ToonVertex vertex) 를 정의한다. 월드로 옮기기 전에 부른다.
-//     ToonVertex { vec3 localPosition, vec3 localNormal, vec3 color, vec2 material, vec4 detail, vec2 uv, vec2 uv1, vec4 tint, mat4 modelMatrix }
-//     인스턴스 꼴(ToonInstanceLayout)의 사용자 어트리뷰트는 그 이름의 in 으로 읽는다. 셋 모두에 들어가므로 몸에만 있는 out 은 쓰지 않는다. (꼭짓점 어트리뷰트 이름 대신 vertex 의 칸을 쓴다)
-//     노멀은 mat3(modelMatrix) 로 옮긴다. 크기가 고르지 않으면 localNormal 을 그 크기의 제곱으로 나눠 둔다.
-//   - 셰이더에는 엔진의 toLinear(vec3) 와 RECIPROCAL_PI 가 있다.
-//   - 텍스처는 그리기의 textures([(유니폼 이름, 텍스처)])로 넘긴다. 엔진이 쓰지 않는 유닛(8 부터, TOON_MAXIMUM_MATERIAL_TEXTURES 개까지)을 차례로 묶고 그 이름의 sampler2D 유니폼에 유닛을 넣는다.
-//   - 그리기마다 다른 유니폼은 on_before_draw(program, gl, ToonProgramKind) 에서 쓴다. 엔진의 유니폼은 엔진이 다시 쓰므로 머티리얼의 것만 쓴다.
-// - ToonInstanceLayout: 인스턴스 하나의 어트리뷰트 차례. (ToonRenderer::create_instance_buffer 와 draw_mesh_instance_buffer 가 쓴다)
-//   어트리뷰트마다 (이름, 크기). 이름이 instanceMatrix(16) 면 모형 행렬, instanceTint(4) 면 곱하는 색으로 엔진이 읽는다.
-//   그 밖의 이름은 사용자 어트리뷰트다. TOON_MAXIMUM_INSTANCE_ATTRIBUTES 개까지, 크기 1 ~ 4. 정점 조각이 그 이름의 in 으로 읽는다. (자리 13 부터)
-//   instanceMatrix 가 없으면 모형 행렬은 단위 행렬이다. 정점 조각이 vertex.modelMatrix 를 지어 넣는다. instanceTint 가 없으면 틴트는 1 이다.
-// - 원본은 머티리얼을 꼴 객체({ uniformChunk, ... })로 짓는다. 러스트 판은 ToonMaterialChunks 를 넘긴다.
+//! 툰 머티리얼과 인스턴스 꼴. (vanilla.js graphics3d/toon/toonmaterial.js)
+//! - ToonMaterial: ToonRenderer 의 몸 셰이더에 끼울 셰이더 조각, 게임마다의 확장 자리.
+//!   엔진의 표준 기능(텍스처, 빛, 틴트, 섞기)으로 되지 않는 무늬나 연출만 조각으로 넣는다. 조각이 없는 칸은 엔진의 빈 함수가 들어간다.
+//!   - uniform_chunk: 조각 셰이더의 맨 위 칸에 들어간다. 유니폼, 상수, 함수, 정점 조각이 내보낸 in 을 적는다.
+//!   - surface_chunk: void applySurface(inout ToonSurface surface) 를 정의한다. 엔진이 꼭짓점 색, 텍스처, 데칼을 셈한 뒤, 틴트와 빛 전에 부른다.
+//!     ToonSurface { vec3 baseColor (sRGB), float alpha, vec3 emission (선형), vec3 normal (월드, 단위), float glow (꼭짓점 빛남), bool isUnlit,
+//!                   vec4 detail (꼭짓점 무늬 번호와 무늬 색), vec2 uv, vec2 uv1 (2 번 UV, 없으면 (0, 1)), vec3 localPosition (모형 좌표), vec3 worldPosition, vec3 viewDirection (면에서 카메라 쪽, 단위),
+//!                 float shadeOffset (빛을 받는 몫에 더할 값, 그늘 경계를 옮김), float specularMask (하이라이트 배), float rimMask (림 빛 배) }
+//!   - light_chunk: void applyLight(ToonSurface surface, inout ToonLighting lighting) 를 정의한다. 엔진이 해, 바탕빛, 채움, 점광과 스포트라이트, 하이라이트, 림을 모은 뒤 합치기 전에 부른다.
+//!     ToonLighting { vec3 irradiance (바탕색에 곱할 빛, 그늘 램프를 거친 것), vec3 specular (더할 하이라이트), vec3 rim (더할 림 빛), float shadow (0 ~ 1), float sunLevel (해를 받는 밝기 단계 0 ~ 1) }
+//!   합치기는 바탕색 x irradiance + specular x specularMask + rim x rimMask + 빛남 이다.
+//!   - vertex_chunk: 정점 셰이더(몸, 바깥선, 그림자 깊이 셋 모두)의 맨 위 칸에 들어가고 void applyVertex(inout ToonVertex vertex) 를 정의한다. 월드로 옮기기 전에 부른다.
+//!     ToonVertex { vec3 localPosition, vec3 localNormal, vec3 color, vec2 material, vec4 detail, vec2 uv, vec2 uv1, vec4 tint, mat4 modelMatrix }
+//!     인스턴스 꼴(ToonInstanceLayout)의 사용자 어트리뷰트는 그 이름의 in 으로 읽는다. 셋 모두에 들어가므로 몸에만 있는 out 은 쓰지 않는다. (꼭짓점 어트리뷰트 이름 대신 vertex 의 칸을 쓴다)
+//!     노멀은 mat3(modelMatrix) 로 옮긴다. 크기가 고르지 않으면 localNormal 을 그 크기의 제곱으로 나눠 둔다.
+//!   - 셰이더에는 엔진의 toLinear(vec3) 와 RECIPROCAL_PI 가 있다.
+//!   - 텍스처는 그리기의 textures([(유니폼 이름, 텍스처)])로 넘긴다. 엔진이 쓰지 않는 유닛(8 부터, TOON_MAXIMUM_MATERIAL_TEXTURES 개까지)을 차례로 묶고 그 이름의 sampler2D 유니폼에 유닛을 넣는다.
+//!   - 그리기마다 다른 유니폼은 on_before_draw(program, gl, ToonProgramKind) 에서 쓴다. 엔진의 유니폼은 엔진이 다시 쓰므로 머티리얼의 것만 쓴다.
+//! - ToonInstanceLayout: 인스턴스 하나의 어트리뷰트 차례. (ToonRenderer::create_instance_buffer 와 draw_mesh_instance_buffer 가 쓴다)
+//!   어트리뷰트마다 (이름, 크기). 이름이 instanceMatrix(16) 면 모형 행렬, instanceTint(4) 면 곱하는 색으로 엔진이 읽는다.
+//!   그 밖의 이름은 사용자 어트리뷰트다. TOON_MAXIMUM_INSTANCE_ATTRIBUTES 개까지, 크기 1 ~ 4. 정점 조각이 그 이름의 in 으로 읽는다. (자리 13 부터)
+//!   instanceMatrix 가 없으면 모형 행렬은 단위 행렬이다. 정점 조각이 vertex.modelMatrix 를 지어 넣는다. instanceTint 가 없으면 틴트는 1 이다.
+//! - 원본은 머티리얼을 꼴 객체({ uniformChunk, ... })로 짓는다. 러스트 판은 ToonMaterialChunks 를 넘긴다.
+//!
+//! # 예제
+//! 표면 조각으로 줄무늬를 넣고 텍스처와 유니폼을 그리기마다 넘기기
+//! ```rust,no_run
+//! use vanilla::{create_box_geometry, Matrix4, MeshBuilder, ShaderProgram, ToonDrawOptions, ToonMaterialChunks, ToonPartOptions, ToonProgramKind, ToonRenderer, ToonTextureOptions, Vector3};
+//! use glow::HasContext;
+//!
+//! fn draw_stripe(gl: &glow::Context) -> Result<(), String> {
+//! 	let mut renderer = ToonRenderer::new(gl)?;
+//! 	let material = renderer.create_material(ToonMaterialChunks {
+//! 		name: String::from("stripe"),
+//! 		uniform_chunk: String::from("uniform sampler2D stripeTexture;\nuniform float stripeShift;\n"),
+//! 		surface_chunk: String::from("void applySurface(inout ToonSurface surface) {
+//! 			float stripe = texture(stripeTexture, vec2(surface.localPosition.y * 4.0 + stripeShift, 0.5)).r;
+//! 			surface.baseColor *= mix(0.5, 1.0, stripe);
+//! 		}"),
+//! 		..ToonMaterialChunks::default()
+//! 	});
+//! 	let stripe_texture = renderer.create_texture(gl, 2, 1, &[255, 255, 255, 255, 0, 0, 0, 255], ToonTextureOptions { is_mipmapped: false, ..ToonTextureOptions::default() })?;
+//! 	let mut builder = MeshBuilder::new();
+//! 	builder.add_part(&create_box_geometry(1.0, 1.0, 1.0), &Matrix4::create_identity(), "#80c0e0", ToonPartOptions::default());
+//! 	let mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("mesh failed")?;
+//! 	let view_matrix = Matrix4::create_look_at(Vector3::create(2.0, 2.0, 3.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
+//! 	renderer.begin_frame_with_matrices(gl, &view_matrix, &Matrix4::create_perspective(0.8, 1.0, 0.1, 20.0));
+//! 	let set_shift = |program: &ShaderProgram, gl: &glow::Context, _kind: ToonProgramKind| unsafe {
+//! 		gl.uniform_1_f32(program.get_uniform_location(gl, "stripeShift").as_ref(), 0.25);
+//! 	};
+//! 	renderer.draw_mesh(gl, &mesh, &Matrix4::create_identity(), ToonDrawOptions {
+//! 		material: Some(&material),
+//! 		textures: &[("stripeTexture", stripe_texture)],
+//! 		on_before_draw: Some(&set_shift),
+//! 		..ToonDrawOptions::default()
+//! 	});
+//! 	renderer.end_frame(gl);
+//! 	Ok(())
+//! }
+//! ```
 //==============================================================================
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-// 인스턴스 꼴에 넣을 수 있는 사용자 어트리뷰트 수의 상한. (어트리뷰트 자리 13, 14, 15)
+/// 인스턴스 꼴에 넣을 수 있는 사용자 어트리뷰트 수의 상한. (어트리뷰트 자리 13, 14, 15)
 pub const TOON_MAXIMUM_INSTANCE_ATTRIBUTES: usize = 3;
 
-// 사용자 인스턴스 어트리뷰트의 첫 자리.
+/// 사용자 인스턴스 어트리뷰트의 첫 자리.
 pub const TOON_FIRST_INSTANCE_ATTRIBUTE_LOCATION: u32 = 13;
 
-// 인스턴스 꼴에서 엔진이 읽는 이름. (행렬 16 은 모형 행렬, 틴트 4 는 곱하는 색)
+/// 인스턴스 꼴에서 엔진이 모형 행렬로 읽는 이름. (수 16)
 pub const TOON_INSTANCE_MATRIX_NAME: &str = "instanceMatrix";
+
+/// 인스턴스 꼴에서 엔진이 곱하는 색으로 읽는 이름. (수 4)
 pub const TOON_INSTANCE_TINT_NAME: &str = "instanceTint";
 
-// 머티리얼과 인스턴스 꼴마다 다른 번호를 주는 셈. (렌더러의 프로그램 캐시 열쇠, 0 은 기본)
+/// 머티리얼과 인스턴스 꼴마다 다른 번호를 주는 셈. (렌더러의 프로그램 캐시 열쇠, 0 은 기본)
 static NEXT_MATERIAL_ID: AtomicU32 = AtomicU32::new(1);
 static NEXT_INSTANCE_LAYOUT_ID: AtomicU32 = AtomicU32::new(1);
 
 //==============================================================================
-// 섞는 방식. (Alpha 는 곧은 알파 SRC_ALPHA, Premultiplied 는 미리 곱한 알파 ONE, Additive 는 더하기 ONE, ONE)
+/// 섞는 방식. (Alpha 는 곧은 알파 SRC_ALPHA, Premultiplied 는 미리 곱한 알파 ONE, Additive 는 더하기 ONE, ONE)
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ToonBlendMode {
+	/// 곧은 알파. (SRC_ALPHA, ONE_MINUS_SRC_ALPHA)
 	#[default]
 	Alpha,
+	/// 미리 곱한 알파. (ONE, ONE_MINUS_SRC_ALPHA)
 	Premultiplied,
+	/// 더하기. (ONE, ONE)
 	Additive,
 }
 
 //==============================================================================
-// 매트캡을 섞는 방식. (Multiply 는 색에 곱함, Add 는 색에 더함, 유니티 툰 셰이더의 MatCap 섞기와 같다)
+/// 매트캡을 섞는 방식. (Multiply 는 색에 곱함, Add 는 색에 더함, 유니티 툰 셰이더의 MatCap 섞기와 같다)
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ToonMatcapBlend {
+	/// 색에 곱한다.
 	#[default]
 	Multiply,
+	/// 색에 더한다.
 	Add,
 }
 
 //==============================================================================
-// 인스턴스 버퍼의 쓰임. (Static 은 한 번 올리고 오래 그림, Dynamic 은 자주 고침)
+/// 인스턴스 버퍼의 쓰임. (Static 은 한 번 올리고 오래 그림, Dynamic 은 자주 고침)
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ToonBufferUsage {
+	/// 한 번 올려 오래 쓴다. (STATIC_DRAW)
 	#[default]
 	Static,
+	/// 자주 고친다. (DYNAMIC_DRAW)
 	Dynamic,
 }
 
 //==============================================================================
-// 머티리얼의 셰이더 조각. (빈 글이면 엔진의 빈 함수)
+/// 머티리얼의 셰이더 조각. (빈 글이면 엔진의 빈 함수)
+///
+/// # 예제
+/// 표면 조각만 준 머티리얼
+/// ```rust
+/// use vanilla::{ToonMaterial, ToonMaterialChunks};
+///
+/// let material = ToonMaterial::new(ToonMaterialChunks {
+/// 	name: String::from("darken"),
+/// 	surface_chunk: String::from("void applySurface(inout ToonSurface surface) { surface.baseColor *= 0.5; }"),
+/// 	..ToonMaterialChunks::default()
+/// });
+/// assert_eq!(material.get_name(), "darken");
+/// assert!(material.get_light_chunk().is_empty());
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct ToonMaterialChunks {
+	/// 이름. (알림 글에 쓴다)
 	pub name: String,
+	/// 유니폼 조각. (조각 셰이더의 맨 위 칸, 유니폼, 상수, 함수, 정점 조각이 내보낸 in)
 	pub uniform_chunk: String,
+	/// 표면 조각. (void applySurface(inout ToonSurface surface) 를 정의한다)
 	pub surface_chunk: String,
+	/// 빛 조각. (void applyLight(ToonSurface surface, inout ToonLighting lighting) 를 정의한다)
 	pub light_chunk: String,
+	/// 정점 조각. (정점 셰이더 셋의 맨 위 칸, void applyVertex(inout ToonVertex vertex) 를 정의한다)
 	pub vertex_chunk: String,
 }
 
 //==============================================================================
-// 툰 머티리얼. (머리말 참고, 셰이더 조각과 번호)
+/// 툰 머티리얼. (머리말 참고, 셰이더 조각과 번호)
+///
+/// # 예제
+/// 빛 조각으로 림을 키우고 정점 조각으로 기울이기
+/// ```rust,no_run
+/// use vanilla::{ToonMaterialChunks, ToonRenderer};
+///
+/// fn prepare_lean_rim(gl: &glow::Context, renderer: &mut ToonRenderer) -> Result<(), String> {
+/// 	let material = renderer.create_material(ToonMaterialChunks {
+/// 		name: String::from("leanRim"),
+/// 		light_chunk: String::from("void applyLight(ToonSurface surface, inout ToonLighting lighting) { lighting.rim *= 2.0; }"),
+/// 		vertex_chunk: String::from("void applyVertex(inout ToonVertex vertex) { vertex.localPosition.x += vertex.localPosition.y * 0.2; }"),
+/// 		..ToonMaterialChunks::default()
+/// 	});
+/// 	if !renderer.prepare_material(gl, Some(&material), None) {
+/// 		return Err(format!("shader failed: {}", material.get_name()));
+/// 	}
+/// 	Ok(())
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct ToonMaterial {
@@ -94,49 +178,73 @@ pub struct ToonMaterial {
 
 impl ToonMaterial {
 	//==============================================================================
-	// 생성.
+	/// 생성.
+	///
+	/// # 인자
+	/// - `chunks`: 이름과 셰이더 조각. (빈 글인 칸은 엔진의 빈 함수)
+	///
+	/// # 돌려줌
+	/// 새 머티리얼. (번호는 머티리얼마다 다르다)
 	//==============================================================================
 	pub fn new(chunks: ToonMaterialChunks) -> ToonMaterial {
 		ToonMaterial { id: NEXT_MATERIAL_ID.fetch_add(1, Ordering::Relaxed), chunks }
 	}
 
 	//==============================================================================
-	// 번호 반환. (머티리얼마다 다르다)
+	/// 번호 반환. (머티리얼마다 다르다)
+	///
+	/// # 돌려줌
+	/// 머티리얼 번호.
 	//==============================================================================
 	pub fn get_id(&self) -> u32 {
 		self.id
 	}
 
 	//==============================================================================
-	// 이름 반환. (알림 글에 쓴다)
+	/// 이름 반환. (알림 글에 쓴다)
+	///
+	/// # 돌려줌
+	/// 이름. (주지 않았으면 빈 글)
 	//==============================================================================
 	pub fn get_name(&self) -> &str {
 		&self.chunks.name
 	}
 
 	//==============================================================================
-	// 유니폼 조각 반환.
+	/// 유니폼 조각 반환.
+	///
+	/// # 돌려줌
+	/// 유니폼 조각. (없으면 빈 글)
 	//==============================================================================
 	pub fn get_uniform_chunk(&self) -> &str {
 		&self.chunks.uniform_chunk
 	}
 
 	//==============================================================================
-	// 표면 조각 반환.
+	/// 표면 조각 반환.
+	///
+	/// # 돌려줌
+	/// 표면 조각. (없으면 빈 글)
 	//==============================================================================
 	pub fn get_surface_chunk(&self) -> &str {
 		&self.chunks.surface_chunk
 	}
 
 	//==============================================================================
-	// 빛 조각 반환.
+	/// 빛 조각 반환.
+	///
+	/// # 돌려줌
+	/// 빛 조각. (없으면 빈 글)
 	//==============================================================================
 	pub fn get_light_chunk(&self) -> &str {
 		&self.chunks.light_chunk
 	}
 
 	//==============================================================================
-	// 정점 조각 반환.
+	/// 정점 조각 반환.
+	///
+	/// # 돌려줌
+	/// 정점 조각. (없으면 빈 글)
 	//==============================================================================
 	pub fn get_vertex_chunk(&self) -> &str {
 		&self.chunks.vertex_chunk
@@ -144,18 +252,51 @@ impl ToonMaterial {
 }
 
 //==============================================================================
-// 인스턴스 어트리뷰트 하나. (offset 은 수 단위, location 은 사용자 어트리뷰트만 Some)
+/// 인스턴스 어트리뷰트 하나. (offset 은 수 단위, location 은 사용자 어트리뷰트만 Some)
+///
+/// # 예제
+/// 사용자 어트리뷰트의 자리 읽기
+/// ```rust
+/// use vanilla::ToonInstanceLayout;
+///
+/// let layout = ToonInstanceLayout::new(&[("instanceMatrix", 16), ("instanceShape", 4)]).unwrap();
+/// let attributes = layout.get_attributes();
+/// assert_eq!(attributes[0].location, None);
+/// assert_eq!((attributes[1].offset, attributes[1].location), (16, Some(13)));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToonInstanceAttribute {
+	/// 이름. (셰이더의 in 이름, instanceMatrix 와 instanceTint 는 엔진이 읽는다)
 	pub name: String,
+	/// 수 개수. (instanceMatrix 16, instanceTint 4, 사용자 어트리뷰트 1 ~ 4)
 	pub size: usize,
+	/// 인스턴스 하나 안에서의 자리. (수 단위)
 	pub offset: usize,
+	/// 어트리뷰트 자리. (사용자 어트리뷰트만 Some, TOON_FIRST_INSTANCE_ATTRIBUTE_LOCATION 부터 차례로)
 	pub location: Option<u32>,
 }
 
 //==============================================================================
-// 인스턴스 꼴. (머리말 참고, 어트리뷰트 이름과 크기의 차례)
+/// 인스턴스 꼴. (머리말 참고, 어트리뷰트 이름과 크기의 차례)
+///
+/// # 예제
+/// 행렬 없이 자리와 크기만 담는 꼴
+/// ```rust,no_run
+/// use vanilla::{ToonBufferUsage, ToonInstanceBuffer, ToonInstanceLayout, ToonMaterialChunks, ToonRenderer};
+///
+/// fn create_scatter(gl: &glow::Context, renderer: &mut ToonRenderer) -> Result<ToonInstanceBuffer, String> {
+/// 	let instance_layout = ToonInstanceLayout::new(&[("instanceOffset", 3), ("instanceScale", 1), ("instanceTint", 4)])?;
+/// 	let material = renderer.create_material(ToonMaterialChunks {
+/// 		name: String::from("scatter"),
+/// 		vertex_chunk: String::from("void applyVertex(inout ToonVertex vertex) { vertex.localPosition = vertex.localPosition * instanceScale + instanceOffset; }"),
+/// 		..ToonMaterialChunks::default()
+/// 	});
+/// 	renderer.prepare_material(gl, Some(&material), Some(&instance_layout));
+/// 	let data = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 0.0, 0.0, 0.5, 1.0, 0.6, 0.6, 1.0];
+/// 	renderer.create_instance_buffer(gl, &instance_layout, &data, ToonBufferUsage::Static)
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct ToonInstanceLayout {
@@ -167,7 +308,7 @@ pub struct ToonInstanceLayout {
 }
 
 //==============================================================================
-// 셰이더 이름으로 쓸 수 있는지. (글자나 _ 로 시작하고 글자, 숫자, _ 만)
+/// 셰이더 이름으로 쓸 수 있는지. (글자나 _ 로 시작하고 글자, 숫자, _ 만)
 //==============================================================================
 fn is_shader_name(name: &str) -> bool {
 	let mut characters = name.chars();
@@ -183,7 +324,13 @@ fn is_shader_name(name: &str) -> bool {
 
 impl ToonInstanceLayout {
 	//==============================================================================
-	// 생성. ((이름, 크기) 목록, 이름이 겹치거나, 크기가 맞지 않거나, 사용자 어트리뷰트가 너무 많으면 Err)
+	/// 생성. ((이름, 크기) 목록, 이름이 겹치거나, 크기가 맞지 않거나, 사용자 어트리뷰트가 너무 많으면 Err)
+	///
+	/// # 인자
+	/// - `attributes`: (이름, 크기) 의 배열.
+	///
+	/// # 돌려줌
+	/// 지은 꼴. 이름이 셰이더 이름이 아니거나 겹치거나, 크기가 맞지 않거나, 사용자 어트리뷰트가 TOON_MAXIMUM_INSTANCE_ATTRIBUTES 개를 넘으면 Err(까닭 글).
 	//==============================================================================
 	pub fn new(attributes: &[(&str, usize)]) -> Result<ToonInstanceLayout, String> {
 		let mut attribute_list = Vec::new();
@@ -226,42 +373,60 @@ impl ToonInstanceLayout {
 	}
 
 	//==============================================================================
-	// 번호 반환. (꼴마다 다르다)
+	/// 번호 반환. (꼴마다 다르다)
+	///
+	/// # 돌려줌
+	/// 꼴 번호.
 	//==============================================================================
 	pub fn get_id(&self) -> u32 {
 		self.id
 	}
 
 	//==============================================================================
-	// 어트리뷰트 목록 반환.
+	/// 어트리뷰트 목록 반환.
+	///
+	/// # 돌려줌
+	/// 어트리뷰트 목록. (offset 은 수 단위, location 은 사용자 어트리뷰트만 Some)
 	//==============================================================================
 	pub fn get_attributes(&self) -> &[ToonInstanceAttribute] {
 		&self.attribute_list
 	}
 
 	//==============================================================================
-	// 인스턴스 하나의 수 개수.
+	/// 인스턴스 하나의 수 개수.
+	///
+	/// # 돌려줌
+	/// 인스턴스 하나의 수 개수.
 	//==============================================================================
 	pub fn get_float_count(&self) -> usize {
 		self.float_count
 	}
 
 	//==============================================================================
-	// 모형 행렬이 있는지.
+	/// 모형 행렬이 있는지.
+	///
+	/// # 돌려줌
+	/// instanceMatrix 가 있으면 true.
 	//==============================================================================
 	pub fn has_matrix(&self) -> bool {
 		self.has_matrix
 	}
 
 	//==============================================================================
-	// 틴트가 있는지.
+	/// 틴트가 있는지.
+	///
+	/// # 돌려줌
+	/// instanceTint 가 있으면 true.
 	//==============================================================================
 	pub fn has_tint(&self) -> bool {
 		self.has_tint
 	}
 
 	//==============================================================================
-	// 사용자 어트리뷰트의 셰이더 선언. (in float / vec2 / vec3 / vec4 이름;)
+	/// 사용자 어트리뷰트의 셰이더 선언. (in float / vec2 / vec3 / vec4 이름;)
+	///
+	/// # 돌려줌
+	/// 사용자 어트리뷰트마다 한 줄인 in 선언. (없으면 빈 글)
 	//==============================================================================
 	pub fn read_declaration_source(&self) -> String {
 		let type_names = ["", "float", "vec2", "vec3", "vec4"];
@@ -280,6 +445,9 @@ impl ToonInstanceLayout {
 mod tests {
 	use super::*;
 
+	//==============================================================================
+	/// 사용자 어트리뷰트의 자리와 선언, 맞지 않는 꼴의 오류 보기.
+	//==============================================================================
 	#[test]
 	fn instance_layout_places_custom_attributes() {
 		let layout = ToonInstanceLayout::new(&[("instanceShape", 4), ("instanceOffset", 3), ("instanceColor", 3)]).unwrap();

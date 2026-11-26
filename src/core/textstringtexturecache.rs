@@ -113,6 +113,12 @@ pub fn take_unresolved_family_characters(family_name: &str) -> String {
 /// Graphic 없이 CSS line-height normal 의 줄 높이 재기. (폰트 문자열, 크롬은 첫째로 쓸 수 있는 글꼴(primary font)의 LineSpacing)
 /// - 데스크탑은 그릴 때와 같은 얼굴 고르기의 첫 얼굴로 셈한다. (LoadedFont::calculate_normal_line_height) 글꼴이 하나도 없으면 None 이다.
 /// - 웹은 브라우저가 놓은 줄 높이를 읽는다. (platform/web/systemfont.rs)
+///
+/// # 인자
+/// - `font_string`: Canvas2D font 꼴 글. ("bold 16px sans-serif" 처럼)
+///
+/// # 돌려줌
+/// 줄 높이. (CSS 픽셀) 데스크탑은 글꼴을 등록한 글자 캐시가 없거나 고를 얼굴이 없으면, 웹은 문서가 없거나 잰 높이가 0 이하면 None.
 //==============================================================================
 pub fn measure_normal_line_height_without_graphic(font_string: &str) -> Option<f32> {
 	let font_description = parse_font_string(font_string);

@@ -1,21 +1,49 @@
 //==============================================================================
-// 툰 화면 공간 바깥선. (vanilla.js graphics3d/toon/toonscreenoutline.js 의 ToonScreenOutline)
-// - 노멀, 선 번호, 깊이를 선의 판에 그리고, 바로 이웃 사이의 경계에서 선을 잡아 점프 플러딩으로 넓힌 뒤 거리로 덮는 몫을 셈해 섞는다.
-// - 선의 판: ToonRenderer 의 create_mesh 결과를 같은 행렬로 한 번 더 그려 노멀(팔면체 접기), 선 번호(14 비트), 꼴(바깥 선, 꺾임 선을 켤지)과 깊이를 쓴다.
-// - 잡기: 화소와 바로 이웃 넷 사이의 경계마다 한 번 본다. 선은 화소가 아니라 화소 사이의 경계 가운데에 선다. (같은 경계를 두 번 긋지 않는다)
-//   바깥 선은 빈 곳과 맞닿은 실루엣, 다른 번호와 맞닿은 곳, 같은 번호라도 서로의 접평면에서 깊이 문턱보다 떨어진 곳(가려진 실루엣)이다.
-//   꺾임 선은 같은 번호 안에서 이웃한 두 노멀이 꺾임 각보다 더 벌어진 곳이다. 화소 하나 사이의 노멀만 보므로 둥근 면의 실루엣 둘레나 비스듬한 면에 띠가 서지 않는다.
-//   깊이를 접평면 거리로 견주므로 비스듬히 보는 바닥에 가짜 선이 서지 않는다. 문턱에 그 깊이의 화소 크기 두 배를 더해 먼 것도 같은 뜻이 된다.
-// - 넓히기: 경계 토막까지의 거리를 점프 플러딩으로 퍼뜨린다. 굵기에 상관없이 걸음 수는 log2 이고, 바깥 선과 꺾임 선은 따로 퍼뜨려 굵기를 따로 준다.
-// - 섞기: 그리는 영역의 화소마다 가장 가까운 경계까지의 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 덮는다. (가장자리가 부드럽고, 선의 판을 줄여도 늘인 선이 점선이 되지 않는다)
-// - 모형마다: ToonLineDrawOptions 의 has_screen_outline 이 false 면 그 모형은 선을 내지 않고 뒤의 선만 가린다. has_crease_line 이 false 면 꺾임 선만 끈다.
-// - 굵기: set_width 와 set_crease 의 굵기는 선 하나의 굵기다. (경계를 가운데로 양쪽에 반씩) 단위는 ToonOutlineWidthUnit, 한 픽셀 밑으로 내리지 않는다.
-// - 깊이: 투영 행렬로 직교와 원근을 가리고, 깊이를 보기 공간 자리로 풀어 견준다. (화면 사각형처럼 클립 x, y 를 옮긴 투영도 된다)
-// - 값: set_resolution_scale 로 넓히기(점프 플러딩) 판을 줄인다. (폰의 가벼운 길) 선의 판과 씨앗은 그리는 영역 해상도라 줄여도 선 자리는 그대로다.
-// - 사용: 매 프레임 begin_line_ids(gl, 보기, 투영) → draw_mesh / draw_mesh_instanced → end_line_ids(gl) (씨앗과 넓히기까지 셈) → 툰 몸 그리기 → draw_outline(gl).
-//   begin_line_ids 는 그때의 뷰포트를 그리는 영역으로 적어 두고, 선의 판을 그 크기에 맞춰 짓는다. end_line_ids 와 draw_outline 이 프레임버퍼, 뷰포트, 상태를 돌린다.
-//   ToonDrawQueue::set_screen_outline 으로 맡기면 그리기 줄이 이 차례를 스스로 한다. (엔진 2D 그리기 사이에 끼울 때, 그 전에 Graphic 의 묶음을 내보내고 끝에 restore_render_state)
-// - 인스턴스마다의 번호는 ToonInstance 의 line_id 다. (원본 인스턴스 객체의 lineId, None 이면 공통 번호)
+//! 툰 화면 공간 바깥선. (vanilla.js graphics3d/toon/toonscreenoutline.js 의 ToonScreenOutline)
+//! - 노멀, 선 번호, 깊이를 선의 판에 그리고, 바로 이웃 사이의 경계에서 선을 잡아 점프 플러딩으로 넓힌 뒤 거리로 덮는 몫을 셈해 섞는다.
+//! - 선의 판: ToonRenderer 의 create_mesh 결과를 같은 행렬로 한 번 더 그려 노멀(팔면체 접기), 선 번호(14 비트), 꼴(바깥 선, 꺾임 선을 켤지)과 깊이를 쓴다.
+//! - 잡기: 화소와 바로 이웃 넷 사이의 경계마다 한 번 본다. 선은 화소가 아니라 화소 사이의 경계 가운데에 선다. (같은 경계를 두 번 긋지 않는다)
+//!   바깥 선은 빈 곳과 맞닿은 실루엣, 다른 번호와 맞닿은 곳, 같은 번호라도 서로의 접평면에서 깊이 문턱보다 떨어진 곳(가려진 실루엣)이다.
+//!   꺾임 선은 같은 번호 안에서 이웃한 두 노멀이 꺾임 각보다 더 벌어진 곳이다. 화소 하나 사이의 노멀만 보므로 둥근 면의 실루엣 둘레나 비스듬한 면에 띠가 서지 않는다.
+//!   깊이를 접평면 거리로 견주므로 비스듬히 보는 바닥에 가짜 선이 서지 않는다. 문턱에 그 깊이의 화소 크기 두 배를 더해 먼 것도 같은 뜻이 된다.
+//! - 넓히기: 경계 토막까지의 거리를 점프 플러딩으로 퍼뜨린다. 굵기에 상관없이 걸음 수는 log2 이고, 바깥 선과 꺾임 선은 따로 퍼뜨려 굵기를 따로 준다.
+//! - 섞기: 그리는 영역의 화소마다 가장 가까운 경계까지의 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 덮는다. (가장자리가 부드럽고, 선의 판을 줄여도 늘인 선이 점선이 되지 않는다)
+//! - 모형마다: ToonLineDrawOptions 의 has_screen_outline 이 false 면 그 모형은 선을 내지 않고 뒤의 선만 가린다. has_crease_line 이 false 면 꺾임 선만 끈다.
+//! - 굵기: set_width 와 set_crease 의 굵기는 선 하나의 굵기다. (경계를 가운데로 양쪽에 반씩) 단위는 ToonOutlineWidthUnit, 한 픽셀 밑으로 내리지 않는다.
+//! - 깊이: 투영 행렬로 직교와 원근을 가리고, 깊이를 보기 공간 자리로 풀어 견준다. (화면 사각형처럼 클립 x, y 를 옮긴 투영도 된다)
+//! - 값: set_resolution_scale 로 넓히기(점프 플러딩) 판을 줄인다. (폰의 가벼운 길) 선의 판과 씨앗은 그리는 영역 해상도라 줄여도 선 자리는 그대로다.
+//! - 사용: 매 프레임 begin_line_ids(gl, 보기, 투영) → draw_mesh / draw_mesh_instanced → end_line_ids(gl) (씨앗과 넓히기까지 셈) → 툰 몸 그리기 → draw_outline(gl).
+//!   begin_line_ids 는 그때의 뷰포트를 그리는 영역으로 적어 두고, 선의 판을 그 크기에 맞춰 짓는다. end_line_ids 와 draw_outline 이 프레임버퍼, 뷰포트, 상태를 돌린다.
+//!   ToonDrawQueue::set_screen_outline 으로 맡기면 그리기 줄이 이 차례를 스스로 한다. (엔진 2D 그리기 사이에 끼울 때, 그 전에 Graphic 의 묶음을 내보내고 끝에 restore_render_state)
+//! - 인스턴스마다의 번호는 ToonInstance 의 line_id 다. (원본 인스턴스 객체의 lineId, None 이면 공통 번호)
+//!
+//! # 예제
+//! 툰 화면 공간 바깥선을 한 프레임에 긋기
+//! ```rust,no_run
+//! use vanilla::{create_box_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonLineDrawOptions, ToonOutlineWidthUnit, ToonPartOptions, ToonRenderer, ToonScreenOutline, Vector3};
+//!
+//! fn draw_outlined_box(gl: &glow::Context) -> Result<(), String> {
+//! 	let mut renderer = ToonRenderer::new(gl)?;
+//! 	let mut outline = ToonScreenOutline::new(gl)?;
+//! 	outline.set_width(2.0, ToonOutlineWidthUnit::Pixel);
+//! 	outline.set_crease(50.0, 1.0, 0.8);
+//! 	let mut builder = MeshBuilder::new();
+//! 	builder.add_part(&create_box_geometry(1.0, 1.0, 1.0), &Matrix4::create_identity(), "#e0c8a8", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
+//! 	let mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("mesh failed")?;
+//! 	let view_matrix = Matrix4::create_look_at(Vector3::create(2.0, 2.0, 3.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
+//! 	let projection_matrix = Matrix4::create_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+//! 	let model_matrix = Matrix4::create_identity();
+//! 	if outline.begin_line_ids(gl, &view_matrix, &projection_matrix) {
+//! 		outline.draw_mesh(gl, &mesh, &model_matrix, 1, ToonLineDrawOptions::default());
+//! 		outline.end_line_ids(gl);
+//! 	}
+//! 	renderer.begin_frame_with_matrices(gl, &view_matrix, &projection_matrix);
+//! 	renderer.draw_mesh(gl, &mesh, &model_matrix, ToonDrawOptions::default());
+//! 	renderer.end_frame(gl);
+//! 	outline.draw_outline(gl);
+//! 	Ok(())
+//! }
+//! ```
 //==============================================================================
 use glow::HasContext;
 
@@ -25,45 +53,72 @@ use crate::core::shaderprogram::ShaderProgram;
 use crate::graphics3d::toon::toonrenderer::{read_matrix_determinant, ToonInstance, ToonMesh, TOON_ATTRIBUTE_LOCATIONS, TOON_INSTANCE_FLOAT_COUNT, TOON_MAXIMUM_JOINTS};
 use crate::graphics3d::GlFramebuffer;
 
-// 선 번호의 상한. (선의 판에 14 비트로 쓴다, 0 은 빈 곳)
+/// 선 번호의 상한. (선의 판에 14 비트로 쓴다, 0 은 빈 곳)
 pub const TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID: u32 = 16383;
 
-// 선의 판과 씨앗 판을 묶는 텍스처 유닛. (툰 렌더러의 그림자 유닛 3 과 겹치지 않게)
+/// 선의 판과 씨앗 판을 묶는 텍스처 유닛. (툰 렌더러의 그림자 유닛 3 과 겹치지 않게)
 const LINE_TEXTURE_UNIT: u32 = 5;
 const DEPTH_TEXTURE_UNIT: u32 = 6;
 
 //==============================================================================
-// 굵기의 단위.
+/// 굵기의 단위.
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToonOutlineWidthUnit {
-	// 월드 길이. (직교는 투영의 세로 배율로, 원근은 초점 거리에서 화면 픽셀로 셈해 멀수록 가늘어진다)
+	/// 월드 길이. (직교는 투영의 세로 배율로, 원근은 초점 거리에서 화면 픽셀로 셈해 멀수록 가늘어진다)
 	World,
-	// 그리는 영역의 픽셀. (거리와 상관없이 같은 굵기)
+	/// 그리는 영역의 픽셀. (거리와 상관없이 같은 굵기)
 	Pixel,
 }
 
 //==============================================================================
-// 번호를 그릴 때의 꼴. (원본 drawMesh 의 options)
+/// 번호를 그릴 때의 꼴. (원본 drawMesh 의 options)
+///
+/// # 예제
+/// 바닥은 선 없이 가리기만, 결정은 꺾임 선 없이
+/// ```rust,no_run
+/// use vanilla::{create_box_geometry, create_octahedron_geometry, Matrix4, MeshBuilder, ToonLineDrawOptions, ToonPartOptions, ToonRenderer, ToonScreenOutline, Vector3};
+///
+/// fn draw_floor_and_crystal(gl: &glow::Context, renderer: &ToonRenderer, outline: &mut ToonScreenOutline) -> Option<()> {
+/// 	let part_options = ToonPartOptions { has_outline: false, ..ToonPartOptions::default() };
+/// 	let mut floor_builder = MeshBuilder::new();
+/// 	floor_builder.add_part(&create_box_geometry(6.0, 0.2, 6.0), &Matrix4::create_translation(0.0, -0.1, 0.0), "#506070", part_options);
+/// 	let floor_mesh = renderer.create_mesh(gl, &floor_builder.read_arrays())?;
+/// 	let mut crystal_builder = MeshBuilder::new();
+/// 	crystal_builder.add_part(&create_octahedron_geometry(0.5), &Matrix4::create_translation(0.0, 0.5, 0.0), "#90d0ff", part_options);
+/// 	let crystal_mesh = renderer.create_mesh(gl, &crystal_builder.read_arrays())?;
+/// 	let view_matrix = Matrix4::create_look_at(Vector3::create(3.0, 3.0, 4.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
+/// 	let projection_matrix = Matrix4::create_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+/// 	if outline.begin_line_ids(gl, &view_matrix, &projection_matrix) {
+/// 		outline.draw_mesh(gl, &floor_mesh, &Matrix4::create_identity(), 1, ToonLineDrawOptions { has_screen_outline: false, ..ToonLineDrawOptions::default() });
+/// 		outline.draw_mesh(gl, &crystal_mesh, &Matrix4::create_identity(), 2, ToonLineDrawOptions { has_crease_line: false, ..ToonLineDrawOptions::default() });
+/// 		outline.end_line_ids(gl);
+/// 	}
+/// 	Some(())
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct ToonLineDrawOptions<'a> {
+	/// 뼈대 모형의 본 행렬. (본마다 수 16, TOON_MAXIMUM_JOINTS 개까지, ToonRenderer::draw_mesh 와 같은 자세로 주고, None 이면 자세 없이 그린다)
 	pub joint_matrices: Option<&'a [f32]>,
+	/// 화면 밖이면 건너뛸지. (경계 구가 절두체 밖이면 그리지 않는다, 기본 true)
 	pub is_culled: bool,
-	// 몸 번호 버퍼의 일부만. (부품에 다른 번호를 줄 때, 시작 번호와 수, 수가 None 이면 끝까지)
+	/// 몸 번호 버퍼의 일부만. (부품에 다른 번호를 줄 때, 시작 번호와 수, 수가 None 이면 끝까지)
 	pub index_start: usize,
+	/// 몸 번호 버퍼에서 그릴 수. (None 이면 index_start 부터 끝까지)
 	pub index_count: Option<usize>,
-	// 감기를 뒤집어 그릴지. (None 이면 모형 행렬의 행렬식이 음수일 때, 인스턴스는 None 이면 뒤집지 않음)
+	/// 감기를 뒤집어 그릴지. (None 이면 모형 행렬의 행렬식이 음수일 때, 인스턴스는 None 이면 뒤집지 않음)
 	pub is_mirrored: Option<bool>,
-	// 바깥 선을 낼지. (false 면 선은 내지 않고 뒤의 선만 가린다)
+	/// 바깥 선을 낼지. (false 면 선은 내지 않고 뒤의 선만 가린다)
 	pub has_screen_outline: bool,
-	// 꺾임 선을 낼지.
+	/// 꺾임 선을 낼지.
 	pub has_crease_line: bool,
 }
 
 impl Default for ToonLineDrawOptions<'_> {
 	//==============================================================================
-	// 기본값. (거르기 켬, 몸 전체, 바깥 선과 꺾임 선 켬)
+	/// 기본값. (거르기 켬, 몸 전체, 바깥 선과 꺾임 선 켬)
 	//==============================================================================
 	fn default() -> Self {
 		ToonLineDrawOptions { joint_matrices: None, is_culled: true, index_start: 0, index_count: None, is_mirrored: None, has_screen_outline: true, has_crease_line: true }
@@ -71,26 +126,49 @@ impl Default for ToonLineDrawOptions<'_> {
 }
 
 //==============================================================================
-// 선의 판. (그리는 영역 해상도의 노멀과 번호 RGBA8, 깊이 24, 씨앗 RGBA16UI, 넓히기 판 RGBA16UI 둘, jump_flood_index 는 넓히기를 마친 쪽)
+/// 선의 판. (그리는 영역 해상도의 노멀과 번호 RGBA8, 깊이 24, 씨앗 RGBA16UI, 넓히기 판 RGBA16UI 둘, jump_flood_index 는 넓히기를 마친 쪽)
+///
+/// # 예제
+/// 선의 판과 넓히기 판의 크기 읽기
+/// ```rust,no_run
+/// use vanilla::ToonScreenOutline;
+///
+/// fn print_line_target(outline: &ToonScreenOutline) {
+/// 	if let Some(line_target) = outline.get_line_target() {
+/// 		println!("line {} x {}, jump flood {} x {}", line_target.width, line_target.height, line_target.jump_flood_width, line_target.jump_flood_height);
+/// 	}
+/// }
+/// ```
 //==============================================================================
 pub struct ToonLineTarget {
+	/// 선의 판 프레임버퍼. (노멀과 번호 텍스처, 깊이 텍스처)
 	pub framebuffer: GlFramebuffer,
+	/// 노멀과 번호 텍스처. (RGBA8, 노멀은 팔면체로 접어 rg, 번호와 꼴은 ba)
 	pub line_texture: GlTexture,
+	/// 깊이 텍스처. (깊이 24)
 	pub depth_texture: GlTexture,
+	/// 씨앗 판 프레임버퍼.
 	pub seed_framebuffer: GlFramebuffer,
+	/// 온 해상도 씨앗 텍스처. (RGBA16UI, rg 는 바깥 선, ba 는 꺾임 선)
 	pub seed_texture: GlTexture,
+	/// 넓히기 판 프레임버퍼 둘. (번갈아 쓴다)
 	pub jump_flood_framebuffers: [GlFramebuffer; 2],
+	/// 넓히기 판 텍스처 둘. (RGBA16UI)
 	pub jump_flood_textures: [GlTexture; 2],
+	/// 넓히기를 마친 쪽. (jump_flood_textures 의 차례, 0 이나 1)
 	pub jump_flood_index: usize,
+	/// 선의 판 너비. (그리는 영역 픽셀)
 	pub width: i32,
+	/// 선의 판 높이. (그리는 영역 픽셀)
 	pub height: i32,
-	/// 넓히기 판 크기. (픽셀)
+	/// 넓히기 판 너비. (픽셀)
 	pub jump_flood_width: i32,
+	/// 넓히기 판 높이. (픽셀)
 	pub jump_flood_height: i32,
 }
 
 //==============================================================================
-// 이번 프레임의 카메라.
+/// 이번 프레임의 카메라.
 //==============================================================================
 #[derive(Clone, Copy)]
 struct LineFrame {
@@ -102,7 +180,7 @@ struct LineFrame {
 }
 
 //==============================================================================
-// 앞의 그리기 상태.
+/// 앞의 그리기 상태.
 //==============================================================================
 struct SavedState {
 	is_blend_enabled: bool,
@@ -124,7 +202,22 @@ struct SavedState {
 }
 
 //==============================================================================
-// 툰 화면 공간 바깥선. (머리말 참고)
+/// 툰 화면 공간 바깥선. (머리말 참고)
+///
+/// # 예제
+/// 꺾임 선 없이 실루엣만 굵게
+/// ```rust,no_run
+/// use vanilla::{ToonOutlineWidthUnit, ToonScreenOutline};
+///
+/// fn create_silhouette_outline(gl: &glow::Context) -> Result<ToonScreenOutline, String> {
+/// 	let mut outline = ToonScreenOutline::new(gl)?;
+/// 	outline.set_color([0.1, 0.08, 0.12, 1.0]);
+/// 	outline.set_width(3.0, ToonOutlineWidthUnit::Pixel);
+/// 	outline.set_crease(180.0, 1.0, 1.0);
+/// 	outline.set_resolution_scale(0.5);
+/// 	Ok(outline)
+/// }
+/// ```
 //==============================================================================
 pub struct ToonScreenOutline {
 	line_program: ShaderProgram,
@@ -154,7 +247,7 @@ pub struct ToonScreenOutline {
 }
 
 //==============================================================================
-// f32 배열을 바이트로 본다. (GL 버퍼 업로드용)
+/// f32 배열을 바이트로 본다. (GL 버퍼 업로드용)
 //==============================================================================
 fn float_slice_to_bytes(values: &[f32]) -> &[u8] {
 	unsafe {
@@ -163,7 +256,7 @@ fn float_slice_to_bytes(values: &[f32]) -> &[u8] {
 }
 
 //==============================================================================
-// 보기와 투영 행렬에서 절두체의 면 여섯. (ToonRenderer 와 같은 셈, ax + by + cz + d >= 0 이 안쪽)
+/// 보기와 투영 행렬에서 절두체의 면 여섯. (ToonRenderer 와 같은 셈, ax + by + cz + d >= 0 이 안쪽)
 //==============================================================================
 fn extract_frustum_planes(matrix: &Matrix4) -> [[f32; 4]; 6] {
 	let elements = &matrix.elements;
@@ -186,8 +279,22 @@ fn extract_frustum_planes(matrix: &Matrix4) -> [[f32; 4]; 6] {
 }
 
 //==============================================================================
-// 점프 플러딩의 걸음 목록. (씨앗을 reach 화소까지 넓히는 데 드는 걸음, 큰 것부터 반씩 줄여 1 까지)
-// - 걸음 k, k/2, ..., 1 은 씨앗을 2k - 1 화소까지 옮긴다. (Rong, Tan 2006)
+/// 점프 플러딩의 걸음 목록. (씨앗을 reach 화소까지 넓히는 데 드는 걸음, 큰 것부터 반씩 줄여 1 까지)
+/// - 걸음 k, k/2, ..., 1 은 씨앗을 2k - 1 화소까지 옮긴다. (Rong, Tan 2006)
+///
+/// # 인자
+/// - `reach`: 씨앗을 옮길 거리. (선의 판 픽셀)
+///
+/// # 돌려줌
+/// 큰 것부터 1 까지의 걸음.
+///
+/// # 예제
+/// 4 화소까지 넓히는 걸음
+/// ```rust
+/// use vanilla::read_jump_flood_steps;
+///
+/// assert_eq!(read_jump_flood_steps(4.0), vec![4, 2, 1]);
+/// ```
 //==============================================================================
 pub fn read_jump_flood_steps(reach: f32) -> Vec<i32> {
 	let distance = (reach.ceil() as i32).max(1);
@@ -204,7 +311,7 @@ pub fn read_jump_flood_steps(reach: f32) -> Vec<i32> {
 }
 
 //==============================================================================
-// 선 굵기 셈. ([바깥 선, 꺾임 선] 의 그리는 영역 픽셀, 0 이 아니면 한 픽셀 밑으로 내리지 않음, 원근의 월드 굵기는 초점 거리에서)
+/// 선 굵기 셈. ([바깥 선, 꺾임 선] 의 그리는 영역 픽셀, 0 이 아니면 한 픽셀 밑으로 내리지 않음, 원근의 월드 굵기는 초점 거리에서)
 //==============================================================================
 fn compute_line_widths(widths: [f32; 2], width_unit: ToonOutlineWidthUnit, viewport_height: i32, projection_scale: f32, is_perspective: bool, focus_distance: f32) -> [f32; 2] {
 	let mut pixels_per_unit = 1.0;
@@ -220,14 +327,23 @@ fn compute_line_widths(widths: [f32; 2], width_unit: ToonOutlineWidthUnit, viewp
 
 impl ToonScreenOutline {
 	//==============================================================================
-	// 셰이더 소스. ((정점, 조각) 네 벌: 번호, 씨앗, 넓히기, 섞기)
+	/// 셰이더 소스. ((정점, 조각) 다섯 벌: 번호, 씨앗, 모으기, 넓히기, 섞기)
+	///
+	/// # 돌려줌
+	/// (정점 셰이더, 조각 셰이더) 다섯. (번호, 씨앗, 모으기, 넓히기, 섞기, 번호 셰이더의 어트리뷰트 자리는 TOON_ATTRIBUTE_LOCATIONS)
 	//==============================================================================
 	pub fn read_program_sources() -> [(&'static str, &'static str); 5] {
 		[(LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, SEED_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, SEED_GATHER_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, JUMP_FLOOD_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, COMPOSITE_FRAGMENT_SHADER)]
 	}
 
 	//==============================================================================
-	// 생성. (네 프로그램과 빈 버텍스 어레이를 짓는다, 선의 판은 첫 begin_line_ids 에서)
+	/// 생성. (다섯 프로그램과 빈 버텍스 어레이를 짓는다, 선의 판은 첫 begin_line_ids 에서)
+	///
+	/// # 인자
+	/// - `gl`: 툰 렌더러와 같은 컨텍스트.
+	///
+	/// # 돌려줌
+	/// 새 화면 공간 바깥선. 셰이더를 짓지 못하거나 버텍스 어레이를 못 만들면 Err(오류 글).
 	//==============================================================================
 	pub fn new(gl: &glow::Context) -> Result<ToonScreenOutline, String> {
 		let line_program = ShaderProgram::create_with_attribute_locations(gl, LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER, &TOON_ATTRIBUTE_LOCATIONS)?;
@@ -265,14 +381,21 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 선 색 설정. (sRGB 0 ~ 1 과 알파, 바깥 선과 꺾임 선이 같이 쓴다)
+	/// 선 색 설정. (sRGB 0 ~ 1 과 알파, 바깥 선과 꺾임 선이 같이 쓴다)
+	///
+	/// # 인자
+	/// - `color`: [r, g, b, a] 의 sRGB.
 	//==============================================================================
 	pub fn set_color(&mut self, color: [f32; 4]) {
 		self.color = color;
 	}
 
 	//==============================================================================
-	// 바깥 선 굵기 설정. (실루엣과 다른 번호와 맞닿은 곳의 선, 반지름이 아니라 선 하나의 굵기, 0 이면 긋지 않음, 꺾임 선 굵기도 이 단위로 센다)
+	/// 바깥 선 굵기 설정. (실루엣과 다른 번호와 맞닿은 곳의 선, 반지름이 아니라 선 하나의 굵기, 0 이면 긋지 않음, 꺾임 선 굵기도 이 단위로 센다)
+	///
+	/// # 인자
+	/// - `width`: 선 하나의 굵기. (경계를 가운데로 양쪽에 반씩)
+	/// - `unit`: 굵기의 단위. (원본 기본 Pixel)
 	//==============================================================================
 	pub fn set_width(&mut self, width: f32, unit: ToonOutlineWidthUnit) {
 		self.width = width.max(0.0);
@@ -280,7 +403,12 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 꺾임 선 설정. (같은 번호 안에서 이웃한 면이 이 각(도)보다 더 꺾이면 선, 굵기는 set_width 의 단위, 진하기 0 ~ 1, 180 도나 굵기 0 이면 긋지 않음)
+	/// 꺾임 선 설정. (같은 번호 안에서 이웃한 면이 이 각(도)보다 더 꺾이면 선, 굵기는 set_width 의 단위, 진하기 0 ~ 1, 180 도나 굵기 0 이면 긋지 않음)
+	///
+	/// # 인자
+	/// - `angle_degrees`: 꺾임 각. (180 이면 꺾임 선을 긋지 않는다)
+	/// - `width`: 꺾임 선 하나의 굵기. (원본 기본 1, 0 이면 긋지 않는다)
+	/// - `opacity`: 꺾임 선의 진하기. (원본 기본 1, 선 색의 알파에 곱한다)
 	//==============================================================================
 	pub fn set_crease(&mut self, angle_degrees: f32, width: f32, opacity: f32) {
 		self.crease_cosine = angle_degrees.clamp(0.0, 180.0).to_radians().cos();
@@ -289,49 +417,70 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 초점 거리 설정. (원근 카메라에서 월드 굵기를 픽셀로 셀 거리, 보통 카메라에서 보는 점까지, 0 이면 그린 모형들의 평균 거리)
+	/// 초점 거리 설정. (원근 카메라에서 월드 굵기를 픽셀로 셀 거리, 보통 카메라에서 보는 점까지, 0 이면 그린 모형들의 평균 거리)
+	///
+	/// # 인자
+	/// - `focus_distance`: 카메라에서의 거리. (월드 길이)
 	//==============================================================================
 	pub fn set_focus_distance(&mut self, focus_distance: f32) {
 		self.focus_distance = focus_distance.max(0.0);
 	}
 
 	//==============================================================================
-	// 깊이 문턱 설정. (같은 번호의 이웃 화소가 서로의 접평면에서 이만큼 넘게 떨어지면 가려진 실루엣으로 긋는다, 월드 길이, 그 깊이의 화소 크기 두 배를 더해 쓴다)
+	/// 깊이 문턱 설정. (같은 번호의 이웃 화소가 서로의 접평면에서 이만큼 넘게 떨어지면 가려진 실루엣으로 긋는다, 월드 길이, 그 깊이의 화소 크기 두 배를 더해 쓴다)
+	///
+	/// # 인자
+	/// - `depth_threshold`: 접평면 거리 문턱. (월드 길이)
 	//==============================================================================
 	pub fn set_depth_threshold(&mut self, depth_threshold: f32) {
 		self.depth_threshold = depth_threshold.max(0.0);
 	}
 
 	//==============================================================================
-	// 넓히기 판의 해상도 몫 설정. (그리는 영역에 대한 몫 0.25 ~ 1, 선의 판과 씨앗은 그리는 영역 해상도로 잡고 점프 플러딩만 줄인 판에서 해서, 줄여도 계단과 점선이 없다)
+	/// 넓히기 판의 해상도 몫 설정. (그리는 영역에 대한 몫 0.25 ~ 1, 선의 판과 씨앗은 그리는 영역 해상도로 잡고 점프 플러딩만 줄인 판에서 해서, 줄여도 계단과 점선이 없다)
+	///
+	/// # 인자
+	/// - `resolution_scale`: 0.25 ~ 1.
 	//==============================================================================
 	pub fn set_resolution_scale(&mut self, resolution_scale: f32) {
 		self.resolution_scale = resolution_scale.clamp(0.25, 1.0);
 	}
 
 	//==============================================================================
-	// HDR 출력 설정. (true 면 선 색을 선형으로 바꿔 섞는다, ToonRenderer::set_hdr_output 과 맞춘다)
+	/// HDR 출력 설정. (true 면 선 색을 선형으로 바꿔 섞는다, ToonRenderer::set_hdr_output 과 맞춘다)
+	///
+	/// # 인자
+	/// - `is_hdr_output`: true 면 선 색을 선형으로 바꿔 섞는다.
 	//==============================================================================
 	pub fn set_hdr_output(&mut self, is_hdr_output: bool) {
 		self.is_hdr_output = is_hdr_output;
 	}
 
 	//==============================================================================
-	// 이번 프레임의 선 굵기. ([바깥 선, 꺾임 선] 의 그리는 영역 픽셀, end_line_ids 뒤에 정해짐, 긋지 않으면 0)
+	/// 이번 프레임의 선 굵기. ([바깥 선, 꺾임 선] 의 그리는 영역 픽셀, end_line_ids 뒤에 정해짐, 긋지 않으면 0)
+	///
+	/// # 돌려줌
+	/// [바깥 선 굵기, 꺾임 선 굵기]. (긋지 않으면 0)
 	//==============================================================================
 	pub fn get_line_widths(&self) -> [f32; 2] {
 		self.line_widths
 	}
 
 	//==============================================================================
-	// 선의 판 반환. (없으면 None, 번호와 깊이와 씨앗 텍스처, 크기)
+	/// 선의 판 반환. (없으면 None, 번호와 깊이와 씨앗 텍스처, 크기)
+	///
+	/// # 돌려줌
+	/// 선의 판. (노멀과 번호 텍스처, 깊이 텍스처, 씨앗 텍스처, 넓히기 판 둘과 마친 쪽, 크기, 아직 짓지 않았거나 짓지 못했으면 None)
 	//==============================================================================
 	pub fn get_line_target(&self) -> Option<&ToonLineTarget> {
 		self.line_target.as_ref()
 	}
 
 	//==============================================================================
-	// 선 굵기 셈. ([바깥 선, 꺾임 선] 의 그리는 영역 픽셀, 번호를 그리는 프레임이 없으면 지금 값)
+	/// 선 굵기 셈. ([바깥 선, 꺾임 선] 의 그리는 영역 픽셀, 번호를 그리는 프레임이 없으면 지금 값)
+	///
+	/// # 돌려줌
+	/// [바깥 선 굵기, 꺾임 선 굵기].
 	//==============================================================================
 	pub fn read_line_widths(&self) -> [f32; 2] {
 		let frame = match self.frame.as_ref() {
@@ -358,7 +507,15 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 번호 그리기 시작. (지금 뷰포트를 그리는 영역으로 적고, 선의 판을 묶어 비운다, 판을 짓지 못하면 false)
+	/// 번호 그리기 시작. (지금 뷰포트를 그리는 영역으로 적고, 선의 판을 묶어 비운다, 판을 짓지 못하면 false)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `view_matrix`: 보기 행렬.
+	/// - `projection_matrix`: 투영 행렬. (원근이나 직교)
+	///
+	/// # 돌려줌
+	/// 선의 판을 짓지 못했으면 false. (그때 draw_mesh 는 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn begin_line_ids(&mut self, gl: &glow::Context, view_matrix: &Matrix4, projection_matrix: &Matrix4) -> bool {
 		let mut viewport = [0i32; 4];
@@ -410,7 +567,14 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 모형 하나의 번호 그리기. (ToonRenderer::draw_mesh 와 같은 행렬과 자세, 번호 1 ~ TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID, 같은 번호끼리 맞닿은 곳은 긋지 않음, 화면 밖이면 건너뛴다)
+	/// 모형 하나의 번호 그리기. (ToonRenderer::draw_mesh 와 같은 행렬과 자세, 번호 1 ~ TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID, 같은 번호끼리 맞닿은 곳은 긋지 않음, 화면 밖이면 건너뛴다)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `mesh`: ToonRenderer::create_mesh 의 결과.
+	/// - `model_matrix`: 모형 행렬.
+	/// - `line_id`: 1 ~ TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID. (0 은 빈 곳이라 쓰지 않는다, 같은 번호끼리 맞닿은 곳은 긋지 않는다)
+	/// - `options`: 그리기 꼴. (본 행렬, 거르기, 몸 번호 버퍼의 일부, 감기 뒤집기, 바깥 선과 꺾임 선을 낼지)
 	//==============================================================================
 	pub fn draw_mesh(&mut self, gl: &glow::Context, mesh: &ToonMesh, model_matrix: &Matrix4, line_id: u32, options: ToonLineDrawOptions) {
 		if !self.is_drawing_line_ids {
@@ -425,7 +589,14 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 같은 모형 여럿의 번호를 한 번에 그리기. (인스턴스에 line_id 가 있으면 그 번호, 없으면 공통 번호, 꼴은 모든 인스턴스에 같다)
+	/// 같은 모형 여럿의 번호를 한 번에 그리기. (인스턴스에 line_id 가 있으면 그 번호, 없으면 공통 번호, 꼴은 모든 인스턴스에 같다)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `mesh`: ToonRenderer::create_mesh 의 결과.
+	/// - `instance_list`: 인스턴스 목록. (모형 행렬과 번호, 번호가 None 이면 공통 번호)
+	/// - `line_id`: 공통 번호.
+	/// - `options`: draw_mesh 와 같다. (꼴은 모든 인스턴스에 같다, is_mirrored 가 None 이면 뒤집지 않는다)
 	//==============================================================================
 	pub fn draw_mesh_instanced(&mut self, gl: &glow::Context, mesh: &ToonMesh, instance_list: &[ToonInstance], line_id: u32, options: ToonLineDrawOptions) {
 		if !self.is_drawing_line_ids {
@@ -456,7 +627,7 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 번호 그리기 본체. (instance_count 가 0 이면 보통 그리기)
+	/// 번호 그리기 본체. (instance_count 가 0 이면 보통 그리기)
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
 	fn draw_with_count(&self, gl: &glow::Context, mesh: &ToonMesh, model_matrix: &Matrix4, instance_count: i32, line_id: u32, is_instance_line_id: bool, is_mirrored: bool, options: ToonLineDrawOptions) {
@@ -499,7 +670,10 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 번호 그리기 끝. (씨앗을 고르고 점프 플러딩으로 넓힌 뒤, 프레임버퍼와 뷰포트와 상태를 돌린다)
+	/// 번호 그리기 끝. (씨앗을 고르고 점프 플러딩으로 넓힌 뒤, 프레임버퍼와 뷰포트와 상태를 돌린다)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn end_line_ids(&mut self, gl: &glow::Context) {
 		if !self.is_drawing_line_ids {
@@ -586,7 +760,10 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 바깥선 긋기. (넓힌 씨앗 판으로 begin_line_ids 때의 그리는 영역에 섞는다, 깊이는 보지도 쓰지도 않는다, 스텐실은 그대로)
+	/// 바깥선 긋기. (넓힌 씨앗 판으로 begin_line_ids 때의 그리는 영역에 섞는다, 깊이는 보지도 쓰지도 않는다, 스텐실은 그대로)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn draw_outline(&mut self, gl: &glow::Context) {
 		let (frame, seed_texture, point_scale) = match (self.frame, self.line_target.as_ref()) {
@@ -632,7 +809,7 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 그린 모형의 거리 더하기. (초점 거리를 주지 않은 원근에서 쓴다, 보기 공간의 앞쪽 거리)
+	/// 그린 모형의 거리 더하기. (초점 거리를 주지 않은 원근에서 쓴다, 보기 공간의 앞쪽 거리)
 	//==============================================================================
 	fn add_drawn_distance(&mut self, mesh: &ToonMesh, model_matrix: &Matrix4) {
 		let frame = match self.frame.as_ref() {
@@ -653,7 +830,7 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 경계 구가 이번 프레임의 절두체 안에 드는지.
+	/// 경계 구가 이번 프레임의 절두체 안에 드는지.
 	//==============================================================================
 	fn is_visible(&self, mesh: &ToonMesh, model_matrix: &Matrix4) -> bool {
 		let frame = match self.frame.as_ref() {
@@ -675,7 +852,7 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 선의 판 읽기. (크기가 바뀌면 다시 지음, 짓지 못하면 None)
+	/// 선의 판 읽기. (크기가 바뀌면 다시 지음, 짓지 못하면 None)
 	//==============================================================================
 	fn read_line_target(&mut self, gl: &glow::Context, width: i32, height: i32, jump_flood_width: i32, jump_flood_height: i32) -> Option<&ToonLineTarget> {
 		let is_same_size = matches!(self.line_target.as_ref(), Some(line_target) if line_target.width == width && line_target.height == height && line_target.jump_flood_width == jump_flood_width && line_target.jump_flood_height == jump_flood_height);
@@ -687,7 +864,7 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 선의 판 짓기. (그리는 영역 해상도의 노멀과 번호 RGBA8, 깊이 24, 씨앗 RGBA16UI, 넓히기 판 RGBA16UI 둘, 앞의 프레임버퍼와 텍스처는 돌린다)
+	/// 선의 판 짓기. (그리는 영역 해상도의 노멀과 번호 RGBA8, 깊이 24, 씨앗 RGBA16UI, 넓히기 판 RGBA16UI 둘, 앞의 프레임버퍼와 텍스처는 돌린다)
 	//==============================================================================
 	fn create_line_target(gl: &glow::Context, width: i32, height: i32, jump_flood_width: i32, jump_flood_height: i32) -> Option<ToonLineTarget> {
 		unsafe {
@@ -745,7 +922,7 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 선의 판 지우기.
+	/// 선의 판 지우기.
 	//==============================================================================
 	fn delete_line_target(&mut self, gl: &glow::Context) {
 		if let Some(line_target) = self.line_target.take() {
@@ -754,7 +931,7 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 선의 판의 GL 객체 지우기.
+	/// 선의 판의 GL 객체 지우기.
 	//==============================================================================
 	fn delete_target_objects(gl: &glow::Context, line_target: &ToonLineTarget) {
 		unsafe {
@@ -773,7 +950,7 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 그리기 상태 적어 두기.
+	/// 그리기 상태 적어 두기.
 	//==============================================================================
 	fn save_state(&mut self, gl: &glow::Context) {
 		unsafe {
@@ -803,7 +980,7 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 적어 둔 상태로 돌리기.
+	/// 적어 둔 상태로 돌리기.
 	//==============================================================================
 	fn restore_state(&mut self, gl: &glow::Context) {
 		let saved_state = match self.saved_state.take() {
@@ -837,7 +1014,10 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 다 쓴 뒤 지우기. (선의 판, 버텍스 어레이, 프로그램 넷)
+	/// 다 쓴 뒤 지우기. (선의 판, 버텍스 어레이, 프로그램 다섯)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		self.delete_line_target(gl);
@@ -856,6 +1036,9 @@ impl ToonScreenOutline {
 mod tests {
 	use super::*;
 
+	//==============================================================================
+	/// 점프 플러딩 걸음이 바라는 거리를 덮는지.
+	//==============================================================================
 	#[test]
 	fn jump_flood_steps_cover_reach() {
 		assert_eq!(read_jump_flood_steps(0.5), vec![1]);
@@ -870,6 +1053,9 @@ mod tests {
 		}
 	}
 
+	//==============================================================================
+	/// 선 굵기가 단위를 따르고 한 픽셀 밑으로 내려가지 않는지. (원근의 월드 굵기는 거리에 반비례)
+	//==============================================================================
 	#[test]
 	fn line_widths_follow_unit_and_minimum() {
 		assert_eq!(compute_line_widths([3.0, 1.0], ToonOutlineWidthUnit::Pixel, 720, 1.0, false, 0.0), [3.0, 1.0]);
@@ -881,6 +1067,9 @@ mod tests {
 		assert!((near_widths[0] - far_widths[0] * 2.0).abs() < 0.001);
 	}
 
+	//==============================================================================
+	/// 셰이더가 원본과 같은 꼴인지. (꼴 비트, 씨앗 출력, 걸음 유니폼, 덮는 몫 셈)
+	//==============================================================================
 	#[test]
 	fn shaders_match_original_layout() {
 		assert!(LINE_FRAGMENT_SHADER.contains("lineFlags * 64.0"));

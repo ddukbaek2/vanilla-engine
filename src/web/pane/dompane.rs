@@ -29,12 +29,31 @@ use web_sys::{Document, Element, Event, HtmlElement, MouseEvent, Window};
 
 //==============================================================================
 /// 스타일 및 요소 생성 유틸리티. (원본 PaneStyle)
+///
+/// # 예제
+/// 도구 막대에 단추 두 개를 놓아 body 에 붙이기 (브라우저가 있어야 해서 컴파일만)
+/// ```rust,no_run
+/// use vanilla::{PaneStyle, PaneStyleOptions};
+///
+/// let body = web_sys::window().unwrap().document().unwrap().body().unwrap();
+/// let toolbar = PaneStyle::create("div", "toolbar", &PaneStyleOptions { style: &[("height", "40px")], ..Default::default() });
+/// let play_button = PaneStyle::create("button", "button", &PaneStyleOptions { text: "Play", accent: true, ..Default::default() });
+/// let reset_button = PaneStyle::create("button", "button", &PaneStyleOptions { text: "Reset", warning: true, ..Default::default() });
+/// toolbar.append_child(&play_button).unwrap();
+/// toolbar.append_child(&reset_button).unwrap();
+/// PaneStyle::apply(&toolbar, &[("justify-content", "flex-start")]);
+/// body.append_child(&toolbar).unwrap();
+/// ```
 //==============================================================================
 pub struct PaneStyle;
 
 impl PaneStyle {
 	//==============================================================================
 	/// 요소에 여러 스타일을 한꺼번에 넣는다. ((CSS 속성 이름, 값) 목록)
+	///
+	/// # 인자
+	/// - `element`: 스타일을 넣을 요소.
+	/// - `styles`: (CSS 속성 이름, 값) 목록. (이름은 background-color 같은 CSS 이름)
 	//==============================================================================
 	pub fn apply(element: &HtmlElement, styles: &[(&str, &str)]) {
 		let style = element.style();
@@ -46,6 +65,14 @@ impl PaneStyle {
 	//==============================================================================
 	/// 스타일 프리셋을 넣은 요소를 만든다.
 	/// (preset: "panel" | "toolbar" | "button" | "input" | "textarea" | "text", 그 밖은 공통 스타일만)
+	///
+	/// # 인자
+	/// - `tag_name`: 만들 요소의 태그 이름. (만들 수 없거나 HTML 요소가 아니면 panic)
+	/// - `preset`: 스타일 프리셋. ("panel" | "toolbar" | "button" | "input" | "textarea" | "text")
+	/// - `options`: id, 글, 덧붙이는 스타일, type, 안내 글, 단추 색.
+	///
+	/// # 돌려줌
+	/// 만든 요소. (아직 문서에 붙지 않았다)
 	//==============================================================================
 	pub fn create(tag_name: &str, preset: &str, options: &PaneStyleOptions) -> HtmlElement {
 		let element = create_html_element(tag_name);
@@ -211,6 +238,25 @@ struct PaneState {
 
 //==============================================================================
 /// 화면 분할 패널. (원본 Pane, clone 은 같은 패널을 가리킨다)
+///
+/// # 예제
+/// 왼쪽 목록과 오른쪽 화면으로 나누어 body 에 붙이기 (브라우저가 있어야 해서 컴파일만)
+/// ```rust,no_run
+/// use vanilla::{Pane, PaneOptions, PaneSize, PaneStyle, PaneStyleOptions};
+///
+/// let body = web_sys::window().unwrap().document().unwrap().body().unwrap();
+/// let main_pane = Pane::new(PaneOptions::default());
+/// let left_pane = Pane::new(PaneOptions { size: PaneSize::Fixed(240.0), min_size: 170.0, ..Default::default() });
+/// let view_pane = Pane::new(PaneOptions { min_size: 200.0, ..Default::default() });
+/// main_pane.add_pane(&left_pane);
+/// main_pane.add_pane(&view_pane);
+/// let panel = PaneStyle::create("div", "panel", &PaneStyleOptions::default());
+/// left_pane.get_container().append_child(&panel).unwrap();
+/// main_pane.set_callback(Some(Box::new(|| {
+/// 	println!("layout changed");
+/// })));
+/// main_pane.attach_to(&body);
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct Pane {
@@ -220,6 +266,12 @@ pub struct Pane {
 impl Pane {
 	//==============================================================================
 	/// 생성. (컨테이너 div 를 만들고, 문서에 다는 끌기 리스너를 지어 둔다)
+	///
+	/// # 인자
+	/// - `options`: 패널 옵션.
+	///
+	/// # 돌려줌
+	/// 새 패널. (컨테이너 div 는 아직 문서에 붙지 않았다)
 	//==============================================================================
 	pub fn new(options: PaneOptions) -> Pane {
 		let fixed_size = match options.size {
@@ -281,6 +333,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 자식 추가. (앞 자식이 있으면 그 사이에 리사이저를 둔다)
+	///
+	/// # 인자
+	/// - `pane`: 붙일 자식 패널.
 	//==============================================================================
 	pub fn add_pane(&self, pane: &Pane) {
 		pane.state.borrow_mut().parent_pane = Rc::downgrade(&self.state);
@@ -516,6 +571,12 @@ impl Pane {
 
 	//==============================================================================
 	/// 배치. (자기 자리를 놓고, 고정 크기 자식을 먼저 재고 남은 자리를 flex 자식끼리 나눈 뒤 자식과 리사이저를 차례로 놓는다)
+	///
+	/// # 인자
+	/// - `x`: 컨테이너 왼쪽. (픽셀, 부모 요소 기준)
+	/// - `y`: 컨테이너 위. (픽셀, 부모 요소 기준)
+	/// - `width`: 컨테이너 폭. (픽셀)
+	/// - `height`: 컨테이너 높이. (픽셀)
 	//==============================================================================
 	pub fn update_layout(&self, x: f64, y: f64, width: f64, height: f64) {
 		let (container, direction, children, resizer_list) = {
@@ -620,6 +681,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 요소에 단다. (창 크기가 바뀔 때와 다음 프레임에 다시 놓는다. 창 리스너가 이 패널을 끝까지 붙든다)
+	///
+	/// # 인자
+	/// - `parent_element`: 붙일 부모 요소. (보통 body)
 	//==============================================================================
 	pub fn attach_to(&self, parent_element: &Element) {
 		let _ = parent_element.append_child(&self.get_container());
@@ -640,6 +704,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 보이기 / 숨기기. (숨긴 패널은 자리를 차지하지 않고, 맞닿은 리사이저도 숨는다)
+	///
+	/// # 인자
+	/// - `is_visible`: 보일지.
 	//==============================================================================
 	pub fn set_visible(&self, is_visible: bool) {
 		{
@@ -676,6 +743,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 보이는지.
+	///
+	/// # 돌려줌
+	/// 보이면 true.
 	//==============================================================================
 	pub fn is_visible(&self) -> bool {
 		self.state.borrow().is_visible
@@ -683,6 +753,9 @@ impl Pane {
 
 	//==============================================================================
 	/// flex 인지. (처음 크기가 Flex)
+	///
+	/// # 돌려줌
+	/// 처음 크기가 Flex 면 true.
 	//==============================================================================
 	pub fn is_flex(&self) -> bool {
 		self.state.borrow().initial_size == PaneSize::Flex
@@ -690,6 +763,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 처음 크기.
+	///
+	/// # 돌려줌
+	/// 만들 때 받은 처음 크기. (PaneOptions::size)
 	//==============================================================================
 	pub fn get_initial_size(&self) -> PaneSize {
 		self.state.borrow().initial_size
@@ -697,6 +773,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 고정 크기. (픽셀, 0 이면 처음 크기로 잰다)
+	///
+	/// # 돌려줌
+	/// 고정 크기. (픽셀, 끌어서 정했거나 처음 크기가 Fixed 면 그 값, reset_layout 뒤나 그 밖은 0)
 	//==============================================================================
 	pub fn get_fixed_size(&self) -> f64 {
 		self.state.borrow().fixed_size
@@ -704,6 +783,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 고정 크기 설정. (다음 배치부터 쓴다. flex 패널에는 쓰이지 않는다)
+	///
+	/// # 인자
+	/// - `fixed_size`: 새 고정 크기. (픽셀, 0 이면 처음 크기로 잰다)
 	//==============================================================================
 	pub fn set_fixed_size(&self, fixed_size: f64) {
 		self.state.borrow_mut().fixed_size = fixed_size;
@@ -711,6 +793,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 최소 크기.
+	///
+	/// # 돌려줌
+	/// 가장 작은 크기. (픽셀)
 	//==============================================================================
 	pub fn get_min_size(&self) -> f64 {
 		self.state.borrow().min_size
@@ -718,6 +803,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 최대 크기.
+	///
+	/// # 돌려줌
+	/// 가장 큰 크기. (픽셀)
 	//==============================================================================
 	pub fn get_max_size(&self) -> f64 {
 		self.state.borrow().max_size
@@ -725,6 +813,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 컨테이너 요소. (내용을 여기에 붙인다)
+	///
+	/// # 돌려줌
+	/// 컨테이너 div 요소.
 	//==============================================================================
 	pub fn get_container(&self) -> HtmlElement {
 		self.state.borrow().container.clone()
@@ -732,6 +823,9 @@ impl Pane {
 
 	//==============================================================================
 	/// 배치 콜백 설정. (update_layout 이 끝날 때마다 부른다. None 이면 비운다)
+	///
+	/// # 인자
+	/// - `resize_callback`: update_layout 이 끝날 때마다 부를 함수. (None 이면 비운다)
 	//==============================================================================
 	pub fn set_callback(&self, resize_callback: Option<PaneResizeCallback>) {
 		self.state.borrow_mut().resize_callback = resize_callback;
@@ -739,12 +833,18 @@ impl Pane {
 
 	//==============================================================================
 	/// 리사이저로 끌 수 있는지.
+	///
+	/// # 돌려줌
+	/// 리사이저로 끌 수 있으면 true.
 	//==============================================================================
 	pub fn is_resizable(&self) -> bool {
 		self.state.borrow().is_resizable
 	}
 
 	//==============================================================================
+	/// 끌 수 있는 가장자리.
+	///
+	/// # 돌려줌
 	/// 끌 수 있는 가장자리.
 	//==============================================================================
 	pub fn get_resizable_edges(&self) -> PaneResizableEdges {

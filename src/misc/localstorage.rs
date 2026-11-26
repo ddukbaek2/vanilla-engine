@@ -45,25 +45,88 @@ use std::rc::Rc;
 ///   clear 가 없으면 get_keys 의 키를 하나씩 지운다.
 /// - 이 함수들 안에서 LocalStorage 를 다시 부르면 기본 저장소를 쓴다. (바꿔 낀 저장소는 부르는 동안 빌려 있다)
 ///   get_backend 로 꺼낸 저장소를 빌린 채로 LocalStorage 를 불러도 기본 저장소를 쓴다.
+///
+/// # 예제
+/// 내 저장소로 갈아 끼우기
+/// ```rust
+/// use std::cell::RefCell;
+/// use std::collections::BTreeMap;
+/// use std::rc::Rc;
+/// use vanilla::{LocalStorage, LocalStorageBackend};
+///
+/// struct MemoryBackend {
+/// 	item_map: Rc<RefCell<BTreeMap<String, String>>>,
+/// }
+///
+/// impl LocalStorageBackend for MemoryBackend {
+/// 	fn get_item(&self, key: &str) -> Result<Option<String>, String> {
+/// 		Ok(self.item_map.borrow().get(key).cloned())
+/// 	}
+///
+/// 	fn set_item(&mut self, key: &str, value: &str) -> Result<(), String> {
+/// 		self.item_map.borrow_mut().insert(key.to_string(), value.to_string());
+/// 		Ok(())
+/// 	}
+///
+/// 	fn remove_item(&mut self, key: &str) -> Result<(), String> {
+/// 		self.item_map.borrow_mut().remove(key);
+/// 		Ok(())
+/// 	}
+///
+/// 	fn get_keys(&self) -> Result<Vec<String>, String> {
+/// 		Ok(self.item_map.borrow().keys().cloned().collect())
+/// 	}
+/// }
+///
+/// let item_map = Rc::new(RefCell::new(BTreeMap::new()));
+/// LocalStorage::set_backend(Some(Box::new(MemoryBackend { item_map: item_map.clone() })));
+/// LocalStorage::set_string("profile.name", "Player");
+/// assert_eq!(item_map.borrow().get("profile.name").map(|value| value.as_str()), Some("Player"));
+/// assert_eq!(LocalStorage::get_keys(), vec!["profile.name"]);
+/// LocalStorage::set_backend(None);
+/// assert!(LocalStorage::get_backend().is_none());
+/// ```
 //==============================================================================
 pub trait LocalStorageBackend {
 	//==============================================================================
 	/// 값 읽기. (없으면 Ok(None))
+	///
+	/// # 인자
+	/// - `key`: 키.
+	///
+	/// # 돌려줌
+	/// 저장된 글. 없으면 Ok(None), 못 읽으면 Err(까닭). (LocalStorage 는 Err 를 없는 것으로 읽는다)
 	//==============================================================================
 	fn get_item(&self, key: &str) -> Result<Option<String>, String>;
 
 	//==============================================================================
 	/// 값 쓰기.
+	///
+	/// # 인자
+	/// - `key`: 키.
+	/// - `value`: 쓸 글.
+	///
+	/// # 돌려줌
+	/// 썼으면 Ok(()). 못 쓰면 Err(까닭). (LocalStorage 는 그 값을 메모리에 대신 둔다)
 	//==============================================================================
 	fn set_item(&mut self, key: &str, value: &str) -> Result<(), String>;
 
 	//==============================================================================
 	/// 값 지우기.
+	///
+	/// # 인자
+	/// - `key`: 지울 키.
+	///
+	/// # 돌려줌
+	/// 지웠으면 Ok(()). 못 지우면 Err(까닭). (LocalStorage 는 알리고 넘어간다)
 	//==============================================================================
 	fn remove_item(&mut self, key: &str) -> Result<(), String>;
 
 	//==============================================================================
 	/// 모든 키. (기본은 빈 목록)
+	///
+	/// # 돌려줌
+	/// 모든 키. 못 읽으면 Err(까닭). (LocalStorage 는 빈 목록으로 친다)
 	//==============================================================================
 	fn get_keys(&self) -> Result<Vec<String>, String> {
 		Ok(Vec::new())
@@ -71,6 +134,9 @@ pub trait LocalStorageBackend {
 
 	//==============================================================================
 	/// 전부 지우기. (기본은 get_keys 의 키를 하나씩 지운다)
+	///
+	/// # 돌려줌
+	/// 다 지웠으면 Ok(()). 못 지우면 Err(까닭). (LocalStorage 는 알리고 넘어간다)
 	//==============================================================================
 	fn clear(&mut self) -> Result<(), String> {
 		let keys = self.get_keys()?;
@@ -445,12 +511,37 @@ fn with_memory_item_map<R>(worker: impl FnOnce(&mut BTreeMap<StorageKey, String>
 
 //==============================================================================
 /// 로컬 스토리지. (정적 함수 묶음)
+///
+/// # 예제
+/// 점수와 설정 저장하고 읽기
+/// ```rust
+/// use vanilla::LocalStorage;
+///
+/// let storage_directory_path = std::env::temp_dir().join(format!("vanillaLocalStorageExample-{}", std::process::id()));
+/// LocalStorage::set_storage_directory(Some(storage_directory_path.clone()));
+/// LocalStorage::set_number("example.bestScore", 1200.0);
+/// LocalStorage::set_boolean("example.isMuted", true);
+/// LocalStorage::set_json("example.settings", &serde_json::json!({ "volume": 0.8, "language": "en" }));
+/// let best_score = LocalStorage::get_number("example.bestScore", 0.0);
+/// let is_muted = LocalStorage::get_boolean("example.isMuted", false);
+/// let settings = LocalStorage::get_json("example.settings", serde_json::json!({}));
+/// assert_eq!(best_score, 1200.0);
+/// assert!(is_muted);
+/// assert_eq!(settings["volume"], 0.8);
+/// assert!(LocalStorage::contains_key("example.bestScore"));
+/// assert_eq!(LocalStorage::clear_by_prefix("example."), 3);
+/// assert!(!LocalStorage::is_memory_fallback());
+/// let _ = std::fs::remove_dir_all(&storage_directory_path);
+/// ```
 //==============================================================================
 pub struct LocalStorage;
 
 impl LocalStorage {
 	//==============================================================================
 	/// 앱 이름 설정. (데스크탑 저장 폴더 이름. 웹은 출처마다 따로라 쓰지 않는다)
+	///
+	/// # 인자
+	/// - `application_name`: 앱 이름. (폴더 이름에 못 쓰는 글자는 '_' 로 바꾸고, 비면 "vanilla")
 	//==============================================================================
 	pub fn set_application_name(application_name: &str) {
 		storage_backend::set_application_name(application_name);
@@ -458,6 +549,9 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 엔진 설정의 창 제목을 앱 이름으로 쓴다. (EngineConfiguration.title)
+	///
+	/// # 인자
+	/// - `engine`: 창 제목(EngineConfiguration.title)을 읽을 엔진.
 	//==============================================================================
 	pub fn set_application_name_from_engine(engine: &Engine) {
 		let engine_configuration = engine.get_engine_configuration();
@@ -466,6 +560,9 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 저장 폴더 직접 설정. (None 이면 앱 이름으로 정한 기본 폴더. 웹은 쓰지 않는다)
+	///
+	/// # 인자
+	/// - `storage_directory_path`: localstorage.json 을 둘 폴더. (None 이면 앱 이름으로 정한 기본 폴더)
 	//==============================================================================
 	pub fn set_storage_directory(storage_directory_path: Option<PathBuf>) {
 		storage_backend::set_storage_directory(storage_directory_path);
@@ -473,6 +570,9 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 저장 파일 경로. (데스크탑만, 웹은 None)
+	///
+	/// # 돌려줌
+	/// 저장 파일 경로. (데스크탑은 늘 Some, 웹은 None)
 	//==============================================================================
 	pub fn get_storage_file_path() -> Option<PathBuf> {
 		storage_backend::get_storage_file_path()
@@ -480,6 +580,9 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 저장소 갈아 끼우기. (None 이면 기본 저장소로 돌아간다. 메모리에 대신 둔 값은 버린다)
+	///
+	/// # 인자
+	/// - `backend`: 갈아 끼울 저장소. (None 이면 기본 저장소)
 	//==============================================================================
 	pub fn set_backend(backend: Option<Box<dyn LocalStorageBackend>>) {
 		STORAGE_OVERRIDE_STATE.with(|state_cell| {
@@ -492,6 +595,9 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 갈아 끼운 저장소 반환. (없으면 None, 빌릴 때는 borrow / borrow_mut)
+	///
+	/// # 돌려줌
+	/// 갈아 끼운 저장소. 없으면 None.
 	//==============================================================================
 	pub fn get_backend() -> Option<Rc<RefCell<Box<dyn LocalStorageBackend>>>> {
 		STORAGE_OVERRIDE_STATE.with(|state_cell| state_cell.borrow().backend.clone())
@@ -499,6 +605,9 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 저장소를 못 써서 메모리에 대신 둔 적이 있는지.
+	///
+	/// # 돌려줌
+	/// 메모리로 대신한 적이 있으면 참. (set_backend 를 부르면 거짓으로 돌아간다)
 	//==============================================================================
 	pub fn is_memory_fallback() -> bool {
 		STORAGE_OVERRIDE_STATE.with(|state_cell| state_cell.borrow().is_memory_fallback)
@@ -506,6 +615,12 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 값 하나 읽기. (없거나 못 읽으면 None. 메모리에 대신 둔 값이 앞선다. 짝 없는 서로게이트는 대체 문자로 보인다)
+	///
+	/// # 인자
+	/// - `key`: 키.
+	///
+	/// # 돌려줌
+	/// 저장된 글. 없거나 못 읽으면 None.
 	//==============================================================================
 	pub fn get_item(key: &str) -> Option<String> {
 		read_item_text(&resolve_key(key))
@@ -513,6 +628,12 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 값 하나를 원래 UTF-16 단위로 읽기. (원본 JS 글 그대로, 짝 없는 서로게이트도 담는다)
+	///
+	/// # 인자
+	/// - `key`: 키.
+	///
+	/// # 돌려줌
+	/// 저장된 글의 UTF-16 단위. 없거나 못 읽으면 None.
 	//==============================================================================
 	pub fn get_item_code_units(key: &str) -> Option<Vec<u16>> {
 		read_item_code_units(&resolve_key(key))
@@ -521,6 +642,13 @@ impl LocalStorage {
 	//==============================================================================
 	/// 값 하나 쓰기. (저장소에 썼으면 true, 못 써서 메모리에 대신 뒀으면 false)
 	/// - 이 키에서 읽은 짝 없는 서로게이트가 든 값을 고치지 않고 다시 쓰면 원래 단위로 쓴다.
+	///
+	/// # 인자
+	/// - `key`: 키.
+	/// - `value`: 쓸 글.
+	///
+	/// # 돌려줌
+	/// 저장소에 썼으면 참. 메모리에 대신 뒀으면 거짓.
 	//==============================================================================
 	pub fn set_item(key: &str, value: &str) -> bool {
 		write_item_text(&resolve_key(key), value)
@@ -528,6 +656,13 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 값 하나를 UTF-16 단위로 쓰기. (원본 JS 글 그대로, 짝 없는 서로게이트도 그대로 쓴다)
+	///
+	/// # 인자
+	/// - `key`: 키.
+	/// - `code_units`: 쓸 글의 UTF-16 단위.
+	///
+	/// # 돌려줌
+	/// 저장소에 썼으면 참. 메모리에 대신 뒀으면 거짓.
 	//==============================================================================
 	pub fn set_item_code_units(key: &str, code_units: &[u16]) -> bool {
 		write_item_code_units(&resolve_key(key), code_units)
@@ -535,6 +670,9 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 값 하나 지우기. (메모리에 대신 둔 값도 지운다)
+	///
+	/// # 인자
+	/// - `key`: 지울 키.
 	//==============================================================================
 	pub fn remove_item(key: &str) {
 		remove_stored_item(&resolve_key(key));
@@ -542,6 +680,12 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 키와 값을 모두 UTF-16 단위로 읽기. (원본 localStorage.getItem 그대로, 짝 없는 서로게이트로만 다른 두 키도 가린다)
+	///
+	/// # 인자
+	/// - `key_code_units`: 키의 UTF-16 단위.
+	///
+	/// # 돌려줌
+	/// 저장된 글의 UTF-16 단위. 없거나 못 읽으면 None.
 	//==============================================================================
 	pub fn get_item_by_key_code_units(key_code_units: &[u16]) -> Option<Vec<u16>> {
 		read_item_code_units(&StorageKey::from_code_units(key_code_units))
@@ -549,6 +693,13 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 키와 값을 모두 UTF-16 단위로 쓰기. (원본 localStorage.setItem 그대로, 저장소에 썼으면 true)
+	///
+	/// # 인자
+	/// - `key_code_units`: 키의 UTF-16 단위.
+	/// - `value_code_units`: 쓸 글의 UTF-16 단위.
+	///
+	/// # 돌려줌
+	/// 저장소에 썼으면 참. 메모리에 대신 뒀으면 거짓.
 	//==============================================================================
 	pub fn set_item_by_key_code_units(key_code_units: &[u16], value_code_units: &[u16]) -> bool {
 		write_item_code_units(&StorageKey::from_code_units(key_code_units), value_code_units)
@@ -556,6 +707,9 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// UTF-16 단위 키로 지우기. (원본 localStorage.removeItem 그대로)
+	///
+	/// # 인자
+	/// - `key_code_units`: 지울 키의 UTF-16 단위.
 	//==============================================================================
 	pub fn remove_item_by_key_code_units(key_code_units: &[u16]) {
 		remove_stored_item(&StorageKey::from_code_units(key_code_units));
@@ -563,6 +717,12 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// UTF-16 단위 키가 있는지.
+	///
+	/// # 인자
+	/// - `key_code_units`: 찾을 키의 UTF-16 단위.
+	///
+	/// # 돌려줌
+	/// 값이 있으면 참.
 	//==============================================================================
 	pub fn contains_key_code_units(key_code_units: &[u16]) -> bool {
 		read_stored_text(&StorageKey::from_code_units(key_code_units)).is_some()
@@ -593,6 +753,10 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 문자열 값 설정.
+	///
+	/// # 인자
+	/// - `key`: 키.
+	/// - `string_value`: 쓸 글.
 	//==============================================================================
 	pub fn set_string(key: &str, string_value: &str) {
 		LocalStorage::set_item(key, string_value);
@@ -600,6 +764,10 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 논리 값 설정. ("true" / "false" 로 저장한다)
+	///
+	/// # 인자
+	/// - `key`: 키.
+	/// - `boolean_value`: 쓸 값. ("true" 나 "false" 글로 쓴다)
 	//==============================================================================
 	pub fn set_boolean(key: &str, boolean_value: bool) {
 		let string_value = if boolean_value {
@@ -613,6 +781,10 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 숫자 값 설정. (원본 String(number) 꼴로 저장한다)
+	///
+	/// # 인자
+	/// - `key`: 키.
+	/// - `number_value`: 쓸 값. (원본 String(number) 꼴의 글로 바꿔 쓴다)
 	//==============================================================================
 	pub fn set_number(key: &str, number_value: f64) {
 		let string_value = format_number(number_value);
@@ -621,6 +793,9 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 값 제거.
+	///
+	/// # 인자
+	/// - `key`: 지울 키.
 	//==============================================================================
 	pub fn remove(key: &str) {
 		LocalStorage::remove_item(key);
@@ -628,6 +803,13 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 문자열 값 반환. (없으면 기본값. 저장소에는 쓰지 않는다)
+	///
+	/// # 인자
+	/// - `key`: 키.
+	/// - `default_string_value`: 없을 때 돌려줄 값.
+	///
+	/// # 돌려줌
+	/// 저장된 글. 없으면 기본값.
 	//==============================================================================
 	pub fn get_string(key: &str, default_string_value: &str) -> String {
 		match LocalStorage::get_item(key) {
@@ -642,6 +824,13 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 논리 값 반환. (없거나 빈 글이면 기본값, 저장소에는 쓰지 않는다. "true" 만 참)
+	///
+	/// # 인자
+	/// - `key`: 키.
+	/// - `default_boolean_value`: 없거나 빈 글일 때 돌려줄 값.
+	///
+	/// # 돌려줌
+	/// 저장된 글이 "true" 면 참. 없거나 빈 글이면 기본값.
 	//==============================================================================
 	pub fn get_boolean(key: &str, default_boolean_value: bool) -> bool {
 		let string_value = LocalStorage::get_string(key, "");
@@ -655,6 +844,13 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 숫자 값 반환. (없거나 빈 글이면 기본값, 저장소에는 쓰지 않는다. 숫자가 아니면 NaN, 원본 Number(text))
+	///
+	/// # 인자
+	/// - `key`: 키.
+	/// - `default_number_value`: 없거나 빈 글일 때 돌려줄 값.
+	///
+	/// # 돌려줌
+	/// 저장된 글을 원본 Number(text) 처럼 바꾼 값. (없거나 빈 글이면 기본값, 숫자가 아니면 NaN)
 	//==============================================================================
 	pub fn get_number(key: &str, default_number_value: f64) -> f64 {
 		let string_value = LocalStorage::get_string(key, "");
@@ -669,6 +865,12 @@ impl LocalStorage {
 	//==============================================================================
 	/// 접두사로 시작하는 키 한꺼번에 지우기. (게임 네임스페이스의 저장을 통째로 지울 때, 지운 키 수)
 	/// - 보인 글로 견준다. 짝 없는 서로게이트로만 다른 키도 따로 센다.
+	///
+	/// # 인자
+	/// - `prefix`: 지울 키의 접두사. (빈 글이면 아무것도 지우지 않는다)
+	///
+	/// # 돌려줌
+	/// 지운 키 수.
 	//==============================================================================
 	pub fn clear_by_prefix(prefix: &str) -> usize {
 		if prefix.is_empty() {
@@ -683,6 +885,12 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 키가 있는지.
+	///
+	/// # 인자
+	/// - `key`: 찾을 키.
+	///
+	/// # 돌려줌
+	/// 값이 있으면 참.
 	//==============================================================================
 	pub fn contains_key(key: &str) -> bool {
 		read_stored_text(&resolve_key(key)).is_some()
@@ -691,6 +899,9 @@ impl LocalStorage {
 	//==============================================================================
 	/// 모든 키 반환. (정렬해서, 메모리에 대신 둔 키도 넣는다)
 	/// - 짝 없는 서로게이트가 든 키는 대체 문자로 보인다. 보인 글이 같은 키는 하나만 나오니, 모두 가려 보려면 get_keys_code_units.
+	///
+	/// # 돌려줌
+	/// 저장소와 메모리의 키를 합쳐 정렬한 목록.
 	//==============================================================================
 	pub fn get_keys() -> Vec<String> {
 		let mut keys: Vec<String> = collect_storage_keys(true).into_iter().map(|key| key.lossy_text).collect();
@@ -700,6 +911,9 @@ impl LocalStorage {
 
 	//==============================================================================
 	/// 모든 키를 UTF-16 단위로 반환. (원본 localStorage.key(i) 의 글 그대로, 정렬해서)
+	///
+	/// # 돌려줌
+	/// 모든 키의 UTF-16 단위 목록. (저장소와 메모리의 키를 합쳐 정렬한다)
 	//==============================================================================
 	pub fn get_keys_code_units() -> Vec<Vec<u16>> {
 		collect_storage_keys(true).iter().map(|key| key.to_code_units()).collect()
@@ -708,6 +922,13 @@ impl LocalStorage {
 	//==============================================================================
 	/// JSON 값 반환. (없거나 풀 수 없으면 기본값, 저장소에는 쓰지 않는다)
 	/// - 짝 없는 서로게이트가 든 글(원본 JSON.stringify 의 \ud83d 같은 것)은 대체 문자로 읽고, 그 자리를 남겨 set_json 이 원래대로 쓴다.
+	///
+	/// # 인자
+	/// - `key`: 키.
+	/// - `default_value`: 없거나 빈 글이거나 풀 수 없을 때 돌려줄 값.
+	///
+	/// # 돌려줌
+	/// 풀어 낸 값. 없거나 풀 수 없으면 기본값.
 	//==============================================================================
 	pub fn get_json(key: &str, default_value: serde_json::Value) -> serde_json::Value {
 		let storage_key = resolve_key(key);
@@ -752,6 +973,13 @@ impl LocalStorage {
 	//==============================================================================
 	/// JSON 값 설정. (JSON 글로 바꿔 쓴다. 저장소에 썼으면 true)
 	/// - get_json 으로 읽은 짝 없는 서로게이트가 든 글을 고치지 않았으면 원본 JSON.stringify 처럼 \udXXX 로 쓴다.
+	///
+	/// # 인자
+	/// - `key`: 키.
+	/// - `value`: JSON 으로 바꿔 쓸 값.
+	///
+	/// # 돌려줌
+	/// 저장소에 썼으면 참. (메모리에 대신 뒀으면 거짓)
 	//==============================================================================
 	pub fn set_json(key: &str, value: &serde_json::Value) -> bool {
 		let storage_key = resolve_key(key);
@@ -1672,6 +1900,9 @@ mod tests {
 	}
 
 	impl LocalStorageBackend for TestBackend {
+		//==============================================================================
+		/// 값 읽기. (막혔으면 Err)
+		//==============================================================================
 		fn get_item(&self, key: &str) -> Result<Option<String>, String> {
 			if self.is_blocked {
 				return Err(String::from("blocked"));
@@ -1679,6 +1910,9 @@ mod tests {
 			Ok(self.item_map.borrow().get(key).cloned())
 		}
 
+		//==============================================================================
+		/// 값 쓰기. (막혔으면 Err)
+		//==============================================================================
 		fn set_item(&mut self, key: &str, value: &str) -> Result<(), String> {
 			if self.is_blocked {
 				return Err(String::from("quota"));
@@ -1687,6 +1921,9 @@ mod tests {
 			Ok(())
 		}
 
+		//==============================================================================
+		/// 값 지우기. (막혔으면 Err)
+		//==============================================================================
 		fn remove_item(&mut self, key: &str) -> Result<(), String> {
 			if self.is_blocked {
 				return Err(String::from("blocked"));
@@ -1695,6 +1932,9 @@ mod tests {
 			Ok(())
 		}
 
+		//==============================================================================
+		/// 모든 키. (막혔으면 Err)
+		//==============================================================================
 		fn get_keys(&self) -> Result<Vec<String>, String> {
 			if self.is_blocked {
 				return Err(String::from("blocked"));

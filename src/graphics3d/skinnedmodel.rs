@@ -157,7 +157,7 @@ impl AnimationPath {
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct SkinnedModelNode {
-	/// 노드 이름. (glTF 노드 name, FBX 는 Model 이름 그대로, 없으면 빈 문자열)
+	/// 노드 이름. (glTF 노드 name, FBX 는 종류 꼬리를 뗀 Model 이름, 없으면 빈 문자열)
 	pub name: String,
 	/// 자식 노드 인덱스 목록.
 	pub child_indices: Vec<usize>,
@@ -882,26 +882,18 @@ impl IntoFuture for AnimationLoadHandle {
 
 //==============================================================================
 /// 애니메이션 FBX 의 클립 이름. (채널이 있는 스택이 하나면 받은 이름 그대로, 여럿이면 "받은 이름/스택 이름")
-/// - 스택 이름은 FBX 이름에서 "\u{0}\u{1}AnimStack" 같은 종류 꼬리를 뗀 것이다. (비었으면 채널 있는 스택 사이의 차례 번호)
+/// - 스택 이름은 FbxLoader 가 종류 꼬리를 뗀 이름이다. (비었으면 채널 있는 스택 사이의 차례 번호)
 /// - 받은 이름이 비었으면 스택 이름만 쓴다.
 //==============================================================================
 fn create_fbx_clip_name(clip_name: &str, stack_name: &str, stack_index: usize, stack_count: usize) -> String {
 	if stack_count <= 1 {
 		return clip_name.to_string();
 	}
-	let display_name = match stack_name.find('\u{0}') {
-		Some(separator_index) => {
-			&stack_name[..separator_index]
-		}
-		None => {
-			stack_name
-		}
-	};
-	let stack_label = if display_name.is_empty() {
+	let stack_label = if stack_name.is_empty() {
 		stack_index.to_string()
 	}
 	else {
-		display_name.to_string()
+		stack_name.to_string()
 	};
 	if clip_name.is_empty() {
 		stack_label
@@ -3753,14 +3745,14 @@ mod tests {
 			FbxAnimation { name: name.to_string(), duration: 1.0, channels }
 		};
 		let mut scene_data = FbxSceneData::default();
-		scene_data.animation_list = vec![create_animation("Take 001\u{0}\u{1}AnimStack", 1), create_animation("Empty\u{0}\u{1}AnimStack", 0), create_animation("\u{0}\u{1}AnimStack", 1)];
+		scene_data.animation_list = vec![create_animation("Take 001", 1), create_animation("Empty", 0), create_animation("", 1)];
 		let mut skinned_model = SkinnedModel::create_without_shader_program();
 		skinned_model.add_animations_from_fbx_scene_data(&scene_data, "Walk", false);
 		assert_eq!(skinned_model.get_animation_name_list(), vec!["Walk/Take 001", "Walk/1"]);
 		scene_data.animation_list.truncate(2);
 		skinned_model.add_animations_from_fbx_scene_data(&scene_data, "Run", false);
 		assert_eq!(skinned_model.get_animation_name_list(), vec!["Walk/Take 001", "Walk/1", "Run"]);
-		assert_eq!(create_fbx_clip_name("", "Idle\u{0}\u{1}AnimStack", 0, 2), "Idle");
-		assert_eq!(create_fbx_clip_name("Jump", "Take\u{0}\u{1}AnimStack", 0, 1), "Jump");
+		assert_eq!(create_fbx_clip_name("", "Idle", 0, 2), "Idle");
+		assert_eq!(create_fbx_clip_name("Jump", "Take", 0, 1), "Jump");
 	}
 }

@@ -19,7 +19,7 @@
 //! - 원본 Scene.load 가 루트를 뷰 크기로 맞추는 것(자리 0, 왼쪽 위 피벗, 콘텐츠 크기는 뷰 크기)은 엔진이 create 바로 뒤에 한다.
 //!   원본 SceneManager.loadScene 처럼 맡긴 애셋이 다 끝난 뒤에도 로딩 화면(draw_on_load)을 최소 0.3초 더 보이고 initialize 를 부른다.
 //! - 씬의 터치 훅(touch_press, touch_move, touch_release, touch_cancel, touch_wheel)은 원본 Scene.tickTouch 차례로 엔진이 tick 뒤에 부른다.
-//!   원본 기본 씬은 훅만 부르고 노드에 넘기지 않지만, 러스트 판 SceneBase.tick 은 가장 앞의 누를 수 있는 노드에도 넘긴다. (원본은 UIScene, GameScene 이 넘긴다)
+//!   SceneBase.tick 은 씬 꼴과 상관없이 가장 앞의 누를 수 있는 노드에도 넘긴다. (원본 Scene.tickTouch 가 씬의 TouchRaycaster 로 넘기는 것과 같다)
 //! - 페이지 복원 훅과 터치 훅은 원본과 달리 엔진을 받는다. (전역 엔진이 없다)
 //==============================================================================
 use crate::base::color::Color;

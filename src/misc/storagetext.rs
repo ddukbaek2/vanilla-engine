@@ -16,6 +16,12 @@ use std::collections::HashMap;
 
 //==============================================================================
 /// 짝 없는 서로게이트가 있는지.
+///
+/// # 인자
+/// - `code_units`: 볼 UTF-16 단위.
+///
+/// # 돌려줌
+/// 짝 없는 서로게이트가 하나라도 있으면 true.
 //==============================================================================
 pub fn has_lone_surrogate(code_units: &[u16]) -> bool {
 	char::decode_utf16(code_units.iter().copied()).any(|decode_result| decode_result.is_err())
@@ -23,6 +29,18 @@ pub fn has_lone_surrogate(code_units: &[u16]) -> bool {
 
 //==============================================================================
 /// 원래 UTF-16 단위와 대체 문자로 보인 글.
+///
+/// # 예제
+/// 잘린 이모지의 앞 반쪽을 든 글
+/// ```rust
+/// use vanilla::misc::storagetext::PreservedText;
+///
+/// let preserved_text = PreservedText::from_code_units(&[0x61, 0xD83D]);
+/// assert_eq!(preserved_text.get_lossy_text(), "a\u{fffd}");
+/// assert_eq!(preserved_text.get_code_units(), &[0x61, 0xD83D]);
+/// assert!(preserved_text.has_lone_surrogate());
+/// assert!(!PreservedText::from_code_units(&[0xD83D, 0xDE00]).has_lone_surrogate());
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreservedText {
@@ -33,6 +51,12 @@ pub struct PreservedText {
 impl PreservedText {
 	//==============================================================================
 	/// UTF-16 단위로 만들기. (짝 없는 서로게이트는 대체 문자로 보인다)
+	///
+	/// # 인자
+	/// - `code_units`: 원래 UTF-16 단위.
+	///
+	/// # 돌려줌
+	/// 그 단위와 대체 문자로 보인 글을 든 PreservedText.
 	//==============================================================================
 	pub fn from_code_units(code_units: &[u16]) -> PreservedText {
 		PreservedText {
@@ -43,6 +67,9 @@ impl PreservedText {
 
 	//==============================================================================
 	/// 대체 문자로 보인 글.
+	///
+	/// # 돌려줌
+	/// 짝 없는 서로게이트를 대체 문자(U+FFFD)로 바꾼 러스트 글.
 	//==============================================================================
 	pub fn get_lossy_text(&self) -> &str {
 		&self.lossy_text
@@ -50,6 +77,9 @@ impl PreservedText {
 
 	//==============================================================================
 	/// 원래 UTF-16 단위.
+	///
+	/// # 돌려줌
+	/// 만들 때 받은 원래 UTF-16 단위.
 	//==============================================================================
 	pub fn get_code_units(&self) -> &[u16] {
 		&self.code_units
@@ -57,6 +87,9 @@ impl PreservedText {
 
 	//==============================================================================
 	/// 짝 없는 서로게이트가 있는지. (없으면 러스트 글과 같다)
+	///
+	/// # 돌려줌
+	/// 짝 없는 서로게이트가 있으면 true.
 	//==============================================================================
 	pub fn has_lone_surrogate(&self) -> bool {
 		has_lone_surrogate(&self.code_units)
@@ -65,6 +98,12 @@ impl PreservedText {
 
 //==============================================================================
 /// JSON.stringify 의 글 따옴표. (QuoteJSONString: " 와 \ 와 \b \f \n \r \t, 그 밖의 U+0000 ~ U+001F 와 짝 없는 서로게이트는 \u 소문자 넷 자리)
+///
+/// # 인자
+/// - `code_units`: 따옴표로 감쌀 글의 UTF-16 단위.
+///
+/// # 돌려줌
+/// JSON.stringify 가 쓰는 꼴의 JSON 글. (앞뒤 따옴표까지)
 //==============================================================================
 pub fn quote_json_code_units(code_units: &[u16]) -> String {
 	let mut quoted_text = String::with_capacity(code_units.len() + 2);
@@ -116,12 +155,28 @@ pub fn quote_json_code_units(code_units: &[u16]) -> String {
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum JsonPathSegment {
+	/// 객체 키.
 	Key(String),
+	/// 배열 차례. (0 부터)
 	Index(usize),
 }
 
 //==============================================================================
 /// 짝 없는 서로게이트가 든 글의 표. (parse_json 이 채우고 stringify_json 이 쓴다)
+///
+/// # 예제
+/// 원본이 쓴 `\ud83d` 를 읽고 그대로 다시 쓰기
+/// ```rust
+/// use vanilla::misc::storagetext::{self, JsonPathSegment};
+///
+/// let stored_text = r#"{"name":"a\ud83d"}"#;
+/// let (value, surrogate_table) = storagetext::parse_json(stored_text).unwrap();
+/// assert_eq!(value["name"], "a\u{fffd}");
+/// assert!(!surrogate_table.is_empty());
+/// let name_path = [JsonPathSegment::Key(String::from("name"))];
+/// assert_eq!(surrogate_table.find_value_code_units(&name_path, "a\u{fffd}"), Some(&[0x61u16, 0xD83D][..]));
+/// assert_eq!(storagetext::stringify_json(&value, &surrogate_table), stored_text);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct JsonSurrogateTable {
@@ -137,6 +192,9 @@ pub struct JsonSurrogateTable {
 impl JsonSurrogateTable {
 	//==============================================================================
 	/// 빈 표.
+	///
+	/// # 돌려줌
+	/// 빈 표.
 	//==============================================================================
 	pub fn new() -> JsonSurrogateTable {
 		JsonSurrogateTable::default()
@@ -144,6 +202,9 @@ impl JsonSurrogateTable {
 
 	//==============================================================================
 	/// 비었는지. (짝 없는 서로게이트가 든 글이 없었다)
+	///
+	/// # 돌려줌
+	/// 짝 없는 서로게이트가 든 글이 없었으면 true.
 	//==============================================================================
 	pub fn is_empty(&self) -> bool {
 		!self.has_lone_surrogate_text
@@ -177,6 +238,13 @@ impl JsonSurrogateTable {
 
 	//==============================================================================
 	/// 그 자리 값 글의 원래 단위. (자리가 맞고 글이 그대로면 그것, 아니면 같은 글로 보이는 원래 글이 하나뿐일 때 그것)
+	///
+	/// # 인자
+	/// - `path`: 값의 자리. (맨 위 값에서부터의 JSON 경로)
+	/// - `text`: 지금 그 자리에 든 글.
+	///
+	/// # 돌려줌
+	/// 원래 UTF-16 단위. (자리가 맞고 글이 그대로면 그 자리의 것, 아니면 find_text_code_units 와 같다) 찾지 못하면 None.
 	//==============================================================================
 	pub fn find_value_code_units(&self, path: &[JsonPathSegment], text: &str) -> Option<&[u16]> {
 		if let Some(preserved_text) = self.path_map.get(path) {
@@ -189,6 +257,12 @@ impl JsonSurrogateTable {
 
 	//==============================================================================
 	/// 같은 글로 보이는 원래 글의 단위. (하나뿐일 때만)
+	///
+	/// # 인자
+	/// - `text`: 대체 문자로 보인 글.
+	///
+	/// # 돌려줌
+	/// 원래 UTF-16 단위. 그렇게 보이는 원래 글이 없거나, 원래 단위가 서로 다른 글이 둘 이상이면 None.
 	//==============================================================================
 	pub fn find_text_code_units(&self, text: &str) -> Option<&[u16]> {
 		match self.text_map.get(text) {
@@ -204,6 +278,12 @@ impl JsonSurrogateTable {
 
 //==============================================================================
 /// JSON 읽기. (JSON.parse 처럼, 짝 없는 서로게이트는 대체 문자로 읽고 표에 남긴다)
+///
+/// # 인자
+/// - `text`: 읽을 JSON 글.
+///
+/// # 돌려줌
+/// 값과 그 짝 없는 서로게이트 표. 틀린 JSON 이면 Err(까닭과 그 자리).
 //==============================================================================
 pub fn parse_json(text: &str) -> Result<(Value, JsonSurrogateTable), String> {
 	let code_units: Vec<u16> = text.encode_utf16().collect();
@@ -212,6 +292,12 @@ pub fn parse_json(text: &str) -> Result<(Value, JsonSurrogateTable), String> {
 
 //==============================================================================
 /// UTF-16 단위의 JSON 읽기. (원본 JS 글 그대로, 날 짝 없는 서로게이트도 받는다)
+///
+/// # 인자
+/// - `code_units`: 읽을 JSON 글의 UTF-16 단위. (날 짝 없는 서로게이트도 받는다)
+///
+/// # 돌려줌
+/// 값과 그 짝 없는 서로게이트 표. 틀린 JSON 이면 Err(까닭과 그 자리).
 //==============================================================================
 pub fn parse_json_code_units(code_units: &[u16]) -> Result<(Value, JsonSurrogateTable), String> {
 	let mut json_reader = JsonReader {
@@ -231,10 +317,27 @@ pub fn parse_json_code_units(code_units: &[u16]) -> Result<(Value, JsonSurrogate
 
 //==============================================================================
 /// JSON 객체의 칸 하나. (키는 원래 UTF-16 단위, 값의 표는 그 값을 바탕(빈 경로)으로 한 자리)
+///
+/// # 예제
+/// 짝 없는 서로게이트로만 다른 두 키를 따로 읽기
+/// ```rust
+/// use vanilla::misc::storagetext;
+///
+/// let entry_list = storagetext::parse_json_object_entries(r#"{"k\ud800":"one","k\ud801":"two"}"#).unwrap();
+/// assert_eq!(entry_list.len(), 2);
+/// assert_eq!(entry_list[0].key.get_lossy_text(), "k\u{fffd}");
+/// assert_eq!(entry_list[1].key.get_lossy_text(), "k\u{fffd}");
+/// assert_eq!(entry_list[1].key.get_code_units(), &[0x6B, 0xD801]);
+/// assert_eq!(entry_list[1].value, "two");
+/// assert!(entry_list[1].surrogate_table.is_empty());
+/// ```
 //==============================================================================
 pub struct JsonObjectEntry {
+	/// 키. (원래 UTF-16 단위와 대체 문자로 보인 글)
 	pub key: PreservedText,
+	/// 값. (짝 없는 서로게이트는 대체 문자)
 	pub value: Value,
+	/// 값의 짝 없는 서로게이트 표. (값을 바탕(빈 경로)으로 한 자리)
 	pub surrogate_table: JsonSurrogateTable,
 }
 
@@ -242,6 +345,12 @@ pub struct JsonObjectEntry {
 /// 맨 위가 객체인 JSON 을 칸 목록으로 읽기. (맨 위가 객체가 아니면 빈 목록)
 /// - 짝 없는 서로게이트로만 다른 두 키도 따로 담는다. (serde_json 맵에서는 대체 문자로 같은 키가 되어 하나만 남는다)
 /// - 차례는 글에 적힌 차례고, 같은 키가 또 나와도 모두 담는다. (JSON.parse 처럼 뒤의 값이 이기게 하려면 담는 쪽이 덮어쓴다)
+///
+/// # 인자
+/// - `text`: 읽을 JSON 글.
+///
+/// # 돌려줌
+/// 칸 목록. (글에 적힌 차례, 맨 위가 객체가 아니면 빈 목록) 틀린 JSON 이면 Err(까닭과 그 자리).
 //==============================================================================
 pub fn parse_json_object_entries(text: &str) -> Result<Vec<JsonObjectEntry>, String> {
 	let code_units: Vec<u16> = text.encode_utf16().collect();
@@ -268,6 +377,13 @@ pub fn parse_json_object_entries(text: &str) -> Result<Vec<JsonObjectEntry>, Str
 
 //==============================================================================
 /// JSON 쓰기. (serde_json 의 짧은 꼴과 같고, 표에 남은 글은 원래 단위로)
+///
+/// # 인자
+/// - `value`: 쓸 값.
+/// - `surrogate_table`: parse_json 이 남긴 표. (빈 표면 serde_json 의 짧은 꼴과 같다)
+///
+/// # 돌려줌
+/// JSON 글.
 //==============================================================================
 pub fn stringify_json(value: &Value, surrogate_table: &JsonSurrogateTable) -> String {
 	stringify_json_at(value, &[], surrogate_table)
@@ -275,6 +391,14 @@ pub fn stringify_json(value: &Value, surrogate_table: &JsonSurrogateTable) -> St
 
 //==============================================================================
 /// JSON 쓰기. (값이 표의 base_path 자리에 있던 것일 때)
+///
+/// # 인자
+/// - `value`: 쓸 값.
+/// - `base_path`: 이 값이 표에서 있던 자리. (빈 경로면 stringify_json 과 같다)
+/// - `surrogate_table`: parse_json 이 남긴 표.
+///
+/// # 돌려줌
+/// JSON 글.
 //==============================================================================
 pub fn stringify_json_at(value: &Value, base_path: &[JsonPathSegment], surrogate_table: &JsonSurrogateTable) -> String {
 	let mut json_text = String::new();

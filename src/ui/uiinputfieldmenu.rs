@@ -513,22 +513,37 @@ impl UIInputFieldBrowserMenu {
 }
 
 impl Component for UIInputFieldBrowserMenu {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름 반환. ("UIInputFieldBrowserMenu")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UIInputFieldBrowserMenu"
 	}
 
+	//==============================================================================
+	/// 트리에 붙을 때. (노드를 interactable 로 켠다)
+	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		node_tree[node_id].set_interactable(true);
 	}
 
+	//==============================================================================
+	/// 갱신. (필드가 포커스를 잃었거나 Esc 나 메뉴 밖 누름이면 닫고, 하위 메뉴를 열고 닫고, 누른 줄에서 뗀 항목을 필드에 부탁한다)
+	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
 		let is_owner_ready = match context.get_node_tree().get_node(self.owner_node_id).and_then(|owner_node| owner_node.get_component::<UIInputField>()) {
 			Some(owner_field) => {
@@ -597,6 +612,9 @@ impl Component for UIInputFieldBrowserMenu {
 		}
 	}
 
+	//==============================================================================
+	/// 그리기. (본 메뉴 판과 열린 하위 메뉴 판, 마우스 아래 줄은 바탕을 칠한다)
+	//==============================================================================
 	fn draw(&mut self, _transform: &NodeTransform, graphic: &mut Graphic) {
 		graphic.push_state();
 		let main_hovered_row_index = match self.hovered_row {
@@ -687,9 +705,9 @@ pub(crate) fn is_view_position_inside_menu(node_tree: &NodeTree, menu_id: NodeId
 	}
 }
 
-///==============================================================================
+//==============================================================================
 /// 터치 빠른 메뉴. (크롬 데스크탑 aura 의 TouchSelectionMenuViews, 손가락으로 길게 눌러 고른 뒤 뜬다)
-///==============================================================================
+//==============================================================================
 const QUICK_MENU_BUTTON_MINIMUM_HEIGHT: f32 = 40.0;
 const QUICK_MENU_BUTTON_PADDING_X: f32 = 16.0;
 const QUICK_MENU_CORNER_RADIUS: f32 = 8.0;
@@ -827,22 +845,37 @@ impl UIInputFieldQuickMenu {
 }
 
 impl Component for UIInputFieldQuickMenu {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름 반환. ("UIInputFieldQuickMenu")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UIInputFieldQuickMenu"
 	}
 
+	//==============================================================================
+	/// 트리에 붙을 때. (노드를 interactable 로 켠다)
+	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		node_tree[node_id].set_interactable(true);
 	}
 
+	//==============================================================================
+	/// 갱신. (필드가 포커스를 잃으면 닫고, 누른 단추에서 떼면 닫은 뒤 필드에 그 명령을 부탁한다)
+	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
 		let is_owner_ready = match context.get_node_tree().get_node(self.owner_node_id).and_then(|owner_node| owner_node.get_component::<UIInputField>()) {
 			Some(owner_field) => {
@@ -878,6 +911,9 @@ impl Component for UIInputFieldQuickMenu {
 		}
 	}
 
+	//==============================================================================
+	/// 그리기. (그림자, 둥근 판, 누른 단추 바탕, 단추 글과 나눔 선, 테두리)
+	//==============================================================================
 	fn draw(&mut self, _transform: &NodeTransform, graphic: &mut Graphic) {
 		graphic.push_state();
 		let menu_rect = Rect::create(0.0, 0.0, self.size.x, self.size.y);

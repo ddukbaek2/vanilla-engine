@@ -76,8 +76,8 @@ impl BodyId2D {
 ///
 /// let mut world = PhysicsWorld2D::new(&WorldDefinition2D::new(1.0));
 /// let body_id = world.create_body(&BodyDefinition2D::new());
-/// let shape_id = world.create_shape(body_id, &ShapeDefinition2D::new(), Polygon2D::make_box(1.0, 1.0)).expect("모양");
-/// assert_eq!(world.get_shape(shape_id).expect("모양").get_body_id(), body_id);
+/// let shape_id = world.create_shape(body_id, &ShapeDefinition2D::new(), Polygon2D::make_box(1.0, 1.0)).expect("shape");
+/// assert_eq!(world.get_shape(shape_id).expect("shape").get_body_id(), body_id);
 /// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -141,8 +141,8 @@ impl ShapeId2D {
 /// let mut joint_definition = RevoluteJointDefinition2D::new();
 /// joint_definition.body_id_a = Some(ground_id);
 /// joint_definition.body_id_b = Some(body_id);
-/// let joint_id = world.create_revolute_joint(&joint_definition).expect("관절");
-/// assert_eq!(world.get_joint(joint_id).expect("관절").get_type(), JointType2D::Revolute);
+/// let joint_id = world.create_revolute_joint(&joint_definition).expect("joint");
+/// assert_eq!(world.get_joint(joint_id).expect("joint").get_type(), JointType2D::Revolute);
 /// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

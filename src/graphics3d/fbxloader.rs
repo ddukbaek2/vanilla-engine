@@ -11,6 +11,7 @@
 //!   - 64비트 정수: 원본은 오브젝트 id 처럼 하나로 든 값이 2^53 을 넘으면 BigInt 로 든다. 러스트 판은 i64 다. 배열(키 시간)은 원본이 Number 다.
 //!   - 원본은 순서 있는 Map 을 쓴다. 러스트 판은 넣은 순서를 지키는 FbxObjectMap 으로 같은 순회 순서를 낸다.
 //!   - 원본에서 만들고 쓰지 않는 objectById 와 getDataView / getFileBytes / getTextDecoder 는 옮기지 않았다.
+//! - 노드와 애니메이션 스택의 name 은 원본처럼 FBX 이름에서 종류 꼬리("\u{0}\u{1}Model", "\u{0}\u{1}AnimStack")를 뗀 것이다. (본 이름 맞추기도 이 이름으로 한다)
 //!
 //! # 예제
 //! 노드 레코드로 짠 장면을 중간 표현으로 해석
@@ -888,7 +889,7 @@ pub struct FbxMaterial {
 
 //==============================================================================
 /// 모델 노드. (계층 + 로컬 변환(오일러 도) + 지오메트리/스킨/머티리얼 소속)
-/// - name 은 원본처럼 FBX 이름 그대로다. ("Hips\u{0}\u{1}Model" 꼴, 본 이름 매칭도 이 문자열로 한다)
+/// - name 은 원본처럼 FBX 이름에서 종류 꼬리를 뗀 것이다. ("Hips\u{0}\u{1}Model" 은 "Hips", 본 이름 매칭도 이 이름으로 한다)
 ///
 /// # 예제
 /// 루트 본 아래 자식 본 하나와 로컬 이동
@@ -929,7 +930,7 @@ pub struct FbxMaterial {
 pub struct FbxNode {
 	/// 오브젝트 id.
 	pub id: i64,
-	/// FBX 이름. (Model 의 두 번째 프로퍼티 그대로)
+	/// FBX 이름. (Model 의 두 번째 프로퍼티에서 종류 꼬리 "\u{0}\u{1}Model" 을 뗀 것)
 	pub name: String,
 	/// 본인지. (Model 의 세 번째 프로퍼티가 LimbNode 면 true)
 	pub is_bone: bool,
@@ -1040,7 +1041,7 @@ pub struct FbxAnimationChannel {
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FbxAnimation {
-	/// 스택 이름. (AnimationStack 의 두 번째 프로퍼티 그대로)
+	/// 스택 이름. (AnimationStack 의 두 번째 프로퍼티에서 종류 꼬리 "\u{0}\u{1}AnimStack" 을 뗀 것, "Take 001" 같은)
 	pub name: String,
 	/// 길이. (초, 채널마다 마지막 키 시간 가운데 가장 큰 것, 채널이 없으면 0)
 	pub duration: f32,
@@ -2182,7 +2183,7 @@ impl FbxLoader {
 					continue;
 				}
 			};
-			let model_name = object_node.get_string_property(1);
+			let model_name = read_fbx_object_name(&object_node.get_string_property(1));
 			let model_sub_type = object_node.get_string_property(2);
 			let mut node = FbxNode {
 				id: model_id,
@@ -2304,7 +2305,7 @@ impl FbxLoader {
 				layer_id_set.insert(object_id);
 			}
 			else if object_node.name == "AnimationStack" {
-				stack_by_id.insert(object_id, AnimationStack { name: object_node.get_string_property(1), layer_ids: Vec::new() });
+				stack_by_id.insert(object_id, AnimationStack { name: read_fbx_object_name(&object_node.get_string_property(1)), layer_ids: Vec::new() });
 			}
 		}
 
@@ -2473,6 +2474,28 @@ impl FbxLoader {
 		let from_value = key_values.get(key_index).copied().unwrap_or(0.0);
 		let to_value = key_values.get(key_index + 1).copied().unwrap_or(from_value);
 		from_value + (to_value - from_value) * factor
+	}
+}
+
+//==============================================================================
+/// 오브젝트 이름 읽기. (바이너리 FBX 의 "이름\u{0}\u{1}종류" 꼴에서 종류 꼬리를 뗀다, "Take 001\u{0}\u{1}AnimStack" 은 "Take 001", 원본 readFbxObjectName)
+/// - three.js FBXLoader(BinaryReader.getString 이 첫 널 바이트에서 자른다)와 Assimp(FBXDocument 가 "종류::이름" 으로 바꾸고
+///   FBXConverter 가 "Model::", "AnimStack::" 를 뗀다)도 같은 이름을 낸다.
+///
+/// # 인자
+/// - `fbx_name`: FBX 오브젝트의 두 번째 프로퍼티 글.
+///
+/// # 돌려줌
+/// 종류 꼬리를 뗀 이름. (꼬리가 없으면 그대로)
+//==============================================================================
+fn read_fbx_object_name(fbx_name: &str) -> String {
+	match fbx_name.find('\u{0}') {
+		Some(separator_index) => {
+			fbx_name[..separator_index].to_string()
+		}
+		None => {
+			fbx_name.to_string()
+		}
 	}
 }
 
@@ -2813,6 +2836,8 @@ mod tests {
 		assert_eq!(scene_data.node_list.len(), 2);
 		assert_eq!(scene_data.root_node_indices, vec![0, 1]);
 		assert!(scene_data.node_list[0].is_bone);
+		assert_eq!(scene_data.node_list[0].name, "Bone");
+		assert_eq!(scene_data.node_list[1].name, "Mesh");
 		assert_eq!(scene_data.node_list[0].translation, [1.0, 2.0, 3.0]);
 		assert_eq!(scene_data.node_list[1].geometry_id, Some(100));
 		assert_eq!(scene_data.node_list[1].skin_id, Some(300));
@@ -2823,7 +2848,7 @@ mod tests {
 
 		assert_eq!(scene_data.animation_list.len(), 1);
 		let animation = &scene_data.animation_list[0];
-		assert_eq!(animation.name, "Take\u{0}\u{1}AnimStack");
+		assert_eq!(animation.name, "Take");
 		assert_eq!(animation.duration, 1.0);
 		assert_eq!(animation.channels.len(), 1);
 		let channel = &animation.channels[0];

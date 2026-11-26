@@ -417,15 +417,16 @@ impl ShadowAtlas {
 	//==============================================================================
 	/// 생성. (깊이 텍스처와 컬러 없는 프레임버퍼, 앞의 묶음은 돌린다)
 	/// - 칸이 없는 상태로 시작한다. (격자 한 변 1, 칸 한 변은 해상도, update_lights 로 나눈다)
+	/// - resolution 은 아틀라스 한 변, tile_resolution 은 칸마다 바라는 한 변이다. (원본 기본값은 DEFAULT_SHADOW_ATLAS_RESOLUTION, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION)
 	///
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	/// - `resolution`: 깊이 텍스처 한 변의 텍셀 수. (정사각형)
+	/// - `tile_resolution`: 칸마다 바라는 한 변. (픽셀, 1 ~ resolution 으로 자르고, 다 들어가지 않으면 반씩 줄인다)
 	///
 	/// # 돌려줌
 	/// 새 그림자 아틀라스. 텍스처나 프레임버퍼를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
-	/// - resolution 은 아틀라스 한 변, tile_resolution 은 칸마다 바라는 한 변이다. (원본 기본값은 DEFAULT_SHADOW_ATLAS_RESOLUTION, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION)
 	pub fn new(gl: &glow::Context, resolution: i32, tile_resolution: i32) -> Result<ShadowAtlas, String> {
 		let (framebuffer, depth_texture) = create_depth_target(gl, resolution)?;
 		Ok(ShadowAtlas { framebuffer, depth_texture, resolution, tile_resolution: tile_resolution.min(resolution).max(1), grid_size: 1, tile_size: resolution, light_list: Vec::new(), tile_list: Vec::new() })
@@ -536,6 +537,9 @@ impl ShadowAtlas {
 
 	//==============================================================================
 	/// 칸마다 바라는 한 변 반환. (픽셀, 생성 때 준 값)
+	///
+	/// # 돌려줌
+	/// 칸마다 바라는 한 변. (픽셀)
 	//==============================================================================
 	pub fn get_tile_resolution(&self) -> i32 {
 		self.tile_resolution
@@ -568,7 +572,7 @@ impl ShadowAtlas {
 	/// 격자 한 변의 칸 수 반환.
 	///
 	/// # 돌려줌
-	/// 격자 한 변의 칸 수. (올림(칸 수의 제곱근), 1 이상)
+	/// 격자 한 변의 칸 수.
 	//==============================================================================
 	pub fn get_grid_size(&self) -> i32 {
 		self.grid_size
@@ -578,7 +582,7 @@ impl ShadowAtlas {
 	/// 칸 한 변 반환. (픽셀)
 	///
 	/// # 돌려줌
-	/// 칸 한 변의 픽셀 수. (내림(해상도 / 격자 한 변))
+	/// 칸 한 변. (픽셀)
 	//==============================================================================
 	pub fn get_tile_size(&self) -> i32 {
 		self.tile_size

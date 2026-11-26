@@ -441,89 +441,189 @@ pub(crate) mod fake_gl {
 			b"\0".as_ptr()
 		}
 	}
+
+	//==============================================================================
+	/// glGenTextures 자리.
+	//==============================================================================
 	extern "system" fn gen_textures(count: i32, names: *mut u32) {
 		unsafe {
 			generate_objects(FakeGlObject::Texture, count, names);
 		}
 	}
+
+	//==============================================================================
+	/// glDeleteTextures 자리.
+	//==============================================================================
 	extern "system" fn delete_textures(count: i32, names: *const u32) {
 		unsafe {
 			delete_objects(FakeGlObject::Texture, count, names);
 		}
 	}
+
+	//==============================================================================
+	/// glGenFramebuffers 자리.
+	//==============================================================================
 	extern "system" fn gen_framebuffers(count: i32, names: *mut u32) {
 		unsafe {
 			generate_objects(FakeGlObject::Framebuffer, count, names);
 		}
 	}
+
+	//==============================================================================
+	/// glDeleteFramebuffers 자리.
+	//==============================================================================
 	extern "system" fn delete_framebuffers(count: i32, names: *const u32) {
 		unsafe {
 			delete_objects(FakeGlObject::Framebuffer, count, names);
 		}
 	}
+
+	//==============================================================================
+	/// glGenRenderbuffers 자리.
+	//==============================================================================
 	extern "system" fn gen_renderbuffers(count: i32, names: *mut u32) {
 		unsafe {
 			generate_objects(FakeGlObject::Renderbuffer, count, names);
 		}
 	}
+
+	//==============================================================================
+	/// glDeleteRenderbuffers 자리.
+	//==============================================================================
 	extern "system" fn delete_renderbuffers(count: i32, names: *const u32) {
 		unsafe {
 			delete_objects(FakeGlObject::Renderbuffer, count, names);
 		}
 	}
+
+	//==============================================================================
+	/// glGenVertexArrays 자리.
+	//==============================================================================
 	extern "system" fn gen_vertex_arrays(count: i32, names: *mut u32) {
 		unsafe {
 			generate_objects(FakeGlObject::VertexArray, count, names);
 		}
 	}
+
+	//==============================================================================
+	/// glDeleteVertexArrays 자리.
+	//==============================================================================
 	extern "system" fn delete_vertex_arrays(count: i32, names: *const u32) {
 		unsafe {
 			delete_objects(FakeGlObject::VertexArray, count, names);
 		}
 	}
+
+	//==============================================================================
+	/// glCreateShader 자리.
+	//==============================================================================
 	extern "system" fn create_shader(_shader_type: u32) -> u32 {
 		create_object(FakeGlObject::Shader)
 	}
+
+	//==============================================================================
+	/// glDeleteShader 자리.
+	//==============================================================================
 	extern "system" fn delete_shader(name: u32) {
 		delete_object(FakeGlObject::Shader, name);
 	}
+
+	//==============================================================================
+	/// glCreateProgram 자리.
+	//==============================================================================
 	extern "system" fn create_program() -> u32 {
 		create_object(FakeGlObject::Program)
 	}
+
+	//==============================================================================
+	/// glDeleteProgram 자리.
+	//==============================================================================
 	extern "system" fn delete_program(name: u32) {
 		delete_object(FakeGlObject::Program, name);
 	}
+
+	//==============================================================================
+	/// glGetShaderiv, glGetProgramiv 자리. (늘 1, 컴파일과 링크가 됐다고 본다)
+	//==============================================================================
 	extern "system" fn get_object_parameter(_name: u32, _parameter: u32, value: *mut i32) {
 		unsafe {
 			*value = 1;
 		}
 	}
+
+	//==============================================================================
+	/// glCheckFramebufferStatus 자리. (늘 완성)
+	//==============================================================================
 	extern "system" fn check_framebuffer_status(_target: u32) -> u32 {
 		glow::FRAMEBUFFER_COMPLETE
 	}
+
+	//==============================================================================
+	/// glShaderSource 자리. (아무것도 하지 않는다)
+	//==============================================================================
 	extern "system" fn shader_source(_shader: u32, _count: i32, _source_list: *const *const c_char, _length_list: *const i32) {
 	}
+
+	//==============================================================================
+	/// glTexImage2D 자리. (아무것도 하지 않는다)
+	//==============================================================================
 	extern "system" fn tex_image_2d(_target: u32, _level: i32, _internal_format: i32, _width: i32, _height: i32, _border: i32, _format: u32, _component_type: u32, _pixels: *const c_void) {
 	}
+
+	//==============================================================================
+	/// glFramebufferTexture2D 자리. (아무것도 하지 않는다)
+	//==============================================================================
 	extern "system" fn framebuffer_texture_2d(_target: u32, _attachment: u32, _texture_target: u32, _texture: u32, _level: i32) {
 	}
+
+	//==============================================================================
+	/// glRenderbufferStorage 자리. (아무것도 하지 않는다)
+	//==============================================================================
 	extern "system" fn renderbuffer_storage(_target: u32, _internal_format: u32, _width: i32, _height: i32) {
 	}
+
+	//==============================================================================
+	/// glFramebufferRenderbuffer 자리. (아무것도 하지 않는다)
+	//==============================================================================
 	extern "system" fn framebuffer_renderbuffer(_target: u32, _attachment: u32, _renderbuffer_target: u32, _renderbuffer: u32) {
 	}
+
+	//==============================================================================
+	/// glPixelStorei 자리. (아무것도 하지 않는다)
+	//==============================================================================
 	extern "system" fn set_enum_integer(_first: u32, _second: i32) {
 	}
+
+	//==============================================================================
+	/// glTexParameteri 자리. (아무것도 하지 않는다)
+	//==============================================================================
 	extern "system" fn set_enum_enum_integer(_first: u32, _second: u32, _third: i32) {
 	}
+
+	//==============================================================================
+	/// glBindTexture, glBindFramebuffer, glBindRenderbuffer, glAttachShader, glDetachShader 자리. (아무것도 하지 않는다)
+	//==============================================================================
 	extern "system" fn set_name_pair(_first: u32, _second: u32) {
 	}
+
+	//==============================================================================
+	/// glCompileShader, glLinkProgram, glGenerateMipmap 자리. (아무것도 하지 않는다)
+	//==============================================================================
 	extern "system" fn set_name(_first: u32) {
 	}
+
+	//==============================================================================
+	/// glGetIntegerv 자리. (늘 0)
+	//==============================================================================
 	extern "system" fn get_integer(_parameter: u32, value: *mut i32) {
 		unsafe {
 			*value = 0;
 		}
 	}
+
+	//==============================================================================
+	/// glReadPixels 자리. (아무것도 쓰지 않는다)
+	//==============================================================================
 	extern "system" fn read_pixels(_x: i32, _y: i32, _width: i32, _height: i32, _format: u32, _component_type: u32, _pixels: *mut c_void) {
 	}
 

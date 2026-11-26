@@ -8,7 +8,7 @@ cargo run -p vanilla-engine-apidoc -- <판> --check
 cargo run -p vanilla-engine-apidoc -- <판> --missing [--only <경로 앞>] [--exclude <경로 앞>]
 cargo run -p vanilla-engine-apidoc -- <판> --gaps [--only <경로 앞>] [--exclude <경로 앞>]
 ```
-- 첫 줄: src/lib.rs 에서 pub mod 와 pub use 로 밖에서 닿는 공개 API(구조체, 트레이트, 꼴 별칭, 열거, 함수, 상수, 내보낸 매크로, 다시 내보낸 반사 매크로)를 읽어 docs/api/<판>.json 을 쓴다. pub(crate) 와 닿지 않는 모듈의 것은 뺀다. (닿지 않는 모듈의 것도 pub use 로 내보냈으면 넣는다)
+- 첫 줄: src/lib.rs 에서 pub mod 와 pub use 로 밖에서 닿는 공개 API(구조체, 트레이트, 꼴 별칭, 열거, 함수, 상수, 내보낸 매크로, 다시 내보낸 반사 매크로)를 읽어 docs/api/<판>.json 을 쓴다. pub(crate) 와 닿지 않는 모듈의 것은 뺀다. (닿지 않는 모듈의 것도 pub use 로 내보냈으면 넣는다) pub mod 사슬로 닿는 묶음 모듈(아래 모듈을 둔 모듈, vanilla::experimental 같은)은 아이템이 없어도 모듈 설명이나 예제가 있으면 모듈로 둔다. (원본 자료의 experimental/experimental 자리, 크레이트 뿌리는 두지 않는다)
 - 자료 꼴은 vanilla.js 와 같다. { engine, version, date, modules: [ { name, summary, examples, classes, functions, enums } ] } 이고 설명 칸은 모두 { ko, en } 이다. 러스트 판에서 더한 것:
   - 클래스 자리에 struct, trait, 꼴 별칭(type)을 두고 kind 칸으로 가른다. 꼴 별칭은 signature 칸에 정의를 둔다. traits 는 구현한 트레이트(derive 포함, 트레이트는 상위 트레이트)다. extends 는 없다.
   - 멤버 kind: self 를 받는 함수는 method, 받지 않는 연관 함수는 static, 그 가운데 new 는 constructor, 연관 상수는 static, 공개 필드는 field. 모듈 함수는 원본처럼 method, 모듈 상수와 static 은 field.
@@ -23,7 +23,7 @@ cargo run -p vanilla-engine-apidoc -- <판> --gaps [--only <경로 앞>] [--excl
 - --missing: 표에 없는 ko 글 목록을 JSON 배열로 낸다. 옮긴 것을 translation.en.json 에 더하고 첫 줄을 다시 돌려 en 빈 칸을 0 으로 만든다.
 - 첫 줄은 가이드 doctest 장 목록 tools/apidoc/src/guide.rs 도 다시 쓴다.
 - --check: docs/api/<판>.json 의 꼴(설명 칸이 { ko, en } 인지, kind, since, 예제 칸, 예제 코드에 한글)을 검사하고 모듈, 클래스(종류별), 멤버(종류별), 인자, 함수, 열거 수와 짝 수, ko 빈 칸(갈래별), en 빈 칸, 예제 수, since 분포를 찍는다. 필드와 상수의 returns 는 꼴만 담는 칸이라 설명이 비어도 세지 않는다. 가이드는 ko 와 en 의 파일 이름과 코드 칸이 같은지, rust 코드 칸과 en 본문에 한글이 없는지, 업데이트 문서가 있는지, 가이드 doctest 장 목록이 장 파일과 맞는지, 자료와 문서에 긴 줄표나 가운뎃점이 없는지 본다. 오류가 있으면 끝 코드가 1 이다.
-- --gaps: 소스에서 문서가 빈 곳을 파일마다 찍는다. 공개 API 의 빈 설명(모듈 요약, 클래스 요약, 멤버, 인자, 돌려줌, 열거와 그 값), 없는 인자를 적은 곳, 예제 없는 구조체와 트레이트, 제 예제도 클래스 예제도 없는 모듈, src 의 모든 함수 가운데 문서 주석도 머리 주석도 없는 것. 줄 번호는 이름:줄 로 찍는다.
+- --gaps: 소스에서 문서가 빈 곳을 파일마다 찍는다. 공개 API 의 빈 설명(모듈 요약, 클래스 요약, 멤버, 인자, 돌려줌, 열거와 그 값), 없는 인자를 적은 곳, 예제 없는 구조체와 트레이트, 제 예제도 클래스 예제도 없는 모듈(아이템이 없는 묶음 모듈은 빼고), src 의 모든 함수 가운데 문서 주석도 머리 주석도 없는 것. 줄 번호는 이름:줄 로 찍는다.
 - --only, --exclude: --missing, --gaps 가 볼 소스를 저장소 기준 경로의 앞부분으로 거른다. (src/ui/, src/base/rect.rs 처럼, 여러 번 줄 수 있다)
 
 ### 예제 검사

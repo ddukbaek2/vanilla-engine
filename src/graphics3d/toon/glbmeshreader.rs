@@ -1,17 +1,17 @@
 //==============================================================================
-// 점토 모형(GLB) 읽기와 뼈대 자세. (vanilla.js graphics3d/toon/glbmeshreader.js)
-// - 재질 색으로 칠하는 모형을 툰 3D 의 MeshBuilder 꼭짓점 배열로 읽는다. 텍스처 좌표와 재질 텍스처가 있으면 그것도 읽는다. (외계행성 광부 키우기에서 왔다)
-//   - 부품 하나가 노드 하나이고, 노드의 메시는 색마다 프리미티브 하나다. 꼭짓점은 위치와 노멀, 뼈대가 있으면 본 번호와 무게다.
-//   - 재질의 baseColorFactor 는 선형 색이라 sRGB 로 바꿔 담고, emissiveFactor 가 있으면 빛남으로 담는다. (emissiveTexture 가 있으면 빛남은 재질 범위로만 넘긴다)
-//   - TEXCOORD_0 이 있으면 uv_data 로, TEXCOORD_1 이 있으면 uv1_data(2 번 UV, 천사 고리)로 담는다. 프리미티브마다 재질 범위(ToonMaterialRange)를 담는다. (재질 이름, extras, 텍스처 그림 차례)
-//     부품 안에서 칸을 갈라 칠할 때(강조색 칸, 표시판) 재질 이름이나 extras 로 고르고 ToonDrawOptions 의 index_start, index_count 로 그 칸만 그린다.
-//   - 그림은 read_glb_images 로 읽고 decode_glb_image 로 풀어 ToonRenderer::create_texture 에 넘긴다.
-//   - 재질 extras 의 outline 은 바깥선 껍데기(뒷면만 그림), basic 은 빛을 받지 않는 부품이다.
-//     바깥선 설정을 주면 그 껍데기는 담지 않고, ".outline" 짝이 있는 노드의 몸으로 점마다 같은 굵기의 껍데기를 새로 짓는다.
-//   - 뼈대(skin)가 있으면 본 노드와 그 거꾸로 묶는 행렬, 움직임(animations)과 그 extras 를 함께 읽는다. 자세는 write_skin_pose 가 셈한다.
-//   - 부품을 따로 숨기거나 칠하는 모형은 read_glb_node_arrays 로 노드마다 따로 읽는다. (노드 extras 와 비치는 정도를 함께)
-//   - 한 덩이로 읽은 뼈대 모형의 노드 extras 와 부품의 자리, 따르는 본은 read_glb_node_infos 로 따로 읽는다.
-// - 엔진의 SkinnedModel(텍스처 PBR)과는 따로다. 툰 그리기에 쓸 꼭짓점 배열만 뽑는다.
+//! 점토 모형(GLB) 읽기와 뼈대 자세. (vanilla.js graphics3d/toon/glbmeshreader.js)
+//! - 재질 색으로 칠하는 모형을 툰 3D 의 MeshBuilder 꼭짓점 배열로 읽는다. 텍스처 좌표와 재질 텍스처가 있으면 그것도 읽는다. (외계행성 광부 키우기에서 왔다)
+//!   - 부품 하나가 노드 하나이고, 노드의 메시는 색마다 프리미티브 하나다. 꼭짓점은 위치와 노멀, 뼈대가 있으면 본 번호와 무게다.
+//!   - 재질의 baseColorFactor 는 선형 색이라 sRGB 로 바꿔 담고, emissiveFactor 가 있으면 빛남으로 담는다. (emissiveTexture 가 있으면 빛남은 재질 범위로만 넘긴다)
+//!   - TEXCOORD_0 이 있으면 uv_data 로, TEXCOORD_1 이 있으면 uv1_data(2 번 UV, 천사 고리)로 담는다. 프리미티브마다 재질 범위(ToonMaterialRange)를 담는다. (재질 이름, extras, 텍스처 그림 차례)
+//!     부품 안에서 칸을 갈라 칠할 때(강조색 칸, 표시판) 재질 이름이나 extras 로 고르고 ToonDrawOptions 의 index_start, index_count 로 그 칸만 그린다.
+//!   - 그림은 read_glb_images 로 읽고 decode_glb_image 로 풀어 ToonRenderer::create_texture 에 넘긴다.
+//!   - 재질 extras 의 outline 은 바깥선 껍데기(뒷면만 그림), basic 은 빛을 받지 않는 부품이다.
+//!     바깥선 설정을 주면 그 껍데기는 담지 않고, ".outline" 짝이 있는 노드의 몸으로 점마다 같은 굵기의 껍데기를 새로 짓는다.
+//!   - 뼈대(skin)가 있으면 본 노드와 그 거꾸로 묶는 행렬, 움직임(animations)과 그 extras 를 함께 읽는다. 자세는 write_skin_pose 가 셈한다.
+//!   - 부품을 따로 숨기거나 칠하는 모형은 read_glb_node_arrays 로 노드마다 따로 읽는다. (노드 extras 와 비치는 정도를 함께)
+//!   - 한 덩이로 읽은 뼈대 모형의 노드 extras 와 부품의 자리, 따르는 본은 read_glb_node_infos 로 따로 읽는다.
+//! - 엔진의 SkinnedModel(텍스처 PBR)과는 따로다. 툰 그리기에 쓸 꼭짓점 배열만 뽑는다.
 //==============================================================================
 use std::collections::{HashMap, HashSet};
 
@@ -21,151 +21,323 @@ use crate::base::matrix4::Matrix4;
 use crate::base::quaternion::Quaternion;
 use crate::graphics3d::toon::meshbuilder::{MeshBuilder, ToonMaterialRange, ToonMeshArrays};
 
-// GLB 의 머리와 덩어리 종류.
+/// GLB 의 머리와 덩어리 종류.
 const GLB_MAGIC: u32 = 0x46546c67;
 const CHUNK_TYPE_JSON: u32 = 0x4e4f534a;
 const CHUNK_TYPE_BINARY: u32 = 0x004e4942;
-// 삼각형 프리미티브. (glTF 의 mode 4, 없으면 4)
+/// 삼각형 프리미티브. (glTF 의 mode 4, 없으면 4)
 const TRIANGLES_MODE: u64 = 4;
-// 바깥선 껍데기 노드의 이름 끝. (read_glb_node_arrays 가 앞 이름의 노드에 함께 담는다)
+/// 바깥선 껍데기 노드의 이름 끝. (read_glb_node_arrays 가 앞 이름의 노드에 함께 담는다)
 const OUTLINE_NODE_SUFFIX: &str = ".outline";
-// 한 번만 트는 움직임의 extras.loop. (끝 시각에 묶어 끝 자세를 둔다)
+/// 한 번만 트는 움직임의 extras.loop. (끝 시각에 묶어 끝 자세를 둔다)
 const LOOP_ONCE: &str = "once";
 
 //==============================================================================
-// 바깥선을 새로 지을 때의 설정.
-// - width: 껍데기 굵기. (0 이면 껍데기를 하나도 짓지 않는다, GLB 의 껍데기도 담지 않는다)
-// - part_widths: 부품(노드 이름)마다 따로 준 굵기. added_parts: ".outline" 짝이 없어도 껍데기를 지을 부품.
-// - inner_parts: inner_width 가 0 보다 크면 그 굵기의 껍데기를 하나 더 지어 바깥선 껍데기 끝에 담고 그 자리를 inner_outline_ranges 로 돌려준다.
-//   inner_parts 와 그 위에 얹힌 inner_over_parts 의 몸이 든 자리는 inner_body_ranges 로 돌려준다. (유리 같은 부위를 둘레의 가는 선과 함께 한 번 더 그릴 때)
+/// 바깥선을 새로 지을 때의 설정.
+/// - width: 껍데기 굵기. (0 이면 껍데기를 하나도 짓지 않는다, GLB 의 껍데기도 담지 않는다)
+/// - part_widths: 부품(노드 이름)마다 따로 준 굵기. added_parts: ".outline" 짝이 없어도 껍데기를 지을 부품.
+/// - inner_parts: inner_width 가 0 보다 크면 그 굵기의 껍데기를 하나 더 지어 바깥선 껍데기 끝에 담고 그 자리를 inner_outline_ranges 로 돌려준다.
+///   inner_parts 와 그 위에 얹힌 inner_over_parts 의 몸이 든 자리는 inner_body_ranges 로 돌려준다. (유리 같은 부위를 둘레의 가는 선과 함께 한 번 더 그릴 때)
+///
+/// # 예제
+/// 바이저만 가늘게, 짝이 없는 부품에도 바깥선 껍데기 짓기
+/// ```rust,no_run
+/// use std::collections::HashMap;
+/// use vanilla::{read_glb_arrays, ToonMeshArrays, ToonOutlineOptions};
+///
+/// fn read_soldier(bytes: &[u8]) -> Result<ToonMeshArrays, String> {
+/// 	let outline_options = ToonOutlineOptions {
+/// 		width: 1.5,
+/// 		part_widths: HashMap::from([(String::from("vanguard_visor"), 0.8)]),
+/// 		added_parts: vec![String::from("vanguard_Mesh"), String::from("vanguard_visor")],
+/// 		..ToonOutlineOptions::default()
+/// 	};
+/// 	read_glb_arrays(bytes, Some(&outline_options))
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct ToonOutlineOptions {
+	/// 껍데기 굵기. (모형 좌표, 0 이면 껍데기를 하나도 짓지 않는다)
 	pub width: f32,
+	/// 부품(노드 이름)마다 따로 준 굵기.
 	pub part_widths: HashMap<String, f32>,
+	/// ".outline" 짝이 없어도 껍데기를 지을 부품. (노드 이름)
 	pub added_parts: Vec<String>,
+	/// 안쪽 껍데기를 하나 더 지을 부품. (노드 이름, inner_width 가 0 보다 클 때)
 	pub inner_parts: Vec<String>,
+	/// inner_parts 위에 얹힌 부품. (노드 이름, 몸이 든 자리만 inner_body_ranges 로)
 	pub inner_over_parts: Vec<String>,
+	/// 안쪽 껍데기 굵기. (0 이면 짓지 않는다)
 	pub inner_width: f32,
 }
 
 //==============================================================================
-// 뼈대의 노드 하나. (쉬는 자세)
+/// 뼈대의 노드 하나. (쉬는 자세)
+///
+/// # 예제
+/// 쉬는 자세의 노드 둘로 본 행렬 셈하기
+/// ```rust
+/// use std::collections::HashMap;
+/// use vanilla::{write_skin_pose, ToonSkeleton, ToonSkeletonNode};
+///
+/// let root = ToonSkeletonNode { name: String::from("root"), parent_index: None, translation: [0.0, 1.0, 0.0], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: None };
+/// let arm = ToonSkeletonNode { name: String::from("arm"), parent_index: Some(0), translation: [0.5, 0.0, 0.0], rotation: [0.0, 0.0, 0.0, 1.0], scale: [2.0; 3], matrix: None };
+/// let skeleton = ToonSkeleton { joints: vec![0, 1], inverse_bind_matrices: Vec::new(), nodes: vec![root, arm], animations: HashMap::new() };
+/// let mut joint_matrices = vec![0.0; skeleton.joints.len() * 16];
+/// write_skin_pose(&skeleton, "Idle", 0.0, &mut joint_matrices, None, None);
+/// assert!((joint_matrices[16] - 2.0).abs() < 0.0001);
+/// assert!((joint_matrices[28] - 0.5).abs() < 0.0001 && (joint_matrices[29] - 1.0).abs() < 0.0001);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct ToonSkeletonNode {
-	// 노드 이름. (없으면 빈 글자)
+	/// 노드 이름. (없으면 빈 글자)
 	pub name: String,
-	// 부모 노드의 차례. (뿌리면 None)
+	/// 부모 노드의 차례. (뿌리면 None)
 	pub parent_index: Option<usize>,
+	/// 자리. ([x, y, z])
 	pub translation: [f32; 3],
-	// 돌림 사원수. ([x, y, z, w])
+	/// 돌림 사원수. ([x, y, z, w])
 	pub rotation: [f32; 4],
+	/// 크기. ([x, y, z])
 	pub scale: [f32; 3],
-	// glTF 의 matrix. (있으면 자리, 돌림, 크기 대신 쓰고 움직임을 받지 않는다)
+	/// glTF 의 matrix. (있으면 자리, 돌림, 크기 대신 쓰고 움직임을 받지 않는다)
 	pub matrix: Option<[f32; 16]>,
 }
 
 //==============================================================================
-// 움직임의 한 갈래. (노드 하나의 자리, 돌림, 크기 가운데 하나)
+/// 움직임의 한 갈래. (노드 하나의 자리, 돌림, 크기 가운데 하나)
 //==============================================================================
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToonChannelPath {
+	/// 자리. (값 셋)
 	Translation,
+	/// 돌림. (사원수 넷)
 	Rotation,
+	/// 크기. (값 셋)
 	Scale,
-	// 그 밖의 것. (weights 같은, 읽기만 하고 자세에 쓰지 않는다)
+	/// 그 밖의 것. (weights 같은, 읽기만 하고 자세에 쓰지 않는다)
 	Other,
 }
 
 //==============================================================================
-// 움직임의 한 갈래. (움직이는 노드, 바꾸는 것, 열쇠 시각과 값)
+/// 움직임의 한 갈래. (움직이는 노드, 바꾸는 것, 열쇠 시각과 값)
+///
+/// # 예제
+/// 앞 키를 그대로 두는 STEP 갈래로 노드 하나 옮기기
+/// ```rust
+/// use std::collections::HashMap;
+/// use vanilla::{write_skin_pose, ToonAnimation, ToonAnimationChannel, ToonChannelPath, ToonSkeleton, ToonSkeletonNode};
+///
+/// let node = ToonSkeletonNode { name: String::from("body"), parent_index: None, translation: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: None };
+/// let hop = ToonAnimationChannel { node_index: 0, path: ToonChannelPath::Translation, times: vec![0.0, 0.5], values: vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0], is_step: true };
+/// let animation = ToonAnimation { duration: 1.0, channels: vec![hop], extras: serde_json::Value::Null };
+/// let skeleton = ToonSkeleton { joints: vec![0], inverse_bind_matrices: Vec::new(), nodes: vec![node], animations: HashMap::from([(String::from("Hop"), animation)]) };
+/// let mut joint_matrices = [0.0; 16];
+/// write_skin_pose(&skeleton, "Hop", 0.25, &mut joint_matrices, None, None);
+/// assert_eq!(joint_matrices[13], 0.0);
+/// write_skin_pose(&skeleton, "Hop", 0.75, &mut joint_matrices, None, None);
+/// assert_eq!(joint_matrices[13], 1.0);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct ToonAnimationChannel {
-	// 움직이는 노드의 차례.
+	/// 움직이는 노드의 차례.
 	pub node_index: usize,
+	/// 바꾸는 것. (자리, 돌림, 크기 가운데 하나)
 	pub path: ToonChannelPath,
-	// 열쇠 시각. (초)
+	/// 열쇠 시각. (초)
 	pub times: Vec<f32>,
-	// 열쇠마다의 값. (돌림은 넷, 자리와 크기는 셋씩)
+	/// 열쇠마다의 값. (돌림은 넷, 자리와 크기는 셋씩)
 	pub values: Vec<f32>,
-	// interpolation 이 STEP 인지. (사이를 섞지 않고 앞 키)
+	/// interpolation 이 STEP 인지. (사이를 섞지 않고 앞 키)
 	pub is_step: bool,
 }
 
 //==============================================================================
-// 움직임 하나. (길이, 갈래들, extras)
+/// 움직임 하나. (길이, 갈래들, extras)
+///
+/// # 예제
+/// 한 번만 트는 움직임은 끝 시각에 묶기
+/// ```rust
+/// use std::collections::HashMap;
+/// use vanilla::{write_skin_pose, ToonAnimation, ToonAnimationChannel, ToonChannelPath, ToonSkeleton, ToonSkeletonNode};
+///
+/// let node = ToonSkeletonNode { name: String::from("body"), parent_index: None, translation: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: None };
+/// let rise = ToonAnimationChannel { node_index: 0, path: ToonChannelPath::Translation, times: vec![0.0, 2.0], values: vec![0.0, 0.0, 0.0, 0.0, 4.0, 0.0], is_step: false };
+/// let animation = ToonAnimation { duration: 2.0, channels: vec![rise], extras: serde_json::json!({ "loop": "once" }) };
+/// let skeleton = ToonSkeleton { joints: vec![0], inverse_bind_matrices: Vec::new(), nodes: vec![node], animations: HashMap::from([(String::from("Rise"), animation)]) };
+/// let mut joint_matrices = [0.0; 16];
+/// write_skin_pose(&skeleton, "Rise", 3.0, &mut joint_matrices, None, None);
+/// assert_eq!(joint_matrices[13], 4.0);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct ToonAnimation {
-	// 길이. (갈래들의 가장 늦은 열쇠 시각, 초)
+	/// 길이. (갈래들의 가장 늦은 열쇠 시각, 초)
 	pub duration: f32,
+	/// 갈래들.
 	pub channels: Vec<ToonAnimationChannel>,
-	// 움직임의 extras. (loop 가 "once" 면 한 번만 튼다, 없으면 빈 것)
+	/// 움직임의 extras. (loop 가 "once" 면 한 번만 튼다, 없으면 빈 것)
 	pub extras: Value,
 }
 
 //==============================================================================
-// 뼈대와 움직임. (첫 skin 만)
+/// 뼈대와 움직임. (첫 skin 만)
+///
+/// # 예제
+/// 자리 움직임 하나로 두 본의 자세 셈하기
+/// ```rust
+/// use std::collections::HashMap;
+/// use vanilla::{write_skin_pose, ToonAnimation, ToonAnimationChannel, ToonChannelPath, ToonSkeleton, ToonSkeletonNode};
+///
+/// let root = ToonSkeletonNode { name: String::from("root"), parent_index: None, translation: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: None };
+/// let arm = ToonSkeletonNode { name: String::from("arm"), parent_index: Some(0), translation: [1.0, 0.0, 0.0], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: None };
+/// let lift = ToonAnimationChannel { node_index: 0, path: ToonChannelPath::Translation, times: vec![0.0, 1.0], values: vec![0.0, 0.0, 0.0, 0.0, 2.0, 0.0], is_step: false };
+/// let animation = ToonAnimation { duration: 1.0, channels: vec![lift], extras: serde_json::Value::Null };
+/// let skeleton = ToonSkeleton { joints: vec![0, 1], inverse_bind_matrices: Vec::new(), nodes: vec![root, arm], animations: HashMap::from([(String::from("Lift"), animation)]) };
+/// let mut joint_matrices = vec![0.0; skeleton.joints.len() * 16];
+/// write_skin_pose(&skeleton, "Lift", 0.5, &mut joint_matrices, None, None);
+/// assert!((joint_matrices[16 + 12] - 1.0).abs() < 0.0001);
+/// assert!((joint_matrices[16 + 13] - 1.0).abs() < 0.0001);
+/// ```
+///
+/// GLB 의 뼈대로 그 시각의 자세 셈하기
+/// ```rust,no_run
+/// use vanilla::{read_glb_arrays, write_skin_pose};
+///
+/// fn read_pose(bytes: &[u8], time: f32) -> Result<Vec<f32>, String> {
+/// 	let arrays = read_glb_arrays(bytes, None)?;
+/// 	let Some(skeleton) = arrays.skeleton.as_ref() else {
+/// 		return Ok(Vec::new());
+/// 	};
+/// 	let mut joint_matrices = vec![0.0; skeleton.joints.len() * 16];
+/// 	write_skin_pose(skeleton, "Survey", time, &mut joint_matrices, None, None);
+/// 	Ok(joint_matrices)
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct ToonSkeleton {
-	// 본 노드의 차례. (skin 의 joints, 꼭짓점의 본 번호가 이 목록의 차례다)
+	/// 본 노드의 차례. (skin 의 joints, 꼭짓점의 본 번호가 이 목록의 차례다)
 	pub joints: Vec<usize>,
-	// 본마다 거꾸로 묶는 행렬. (16 씩, 없으면 단위 행렬)
+	/// 본마다 거꾸로 묶는 행렬. (16 씩, 없으면 단위 행렬)
 	pub inverse_bind_matrices: Vec<f32>,
-	// 모든 노드의 쉬는 자세. (노드 차례)
+	/// 모든 노드의 쉬는 자세. (노드 차례)
 	pub nodes: Vec<ToonSkeletonNode>,
-	// 이름마다 움직임.
+	/// 이름마다 움직임.
 	pub animations: HashMap<String, ToonAnimation>,
 }
 
 //==============================================================================
-// 노드마다 따로 읽은 부품. (배열, 노드 extras, 비치는 재질의 가장 작은 불투명도)
+/// 노드마다 따로 읽은 부품. (배열, 노드 extras, 비치는 재질의 가장 작은 불투명도)
+///
+/// # 예제
+/// 부품마다 메시를 따로 올리고 바이저만 빼기
+/// ```rust,no_run
+/// use vanilla::{read_glb_node_arrays, ToonMesh, ToonOutlineOptions, ToonRenderer};
+///
+/// fn create_part_meshes(gl: &glow::Context, renderer: &ToonRenderer, bytes: &[u8]) -> Result<Vec<(String, ToonMesh, f32)>, String> {
+/// 	let outline_options = ToonOutlineOptions { width: 1.5, added_parts: vec![String::from("vanguard_Mesh"), String::from("vanguard_visor")], ..ToonOutlineOptions::default() };
+/// 	let part_arrays = read_glb_node_arrays(bytes, Some(&outline_options))?;
+/// 	let mut meshes = Vec::new();
+/// 	for (part_name, part) in part_arrays.iter() {
+/// 		if part_name == "vanguard_visor" {
+/// 			continue;
+/// 		}
+/// 		if let Some(mesh) = renderer.create_mesh(gl, &part.arrays) {
+/// 			meshes.push((part_name.clone(), mesh, part.alpha));
+/// 		}
+/// 	}
+/// 	Ok(meshes)
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct ToonPartArrays {
+	/// 부품의 꼭짓점 배열. (뼈대는 읽지 않아 skeleton 은 None)
 	pub arrays: ToonMeshArrays,
-	// 노드 extras. (없으면 빈 것)
+	/// 노드 extras. (없으면 빈 것)
 	pub extras: Value,
-	// 비치는 재질(alphaMode BLEND)의 가장 작은 불투명도. (없으면 1)
+	/// 비치는 재질(alphaMode BLEND)의 가장 작은 불투명도. (없으면 1)
 	pub alpha: f32,
 }
 
 //==============================================================================
-// 메시 노드 하나의 정보. (extras, 꼭짓점 범위의 가운데, 가장 무겁게 딸린 본의 skin 안 차례)
+/// 메시 노드 하나의 정보. (extras, 꼭짓점 범위의 가운데, 가장 무겁게 딸린 본의 skin 안 차례)
+///
+/// # 예제
+/// 걷는 모형의 바이저 자리 읽기
+/// ```rust,no_run
+/// use vanilla::{read_glb_arrays, read_glb_node_infos, write_skin_pose, Matrix4};
+///
+/// fn read_visor_position(bytes: &[u8]) -> Result<Option<[f32; 3]>, String> {
+/// 	let arrays = read_glb_arrays(bytes, None)?;
+/// 	let node_infos = read_glb_node_infos(bytes)?;
+/// 	let (Some(skeleton), Some(visor_info)) = (arrays.skeleton.as_ref(), node_infos.get("vanguard_visor")) else {
+/// 		return Ok(None);
+/// 	};
+/// 	let Some(joint_index) = visor_info.joint_index else {
+/// 		return Ok(Some(visor_info.center));
+/// 	};
+/// 	let mut joint_matrices = vec![0.0; skeleton.joints.len() * 16];
+/// 	write_skin_pose(skeleton, "Walk", 0.25, &mut joint_matrices, None, None);
+/// 	let mut joint_matrix = Matrix4::create_identity();
+/// 	joint_matrix.elements.copy_from_slice(&joint_matrices[joint_index * 16..joint_index * 16 + 16]);
+/// 	let visor_position = joint_matrix.transform_point(visor_info.center[0], visor_info.center[1], visor_info.center[2]);
+/// 	Ok(Some([visor_position.x, visor_position.y, visor_position.z]))
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct ToonNodeInfo {
-	// 노드 extras. (없으면 빈 것)
+	/// 노드 extras. (없으면 빈 것)
 	pub extras: Value,
-	// 꼭짓점 범위의 가운데. (모형 좌표, 꼭짓점이 없으면 원점)
+	/// 꼭짓점 범위의 가운데. (모형 좌표, 꼭짓점이 없으면 원점)
 	pub center: [f32; 3],
-	// 가장 무겁게 딸린 본의 skin 안 차례. (뼈대로 움직이지 않으면 None)
+	/// 가장 무겁게 딸린 본의 skin 안 차례. (뼈대로 움직이지 않으면 None)
 	pub joint_index: Option<usize>,
 }
 
 //==============================================================================
-// 자세를 섞을 앞 움직임. (움직임이 바뀔 때 잠깐)
+/// 자세를 섞을 앞 움직임. (움직임이 바뀔 때 잠깐)
+///
+/// # 예제
+/// 움직임이 바뀔 때 앞 자세를 잠깐 섞기
+/// ```rust
+/// # use std::collections::HashMap;
+/// # use vanilla::{ToonAnimation, ToonAnimationChannel, ToonChannelPath, ToonSkeleton, ToonSkeletonNode};
+/// use vanilla::{write_skin_pose, ToonPoseBlend};
+///
+/// # let node = ToonSkeletonNode { name: String::from("body"), parent_index: None, translation: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: None };
+/// # let create_hold = |height: f32| ToonAnimation { duration: 1.0, channels: vec![ToonAnimationChannel { node_index: 0, path: ToonChannelPath::Translation, times: vec![0.0], values: vec![0.0, height, 0.0], is_step: false }], extras: serde_json::Value::Null };
+/// # let skeleton = ToonSkeleton { joints: vec![0], inverse_bind_matrices: Vec::new(), nodes: vec![node], animations: HashMap::from([(String::from("Survey"), create_hold(0.0)), (String::from("Run"), create_hold(2.0))]) };
+/// let blend_duration = 0.2;
+/// let time_since_change = 0.05;
+/// let blend = ToonPoseBlend { animation_name: "Survey", time: 1.4, weight: 1.0 - time_since_change / blend_duration };
+/// let mut joint_matrices = vec![0.0; skeleton.joints.len() * 16];
+/// write_skin_pose(&skeleton, "Run", time_since_change, &mut joint_matrices, Some(blend), None);
+/// assert!((joint_matrices[13] - 0.5).abs() < 0.0001);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct ToonPoseBlend<'a> {
-	// 앞 움직임의 이름.
+	/// 앞 움직임의 이름.
 	pub animation_name: &'a str,
-	// 앞 움직임의 시각. (초)
+	/// 앞 움직임의 시각. (초)
 	pub time: f32,
-	// 앞 자세의 무게. (0 이면 섞지 않음, 1 이면 앞 자세 그대로)
+	/// 앞 자세의 무게. (0 이면 섞지 않음, 1 이면 앞 자세 그대로)
 	pub weight: f32,
 }
 
 //==============================================================================
-// 노드마다의 흔들림 배율. (움직임 이름 → (노드 차례, 배율) 목록, 1 이면 그대로, 0 이면 쉬는 자세)
+/// 노드마다의 흔들림 배율. (움직임 이름 → (노드 차례, 배율) 목록, 1 이면 그대로, 0 이면 쉬는 자세)
 //==============================================================================
 pub type ToonSwingScales = HashMap<String, Vec<(usize, f32)>>;
 
 //==============================================================================
-// GLB 의 JSON 과 바이너리.
+/// GLB 의 JSON 과 바이너리.
 //==============================================================================
 struct GlbChunks {
 	json: Value,
@@ -173,7 +345,7 @@ struct GlbChunks {
 }
 
 //==============================================================================
-// 리틀 엔디언 u32 읽기. (모자라면 None)
+/// 리틀 엔디언 u32 읽기. (모자라면 None)
 //==============================================================================
 fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
 	let slice = bytes.get(offset..offset + 4)?;
@@ -181,7 +353,7 @@ fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
 }
 
 //==============================================================================
-// GLB 의 덩어리 읽기.
+/// GLB 의 덩어리 읽기.
 //==============================================================================
 fn read_glb_chunks(bytes: &[u8]) -> Result<GlbChunks, String> {
 	if read_u32(bytes, 0) != Some(GLB_MAGIC) {
@@ -214,7 +386,7 @@ fn read_glb_chunks(bytes: &[u8]) -> Result<GlbChunks, String> {
 }
 
 //==============================================================================
-// 접근자 하나를 수 목록으로 읽기. (촘촘한 것과 byteStride 로 띄운 것, normalized 정수는 0 ~ 1 로)
+/// 접근자 하나를 수 목록으로 읽기. (촘촘한 것과 byteStride 로 띄운 것, normalized 정수는 0 ~ 1 로)
 //==============================================================================
 fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f32> {
 	let accessor = &chunks.json["accessors"][accessor_index];
@@ -298,7 +470,7 @@ fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f32> {
 }
 
 //==============================================================================
-// 무게 접근자 읽기. (정수로 담겼으면 normalized 가 없어도 0 ~ 1 로)
+/// 무게 접근자 읽기. (정수로 담겼으면 normalized 가 없어도 0 ~ 1 로)
 //==============================================================================
 fn read_weight_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f32> {
 	let values = read_accessor(chunks, accessor_index);
@@ -320,7 +492,7 @@ fn read_weight_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f32> {
 }
 
 //==============================================================================
-// 꼭짓점 번호 읽기. (번호 접근자가 없으면 0 부터 차례로)
+/// 꼭짓점 번호 읽기. (번호 접근자가 없으면 0 부터 차례로)
 //==============================================================================
 fn read_indices(chunks: &GlbChunks, primitive: &Value, point_count: usize) -> Vec<u32> {
 	match primitive["indices"].as_u64() {
@@ -334,7 +506,7 @@ fn read_indices(chunks: &GlbChunks, primitive: &Value, point_count: usize) -> Ve
 }
 
 //==============================================================================
-// JSON 수 배열을 COUNT 개 읽기. (배열이 아니거나 모자라거나 수가 아닌 칸은 fallback)
+/// JSON 수 배열을 COUNT 개 읽기. (배열이 아니거나 모자라거나 수가 아닌 칸은 fallback)
 //==============================================================================
 fn read_float_array<const COUNT: usize>(value: &Value, fallback: [f32; COUNT]) -> [f32; COUNT] {
 	let mut result = fallback;
@@ -347,7 +519,7 @@ fn read_float_array<const COUNT: usize>(value: &Value, fallback: [f32; COUNT]) -
 }
 
 //==============================================================================
-// 자리, 돌림(사원수), 크기로 행렬 짓기.
+/// 자리, 돌림(사원수), 크기로 행렬 짓기.
 //==============================================================================
 fn create_transform_matrix(translation: [f32; 3], rotation: [f32; 4], scale: [f32; 3]) -> Matrix4 {
 	let mut matrix = Matrix4::create_translation(translation[0], translation[1], translation[2]);
@@ -358,7 +530,7 @@ fn create_transform_matrix(translation: [f32; 3], rotation: [f32; 4], scale: [f3
 }
 
 //==============================================================================
-// 노드의 자기 행렬. (matrix 가 있으면 그것, 아니면 자리, 돌림, 크기)
+/// 노드의 자기 행렬. (matrix 가 있으면 그것, 아니면 자리, 돌림, 크기)
 //==============================================================================
 fn read_node_matrix(node: &Value) -> Matrix4 {
 	if node["matrix"].is_array() {
@@ -370,14 +542,14 @@ fn read_node_matrix(node: &Value) -> Matrix4 {
 }
 
 //==============================================================================
-// 노드 이름. (없으면 빈 글자)
+/// 노드 이름. (없으면 빈 글자)
 //==============================================================================
 fn read_node_name(node: &Value) -> String {
 	String::from(node["name"].as_str().unwrap_or(""))
 }
 
 //==============================================================================
-// 프리미티브의 재질. (없으면 Null)
+/// 프리미티브의 재질. (없으면 Null)
 //==============================================================================
 fn read_material<'a>(chunks: &'a GlbChunks, primitive: &Value) -> &'a Value {
 	match primitive["material"].as_u64() {
@@ -391,8 +563,8 @@ fn read_material<'a>(chunks: &'a GlbChunks, primitive: &Value) -> &'a Value {
 }
 
 //==============================================================================
-// 프리미티브 하나 담기. (바깥선 껍데기는 바깥선 배열에, 나머지는 색과 빛남과 함께)
-// - 뼈대로 움직이는 프리미티브는 노드 행렬을 쓰지 않는다. (glTF 의 약속, 자리는 본이 정한다)
+/// 프리미티브 하나 담기. (바깥선 껍데기는 바깥선 배열에, 나머지는 색과 빛남과 함께)
+/// - 뼈대로 움직이는 프리미티브는 노드 행렬을 쓰지 않는다. (glTF 의 약속, 자리는 본이 정한다)
 //==============================================================================
 fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, primitive: &Value, matrix: &Matrix4, is_outline_rebuilt: bool) {
 	let mode = primitive["mode"].as_u64().unwrap_or(TRIANGLES_MODE);
@@ -462,7 +634,7 @@ fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, pr
 }
 
 //==============================================================================
-// 재질의 텍스처 정보가 가리키는 그림 차례. (textures[index].source, 없으면 None)
+/// 재질의 텍스처 정보가 가리키는 그림 차례. (textures[index].source, 없으면 None)
 //==============================================================================
 fn read_texture_image(chunks: &GlbChunks, texture_info: &Value) -> Option<usize> {
 	let texture_index = texture_info["index"].as_u64()? as usize;
@@ -470,20 +642,46 @@ fn read_texture_image(chunks: &GlbChunks, texture_info: &Value) -> Option<usize>
 }
 
 //==============================================================================
-// GLB 에 든 그림 하나. (images 의 차례, 재질 범위의 base_color_image, emissive_image 가 가리킨다)
+/// GLB 에 든 그림 하나. (images 의 차례, 재질 범위의 base_color_image, emissive_image 가 가리킨다)
+///
+/// # 예제
+/// GLB 의 그림을 images 차례대로 텍스처로 올리기
+/// ```rust,no_run
+/// use vanilla::core::graphic::GlTexture;
+/// use vanilla::{decode_glb_image, read_glb_images, ToonRenderer, ToonTextureOptions};
+///
+/// fn create_image_textures(gl: &glow::Context, renderer: &ToonRenderer, bytes: &[u8]) -> Result<Vec<Option<GlTexture>>, String> {
+/// 	let mut textures = Vec::new();
+/// 	for image in read_glb_images(bytes)?.iter() {
+/// 		if image.data.is_empty() {
+/// 			textures.push(None);
+/// 			continue;
+/// 		}
+/// 		let (width, height, pixels) = decode_glb_image(image)?;
+/// 		textures.push(Some(renderer.create_texture(gl, width, height, &pixels, ToonTextureOptions::default())?));
+/// 	}
+/// 	Ok(textures)
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct ToonGlbImage {
-	// 그림 이름. (없으면 빈 글자)
+	/// 그림 이름. (없으면 빈 글자)
 	pub name: String,
-	// 그림 종류. ("image/png" 같은, 없으면 빈 글자)
+	/// 그림 종류. ("image/png" 같은, 없으면 빈 글자)
 	pub mime_type: String,
-	// 그림 파일 바이트. (바깥 파일 uri 면 빈 것)
+	/// 그림 파일 바이트. (바깥 파일 uri 면 빈 것)
 	pub data: Vec<u8>,
 }
 
 //==============================================================================
-// GLB 에 든 그림들. (바이너리 덩어리의 bufferView 로 담긴 그림만 읽는다, 바깥 파일 uri 는 data 가 빈 것)
+/// GLB 에 든 그림들. (바이너리 덩어리의 bufferView 로 담긴 그림만 읽는다, 바깥 파일 uri 는 data 가 빈 것)
+///
+/// # 인자
+/// - `bytes`: GLB 파일 전체.
+///
+/// # 돌려줌
+/// images 차례의 그림. (바깥 파일 uri 인 그림은 data 가 빈 것) GLB 가 아니거나 덩어리가 잘렸거나 모자라거나 JSON 을 읽지 못하면 Err(까닭 글).
 //==============================================================================
 pub fn read_glb_images(bytes: &[u8]) -> Result<Vec<ToonGlbImage>, String> {
 	let chunks = read_glb_chunks(bytes)?;
@@ -507,7 +705,13 @@ pub fn read_glb_images(bytes: &[u8]) -> Result<Vec<ToonGlbImage>, String> {
 }
 
 //==============================================================================
-// read_glb_images 의 그림 하나를 풀기. ((너비, 높이, RGBA 바이트), 알파를 미리 곱하지 않는다, image 크레이트의 png, jpeg, webp, gif, bmp, ico)
+/// read_glb_images 의 그림 하나를 풀기. ((너비, 높이, RGBA 바이트), 알파를 미리 곱하지 않는다, image 크레이트의 png, jpeg, webp, gif, bmp, ico)
+///
+/// # 인자
+/// - `image`: read_glb_images 의 그림 하나.
+///
+/// # 돌려줌
+/// (너비, 높이, RGBA 바이트) 풀어 낸 그림. (ToonRenderer::create_texture 에 넘긴다) 풀지 못하면 Err(까닭 글).
 //==============================================================================
 pub fn decode_glb_image(image: &ToonGlbImage) -> Result<(u32, u32, Vec<u8>), String> {
 	let decoded = image::load_from_memory(&image.data).map_err(|error| format!("GLB 그림 {} 을 풀지 못했다: {}", image.name, error))?;
@@ -516,7 +720,7 @@ pub fn decode_glb_image(image: &ToonGlbImage) -> Result<(u32, u32, Vec<u8>), Str
 }
 
 //==============================================================================
-// 몸으로 새로 지을 바깥선 껍데기의 굵기. (".outline" 짝도 added_parts 도 없거나 굵기가 0 이하면 None)
+/// 몸으로 새로 지을 바깥선 껍데기의 굵기. (".outline" 짝도 added_parts 도 없거나 굵기가 0 이하면 None)
 //==============================================================================
 fn read_rebuilt_outline_width(node: &Value, node_names: &HashSet<String>, outline_options: &ToonOutlineOptions) -> Option<f32> {
 	let node_name = read_node_name(node);
@@ -529,7 +733,7 @@ fn read_rebuilt_outline_width(node: &Value, node_names: &HashSet<String>, outlin
 }
 
 //==============================================================================
-// 노드의 몸으로 바깥선 껍데기 짓기. (색마다 나뉜 프리미티브를 이어 붙여 한 번에 넘긴다, 바깥선 재질과 노멀이 없는 것은 뺀다)
+/// 노드의 몸으로 바깥선 껍데기 짓기. (색마다 나뉜 프리미티브를 이어 붙여 한 번에 넘긴다, 바깥선 재질과 노멀이 없는 것은 뺀다)
 //==============================================================================
 fn add_rebuilt_outline(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, matrix: &Matrix4, outline_width: f32) {
 	let mut positions = Vec::new();
@@ -577,14 +781,14 @@ fn add_rebuilt_outline(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Val
 }
 
 //==============================================================================
-// 노드 이름 모음. (이름이 없는 노드는 빈 글자)
+/// 노드 이름 모음. (이름이 없는 노드는 빈 글자)
 //==============================================================================
 fn read_node_names(chunks: &GlbChunks) -> HashSet<String> {
 	chunks.json["nodes"].as_array().map(|nodes| nodes.iter().map(read_node_name).collect()).unwrap_or_default()
 }
 
 //==============================================================================
-// 뼈대와 움직임 읽기. (없으면 None, 첫 skin 만)
+/// 뼈대와 움직임 읽기. (없으면 None, 첫 skin 만)
 //==============================================================================
 fn read_skeleton(chunks: &GlbChunks) -> Option<ToonSkeleton> {
 	let skin = chunks.json["skins"].as_array()?.first()?;
@@ -660,7 +864,7 @@ fn read_skeleton(chunks: &GlbChunks) -> Option<ToonSkeleton> {
 }
 
 //==============================================================================
-// 장면의 메시 노드를 차례로 돌기. (노드마다 부모까지 곱한 행렬과 함께 visit_event 를 부른다)
+/// 장면의 메시 노드를 차례로 돌기. (노드마다 부모까지 곱한 행렬과 함께 visit_event 를 부른다)
 //==============================================================================
 fn visit_mesh_nodes(chunks: &GlbChunks, visit_event: &mut dyn FnMut(&Value, &Matrix4)) {
 	let node_count = chunks.json["nodes"].as_array().map(|nodes| nodes.len()).unwrap_or(0);
@@ -698,7 +902,7 @@ fn visit_mesh_nodes(chunks: &GlbChunks, visit_event: &mut dyn FnMut(&Value, &Mat
 }
 
 //==============================================================================
-// 노드 메시의 프리미티브 목록.
+/// 노드 메시의 프리미티브 목록.
 //==============================================================================
 fn read_primitives(chunks: &GlbChunks, node: &Value) -> Vec<Value> {
 	let mesh_index = node["mesh"].as_u64().unwrap_or(0) as usize;
@@ -706,7 +910,14 @@ fn read_primitives(chunks: &GlbChunks, node: &Value) -> Vec<Value> {
 }
 
 //==============================================================================
-// GLB 하나를 꼭짓점 배열로. (뼈대가 있으면 skeleton 도, 바깥선 설정을 주면 껍데기를 새로 짓는다)
+/// GLB 하나를 꼭짓점 배열로. (뼈대가 있으면 skeleton 도, 바깥선 설정을 주면 껍데기를 새로 짓는다)
+///
+/// # 인자
+/// - `bytes`: GLB 파일 전체.
+/// - `outline_options`: 주면 GLB 의 바깥선 껍데기 대신 ".outline" 짝이 있는 노드의 몸으로 껍데기를 새로 짓는다. (None 이면 GLB 의 껍데기 그대로)
+///
+/// # 돌려줌
+/// MeshBuilder::read_arrays 의 꼴과 skeleton (없으면 None), inner_outline_ranges, inner_body_ranges. (ToonRenderer::create_mesh 에 넘긴다) GLB 가 아니거나 덩어리가 잘렸거나 모자라거나 JSON 을 읽지 못하면 Err(까닭 글).
 //==============================================================================
 pub fn read_glb_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOptions>) -> Result<ToonMeshArrays, String> {
 	let chunks = read_glb_chunks(bytes)?;
@@ -757,9 +968,16 @@ pub fn read_glb_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOptions
 }
 
 //==============================================================================
-// GLB 하나를 노드 이름마다의 꼭짓점 배열로. (뼈대는 읽지 않는다)
-// - 이름 끝의 ".outline" 노드(바깥선 껍데기)는 그 앞 이름의 노드에 함께 담는다.
-// - 부품마다 노드 extras 와 비치는 재질(alphaMode BLEND)의 가장 작은 불투명도를 함께 담는다.
+/// GLB 하나를 노드 이름마다의 꼭짓점 배열로. (뼈대는 읽지 않는다)
+/// - 이름 끝의 ".outline" 노드(바깥선 껍데기)는 그 앞 이름의 노드에 함께 담는다.
+/// - 부품마다 노드 extras 와 비치는 재질(alphaMode BLEND)의 가장 작은 불투명도를 함께 담는다.
+///
+/// # 인자
+/// - `bytes`: GLB 파일 전체.
+/// - `outline_options`: read_glb_arrays 와 같음.
+///
+/// # 돌려줌
+/// 노드 이름마다 부품의 배열과 extras, alpha. GLB 가 아니거나 덩어리가 잘렸거나 모자라거나 JSON 을 읽지 못하면 Err(까닭 글).
 //==============================================================================
 pub fn read_glb_node_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOptions>) -> Result<HashMap<String, ToonPartArrays>, String> {
 	let chunks = read_glb_chunks(bytes)?;
@@ -800,9 +1018,15 @@ pub fn read_glb_node_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOp
 }
 
 //==============================================================================
-// GLB 의 메시 노드마다의 extras, 가운데, 따르는 본. (이름 끝이 ".outline" 인 노드와 바깥선 재질은 뺀다)
-// - center 는 꼭짓점이 놓인 범위의 가운데다. (모형 좌표, 뼈대로 움직이는 노드는 쉬는 자세의 자리, 꼭짓점이 없으면 원점)
-// - joint_index 는 그 노드의 꼭짓점이 가장 무겁게 딸린 본의 skin 안 차례다. (write_skin_pose 가 쓴 본 행렬의 차례)
+/// GLB 의 메시 노드마다의 extras, 가운데, 따르는 본. (이름 끝이 ".outline" 인 노드와 바깥선 재질은 뺀다)
+/// - center 는 꼭짓점이 놓인 범위의 가운데다. (모형 좌표, 뼈대로 움직이는 노드는 쉬는 자세의 자리, 꼭짓점이 없으면 원점)
+/// - joint_index 는 그 노드의 꼭짓점이 가장 무겁게 딸린 본의 skin 안 차례다. (write_skin_pose 가 쓴 본 행렬의 차례)
+///
+/// # 인자
+/// - `bytes`: GLB 파일 전체.
+///
+/// # 돌려줌
+/// 노드 이름마다 메시 노드의 extras, center, joint_index. GLB 가 아니거나 덩어리가 잘렸거나 모자라거나 JSON 을 읽지 못하면 Err(까닭 글).
 //==============================================================================
 pub fn read_glb_node_infos(bytes: &[u8]) -> Result<HashMap<String, ToonNodeInfo>, String> {
 	let chunks = read_glb_chunks(bytes)?;
@@ -858,7 +1082,7 @@ pub fn read_glb_node_infos(bytes: &[u8]) -> Result<HashMap<String, ToonNodeInfo>
 }
 
 //==============================================================================
-// 움직임의 한 갈래를 그 시각에서 읽기. (LINEAR 는 사이를 섞고 돌림은 사원수를 가까운 쪽으로 섞어 정규화, STEP 은 앞 키)
+/// 움직임의 한 갈래를 그 시각에서 읽기. (LINEAR 는 사이를 섞고 돌림은 사원수를 가까운 쪽으로 섞어 정규화, STEP 은 앞 키)
 //==============================================================================
 fn sample_channel(channel: &ToonAnimationChannel, time: f32) -> Vec<f32> {
 	let times = &channel.times;
@@ -906,7 +1130,7 @@ fn sample_channel(channel: &ToonAnimationChannel, time: f32) -> Vec<f32> {
 }
 
 //==============================================================================
-// 두 돌림 섞기. (가까운 쪽으로 섞어 정규화, ratio 가 1 이면 other)
+/// 두 돌림 섞기. (가까운 쪽으로 섞어 정규화, ratio 가 1 이면 other)
 //==============================================================================
 fn mix_rotation(rotation: [f32; 4], other_rotation: [f32; 4], ratio: f32) -> [f32; 4] {
 	let dot: f32 = (0..4).map(|component_index| rotation[component_index] * other_rotation[component_index]).sum();
@@ -920,7 +1144,7 @@ fn mix_rotation(rotation: [f32; 4], other_rotation: [f32; 4], ratio: f32) -> [f3
 }
 
 //==============================================================================
-// 움직임을 그 시각에서 읽은 노드마다의 자리, 돌림, 크기. (움직임이 없으면 쉬는 자세)
+/// 움직임을 그 시각에서 읽은 노드마다의 자리, 돌림, 크기. (움직임이 없으면 쉬는 자세)
 //==============================================================================
 fn read_animation_locals(skeleton: &ToonSkeleton, animation_name: &str, time: f32, swing_scales: Option<&ToonSwingScales>) -> Vec<ToonSkeletonNode> {
 	let mut locals = skeleton.nodes.clone();
@@ -983,7 +1207,15 @@ fn read_animation_locals(skeleton: &ToonSkeleton, animation_name: &str, time: f3
 }
 
 //==============================================================================
-// 움직임에서 한 노드의 돌림이 쉬는 자세에서 가장 벗어난 각. (라디안, 열쇠 프레임마다 보고, 그 노드의 돌림이 없으면 0)
+/// 움직임에서 한 노드의 돌림이 쉬는 자세에서 가장 벗어난 각. (라디안, 열쇠 프레임마다 보고, 그 노드의 돌림이 없으면 0)
+///
+/// # 인자
+/// - `skeleton`: read_glb_arrays 의 skeleton.
+/// - `animation_name`: 움직임 이름.
+/// - `node_index`: skeleton.nodes 의 차례.
+///
+/// # 돌려줌
+/// 쉬는 자세에서 가장 벗어난 각. (라디안, 없으면 0)
 //==============================================================================
 pub fn read_animation_swing(skeleton: &ToonSkeleton, animation_name: &str, node_index: usize) -> f32 {
 	let (animation, node) = match (skeleton.animations.get(animation_name), skeleton.nodes.get(node_index)) {
@@ -1011,7 +1243,7 @@ pub fn read_animation_swing(skeleton: &ToonSkeleton, animation_name: &str, node_
 }
 
 //==============================================================================
-// 두 자세 섞기. (자리와 크기는 곧게, 돌림은 가까운 쪽으로 섞어 정규화, ratio 가 1 이면 other)
+/// 두 자세 섞기. (자리와 크기는 곧게, 돌림은 가까운 쪽으로 섞어 정규화, ratio 가 1 이면 other)
 //==============================================================================
 fn mix_locals(locals: &mut [ToonSkeletonNode], other_locals: &[ToonSkeletonNode], ratio: f32) {
 	for (local, other) in locals.iter_mut().zip(other_locals.iter()) {
@@ -1027,9 +1259,17 @@ fn mix_locals(locals: &mut [ToonSkeletonNode], other_locals: &[ToonSkeletonNode]
 }
 
 //==============================================================================
-// 뼈대 자세 셈하기. (움직임을 그 시각에서 읽어 본마다 행렬을 target 에 16 씩 쓴다, 움직임이 없으면 쉬는 자세)
-// - blend 를 주면 앞 움직임의 자세를 그 무게만큼 섞는다. (움직임이 바뀔 때 잠깐)
-// - swing_scales 를 주면 그 움직임의 그 노드는 돌림을 쉬는 자세 쪽으로 줄인다. (섞는 앞 자세에도 같이)
+/// 뼈대 자세 셈하기. (움직임을 그 시각에서 읽어 본마다 행렬을 target 에 16 씩 쓴다, 움직임이 없으면 쉬는 자세)
+/// - blend 를 주면 앞 움직임의 자세를 그 무게만큼 섞는다. (움직임이 바뀔 때 잠깐)
+/// - swing_scales 를 주면 그 움직임의 그 노드는 돌림을 쉬는 자세 쪽으로 줄인다. (섞는 앞 자세에도 같이)
+///
+/// # 인자
+/// - `skeleton`: read_glb_arrays 의 skeleton.
+/// - `animation_name`: 움직임 이름. (없으면 쉬는 자세)
+/// - `time`: 초. (움직임 길이로 되풀이, 한 번만 트는 움직임은 끝 시각에 묶음)
+/// - `target`: 본마다 16 씩 쓸 곳. (skeleton.joints 수 x 16 이상, 모자라면 들어가는 본까지만 쓴다, ToonDrawOptions 의 joint_matrices)
+/// - `blend`: 섞을 앞 자세와 그 무게. (None 이면 섞지 않음)
+/// - `swing_scales`: 움직임 이름마다 (노드 차례, 배율) 목록의 흔들림 배율. (1 이면 그대로, 0 이면 쉬는 자세, None 이면 없음)
 //==============================================================================
 pub fn write_skin_pose(skeleton: &ToonSkeleton, animation_name: &str, time: f32, target: &mut [f32], blend: Option<ToonPoseBlend>, swing_scales: Option<&ToonSwingScales>) {
 	let mut locals = read_animation_locals(skeleton, animation_name, time, swing_scales);
@@ -1089,7 +1329,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 시험용 작은 GLB. (네모 하나, TEXCOORD_0 은 정규화한 u16, 재질 이름과 extras, 바탕색 텍스처의 그림)
+	/// 시험용 작은 GLB. (네모 하나, TEXCOORD_0 은 정규화한 u16, 재질 이름과 extras, 바탕색 텍스처의 그림)
 	//==============================================================================
 	fn build_test_glb(image_bytes: &[u8]) -> Vec<u8> {
 		let positions: [f32; 12] = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0];
@@ -1143,6 +1383,9 @@ mod tests {
 		glb
 	}
 
+	//==============================================================================
+	/// 작은 GLB 에서 UV, 재질 범위, 노드 extras, 그림을 읽고 그림을 RGBA 로 푸는지.
+	//==============================================================================
 	#[test]
 	fn glb_reads_uv_material_range_and_image() {
 		let mut png_bytes: Vec<u8> = Vec::new();

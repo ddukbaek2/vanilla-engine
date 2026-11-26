@@ -27,6 +27,32 @@ use std::rc::Rc;
 
 //==============================================================================
 /// 구독 번호. (unsubscribe 에 넘긴다)
+///
+/// # 예제
+/// 구독 번호로 한 구독만 풀기
+/// ```rust
+/// use std::cell::Cell;
+/// use std::rc::Rc;
+/// use vanilla::{LocalStorage, PersistedStore, PersistedStoreSubscription};
+///
+/// let storage_directory_path = std::env::temp_dir().join(format!("vanillaPersistedStoreSubscriptionExample-{}", std::process::id()));
+/// LocalStorage::set_storage_directory(Some(storage_directory_path.clone()));
+/// let mut store = PersistedStore::new("example.progress", serde_json::json!({ "stage": 1 }), 1);
+/// let notified_count = Rc::new(Cell::new(0));
+/// let notified_count_for_first = notified_count.clone();
+/// let notified_count_for_second = notified_count.clone();
+/// let first_subscription: PersistedStoreSubscription = store.subscribe(move |_state| {
+/// 	notified_count_for_first.set(notified_count_for_first.get() + 1);
+/// });
+/// let second_subscription = store.subscribe(move |_state| {
+/// 	notified_count_for_second.set(notified_count_for_second.get() + 10);
+/// });
+/// assert_ne!(first_subscription, second_subscription);
+/// store.unsubscribe(first_subscription);
+/// store.set(serde_json::json!({ "stage": 3 }));
+/// assert_eq!(notified_count.get(), 10);
+/// let _ = std::fs::remove_dir_all(&storage_directory_path);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PersistedStoreSubscription(u64);
@@ -36,6 +62,36 @@ type PersistedStoreSubscriber = Box<dyn FnMut(&Value)>;
 
 //==============================================================================
 /// 지속 저장소.
+///
+/// # 예제
+/// 설정을 저장하고 바뀔 때 알림 받기
+/// ```rust
+/// use std::cell::Cell;
+/// use std::rc::Rc;
+/// use vanilla::{LocalStorage, PersistedStore};
+///
+/// let storage_directory_path = std::env::temp_dir().join(format!("vanillaPersistedStoreExample-{}", std::process::id()));
+/// LocalStorage::set_storage_directory(Some(storage_directory_path.clone()));
+/// let mut store = PersistedStore::new("example.settings", serde_json::json!({ "volume": 1, "language": "en" }), 1);
+/// let changed_count = Rc::new(Cell::new(0));
+/// let changed_count_for_subscriber = changed_count.clone();
+/// let subscription = store.subscribe(move |state| {
+/// 	println!("changed {}", state["volume"]);
+/// 	changed_count_for_subscriber.set(changed_count_for_subscriber.get() + 1);
+/// });
+/// store.set(serde_json::json!({ "volume": 0.5 }));
+/// let state = store.get();
+/// assert_eq!(state["volume"], 0.5);
+/// assert_eq!(state["language"], "en");
+/// assert_eq!(changed_count.get(), 1);
+/// let reloaded_store = PersistedStore::new("example.settings", serde_json::json!({ "volume": 1, "language": "en" }), 1);
+/// assert_eq!(reloaded_store.get()["volume"], 0.5);
+/// store.unsubscribe(subscription);
+/// store.reset();
+/// assert_eq!(store.get()["volume"], 1);
+/// assert_eq!(changed_count.get(), 1);
+/// let _ = std::fs::remove_dir_all(&storage_directory_path);
+/// ```
 //==============================================================================
 pub struct PersistedStore {
 	storage_key: String,
@@ -131,6 +187,14 @@ fn order_object_keys(object_map: Map<String, Value>) -> Map<String, Value> {
 impl PersistedStore {
 	//==============================================================================
 	/// 생성. (만들면서 저장소에서 읽는다)
+	///
+	/// # 인자
+	/// - `storage_key`: 상태를 둘 저장소 키.
+	/// - `default_state`: 기본 상태. (저장된 것이 없거나 판이 다르면 이것을 복사해 쓴다)
+	/// - `version`: 저장 꼴의 판 번호. (저장된 판과 다르면 기본 상태로 되돌아간다)
+	///
+	/// # 돌려줌
+	/// 저장소에서 상태를 읽어 둔 지속 저장소.
 	//==============================================================================
 	pub fn new(storage_key: &str, default_state: Value, version: i64) -> PersistedStore {
 		let mut persisted_store = PersistedStore {
@@ -149,6 +213,9 @@ impl PersistedStore {
 
 	//==============================================================================
 	/// 상태 반환. (객체 Value. 고칠 때는 set / replace 를 쓴다)
+	///
+	/// # 돌려줌
+	/// 지금 상태.
 	//==============================================================================
 	pub fn get(&self) -> &Value {
 		&self.state
@@ -156,6 +223,9 @@ impl PersistedStore {
 
 	//==============================================================================
 	/// 상태 일부 갱신. (얕은 병합 뒤 저장하고 구독자에게 알린다)
+	///
+	/// # 인자
+	/// - `partial_state`: 바꿀 키와 값만 담은 객체.
 	//==============================================================================
 	pub fn set(&mut self, partial_state: Value) {
 		let mut merged_state = to_object_map(self.state.clone());
@@ -167,6 +237,9 @@ impl PersistedStore {
 
 	//==============================================================================
 	/// 상태 전체 교체.
+	///
+	/// # 인자
+	/// - `next_state`: 새 상태. (배열은 번호 키의 객체로 펴고, 객체도 배열도 아니면 빈 객체로 친다)
 	//==============================================================================
 	pub fn replace(&mut self, next_state: Value) {
 		self.state = Value::Object(to_object_map(next_state));
@@ -184,6 +257,12 @@ impl PersistedStore {
 
 	//==============================================================================
 	/// 구독. (구독 번호를 돌려준다)
+	///
+	/// # 인자
+	/// - `subscriber`: 알릴 때마다(set, replace, reset, set_storage_backend, notify) 지금 상태를 받는 함수.
+	///
+	/// # 돌려줌
+	/// 구독 번호. (unsubscribe 에 넘긴다)
 	//==============================================================================
 	pub fn subscribe(&mut self, subscriber: impl FnMut(&Value) + 'static) -> PersistedStoreSubscription {
 		let subscription = PersistedStoreSubscription(self.next_subscription_number);
@@ -194,6 +273,9 @@ impl PersistedStore {
 
 	//==============================================================================
 	/// 구독 해지. (원본 subscribe 가 돌려준 해지 함수 자리)
+	///
+	/// # 인자
+	/// - `subscription`: subscribe 가 돌려준 구독 번호. (모르는 것이면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn unsubscribe(&mut self, subscription: PersistedStoreSubscription) {
 		self.subscriber_list.retain(|(candidate_subscription, _)| *candidate_subscription != subscription);
@@ -211,6 +293,9 @@ impl PersistedStore {
 	//==============================================================================
 	/// 저장소에서 읽기. (기본값 위에 저장된 state 를 덮는다. 기본값에 없던 키도 살리고, 새로 생긴 기본 키는 기본값으로 채운다)
 	/// - state 가 객체나 배열이 아니면 기본값이다. (원본 typeof state === "object", 배열은 번호 키로 섞는다)
+	///
+	/// # 돌려줌
+	/// 저장된 상태를 기본 상태 위에 덮은 새 객체. (없거나, 판이 다르거나, 풀 수 없으면 기본 상태의 복사본)
 	//==============================================================================
 	pub fn read_from_storage(&self) -> Value {
 		let default_state = Value::Object(self.default_state.clone());
@@ -275,6 +360,9 @@ impl PersistedStore {
 
 	//==============================================================================
 	/// 저장된 글 읽기. (없거나 못 읽으면 빈 글)
+	///
+	/// # 돌려줌
+	/// 저장된 JSON 글. 없거나 못 읽으면 빈 글.
 	//==============================================================================
 	pub fn read_stored_text(&self) -> String {
 		match &self.storage_backend {
@@ -318,6 +406,9 @@ impl PersistedStore {
 
 	//==============================================================================
 	/// 이 저장소만 쓰는 곳 갈아 끼우기. (None 이면 LocalStorage. 그곳에서 상태를 다시 읽고 구독자에게 알린다)
+	///
+	/// # 인자
+	/// - `storage_backend`: 이 저장소만 쓸 곳. (None 이면 LocalStorage)
 	//==============================================================================
 	pub fn set_storage_backend(&mut self, storage_backend: Option<Box<dyn LocalStorageBackend>>) {
 		self.storage_backend = storage_backend.map(|storage_backend| Rc::new(RefCell::new(storage_backend)));
@@ -327,6 +418,9 @@ impl PersistedStore {
 
 	//==============================================================================
 	/// 이 저장소만 쓰는 곳 반환. (없으면 None, 빌릴 때는 borrow / borrow_mut)
+	///
+	/// # 돌려줌
+	/// 이 저장소만 쓰는 곳. 없으면 None.
 	//==============================================================================
 	pub fn get_storage_backend(&self) -> Option<Rc<RefCell<Box<dyn LocalStorageBackend>>>> {
 		self.storage_backend.clone()
@@ -334,6 +428,9 @@ impl PersistedStore {
 
 	//==============================================================================
 	/// 저장 키 반환.
+	///
+	/// # 돌려줌
+	/// 저장소 키.
 	//==============================================================================
 	pub fn get_storage_key(&self) -> &str {
 		&self.storage_key
@@ -413,15 +510,24 @@ mod tests {
 	}
 
 	impl LocalStorageBackend for MapBackend {
+		//==============================================================================
+		/// 값 읽기.
+		//==============================================================================
 		fn get_item(&self, key: &str) -> Result<Option<String>, String> {
 			Ok(self.item_map.borrow().get(key).cloned())
 		}
 
+		//==============================================================================
+		/// 값 쓰기.
+		//==============================================================================
 		fn set_item(&mut self, key: &str, value: &str) -> Result<(), String> {
 			self.item_map.borrow_mut().insert(key.to_string(), value.to_string());
 			Ok(())
 		}
 
+		//==============================================================================
+		/// 값 지우기.
+		//==============================================================================
 		fn remove_item(&mut self, key: &str) -> Result<(), String> {
 			self.item_map.borrow_mut().remove(key);
 			Ok(())

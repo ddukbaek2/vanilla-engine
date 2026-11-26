@@ -1,15 +1,15 @@
 //==============================================================================
-// 툰 3D 모형 짓기. (vanilla.js graphics3d/toon/meshbuilder.js 의 MeshBuilder 와 기본 도형)
-// - 툰 3D(점토 같은 한 색 재질과 바깥선)를 그릴 꼭짓점 배열을 짓는다. 외계행성 광부 키우기의 판 3D 에서 왔다. (three.js 의 기본 도형과 같은 꼴)
-// - 도형은 가운데가 원점인 자기 좌표로 짓는다. 부품을 더할 때 자리, 돌림, 크기를 곱해 한 덩어리에 담는다.
-// - 꼭짓점 하나는 자리 3, 노멀 3, 색 3(sRGB), 재질 2(빛남의 세기, 빛을 받지 않음), 무늬 4(무늬 번호, 무늬 색) 이다.
-//   무늬 번호와 색의 뜻은 그리는 셰이더가 정한다. (0 이면 무늬 없음)
-// - 텍스처 좌표(UV)는 꼭짓점 배열 밖의 uv_data 에 꼭짓점마다 2 씩 따로 담는다. UV 를 준 꼭짓점이 하나라도 있으면 나머지는 0 으로 채운다. (도형의 uvs, add_triangles_with_uvs)
-// - 2 번 UV 도 같은 꼴로 uv1_data 에 담는다. (도형의 uvs1, add_triangles_with_uvs 의 uvs1, GLB 의 TEXCOORD_1, 천사 고리처럼 두 번째 펼침을 읽는 것)
-//   (0, 0) 이 그림의 왼쪽 위다. (glTF 와 같음) 상자는 면마다 0 ~ 1, 구는 경도와 위도로 0 ~ 1 이다.
-// - 재질 범위(material_ranges)는 몸의 꼭짓점 번호 가운데 한 재질이 든 자리다. GLB 읽기가 프리미티브마다 담는다. (재질 이름, extras, 텍스처, ToonDrawOptions 의 index_start, index_count)
-// - 바깥선은 부품의 점마다 같은 굵기로 민 껍데기다. 뒷면만 그리므로 따로 담는다. (inverted hull)
-// - 삼각형의 감기는 꼭짓점 노멀을 보고 바깥이 앞면이 되게 맞춘다. (뒷면 가리기와 바깥선이 감기에 기댄다)
+//! 툰 3D 모형 짓기. (vanilla.js graphics3d/toon/meshbuilder.js 의 MeshBuilder 와 기본 도형)
+//! - 툰 3D(점토 같은 한 색 재질과 바깥선)를 그릴 꼭짓점 배열을 짓는다. 외계행성 광부 키우기의 판 3D 에서 왔다. (three.js 의 기본 도형과 같은 꼴)
+//! - 도형은 가운데가 원점인 자기 좌표로 짓는다. 부품을 더할 때 자리, 돌림, 크기를 곱해 한 덩어리에 담는다.
+//! - 꼭짓점 하나는 자리 3, 노멀 3, 색 3(sRGB), 재질 2(빛남의 세기, 빛을 받지 않음), 무늬 4(무늬 번호, 무늬 색) 이다.
+//!   무늬 번호와 색의 뜻은 그리는 셰이더가 정한다. (0 이면 무늬 없음)
+//! - 텍스처 좌표(UV)는 꼭짓점 배열 밖의 uv_data 에 꼭짓점마다 2 씩 따로 담는다. UV 를 준 꼭짓점이 하나라도 있으면 나머지는 0 으로 채운다. (도형의 uvs, add_triangles_with_uvs)
+//! - 2 번 UV 도 같은 꼴로 uv1_data 에 담는다. (도형의 uvs1, add_triangles_with_uvs 의 uvs1, GLB 의 TEXCOORD_1, 천사 고리처럼 두 번째 펼침을 읽는 것)
+//!   (0, 0) 이 그림의 왼쪽 위다. (glTF 와 같음) 상자는 면마다 0 ~ 1, 구는 경도와 위도로 0 ~ 1 이다.
+//! - 재질 범위(material_ranges)는 몸의 꼭짓점 번호 가운데 한 재질이 든 자리다. GLB 읽기가 프리미티브마다 담는다. (재질 이름, extras, 텍스처, ToonDrawOptions 의 index_start, index_count)
+//! - 바깥선은 부품의 점마다 같은 굵기로 민 껍데기다. 뒷면만 그리므로 따로 담는다. (inverted hull)
+//! - 삼각형의 감기는 꼭짓점 노멀을 보고 바깥이 앞면이 되게 맞춘다. (뒷면 가리기와 바깥선이 감기에 기댄다)
 //==============================================================================
 use std::collections::HashMap;
 use std::f32::consts::PI;
@@ -19,29 +19,43 @@ use serde_json::Value;
 use crate::base::matrix4::Matrix4;
 use crate::graphics3d::toon::glbmeshreader::ToonSkeleton;
 
-// 꼭짓점 하나의 수 개수. (자리 3, 노멀 3, 색 3, 재질 2, 무늬 4)
+/// 꼭짓점 하나의 수 개수. (자리 3, 노멀 3, 색 3, 재질 2, 무늬 4)
 pub const VERTEX_FLOAT_COUNT: usize = 15;
-// 뼈대가 있는 모형의 꼭짓점마다 따로 담는 수 개수. (뼈대 번호 4, 무게 4)
+/// 뼈대가 있는 모형의 꼭짓점마다 따로 담는 수 개수. (뼈대 번호 4, 무게 4)
 pub const SKIN_FLOAT_COUNT: usize = 8;
-// 바깥선의 기본 굵기.
+/// 바깥선의 기본 굵기.
 pub const DEFAULT_OUTLINE_WIDTH: f32 = 0.02;
-// 바깥선을 모서리에서 더 밀 때 쓰는 가장 작은 코사인. (뾰족한 끝이 굵기의 1.18 배보다 튀지 않게)
+/// 바깥선을 모서리에서 더 밀 때 쓰는 가장 작은 코사인. (뾰족한 끝이 굵기의 1.18 배보다 튀지 않게)
 const MINIMUM_OUTLINE_MITER_COSINE: f32 = 0.85;
-// 감기를 맞출 때 넓이가 이보다 작은 삼각형은 그대로 둔다. (구의 극처럼 겹친 점)
+/// 감기를 맞출 때 넓이가 이보다 작은 삼각형은 그대로 둔다. (구의 극처럼 겹친 점)
 const DEGENERATE_AREA: f32 = 1e-12;
 
 //==============================================================================
-// 기본 도형. (가운데가 원점인 자리, 노멀, 꼭짓점 번호)
-// - uvs 는 점마다 텍스처 좌표 둘이다. (상자와 구만 짓는다, 비면 없음)
+/// 기본 도형. (가운데가 원점인 자리, 노멀, 꼭짓점 번호)
+/// - uvs 는 점마다 텍스처 좌표 둘이다. (상자와 구만 짓는다, 비면 없음)
+///
+/// # 예제
+/// 상자 도형의 점, 삼각형, 텍스처 좌표 수 보기
+/// ```rust
+/// use vanilla::create_box_geometry;
+///
+/// let geometry = create_box_geometry(1.0, 2.0, 3.0);
+/// assert_eq!(geometry.positions.len(), 24 * 3);
+/// assert_eq!(geometry.normals.len(), geometry.positions.len());
+/// assert_eq!(geometry.indices.len(), 36);
+/// assert_eq!(geometry.uvs.len(), 24 * 2);
+/// assert!(geometry.uvs1.is_empty());
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct ToonGeometry {
-	// 점마다 자리 셋.
+	/// 점마다 자리 셋.
 	pub positions: Vec<f32>,
-	// 점마다 단위 노멀 셋.
+	/// 점마다 단위 노멀 셋.
 	pub normals: Vec<f32>,
-	// 삼각형마다 점 번호 셋.
+	/// 삼각형마다 점 번호 셋.
 	pub indices: Vec<u32>,
+	/// 점마다 텍스처 좌표 둘. (상자와 구만 짓는다, 비면 없음)
 	pub uvs: Vec<f32>,
 	/// 점마다 2 번 텍스처 좌표 둘. (비면 없음)
 	pub uvs1: Vec<f32>,
@@ -49,7 +63,7 @@ pub struct ToonGeometry {
 
 impl ToonGeometry {
 	//==============================================================================
-	// 점 하나 담기. (자리와 노멀)
+	/// 점 하나 담기. (자리와 노멀)
 	//==============================================================================
 	fn push_point(&mut self, position: [f32; 3], normal: [f32; 3]) {
 		self.positions.extend_from_slice(&position);
@@ -57,7 +71,7 @@ impl ToonGeometry {
 	}
 
 	//==============================================================================
-	// 점 하나의 텍스처 좌표 담기.
+	/// 점 하나의 텍스처 좌표 담기.
 	//==============================================================================
 	fn push_uv(&mut self, u: f32, v: f32) {
 		self.uvs.push(u);
@@ -65,7 +79,7 @@ impl ToonGeometry {
 	}
 
 	//==============================================================================
-	// 지금까지 담은 점 수. (다음에 담을 점의 번호)
+	/// 지금까지 담은 점 수. (다음에 담을 점의 번호)
 	//==============================================================================
 	fn get_point_count(&self) -> u32 {
 		(self.positions.len() / 3) as u32
@@ -73,23 +87,37 @@ impl ToonGeometry {
 }
 
 //==============================================================================
-// 부품을 더할 때의 꼴. (빛남, 빛을 받지 않음, 바깥선 여부와 굵기)
+/// 부품을 더할 때의 꼴. (빛남, 빛을 받지 않음, 바깥선 여부와 굵기)
+///
+/// # 예제
+/// 빛나는 눈과 바깥선 없는 그림자 판
+/// ```rust
+/// use std::f32::consts::PI;
+/// use vanilla::{create_cylinder_geometry, create_sphere_geometry, Matrix4, MeshBuilder, ToonPartOptions};
+///
+/// let mut builder = MeshBuilder::new();
+/// builder.add_part(&create_sphere_geometry(0.5, 24, 16, PI), &Matrix4::create_translation(0.0, 0.5, 0.0), "#f0e0d0", ToonPartOptions { outline_width: 0.03, ..ToonPartOptions::default() });
+/// builder.add_part(&create_sphere_geometry(0.06, 10, 8, PI), &Matrix4::create_translation(0.15, 0.6, 0.45), "#40ffff", ToonPartOptions { glow: 2.0, is_unlit: true, has_outline: false, ..ToonPartOptions::default() });
+/// let outline_index_count = builder.get_outline_index_count();
+/// builder.add_part(&create_cylinder_geometry(0.5, 0.5, 0.01, 24), &Matrix4::create_translation(0.0, 0.005, 0.0), "#202020", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
+/// assert_eq!(builder.get_outline_index_count(), outline_index_count);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct ToonPartOptions {
-	// 빛남의 세기. (꼭짓점의 재질 첫 칸, 0 이면 빛나지 않음)
+	/// 빛남의 세기. (꼭짓점의 재질 첫 칸, 0 이면 빛나지 않음)
 	pub glow: f32,
-	// 빛을 받지 않음. (꼭짓점의 재질 둘째 칸, 그늘 없이 제 색)
+	/// 빛을 받지 않음. (꼭짓점의 재질 둘째 칸, 그늘 없이 제 색)
 	pub is_unlit: bool,
-	// 바깥선 껍데기를 담을지.
+	/// 바깥선 껍데기를 담을지.
 	pub has_outline: bool,
-	// 바깥선 굵기. (기본 DEFAULT_OUTLINE_WIDTH)
+	/// 바깥선 굵기. (기본 DEFAULT_OUTLINE_WIDTH)
 	pub outline_width: f32,
 }
 
 impl Default for ToonPartOptions {
 	//==============================================================================
-	// 기본 꼴. (빛남 0, 빛을 받음, 바깥선 기본 굵기)
+	/// 기본 꼴. (빛남 0, 빛을 받음, 바깥선 기본 굵기)
 	//==============================================================================
 	fn default() -> ToonPartOptions {
 		ToonPartOptions { glow: 0.0, is_unlit: false, has_outline: true, outline_width: DEFAULT_OUTLINE_WIDTH }
@@ -97,79 +125,171 @@ impl Default for ToonPartOptions {
 }
 
 //==============================================================================
-// 네모 면 하나. (네 점은 둘레 차례, 면의 바깥쪽 노멀)
+/// 네모 면 하나. (네 점은 둘레 차례, 면의 바깥쪽 노멀)
+///
+/// # 예제
+/// 블록 하나의 윗면과 옆면에 바깥선 껍데기
+/// ```rust
+/// use vanilla::{MeshBuilder, ToonQuad};
+///
+/// let mut builder = MeshBuilder::new();
+/// let quads = [
+/// 	ToonQuad { corners: [[0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [1.0, 1.0, 1.0], [0.0, 1.0, 1.0]], normal: [0.0, 1.0, 0.0] },
+/// 	ToonQuad { corners: [[0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 1.0]], normal: [0.0, 0.0, 1.0] },
+/// ];
+/// for quad in quads.iter() {
+/// 	builder.add_quad(quad.corners, quad.normal, [0.5, 0.4, 0.3], 0.0, None, false);
+/// }
+/// builder.add_quad_shell(&quads, 0.02);
+/// assert_eq!(builder.get_index_count(), 12);
+/// assert_eq!(builder.get_outline_index_count(), 12);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct ToonQuad {
+	/// 네 점. ([x, y, z], 둘레 차례)
 	pub corners: [[f32; 3]; 4],
+	/// 면의 바깥쪽 노멀. ([x, y, z])
 	pub normal: [f32; 3],
 }
 
 //==============================================================================
-// 다 지은 배열. (몸, 바깥선 껍데기, 뼈대 번호와 무게, 뼈대)
+/// 다 지은 배열. (몸, 바깥선 껍데기, 뼈대 번호와 무게, 뼈대)
+///
+/// # 예제
+/// 지은 배열의 몸과 바깥선 껍데기 크기 보기
+/// ```rust
+/// use vanilla::{create_box_geometry, Matrix4, MeshBuilder, ToonPartOptions, VERTEX_FLOAT_COUNT};
+///
+/// let mut builder = MeshBuilder::new();
+/// builder.add_part(&create_box_geometry(1.0, 1.0, 1.0), &Matrix4::create_identity(), "#ff8844", ToonPartOptions::default());
+/// let arrays = builder.read_arrays();
+/// assert_eq!(arrays.vertex_data.len() / VERTEX_FLOAT_COUNT, 24);
+/// assert_eq!(arrays.index_data.len(), 36);
+/// assert_eq!(arrays.outline_vertex_data.len(), arrays.outline_base_data.len());
+/// assert_eq!(arrays.uv_data.len(), 24 * 2);
+/// assert!(arrays.skeleton.is_none());
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct ToonMeshArrays {
-	// 몸의 꼭짓점. (VERTEX_FLOAT_COUNT 씩)
+	/// 몸의 꼭짓점. (VERTEX_FLOAT_COUNT 씩)
 	pub vertex_data: Vec<f32>,
+	/// 몸의 삼각형마다 꼭짓점 번호 셋.
 	pub index_data: Vec<u32>,
-	// 바깥선 껍데기의 자리. (3 씩)
+	/// 바깥선 껍데기의 자리. (3 씩)
 	pub outline_vertex_data: Vec<f32>,
+	/// 바깥선 껍데기의 삼각형마다 점 번호 셋.
 	pub outline_index_data: Vec<u32>,
-	// 바깥선 껍데기의 점마다 밀기 전 몸의 자리. (3 씩, 받은 껍데기는 그 자리 그대로)
+	/// 바깥선 껍데기의 점마다 밀기 전 몸의 자리. (3 씩, 받은 껍데기는 그 자리 그대로)
 	pub outline_base_data: Vec<f32>,
-	// 꼭짓점마다 뼈대 번호 넷과 무게 넷. (뼈대가 있는 모형만, SKIN_FLOAT_COUNT 씩)
+	/// 꼭짓점마다 뼈대 번호 넷과 무게 넷. (뼈대가 있는 모형만, SKIN_FLOAT_COUNT 씩)
 	pub skin_data: Vec<f32>,
-	// 바깥선 껍데기의 점마다 뼈대 번호 넷과 무게 넷.
+	/// 바깥선 껍데기의 점마다 뼈대 번호 넷과 무게 넷.
 	pub outline_skin_data: Vec<f32>,
-	// 뼈대. (read_glb_arrays 가 채운다, MeshBuilder 는 None)
+	/// 뼈대. (read_glb_arrays 가 채운다, MeshBuilder 는 None)
 	pub skeleton: Option<ToonSkeleton>,
-	// GLB 의 안쪽 껍데기와 안쪽 몸이 든 자리. ((시작, 개수) 들, read_glb_arrays 가 채운다)
+	/// GLB 의 안쪽 껍데기와 안쪽 몸이 든 자리. ((시작, 개수) 들, read_glb_arrays 가 채운다)
 	pub inner_outline_ranges: Vec<(usize, usize)>,
+	/// 안쪽 몸이 든 자리. ((시작, 개수) 들, 몸의 꼭짓점 번호, read_glb_arrays 가 채운다)
 	pub inner_body_ranges: Vec<(usize, usize)>,
-	// 꼭짓점마다 텍스처 좌표 둘. (UV 를 준 꼭짓점이 없으면 빈 것)
+	/// 꼭짓점마다 텍스처 좌표 둘. (UV 를 준 꼭짓점이 없으면 빈 것)
 	pub uv_data: Vec<f32>,
 	/// 꼭짓점마다 2 번 텍스처 좌표 둘. (2 번 UV 를 준 꼭짓점이 없으면 빈 것)
 	pub uv1_data: Vec<f32>,
-	// 재질 범위. (GLB 프리미티브마다)
+	/// 재질 범위. (GLB 프리미티브마다)
 	pub material_ranges: Vec<ToonMaterialRange>,
 }
 
 //==============================================================================
-// 재질 범위. (몸의 꼭짓점 번호 가운데 한 재질이 든 자리, GLB 읽기가 프리미티브마다 담는다)
-// - name 재질 이름, material_index 재질 차례(없으면 None), node_name 노드 이름, extras 재질 extras, alpha_mode "OPAQUE" | "MASK" | "BLEND", alpha_cutoff (MASK 의 문턱)
-// - base_color_factor, emissive_factor 는 선형 색이다. base_color_image, emissive_image 는 read_glb_images 의 차례다. (없으면 None)
-// - 부품 안에서 칸을 갈라 칠할 때(강조색 칸, 표시판) 재질 이름이나 extras 로 고르고 ToonDrawOptions 의 index_start, index_count 로 그 칸만 그린다.
+/// 재질 범위. (몸의 꼭짓점 번호 가운데 한 재질이 든 자리, GLB 읽기가 프리미티브마다 담는다)
+/// - name 재질 이름, material_index 재질 차례(없으면 None), node_name 노드 이름, extras 재질 extras, alpha_mode "OPAQUE" | "MASK" | "BLEND", alpha_cutoff (MASK 의 문턱)
+/// - base_color_factor, emissive_factor 는 선형 색이다. base_color_image, emissive_image 는 read_glb_images 의 차례다. (없으면 None)
+/// - 부품 안에서 칸을 갈라 칠할 때(강조색 칸, 표시판) 재질 이름이나 extras 로 고르고 ToonDrawOptions 의 index_start, index_count 로 그 칸만 그린다.
+///
+/// # 예제
+/// 부위 하나를 이름 붙인 재질 범위로 담기
+/// ```rust
+/// use vanilla::{create_box_geometry, Matrix4, MeshBuilder, ToonMaterialRange, ToonPartOptions};
+///
+/// let mut builder = MeshBuilder::new();
+/// builder.add_part(&create_box_geometry(1.0, 1.0, 1.0), &Matrix4::create_identity(), "#909090", ToonPartOptions::default());
+/// let screen_start = builder.get_index_count();
+/// builder.add_part(&create_box_geometry(0.6, 0.4, 0.02), &Matrix4::create_translation(0.0, 0.1, 0.51), "#102030", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
+/// let screen_count = builder.get_index_count() - screen_start;
+/// builder.add_material_range(ToonMaterialRange { name: String::from("screen"), index_start: screen_start, index_count: screen_count, ..ToonMaterialRange::default() });
+/// let arrays = builder.read_arrays();
+/// let screen_range = arrays.material_ranges.iter().find(|material_range| material_range.name == "screen").unwrap();
+/// assert_eq!((screen_range.index_start, screen_range.index_count), (36, 36));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct ToonMaterialRange {
+	/// 재질 이름. (없으면 빈 글자)
 	pub name: String,
+	/// 재질 차례. (프리미티브에 재질이 없으면 None)
 	pub material_index: Option<usize>,
+	/// 프리미티브가 든 노드 이름. (없으면 빈 글자)
 	pub node_name: String,
+	/// 몸의 꼭짓점 번호 가운데 이 재질이 시작하는 자리. (ToonDrawOptions 의 index_start)
 	pub index_start: usize,
+	/// 이 재질이 든 꼭짓점 번호 수. (ToonDrawOptions 의 index_count)
 	pub index_count: usize,
+	/// 재질 extras. (없으면 빈 객체)
 	pub extras: Value,
+	/// glTF 의 alphaMode. ("OPAQUE", "MASK", "BLEND", GLB 에 없으면 "OPAQUE")
 	pub alpha_mode: String,
+	/// MASK 의 문턱. (GLB 에 없으면 0.5)
 	pub alpha_cutoff: f32,
+	/// 바탕색 배. (선형 [r, g, b, a], GLB 에 없으면 1)
 	pub base_color_factor: [f32; 4],
+	/// 빛남 색. (선형 [r, g, b], GLB 에 없으면 0)
 	pub emissive_factor: [f32; 3],
+	/// 바탕색 텍스처의 그림 차례. (read_glb_images 의 차례, 없으면 None)
 	pub base_color_image: Option<usize>,
+	/// 빛남 텍스처의 그림 차례. (read_glb_images 의 차례, 없으면 None)
 	pub emissive_image: Option<usize>,
-	// 이 프리미티브에 텍스처 좌표가 있는지.
+	/// 이 프리미티브에 텍스처 좌표가 있는지.
 	pub has_uv: bool,
 }
 
 //==============================================================================
-// 잇는 조각 하나. (MeshBuilder::combine 에 넘기는 배열과 옮김, 원본 { arrays, offset })
+/// 잇는 조각 하나. (MeshBuilder::combine 에 넘기는 배열과 옮김, 원본 { arrays, offset })
+///
+/// # 예제
+/// 바위 조각 셋을 옮겨 한 배열로 잇기
+/// ```rust
+/// use vanilla::{create_faceted_chunk_geometry, Matrix4, MeshBuilder, ToonMeshPiece, ToonPartOptions};
+///
+/// let mut builder = MeshBuilder::new();
+/// builder.add_part(&create_faceted_chunk_geometry(0.4, &[1.0, 0.8, 1.1, 0.9], [1.0, 0.7, 1.0]), &Matrix4::create_identity(), "#8a8070", ToonPartOptions::default());
+/// let rock_arrays = builder.read_arrays();
+/// let pieces = [
+/// 	ToonMeshPiece { arrays: &rock_arrays, offset: [0.0, 0.0, 0.0] },
+/// 	ToonMeshPiece { arrays: &rock_arrays, offset: [1.2, 0.0, 0.3] },
+/// 	ToonMeshPiece { arrays: &rock_arrays, offset: [-0.8, 0.0, 1.0] },
+/// ];
+/// let combined_arrays = MeshBuilder::combine(&pieces);
+/// assert_eq!(combined_arrays.index_data.len(), rock_arrays.index_data.len() * 3);
+/// assert_eq!(combined_arrays.outline_index_data.len(), rock_arrays.outline_index_data.len() * 3);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct ToonMeshPiece<'a> {
+	/// 이을 배열. (read_arrays 나 read_glb_arrays 의 결과)
 	pub arrays: &'a ToonMeshArrays,
+	/// 자리에 더할 옮김. ([x, y, z])
 	pub offset: [f32; 3],
 }
 
 //==============================================================================
-// 색 글자를 sRGB 세 수로. ("#rrggbb" → [r, g, b], 0 ~ 1)
+/// 색 글자를 sRGB 세 수로. ("#rrggbb" → [r, g, b], 0 ~ 1)
+///
+/// # 인자
+/// - `color_text`: "#rrggbb" 색 글자.
+///
+/// # 돌려줌
+/// [r, g, b] sRGB. (0 ~ 1, 읽지 못하면 흰색)
 //==============================================================================
 pub fn read_color_values(color_text: &str) -> [f32; 3] {
 	let hex_text = color_text.trim_start_matches('#');
@@ -178,7 +298,16 @@ pub fn read_color_values(color_text: &str) -> [f32; 3] {
 }
 
 //==============================================================================
-// 자리, 돌림, 크기로 변환 행렬 짓기. (부모 행렬 뒤에 곱함, 돌림은 three.js 의 기본 차례 XYZ)
+/// 자리, 돌림, 크기로 변환 행렬 짓기. (부모 행렬 뒤에 곱함, 돌림은 three.js 의 기본 차례 XYZ)
+///
+/// # 인자
+/// - `parent_matrix`: 부모 행렬. (None 이면 단위 행렬)
+/// - `position`: [x, y, z]
+/// - `rotation`: [x, y, z] 라디안. (None 이면 돌리지 않음)
+/// - `scale`: [x, y, z] (None 이면 키우지 않음)
+///
+/// # 돌려줌
+/// 부모 x 자리 x 돌림 x 크기 행렬. (새 행렬)
 //==============================================================================
 pub fn create_part_matrix(parent_matrix: Option<&Matrix4>, position: [f32; 3], rotation: Option<[f32; 3]>, scale: Option<[f32; 3]>) -> Matrix4 {
 	let mut matrix = match parent_matrix {
@@ -202,7 +331,15 @@ pub fn create_part_matrix(parent_matrix: Option<&Matrix4>, position: [f32; 3], r
 }
 
 //==============================================================================
-// 네모 상자. (면마다 꼭짓점을 따로 두어 모서리가 날카롭다)
+/// 네모 상자. (면마다 꼭짓점을 따로 두어 모서리가 날카롭다)
+///
+/// # 인자
+/// - `width`: X 축 길이.
+/// - `height`: Y 축 길이.
+/// - `depth`: Z 축 길이.
+///
+/// # 돌려줌
+/// { positions, normals, indices, uvs } 도형. (면마다 UV 0 ~ 1)
 //==============================================================================
 pub fn create_box_geometry(width: f32, height: f32, depth: f32) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
@@ -229,7 +366,17 @@ pub fn create_box_geometry(width: f32, height: f32, depth: f32) -> ToonGeometry 
 }
 
 //==============================================================================
-// 모서리가 둥근 상자. (면마다 격자를 깔고 안쪽 상자에서 반지름만큼 밀어낸다)
+/// 모서리가 둥근 상자. (면마다 격자를 깔고 안쪽 상자에서 반지름만큼 밀어낸다)
+///
+/// # 인자
+/// - `width`: X 축 길이.
+/// - `height`: Y 축 길이.
+/// - `depth`: Z 축 길이.
+/// - `segments`: 둥근 곳의 마디 수. (1 보다 작으면 1)
+/// - `radius`: 모서리 반지름. (반 길이보다 크면 그 축은 다 둥글다)
+///
+/// # 돌려줌
+/// { positions, normals, indices } 도형.
 //==============================================================================
 pub fn create_rounded_box_geometry(width: f32, height: f32, depth: f32, segments: u32, radius: f32) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
@@ -285,7 +432,16 @@ pub fn create_rounded_box_geometry(width: f32, height: f32, depth: f32, segments
 }
 
 //==============================================================================
-// 원기둥. (위와 아래 반지름이 다르면 깔때기, 위가 0 이면 원뿔, 위아래 뚜껑 포함)
+/// 원기둥. (위와 아래 반지름이 다르면 깔때기, 위가 0 이면 원뿔, 위아래 뚜껑 포함)
+///
+/// # 인자
+/// - `radius_top`: 위 반지름. (0 이면 원뿔)
+/// - `radius_bottom`: 아래 반지름.
+/// - `height`: 높이. (가운데가 원점)
+/// - `radial_segments`: 둘레 마디 수.
+///
+/// # 돌려줌
+/// { positions, normals, indices } 도형.
 //==============================================================================
 pub fn create_cylinder_geometry(radius_top: f32, radius_bottom: f32, height: f32, radial_segments: u32) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
@@ -321,7 +477,16 @@ pub fn create_cylinder_geometry(radius_top: f32, radius_bottom: f32, height: f32
 }
 
 //==============================================================================
-// 구. (위에서부터 theta_length 까지, π/2 면 위쪽 반구)
+/// 구. (위에서부터 theta_length 까지, π/2 면 위쪽 반구)
+///
+/// # 인자
+/// - `radius`: 반지름.
+/// - `width_segments`: 경도 마디 수.
+/// - `height_segments`: 위도 마디 수.
+/// - `theta_length`: 위에서부터 깎을 각. (라디안, π 면 온 구)
+///
+/// # 돌려줌
+/// { positions, normals, indices, uvs } 도형. (UV 는 경도와 위도로 0 ~ 1)
 //==============================================================================
 pub fn create_sphere_geometry(radius: f32, width_segments: u32, height_segments: u32, theta_length: f32) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
@@ -345,7 +510,14 @@ pub fn create_sphere_geometry(radius: f32, width_segments: u32, height_segments:
 }
 
 //==============================================================================
-// 돌려 깎기. (옆모습의 점 [x, y] 들을 Y 축으로 돌림, 노멀은 옆모습의 기울기로)
+/// 돌려 깎기. (옆모습의 점 [x, y] 들을 Y 축으로 돌림, 노멀은 옆모습의 기울기로)
+///
+/// # 인자
+/// - `points`: 옆모습의 점 [x, y] 들. (아래에서 위로)
+/// - `segments`: 둘레 마디 수.
+///
+/// # 돌려줌
+/// { positions, normals, indices } 도형.
 //==============================================================================
 pub fn create_lathe_geometry(points: &[[f32; 2]], segments: u32) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
@@ -378,7 +550,16 @@ pub fn create_lathe_geometry(points: &[[f32; 2]], segments: u32) -> ToonGeometry
 }
 
 //==============================================================================
-// 캡슐. (가운데 길이 length 의 원기둥 위아래에 반구, 전체 높이는 length + 반지름 둘)
+/// 캡슐. (가운데 길이 length 의 원기둥 위아래에 반구, 전체 높이는 length + 반지름 둘)
+///
+/// # 인자
+/// - `radius`: 반지름.
+/// - `length`: 가운데 원기둥의 길이. (반구는 빼고)
+/// - `cap_segments`: 반구 하나의 위도 마디 수.
+/// - `radial_segments`: 둘레 마디 수.
+///
+/// # 돌려줌
+/// { positions, normals, indices } 도형.
 //==============================================================================
 pub fn create_capsule_geometry(radius: f32, length: f32, cap_segments: u32, radial_segments: u32) -> ToonGeometry {
 	let mut points = Vec::new();
@@ -395,7 +576,17 @@ pub fn create_capsule_geometry(radius: f32, length: f32, cap_segments: u32, radi
 }
 
 //==============================================================================
-// 고리. (XY 평면에 누운 고리, arc 만큼만)
+/// 고리. (XY 평면에 누운 고리, arc 만큼만)
+///
+/// # 인자
+/// - `radius`: 고리의 반지름.
+/// - `tube`: 관의 반지름.
+/// - `radial_segments`: 관을 도는 마디.
+/// - `tubular_segments`: 고리를 도는 마디.
+/// - `arc`: 고리를 도는 각. (라디안, 2π 면 온 고리)
+///
+/// # 돌려줌
+/// { positions, normals, indices } 도형.
 //==============================================================================
 pub fn create_torus_geometry(radius: f32, tube: f32, radial_segments: u32, tubular_segments: u32, arc: f32) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
@@ -420,7 +611,13 @@ pub fn create_torus_geometry(radius: f32, tube: f32, radial_segments: u32, tubul
 }
 
 //==============================================================================
-// 팔면체. (면마다 꼭짓점을 따로 두어 각진 결정)
+/// 팔면체. (면마다 꼭짓점을 따로 두어 각진 결정)
+///
+/// # 인자
+/// - `radius`: 가운데에서 꼭짓점까지.
+///
+/// # 돌려줌
+/// { positions, normals, indices } 도형.
 //==============================================================================
 pub fn create_octahedron_geometry(radius: f32) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
@@ -441,8 +638,16 @@ pub fn create_octahedron_geometry(radius: f32) -> ToonGeometry {
 }
 
 //==============================================================================
-// 각진 돌덩이. (이십면체의 꼭짓점 열둘을 저마다 늘이고 줄여, 면마다 꼭짓점을 따로 둔 깎은 돌, 원본 createFacetedChunkGeometry)
-// - vertex_scales 는 꼭짓점 열둘의 반지름 배다. 모자라면 처음부터 되풀이하고, 비면 1 이다. axis_scale 은 [x, y, z] 배.
+/// 각진 돌덩이. (이십면체의 꼭짓점 열둘을 저마다 늘이고 줄여, 면마다 꼭짓점을 따로 둔 깎은 돌, 원본 createFacetedChunkGeometry)
+/// - vertex_scales 는 꼭짓점 열둘의 반지름 배다. 모자라면 처음부터 되풀이하고, 비면 1 이다. axis_scale 은 [x, y, z] 배.
+///
+/// # 인자
+/// - `radius`: 기준 반지름.
+/// - `vertex_scales`: 꼭짓점 열둘의 반지름 배. (모자라면 처음부터 되풀이, 비면 1)
+/// - `axis_scale`: [x, y, z] 배.
+///
+/// # 돌려줌
+/// { positions, normals, indices }
 //==============================================================================
 pub fn create_faceted_chunk_geometry(radius: f32, vertex_scales: &[f32], axis_scale: [f32; 3]) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
@@ -481,7 +686,13 @@ pub fn create_faceted_chunk_geometry(radius: f32, vertex_scales: &[f32], axis_sc
 }
 
 //==============================================================================
-// 노멀에 곱할 3x3. (행렬 왼쪽 위 3x3 의 역의 전치, 행 차례)
+/// 노멀에 곱할 3x3. (행렬 왼쪽 위 3x3 의 역의 전치, 행 차례)
+///
+/// # 인자
+/// - `elements`: Matrix4 의 수.
+///
+/// # 돌려줌
+/// 노멀에 곱할 3x3 의 수 9. (행 차례, 행렬식이 0 에 가까우면 단위 행렬)
 //==============================================================================
 pub fn read_normal_matrix(elements: &[f32; 16]) -> [f32; 9] {
 	let m00 = elements[0];
@@ -516,7 +727,7 @@ pub fn read_normal_matrix(elements: &[f32; 16]) -> [f32; 9] {
 }
 
 //==============================================================================
-// 자리와 노멀을 행렬로 옮기기. (자리 배열, 단위 노멀 배열)
+/// 자리와 노멀을 행렬로 옮기기. (자리 배열, 단위 노멀 배열)
 //==============================================================================
 fn transform_points(positions: &[f32], normals: &[f32], matrix: &Matrix4) -> (Vec<f32>, Vec<f32>) {
 	let normal_matrix = read_normal_matrix(matrix.get_elements());
@@ -540,7 +751,7 @@ fn transform_points(positions: &[f32], normals: &[f32], matrix: &Matrix4) -> (Ve
 }
 
 //==============================================================================
-// 세 점의 면 노멀. (넓이의 두 배 길이)
+/// 세 점의 면 노멀. (넓이의 두 배 길이)
 //==============================================================================
 fn read_face_normal(first: [f32; 3], second: [f32; 3], third: [f32; 3]) -> [f32; 3] {
 	let first_edge = [second[0] - first[0], second[1] - first[1], second[2] - first[2]];
@@ -549,7 +760,7 @@ fn read_face_normal(first: [f32; 3], second: [f32; 3], third: [f32; 3]) -> [f32;
 }
 
 //==============================================================================
-// 배열에서 점 하나의 세 수 읽기.
+/// 배열에서 점 하나의 세 수 읽기.
 //==============================================================================
 fn read_point(values: &[f32], point_index: u32) -> [f32; 3] {
 	let offset = point_index as usize * 3;
@@ -557,95 +768,151 @@ fn read_point(values: &[f32], point_index: u32) -> [f32; 3] {
 }
 
 //==============================================================================
-// 세 수 벡터의 내적.
+/// 세 수 벡터의 내적.
 //==============================================================================
 fn dot(first: [f32; 3], second: [f32; 3]) -> f32 {
 	first[0] * second[0] + first[1] * second[1] + first[2] * second[2]
 }
 
 //==============================================================================
-// 자리를 1e-4 로 반올림한 열쇠. (같은 자리의 점을 함께 민다)
+/// 자리를 1e-4 로 반올림한 열쇠. (같은 자리의 점을 함께 민다)
 //==============================================================================
 fn read_point_key(point: [f32; 3]) -> (i64, i64, i64) {
 	((point[0] * 10000.0).round() as i64, (point[1] * 10000.0).round() as i64, (point[2] * 10000.0).round() as i64)
 }
 
 //==============================================================================
-// 노멀을 1e-3 으로 반올림한 열쇠. (같은 자리에 같은 법선을 두 번 더하지 않는다)
+/// 노멀을 1e-3 으로 반올림한 열쇠. (같은 자리에 같은 법선을 두 번 더하지 않는다)
 //==============================================================================
 fn read_normal_key(normal: [f32; 3]) -> (i64, i64, i64) {
 	((normal[0] * 1000.0).round() as i64, (normal[1] * 1000.0).round() as i64, (normal[2] * 1000.0).round() as i64)
 }
 
 //==============================================================================
-// 모형 한 덩어리를 짓는 것.
+/// 모형 한 덩어리를 짓는 것.
+///
+/// # 예제
+/// 바퀴 부위가 든 자리를 적어 두기
+/// ```rust
+/// use std::f32::consts::PI;
+/// use vanilla::{create_box_geometry, create_cylinder_geometry, create_part_matrix, Matrix4, MeshBuilder, ToonPartOptions};
+///
+/// let mut builder = MeshBuilder::new();
+/// builder.add_part(&create_box_geometry(1.2, 0.4, 0.6), &Matrix4::create_translation(0.0, 0.4, 0.0), "#c04040", ToonPartOptions::default());
+/// let wheel_start = builder.get_index_count();
+/// builder.add_part(&create_cylinder_geometry(0.2, 0.2, 0.1, 16), &create_part_matrix(None, [0.4, 0.2, 0.35], Some([PI / 2.0, 0.0, 0.0]), None), "#303030", ToonPartOptions::default());
+/// let wheel_count = builder.get_index_count() - wheel_start;
+/// assert_eq!(wheel_start, 36);
+/// assert!(wheel_count > 0);
+/// ```
+///
+/// 부품 여럿을 한 메시로 짓고 몸의 한 부위만 따로 그리기
+/// ```rust,no_run
+/// use std::f32::consts::PI;
+/// use vanilla::{create_rounded_box_geometry, create_sphere_geometry, Camera3D, Matrix4, MeshBuilder, ToonDrawOptions, ToonPartOptions, ToonRenderer, Vector3};
+///
+/// fn draw_lamp(gl: &glow::Context, renderer: &mut ToonRenderer, camera: &mut Camera3D) {
+/// 	let mut builder = MeshBuilder::new();
+/// 	builder.add_part(&create_rounded_box_geometry(1.0, 0.5, 0.6, 3, 0.1), &Matrix4::create_translation(0.0, 0.25, 0.0), "#d0d8e0", ToonPartOptions::default());
+/// 	let lamp_start = builder.get_index_count();
+/// 	builder.add_part(&create_sphere_geometry(0.12, 12, 8, PI), &Matrix4::create_translation(0.5, 0.35, 0.0), "#ffe080", ToonPartOptions { glow: 1.5, is_unlit: true, ..ToonPartOptions::default() });
+/// 	let lamp_count = builder.get_index_count() - lamp_start;
+/// 	let Some(mesh) = renderer.create_mesh(gl, &builder.read_arrays()) else {
+/// 		return;
+/// 	};
+/// 	camera.set_perspective(0.8, 0.1, 100.0);
+/// 	camera.look_at(Vector3::create(1.5, 1.2, 2.0), Vector3::create(0.0, 0.2, 0.0), Vector3::create(0.0, 1.0, 0.0));
+/// 	renderer.begin_frame_with_camera(gl, camera);
+/// 	renderer.draw_mesh(gl, &mesh, &Matrix4::create_identity(), ToonDrawOptions { index_start: 0, index_count: lamp_start, ..ToonDrawOptions::default() });
+/// 	renderer.draw_mesh(gl, &mesh, &Matrix4::create_identity(), ToonDrawOptions { index_start: lamp_start, index_count: lamp_count, tint_color: [1.0, 0.5, 0.5, 1.0], has_outline: false, ..ToonDrawOptions::default() });
+/// 	renderer.end_frame(gl);
+/// }
+/// ```
 //==============================================================================
 #[derive(Default)]
 pub struct MeshBuilder {
-	// 꼭짓점의 수. (VERTEX_FLOAT_COUNT 씩)
+	/// 꼭짓점의 수. (VERTEX_FLOAT_COUNT 씩)
 	vertices: Vec<f32>,
 	indices: Vec<u32>,
-	// 바깥선 껍데기의 자리. (3 씩)
+	/// 바깥선 껍데기의 자리. (3 씩)
 	outline_positions: Vec<f32>,
-	// 바깥선 껍데기의 점마다 밀기 전 몸의 자리. (3 씩, 받은 껍데기는 그 자리 그대로)
+	/// 바깥선 껍데기의 점마다 밀기 전 몸의 자리. (3 씩, 받은 껍데기는 그 자리 그대로)
 	outline_base_positions: Vec<f32>,
 	outline_indices: Vec<u32>,
-	// 꼭짓점마다 뼈대 번호 넷과 무게 넷. (뼈대가 있는 모형만, SKIN_FLOAT_COUNT 씩)
+	/// 꼭짓점마다 뼈대 번호 넷과 무게 넷. (뼈대가 있는 모형만, SKIN_FLOAT_COUNT 씩)
 	skin_values: Vec<f32>,
 	outline_skin_values: Vec<f32>,
-	// 꼭짓점마다 텍스처 좌표 둘. (UV 를 준 꼭짓점이 있을 때만, 없는 꼭짓점은 0)
+	/// 꼭짓점마다 텍스처 좌표 둘. (UV 를 준 꼭짓점이 있을 때만, 없는 꼭짓점은 0)
 	uv_values: Vec<f32>,
 	/// 꼭짓점마다 2 번 텍스처 좌표 둘. (같은 꼴)
 	uv1_values: Vec<f32>,
-	// 재질 범위. (add_material_range 로 담은 차례)
+	/// 재질 범위. (add_material_range 로 담은 차례)
 	material_ranges: Vec<ToonMaterialRange>,
 }
 
 impl MeshBuilder {
 	//==============================================================================
-	// 생성.
+	/// 생성.
+	///
+	/// # 돌려줌
+	/// 빈 MeshBuilder.
 	//==============================================================================
 	pub fn new() -> MeshBuilder {
 		MeshBuilder::default()
 	}
 
 	//==============================================================================
-	// 비었는지.
+	/// 비었는지.
+	///
+	/// # 돌려줌
+	/// 몸의 삼각형이 하나도 없으면 true.
 	//==============================================================================
 	pub fn is_empty(&self) -> bool {
 		self.indices.is_empty()
 	}
 
 	//==============================================================================
-	// 지금까지 담은 몸의 꼭짓점 번호 수. (한 부위의 몸이 든 자리를 따로 그릴 때 그 앞뒤로 읽는다)
+	/// 지금까지 담은 몸의 꼭짓점 번호 수. (한 부위의 몸이 든 자리를 따로 그릴 때 그 앞뒤로 읽는다)
+	///
+	/// # 돌려줌
+	/// 몸의 꼭짓점 번호 수. (index_data 의 길이)
 	//==============================================================================
 	pub fn get_index_count(&self) -> usize {
 		self.indices.len()
 	}
 
 	//==============================================================================
-	// 지금까지 담은 바깥선 껍데기의 꼭짓점 번호 수.
+	/// 지금까지 담은 바깥선 껍데기의 꼭짓점 번호 수.
+	///
+	/// # 돌려줌
+	/// 바깥선 껍데기의 꼭짓점 번호 수. (outline_index_data 의 길이)
 	//==============================================================================
 	pub fn get_outline_index_count(&self) -> usize {
 		self.outline_indices.len()
 	}
 
 	//==============================================================================
-	// 지금까지 담은 몸의 꼭짓점 수. (다음에 담을 꼭짓점의 번호)
+	/// 지금까지 담은 몸의 꼭짓점 수. (다음에 담을 꼭짓점의 번호)
 	//==============================================================================
 	fn get_vertex_count(&self) -> u32 {
 		(self.vertices.len() / VERTEX_FLOAT_COUNT) as u32
 	}
 
 	//==============================================================================
-	// 지금까지 담은 바깥선 껍데기의 점 수. (다음에 담을 점의 번호)
+	/// 지금까지 담은 바깥선 껍데기의 점 수. (다음에 담을 점의 번호)
 	//==============================================================================
 	fn get_outline_point_count(&self) -> u32 {
 		(self.outline_positions.len() / 3) as u32
 	}
 
 	//==============================================================================
-	// 부품 하나 더하기. (도형에 행렬을 곱해 담고, 바깥선이면 점마다 민 껍데기도 담는다)
+	/// 부품 하나 더하기. (도형에 행렬을 곱해 담고, 바깥선이면 점마다 민 껍데기도 담는다)
+	///
+	/// # 인자
+	/// - `geometry`: 도형. (uvs 와 uvs1 은 비어도 된다)
+	/// - `matrix`: 도형에 곱할 자리, 돌림, 크기 행렬.
+	/// - `color_text`: "#rrggbb"
+	/// - `options`: 빛남, 빛을 받지 않음, 바깥선 여부와 굵기. (ToonPartOptions::default() 면 바깥선 있음)
 	//==============================================================================
 	pub fn add_part(&mut self, geometry: &ToonGeometry, matrix: &Matrix4, color_text: &str, options: ToonPartOptions) {
 		let color = read_color_values(color_text);
@@ -669,7 +936,15 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 네모 면 하나 더하기. (블록 지형과 바닥 같은 면, 네 점은 둘레 차례, 바깥선 없음)
+	/// 네모 면 하나 더하기. (블록 지형과 바닥 같은 면, 네 점은 둘레 차례, 바깥선 없음)
+	///
+	/// # 인자
+	/// - `corners`: 네 점 [x, y, z]
+	/// - `normal`: [x, y, z]
+	/// - `color`: [r, g, b] sRGB.
+	/// - `pattern`: 무늬 번호. (뜻은 셰이더가 정함, 0 이면 없음)
+	/// - `pattern_color`: [r, g, b] 무늬 색. (없으면 None)
+	/// - `is_unlit`: 빛을 받지 않음.
 	//==============================================================================
 	pub fn add_quad(&mut self, corners: [[f32; 3]; 4], normal: [f32; 3], color: [f32; 3], pattern: f32, pattern_color: Option<[f32; 3]>, is_unlit: bool) {
 		let start_index = self.get_vertex_count();
@@ -686,7 +961,7 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 네모 면 하나의 삼각형 둘 담기. (뒤집으면 감기를 거꾸로)
+	/// 네모 면 하나의 삼각형 둘 담기. (뒤집으면 감기를 거꾸로)
 	//==============================================================================
 	fn push_quad_indices(target: &mut Vec<u32>, start_index: u32, is_flipped: bool) {
 		if is_flipped {
@@ -698,8 +973,12 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 네모 면들의 바깥선 껍데기 담기. (면으로 지은 지형 덩어리처럼)
-	// - 같은 자리의 꼭짓점마다 서로 다른 면 법선을 한 번씩 더해 정규화하고, 그쪽으로 굵기만큼 민다.
+	/// 네모 면들의 바깥선 껍데기 담기. (면으로 지은 지형 덩어리처럼)
+	/// - 같은 자리의 꼭짓점마다 서로 다른 면 법선을 한 번씩 더해 정규화하고, 그쪽으로 굵기만큼 민다.
+	///
+	/// # 인자
+	/// - `quads`: 네모 면들. (네 점과 바깥쪽 노멀)
+	/// - `outline_width`: 껍데기 굵기. (꼭짓점 좌표 길이)
 	//==============================================================================
 	pub fn add_quad_shell(&mut self, quads: &[ToonQuad], outline_width: f32) {
 		let mut point_normals: HashMap<(i64, i64, i64), (Vec<(i64, i64, i64)>, [f32; 3])> = HashMap::new();
@@ -731,14 +1010,38 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 받은 모형의 삼각형 담기. (GLB 의 프리미티브 하나, 감기는 그대로)
+	/// 받은 모형의 삼각형 담기. (GLB 의 프리미티브 하나, 감기는 그대로)
+	///
+	/// # 인자
+	/// - `positions`: 꼭짓점마다 [x, y, z].
+	/// - `normals`: 꼭짓점마다 [x, y, z] 노멀.
+	/// - `indices`: 삼각형마다 꼭짓점 번호 셋.
+	/// - `matrix`: 꼭짓점에 곱할 행렬.
+	/// - `color`: [r, g, b] sRGB.
+	/// - `glow`: 빛남의 세기. (바탕색에 곱해 더함, 0 이면 없음)
+	/// - `is_unlit`: 빛을 받지 않음.
+	/// - `joints`: 꼭짓점마다 뼈대 번호 넷. (없으면 None)
+	/// - `weights`: 꼭짓점마다 무게 넷.
 	//==============================================================================
 	pub fn add_triangles(&mut self, positions: &[f32], normals: &[f32], indices: &[u32], matrix: &Matrix4, color: [f32; 3], glow: f32, is_unlit: bool, joints: Option<&[f32]>, weights: Option<&[f32]>) {
 		self.add_triangles_with_uvs(positions, normals, indices, matrix, color, glow, is_unlit, joints, weights, None, None);
 	}
 
 	//==============================================================================
-	// 받은 모형의 삼각형을 텍스처 좌표와 함께 담기. (uvs, uvs1 은 꼭짓점마다 둘, 원본 addTriangles 의 마지막 두 선택 인자)
+	/// 받은 모형의 삼각형을 텍스처 좌표와 함께 담기. (uvs, uvs1 은 꼭짓점마다 둘, 원본 addTriangles 의 마지막 두 선택 인자)
+	///
+	/// # 인자
+	/// - `positions`: 꼭짓점마다 [x, y, z].
+	/// - `normals`: 꼭짓점마다 [x, y, z] 노멀.
+	/// - `indices`: 삼각형마다 꼭짓점 번호 셋.
+	/// - `matrix`: 꼭짓점에 곱할 행렬.
+	/// - `color`: [r, g, b] sRGB.
+	/// - `glow`: 빛남의 세기. (바탕색에 곱해 더함, 0 이면 없음)
+	/// - `is_unlit`: 빛을 받지 않음.
+	/// - `joints`: 꼭짓점마다 뼈대 번호 넷. (없으면 None)
+	/// - `weights`: 꼭짓점마다 무게 넷.
+	/// - `uvs`: 꼭짓점마다 텍스처 좌표 둘. (없으면 None)
+	/// - `uvs1`: 꼭짓점마다 2 번 텍스처 좌표 둘. (없으면 None)
 	//==============================================================================
 	pub fn add_triangles_with_uvs(&mut self, positions: &[f32], normals: &[f32], indices: &[u32], matrix: &Matrix4, color: [f32; 3], glow: f32, is_unlit: bool, joints: Option<&[f32]>, weights: Option<&[f32]>, uvs: Option<&[f32]>, uvs1: Option<&[f32]>) {
 		let unlit = if is_unlit { 1.0 } else { 0.0 };
@@ -756,7 +1059,7 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 방금 담은 꼭짓점들의 텍스처 좌표 담기. (uvs 가 None 이면 UV 가 이미 있을 때만 0 으로 채운다, 앞 꼭짓점의 빈자리도 0 으로)
+	/// 방금 담은 꼭짓점들의 텍스처 좌표 담기. (uvs 가 None 이면 UV 가 이미 있을 때만 0 으로 채운다, 앞 꼭짓점의 빈자리도 0 으로)
 	//==============================================================================
 	fn push_uv_values(&mut self, uvs: Option<&[f32]>, vertex_count: usize) {
 		let start_vertex = self.vertices.len() / VERTEX_FLOAT_COUNT - vertex_count;
@@ -786,14 +1089,24 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 재질 범위 담기. (몸의 꼭짓점 번호 자리, GLB 읽기가 프리미티브마다 담는다)
+	/// 재질 범위 담기. (몸의 꼭짓점 번호 자리, GLB 읽기가 프리미티브마다 담는다)
+	///
+	/// # 인자
+	/// - `material_range`: 몸의 꼭짓점 번호 자리. (read_arrays 의 material_ranges 에 복사해 담긴다)
 	//==============================================================================
 	pub fn add_material_range(&mut self, material_range: ToonMaterialRange) {
 		self.material_ranges.push(material_range);
 	}
 
 	//==============================================================================
-	// 받은 모형의 바깥선 껍데기 담기. (이미 부풀린 것, 감기는 그대로)
+	/// 받은 모형의 바깥선 껍데기 담기. (이미 부풀린 것, 감기는 그대로)
+	///
+	/// # 인자
+	/// - `positions`: 이미 부풀린 껍데기의 꼭짓점마다 [x, y, z].
+	/// - `indices`: 삼각형마다 꼭짓점 번호 셋. (감기는 그대로 담는다)
+	/// - `matrix`: 꼭짓점에 곱할 행렬.
+	/// - `joints`: 꼭짓점마다 뼈대 번호 넷. (없으면 None)
+	/// - `weights`: 꼭짓점마다 무게 넷. (없으면 None)
 	//==============================================================================
 	pub fn add_outline_triangles(&mut self, positions: &[f32], indices: &[u32], matrix: &Matrix4, joints: Option<&[f32]>, weights: Option<&[f32]>) {
 		let start_index = self.get_outline_point_count();
@@ -807,8 +1120,17 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 받은 모형의 몸으로 바깥선 껍데기 짓기. (add_part 의 바깥선과 같은 셈, 감기는 그대로, 뼈대 번호와 무게는 몸의 것 그대로)
-	// - 여러 프리미티브를 이어 붙여 한 번에 넘기면 프리미티브 사이의 같은 자리 점도 함께 민다.
+	/// 받은 모형의 몸으로 바깥선 껍데기 짓기. (add_part 의 바깥선과 같은 셈, 감기는 그대로, 뼈대 번호와 무게는 몸의 것 그대로)
+	/// - 여러 프리미티브를 이어 붙여 한 번에 넘기면 프리미티브 사이의 같은 자리 점도 함께 민다.
+	///
+	/// # 인자
+	/// - `positions`: 몸의 꼭짓점마다 [x, y, z].
+	/// - `normals`: 몸의 꼭짓점마다 [x, y, z] 노멀.
+	/// - `indices`: 삼각형마다 꼭짓점 번호 셋.
+	/// - `matrix`: 꼭짓점에 곱할 행렬.
+	/// - `outline_width`: 껍데기 굵기. (행렬을 곱한 뒤의 길이)
+	/// - `joints`: 꼭짓점마다 뼈대 번호 넷. (없으면 None)
+	/// - `weights`: 꼭짓점마다 무게 넷. (없으면 None)
 	//==============================================================================
 	pub fn add_triangle_shell(&mut self, positions: &[f32], normals: &[f32], indices: &[u32], matrix: &Matrix4, outline_width: f32, joints: Option<&[f32]>, weights: Option<&[f32]>) {
 		let (world_positions, world_normals) = transform_points(positions, normals, matrix);
@@ -817,7 +1139,7 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 바깥선 껍데기의 점과 삼각형 담기.
+	/// 바깥선 껍데기의 점과 삼각형 담기.
 	//==============================================================================
 	fn push_outline_shell(&mut self, world_positions: &[f32], world_normals: &[f32], indices: &[u32], flips: Option<&[bool]>, outline_width: f32) {
 		let offsets = MeshBuilder::read_outline_offsets(world_positions, world_normals, outline_width);
@@ -830,7 +1152,7 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 뼈대 번호와 무게 담기. (뼈대가 없으면 담지 않는다)
+	/// 뼈대 번호와 무게 담기. (뼈대가 없으면 담지 않는다)
 	//==============================================================================
 	fn push_skin_values(target: &mut Vec<f32>, joints: Option<&[f32]>, weights: Option<&[f32]>, vertex_count: usize) {
 		let (joints, weights) = match (joints, weights) {
@@ -849,7 +1171,10 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 다 지은 배열.
+	/// 다 지은 배열.
+	///
+	/// # 돌려줌
+	/// 지금까지 담은 것을 복사한 배열. (skeleton 은 None, UV 는 준 꼭짓점이 있을 때만 꼭짓점마다 둘)
 	//==============================================================================
 	pub fn read_arrays(&self) -> ToonMeshArrays {
 		let vertex_count = self.vertices.len() / VERTEX_FLOAT_COUNT;
@@ -881,7 +1206,7 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 삼각형마다 감기를 뒤집을지. (면 노멀이 꼭짓점 노멀의 합과 반대면 뒤집는다)
+	/// 삼각형마다 감기를 뒤집을지. (면 노멀이 꼭짓점 노멀의 합과 반대면 뒤집는다)
 	//==============================================================================
 	fn read_triangle_flips(indices: &[u32], world_positions: &[f32], world_normals: &[f32]) -> Vec<bool> {
 		indices.chunks(3).map(|triangle| {
@@ -898,7 +1223,7 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 삼각형 담기. (뒤집을 것은 둘째와 셋째를 바꾼다)
+	/// 삼각형 담기. (뒤집을 것은 둘째와 셋째를 바꾼다)
 	//==============================================================================
 	fn push_triangles(target: &mut Vec<u32>, indices: &[u32], flips: Option<&[bool]>, start_index: u32) {
 		for (triangle_index, triangle) in indices.chunks(3).enumerate() {
@@ -913,8 +1238,8 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 바깥선 껍데기의 삼각형 담기. (뒤집을 것은 둘째와 셋째를 바꾸고, 밀고 나서 면이 뒤집힌 삼각형은 뺀다)
-	// - 오목한 곳에서 굵기보다 좁게 굽은 면은 밀면 껍데기가 접혀 면이 뒤집힌다. 그런 면은 몸 위에 짙은 줄로 비치므로 뺀다.
+	/// 바깥선 껍데기의 삼각형 담기. (뒤집을 것은 둘째와 셋째를 바꾸고, 밀고 나서 면이 뒤집힌 삼각형은 뺀다)
+	/// - 오목한 곳에서 굵기보다 좁게 굽은 면은 밀면 껍데기가 접혀 면이 뒤집힌다. 그런 면은 몸 위에 짙은 줄로 비치므로 뺀다.
 	//==============================================================================
 	fn push_shell_triangles(target: &mut Vec<u32>, indices: &[u32], flips: Option<&[bool]>, start_index: u32, world_positions: &[f32], offsets: &[f32]) {
 		let read_shell_point = |point_index: u32| {
@@ -939,9 +1264,17 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 바깥선 껍데기의 점마다 밀어낼 만큼. (같은 자리의 점끼리 함께 민다)
-	// - 같은 자리의 점(날카로운 모서리, 이음매, 극)은 서로 다른 법선을 한 번씩 더한 쪽으로 함께 밀어 껍데기가 벌어지지 않게 한다.
-	// - 모서리에서는 맞닿은 면마다 굵기만큼 떨어지게 더 민다. (그 쪽과 면 법선의 가장 작은 코사인으로 나눈다, 0.85 밑으로 내리지 않는다)
+	/// 바깥선 껍데기의 점마다 밀어낼 만큼. (같은 자리의 점끼리 함께 민다)
+	/// - 같은 자리의 점(날카로운 모서리, 이음매, 극)은 서로 다른 법선을 한 번씩 더한 쪽으로 함께 밀어 껍데기가 벌어지지 않게 한다.
+	/// - 모서리에서는 맞닿은 면마다 굵기만큼 떨어지게 더 민다. (그 쪽과 면 법선의 가장 작은 코사인으로 나눈다, 0.85 밑으로 내리지 않는다)
+	///
+	/// # 인자
+	/// - `world_positions`: 행렬을 곱한 꼭짓점 자리. (3 씩)
+	/// - `world_normals`: 단위 법선.
+	/// - `outline_width`: 껍데기 굵기.
+	///
+	/// # 돌려줌
+	/// 점마다 밀어낼 [x, y, z]. (3 씩)
 	//==============================================================================
 	pub fn read_outline_offsets(world_positions: &[f32], world_normals: &[f32], outline_width: f32) -> Vec<f32> {
 		let point_count = world_positions.len() / 3;
@@ -994,9 +1327,15 @@ impl MeshBuilder {
 	}
 
 	//==============================================================================
-	// 지어 둔 배열 여럿을 옮겨 한 배열로 잇기. (움직이지 않는 조각을 한 메시로, 돌리거나 키우지 않음, 원본 MeshBuilder.combine)
-	// - 조각마다 배열과 옮김. 자리에 옮김을 더하고 번호에 앞 조각의 꼭짓점 수를 더한다. 바깥선 껍데기와 껍데기 기준 자리, 안쪽 범위도 같이 옮겨 잇는다.
-	// - 뼈대는 잇지 않는다. 뼈대가 있는 조각도 쉬는 자세 그대로 움직이지 않는 몸이 된다.
+	/// 지어 둔 배열 여럿을 옮겨 한 배열로 잇기. (움직이지 않는 조각을 한 메시로, 돌리거나 키우지 않음, 원본 MeshBuilder.combine)
+	/// - 조각마다 배열과 옮김. 자리에 옮김을 더하고 번호에 앞 조각의 꼭짓점 수를 더한다. 바깥선 껍데기와 껍데기 기준 자리, 안쪽 범위도 같이 옮겨 잇는다.
+	/// - 뼈대는 잇지 않는다. 뼈대가 있는 조각도 쉬는 자세 그대로 움직이지 않는 몸이 된다.
+	///
+	/// # 인자
+	/// - `piece_list`: 이을 조각들. (배열과 옮김)
+	///
+	/// # 돌려줌
+	/// read_arrays 의 꼴. (skeleton 은 None)
 	//==============================================================================
 	pub fn combine(piece_list: &[ToonMeshPiece]) -> ToonMeshArrays {
 		let mut combined = ToonMeshArrays::default();
@@ -1049,6 +1388,9 @@ impl MeshBuilder {
 mod tests {
 	use super::*;
 
+	//==============================================================================
+	/// 상자의 꼭짓점과 번호 수, 바깥선 껍데기가 몸 바깥에 있는지.
+	//==============================================================================
 	#[test]
 	fn box_faces_point_outward() {
 		let mut mesh_builder = MeshBuilder::new();
@@ -1083,6 +1425,9 @@ mod tests {
 		assert_eq!(combined.uv1_data, arrays.uv1_data);
 	}
 
+	//==============================================================================
+	/// UV 가 앞 꼭짓점을 0 으로 채우고, 이을 때 UV 길이와 재질 범위의 자리를 맞추는지.
+	//==============================================================================
 	#[test]
 	fn uv_values_pad_and_combine() {
 		let mut mesh_builder = MeshBuilder::new();
@@ -1103,6 +1448,9 @@ mod tests {
 		assert_eq!(combined.material_ranges[0].index_start, 6 + plain.index_data.len());
 	}
 
+	//==============================================================================
+	/// 각진 돌덩이를 두 조각으로 이을 때 번호, 자리, 껍데기 기준 자리를 옮기고 뼈대는 잇지 않는지.
+	//==============================================================================
 	#[test]
 	fn faceted_chunk_and_combine() {
 		let mut mesh_builder = MeshBuilder::new();

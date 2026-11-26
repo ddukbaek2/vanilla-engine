@@ -1858,9 +1858,6 @@ impl ScreenEffect {
 	/// 파괴. (GL 자원 해제: 렌더 대상과 패스 프로그램, 원본 destroy)
 	/// - 버려질 때(Drop)도 스스로 부른다. 다시 end 를 부르면 자원을 새로 만든다.
 	/// - GL 컨텍스트가 이미 사라졌으면 그 자원도 같이 사라졌으므로 목록만 비운다.
-	///
-	/// # 인자
-	/// - `graphic`: GL 자원을 만든 그래픽.
 	//==============================================================================
 	pub fn destroy(&mut self) {
 		let render_target_set = self.render_target_set.take();

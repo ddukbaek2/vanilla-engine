@@ -1,19 +1,19 @@
 //==============================================================================
-// 툰 3D 를 노드 사각형 안에 그리는 컴포넌트. (vanilla.js graphics3d/toon/toonview3d.js 의 ToonView3D)
-// - draw 에서: 노드의 내용 영역(0, 0, 내용 크기)을 지금 변환으로 드로잉 버퍼 픽셀의 사각형으로 옮기고(돌았으면 감싸는 사각형),
-//   Graphic::run_external_pass 로 앞의 2D 묶음을 내보내고 상태 기억을 잊고 깊이를 비운 뒤, 렌더러의 화면 사각형(set_screen_rect)을 걸고 그리기 함수를 부른다.
-//   끝나면 화면 사각형을 풀고 restore_render_state 로 2D 상태를 되돌린다. (그리기 함수가 패닉해도 둘 다 되돌린다)
-// - 렌더러는 처음 그릴 때 짓는다. 셰이더를 짓지 못하는 기기면 다시 짓지 않고 대체 그리기 함수(set_fallback_draw_callback)로 2D 를 그린다.
-//   여러 노드가 렌더러 하나를 함께 쓰려면 set_renderer 로 넣는다.
-// - 카메라(get_camera_mut)의 가로 세로 비는 그릴 때마다 사각형의 비로 맞춘다. 3D 점 위의 2D 표시는 같은 카메라의 project_to_view 로 셈한다.
-// - 깊이 비우기: 부모 Mask 의 자르기 안이면 Adreno 660 함정(Graphic::clear_depth_buffer 머리말)이 있다. 자르기를 거는 쪽이
-//   begin_clip_rect 앞에서 clear_depth_buffer 를 부르고 이 컴포넌트는 set_depth_cleared(false) 로 둔다.
-// - 그리기 함수: (렌더러, 카메라, 화면 사각형, GL, 드로잉 버퍼 높이). 화면 사각형은 드로잉 버퍼 픽셀이다.
-//   보통 ToonDrawQueue 에 담아 queue.draw(gl, renderer, camera) 하거나 begin_frame_with_camera 와 end_frame 사이에 그린다.
-//   ToonPostProcess 를 쓰면 renderer.clear_screen_rect() 를 부르고 실수 렌더 타겟에 그린 뒤 end 의 뷰포트를 사각형으로 준다.
-// - 원본과 다른 것:
-//   - 공유 렌더러는 Rc<RefCell<ToonRenderer>> 다. 원본은 객체 참조를 나눠 든다. 그리는 동안 렌더러를 빌려 그리기 함수에 넘긴다.
-//   - 그리기 함수는 다섯째 인자로 드로잉 버퍼 높이를 받는다. 원본은 webGL2RenderingContext.drawingBufferHeight 로 읽지만 glow 컨텍스트에는 그 값이 없다.
+//! 툰 3D 를 노드 사각형 안에 그리는 컴포넌트. (vanilla.js graphics3d/toon/toonview3d.js 의 ToonView3D)
+//! - draw 에서: 노드의 내용 영역(0, 0, 내용 크기)을 지금 변환으로 드로잉 버퍼 픽셀의 사각형으로 옮기고(돌았으면 감싸는 사각형),
+//!   Graphic::run_external_pass 로 앞의 2D 묶음을 내보내고 상태 기억을 잊고 깊이를 비운 뒤, 렌더러의 화면 사각형(set_screen_rect)을 걸고 그리기 함수를 부른다.
+//!   끝나면 화면 사각형을 풀고 restore_render_state 로 2D 상태를 되돌린다. (그리기 함수가 패닉해도 둘 다 되돌린다)
+//! - 렌더러는 처음 그릴 때 짓는다. 셰이더를 짓지 못하는 기기면 다시 짓지 않고 대체 그리기 함수(set_fallback_draw_callback)로 2D 를 그린다.
+//!   여러 노드가 렌더러 하나를 함께 쓰려면 set_renderer 로 넣는다.
+//! - 카메라(get_camera_mut)의 가로 세로 비는 그릴 때마다 사각형의 비로 맞춘다. 3D 점 위의 2D 표시는 같은 카메라의 project_to_view 로 셈한다.
+//! - 깊이 비우기: 부모 Mask 의 자르기 안이면 Adreno 660 함정(Graphic::clear_depth_buffer 머리말)이 있다. 자르기를 거는 쪽이
+//!   begin_clip_rect 앞에서 clear_depth_buffer 를 부르고 이 컴포넌트는 set_depth_cleared(false) 로 둔다.
+//! - 그리기 함수: (렌더러, 카메라, 화면 사각형, GL, 드로잉 버퍼 높이). 화면 사각형은 드로잉 버퍼 픽셀이다.
+//!   보통 ToonDrawQueue 에 담아 queue.draw(gl, renderer, camera) 하거나 begin_frame_with_camera 와 end_frame 사이에 그린다.
+//!   ToonPostProcess 를 쓰면 renderer.clear_screen_rect() 를 부르고 실수 렌더 타겟에 그린 뒤 end 의 뷰포트를 사각형으로 준다.
+//! - 원본과 다른 것:
+//!   - 공유 렌더러는 `Rc<RefCell<ToonRenderer>>` 다. 원본은 객체 참조를 나눠 든다. 그리는 동안 렌더러를 빌려 그리기 함수에 넘긴다.
+//!   - 그리기 함수는 다섯째 인자로 드로잉 버퍼 높이를 받는다. 원본은 webGL2RenderingContext.drawingBufferHeight 로 읽지만 glow 컨텍스트에는 그 값이 없다.
 //==============================================================================
 use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
@@ -27,17 +27,17 @@ use crate::graphics3d::camera3d::Camera3D;
 use crate::graphics3d::toon::toonrenderer::ToonRenderer;
 
 //==============================================================================
-// 그리기 함수. (렌더러, 카메라, 화면 사각형, GL, 드로잉 버퍼 높이)
+/// 그리기 함수. (렌더러, 카메라, 화면 사각형, GL, 드로잉 버퍼 높이)
 //==============================================================================
 pub type ToonViewDrawCallback = Box<dyn FnMut(&mut ToonRenderer, &Camera3D, Rect, &glow::Context, i32)>;
 
 //==============================================================================
-// 대체 그리기 함수. (렌더러를 짓지 못한 기기에서 2D 로, 노드 변환이 걸린 Graphic 과 내용 크기)
+/// 대체 그리기 함수. (렌더러를 짓지 못한 기기에서 2D 로, 노드 변환이 걸린 Graphic 과 내용 크기)
 //==============================================================================
 pub type ToonViewFallbackDrawCallback = Box<dyn FnMut(&mut Graphic, Vector2)>;
 
 //==============================================================================
-// 그리는 동안 렌더러를 빌려 들고, 끝나면(패닉해도) 화면 사각형을 푸는 가드.
+/// 그리는 동안 렌더러를 빌려 들고, 끝나면(패닉해도) 화면 사각형을 푸는 가드.
 //==============================================================================
 struct ScreenRectGuard<'a> {
 	renderer: RefMut<'a, ToonRenderer>,
@@ -45,7 +45,7 @@ struct ScreenRectGuard<'a> {
 
 impl Drop for ScreenRectGuard<'_> {
 	//==============================================================================
-	// 화면 사각형 풀기.
+	/// 화면 사각형 풀기.
 	//==============================================================================
 	fn drop(&mut self) {
 		self.renderer.clear_screen_rect();
@@ -53,26 +53,59 @@ impl Drop for ScreenRectGuard<'_> {
 }
 
 //==============================================================================
-// 툰 3D 를 노드 사각형 안에 그리는 컴포넌트. (머리말 참고)
+/// 툰 3D 를 노드 사각형 안에 그리는 컴포넌트. (머리말 참고)
+///
+/// # 예제
+/// 노드 사각형 안에 툰 3D 장면 그리기
+/// ```rust
+/// use vanilla::{create_sphere_geometry, Camera3D, Matrix4, MeshBuilder, NodeTree, Rect, ToonDrawOptions, ToonDrawQueue, ToonMesh, ToonPartOptions, ToonRenderer, ToonView3D, Vector3};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let view_id = node_tree.create_child(root_id, "view");
+/// node_tree[view_id].set_content_size_xy(320.0, 240.0);
+/// let view = node_tree[view_id].add_component(ToonView3D::new());
+/// view.get_camera_mut().set_perspective(0.8, 0.1, 100.0);
+/// view.get_camera_mut().look_at(Vector3::create(0.0, 1.5, 3.0), Vector3::create(0.0, 0.5, 0.0), Vector3::create(0.0, 1.0, 0.0));
+/// let mut builder = MeshBuilder::new();
+/// builder.add_part(&create_sphere_geometry(0.5, 24, 16, std::f32::consts::PI), &Matrix4::create_translation(0.0, 0.5, 0.0), "#f0b080", ToonPartOptions::default());
+/// let arrays = builder.read_arrays();
+/// let mut mesh: Option<ToonMesh> = None;
+/// view.set_draw_callback(Some(Box::new(move |renderer: &mut ToonRenderer, camera: &Camera3D, _screen_rect: Rect, gl: &glow::Context, _drawing_buffer_height: i32| {
+/// 	if mesh.is_none() {
+/// 		mesh = renderer.create_mesh(gl, &arrays);
+/// 	}
+/// 	if let Some(mesh) = mesh.as_ref() {
+/// 		let mut queue = ToonDrawQueue::new();
+/// 		queue.add_mesh(mesh, &Matrix4::create_identity(), ToonDrawOptions::default());
+/// 		queue.draw(gl, renderer, camera);
+/// 	}
+/// })));
+/// assert!(view.get_renderer().is_none());
+/// assert!(view.is_depth_cleared());
+/// ```
 //==============================================================================
 pub struct ToonView3D {
 	component_base: ComponentBase,
-	// 툰 렌더러. (처음 그릴 때 짓거나 set_renderer 로 넣은 것, 여러 노드가 함께 쓸 수 있다)
+	/// 툰 렌더러. (처음 그릴 때 짓거나 set_renderer 로 넣은 것, 여러 노드가 함께 쓸 수 있다)
 	renderer: Option<Rc<RefCell<ToonRenderer>>>,
-	// 렌더러를 짓지 못함. (다시 짓지 않음)
+	/// 렌더러를 짓지 못함. (다시 짓지 않음)
 	is_renderer_failed: bool,
 	camera: Camera3D,
 	draw_callback: Option<ToonViewDrawCallback>,
 	fallback_draw_callback: Option<ToonViewFallbackDrawCallback>,
 	is_depth_cleared: bool,
-	// 이번 그리기의 화면 사각형. (드로잉 버퍼 픽셀)
+	/// 이번 그리기의 화면 사각형. (드로잉 버퍼 픽셀)
 	screen_rect: Rect,
 }
 
 #[crate::reflect]
 impl ToonView3D {
 	//==============================================================================
-	// 생성. (깊이를 비움)
+	/// 생성. (깊이를 비움)
+	///
+	/// # 돌려줌
+	/// 새 컴포넌트. (렌더러는 처음 그릴 때 짓는다)
 	//==============================================================================
 	pub fn new() -> ToonView3D {
 		ToonView3D {
@@ -88,35 +121,50 @@ impl ToonView3D {
 	}
 
 	//==============================================================================
-	// 그리기 함수 설정. (None 이면 그리지 않음)
+	/// 그리기 함수 설정. (None 이면 그리지 않음)
+	///
+	/// # 인자
+	/// - `draw_callback`: (렌더러, 카메라, 화면 사각형, GL, 드로잉 버퍼 높이) 를 받는 함수. (None 이면 그리지 않음)
 	//==============================================================================
 	pub fn set_draw_callback(&mut self, draw_callback: Option<ToonViewDrawCallback>) {
 		self.draw_callback = draw_callback;
 	}
 
 	//==============================================================================
-	// 대체 그리기 함수 설정. (렌더러를 짓지 못한 기기에서 2D 로)
+	/// 대체 그리기 함수 설정. (렌더러를 짓지 못한 기기에서 2D 로)
+	///
+	/// # 인자
+	/// - `fallback_draw_callback`: (graphic, content_size) 를 받는 함수. 렌더러를 짓지 못한 기기에서 부른다. (None 이면 그리지 않음)
 	//==============================================================================
 	pub fn set_fallback_draw_callback(&mut self, fallback_draw_callback: Option<ToonViewFallbackDrawCallback>) {
 		self.fallback_draw_callback = fallback_draw_callback;
 	}
 
 	//==============================================================================
-	// 그리기 전에 깊이를 비울지 설정. (기본 true)
+	/// 그리기 전에 깊이를 비울지 설정. (기본 true)
+	///
+	/// # 인자
+	/// - `is_depth_cleared`: 그리기 전에 깊이를 비울지. (부모 Mask 의 자르기 안이면 false 로 두고 자르는 쪽이 비운다)
 	//==============================================================================
 	pub fn set_depth_cleared(&mut self, is_depth_cleared: bool) {
 		self.is_depth_cleared = is_depth_cleared;
 	}
 
 	//==============================================================================
-	// 그리기 전에 깊이를 비우는지 반환.
+	/// 그리기 전에 깊이를 비우는지 반환.
+	///
+	/// # 돌려줌
+	/// 그리기 전에 깊이를 비우면 true.
 	//==============================================================================
 	pub fn is_depth_cleared(&self) -> bool {
 		self.is_depth_cleared
 	}
 
 	//==============================================================================
-	// 렌더러 넣기. (여러 노드가 하나를 함께 쓸 때, None 이면 처음 그릴 때 짓는다)
+	/// 렌더러 넣기. (여러 노드가 하나를 함께 쓸 때, None 이면 처음 그릴 때 짓는다)
+	///
+	/// # 인자
+	/// - `renderer`: 함께 쓸 렌더러. (None 이면 처음 그릴 때 짓는다)
 	//==============================================================================
 	pub fn set_renderer(&mut self, renderer: Option<Rc<RefCell<ToonRenderer>>>) {
 		self.renderer = renderer;
@@ -124,42 +172,63 @@ impl ToonView3D {
 	}
 
 	//==============================================================================
-	// 렌더러 반환. (아직 짓지 않았거나 짓지 못했으면 None)
+	/// 렌더러 반환. (아직 짓지 않았거나 짓지 못했으면 None)
+	///
+	/// # 돌려줌
+	/// 렌더러. (아직 짓지 않았거나 짓지 못했으면 None)
 	//==============================================================================
 	pub fn get_renderer(&self) -> Option<&Rc<RefCell<ToonRenderer>>> {
 		self.renderer.as_ref()
 	}
 
 	//==============================================================================
-	// 렌더러를 짓지 못했는지.
+	/// 렌더러를 짓지 못했는지.
+	///
+	/// # 돌려줌
+	/// 렌더러를 짓지 못했으면 true. (그때는 대체 그리기 함수로 그린다)
 	//==============================================================================
 	pub fn is_renderer_failed(&self) -> bool {
 		self.is_renderer_failed
 	}
 
 	//==============================================================================
-	// 카메라 반환.
+	/// 카메라 반환.
+	///
+	/// # 돌려줌
+	/// 이 컴포넌트의 카메라. (가로 세로 비는 그릴 때마다 사각형에 맞춘다)
 	//==============================================================================
 	pub fn get_camera(&self) -> &Camera3D {
 		&self.camera
 	}
 
 	//==============================================================================
-	// 카메라 반환. (투영과 보는 자리를 정할 때)
+	/// 카메라 반환. (투영과 보는 자리를 정할 때)
+	///
+	/// # 돌려줌
+	/// 이 컴포넌트의 카메라. (가로 세로 비는 그릴 때마다 사각형에 맞춘다)
 	//==============================================================================
 	pub fn get_camera_mut(&mut self) -> &mut Camera3D {
 		&mut self.camera
 	}
 
 	//==============================================================================
-	// 지난 그리기의 화면 사각형 반환. (드로잉 버퍼 픽셀)
+	/// 지난 그리기의 화면 사각형 반환. (드로잉 버퍼 픽셀)
+	///
+	/// # 돌려줌
+	/// 드로잉 버퍼 픽셀의 사각형. (왼쪽 위가 원점, 아직 그리지 않았으면 빈 사각형)
 	//==============================================================================
 	pub fn get_screen_rect(&self) -> Rect {
 		self.screen_rect
 	}
 
 	//==============================================================================
-	// 렌더러 읽기. (처음이면 짓고, 짓지 못하면 None 이고 다시 짓지 않는다)
+	/// 렌더러 읽기. (처음이면 짓고, 짓지 못하면 None 이고 다시 짓지 않는다)
+	///
+	/// # 인자
+	/// - `graphic`: 그래픽. (처음이면 그 GL 로 렌더러를 짓는다)
+	///
+	/// # 돌려줌
+	/// 렌더러. (짓지 못했으면 None)
 	//==============================================================================
 	pub fn read_renderer(&mut self, graphic: &mut Graphic) -> Option<Rc<RefCell<ToonRenderer>>> {
 		if self.renderer.is_some() || self.is_renderer_failed {
@@ -181,7 +250,11 @@ impl ToonView3D {
 	}
 
 	//==============================================================================
-	// 내용 영역을 드로잉 버퍼 픽셀의 사각형으로. (지금 변환으로 네 귀를 옮겨 감싸는 사각형)
+	/// 내용 영역을 드로잉 버퍼 픽셀의 사각형으로. (지금 변환으로 네 귀를 옮겨 감싸는 사각형)
+	///
+	/// # 인자
+	/// - `graphic`: Graphic. (지금 변환을 읽는다)
+	/// - `content_size`: 내용 영역의 크기.
 	//==============================================================================
 	pub fn refresh_screen_rect(&mut self, graphic: &Graphic, content_size: Vector2) {
 		let transform_matrix = graphic.get_transform_matrix();
@@ -200,7 +273,7 @@ impl ToonView3D {
 
 impl Default for ToonView3D {
 	//==============================================================================
-	// 기본값. (new 와 같다)
+	/// 기본값. (new 와 같다)
 	//==============================================================================
 	fn default() -> Self {
 		ToonView3D::new()
@@ -210,28 +283,28 @@ impl Default for ToonView3D {
 #[crate::reflect]
 impl Component for ToonView3D {
 	//==============================================================================
-	// 공통 상태 반환.
+	/// 공통 상태 반환.
 	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
 	//==============================================================================
-	// 공통 상태 반환. (변경용)
+	/// 공통 상태 반환. (변경용)
 	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
 	//==============================================================================
-	// 컴포넌트 이름.
+	/// 컴포넌트 이름.
 	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"ToonView3D"
 	}
 
 	//==============================================================================
-	// 갱신할 것이 없다.
+	/// 갱신할 것이 없다.
 	//==============================================================================
 	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
@@ -239,7 +312,7 @@ impl Component for ToonView3D {
 	}
 
 	//==============================================================================
-	// 내용 영역 안에서만 그리는지 반환. (가위로 자른다)
+	/// 내용 영역 안에서만 그리는지 반환. (가위로 자른다)
 	//==============================================================================
 	#[reflect(after = "getScreenRect")]
 	fn is_drawn_inside_content(&self) -> bool {
@@ -247,7 +320,7 @@ impl Component for ToonView3D {
 	}
 
 	//==============================================================================
-	// 출력. (렌더러가 없으면 대체 그리기, 있으면 run_external_pass 안에서 그리기 함수)
+	/// 출력. (렌더러가 없으면 대체 그리기, 있으면 run_external_pass 안에서 그리기 함수)
 	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		let content_size = transform.get_content_size();
@@ -297,6 +370,9 @@ mod tests {
 	use super::*;
 	use crate::core::node::nodetree::NodeTree;
 
+	//==============================================================================
+	/// 노드에 붙인 컴포넌트를 다시 찾아 설정 읽기. (깊이 비우기를 끈 것, 렌더러는 아직 없음)
+	//==============================================================================
 	#[test]
 	fn component_is_found_without_type_argument() {
 		let mut node_tree = NodeTree::new();

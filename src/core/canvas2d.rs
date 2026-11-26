@@ -18,27 +18,66 @@
 //!   - 속성은 setter 와 getter 다. 색은 Color 나 CSS 색 글, 그라데이션, 패턴을 받는 CanvasStyle 이다.
 //!   - roundRect 의 반지름은 수(f32)나 타원 모서리((x, y), CanvasRadius::Elliptical, 원본 DOMPointInit)의 목록이다.
 //!   - 데스크탑 픽셀은 크롬과 같은 Skia 셈이지만 같은 판이 아니라 가장자리 안티에일리어싱과 흐림이 조금 다를 수 있다.
+//!
+//! # 예제
+//! 원을 칠해 엔진 그림으로 받기
+//! ```rust
+//! use vanilla::{Canvas2D, CanvasFillRule};
+//!
+//! let mut canvas = Canvas2D::new(64, 64);
+//! canvas.set_fill_style("#ff0000");
+//! canvas.begin_path();
+//! canvas.arc(32.0, 32.0, 24.0, 0.0, std::f32::consts::PI * 2.0, false);
+//! canvas.fill(CanvasFillRule::NonZero);
+//! assert_eq!(canvas.get_image_data(32, 32, 1, 1).data, vec![255, 0, 0, 255]);
+//! assert_eq!(canvas.get_image_data(2, 2, 1, 1).data, vec![0, 0, 0, 0]);
+//!
+//! let image = canvas.to_image();
+//! assert_eq!((image.get_width(), image.get_height()), (64, 64));
+//! ```
 //==============================================================================
 use crate::base::color::Color;
 use std::f32::consts::PI;
 
 //==============================================================================
 /// 2D 변환 행렬. (원본 DOMMatrix 의 a, b, c, d, e, f. x' = a x + c y + e, y' = b x + d y + f)
+///
+/// # 예제
+/// 두 배로 늘인 뒤 옮기는 행렬과 그 역행렬
+/// ```rust
+/// use vanilla::CanvasMatrix;
+///
+/// let translate = CanvasMatrix::create(1.0, 0.0, 0.0, 1.0, 10.0, 20.0);
+/// let scale = CanvasMatrix::create(2.0, 0.0, 0.0, 2.0, 0.0, 0.0);
+/// let matrix = translate.multiply(&scale);
+/// assert_eq!(matrix.transform_point(1.0, 1.0), (12.0, 22.0));
+///
+/// let inverse = matrix.invert().unwrap();
+/// assert_eq!(inverse.transform_point(12.0, 22.0), (1.0, 1.0));
+/// assert!(CanvasMatrix::create(0.0, 0.0, 0.0, 0.0, 0.0, 0.0).invert().is_none());
+/// assert_eq!(CanvasMatrix::default(), CanvasMatrix::IDENTITY);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CanvasMatrix {
+	/// 가로 배율. (x 에 곱해 새 x 에 더한다)
 	pub a: f32,
+	/// 세로 기울임. (x 에 곱해 새 y 에 더한다)
 	pub b: f32,
+	/// 가로 기울임. (y 에 곱해 새 x 에 더한다)
 	pub c: f32,
+	/// 세로 배율. (y 에 곱해 새 y 에 더한다)
 	pub d: f32,
+	/// 가로 이동. (픽셀)
 	pub e: f32,
+	/// 세로 이동. (픽셀)
 	pub f: f32,
 }
 
 impl CanvasMatrix {
-	///==============================================================================
+	//==============================================================================
 	/// 단위 행렬.
-	///==============================================================================
+	//==============================================================================
 	pub const IDENTITY: CanvasMatrix = CanvasMatrix {
 		a: 1.0,
 		b: 0.0,
@@ -50,6 +89,17 @@ impl CanvasMatrix {
 
 	//==============================================================================
 	/// 여섯 값으로 만들기.
+	///
+	/// # 인자
+	/// - `a`: 가로 배율. (x 에 곱해 새 x 에 더한다)
+	/// - `b`: 세로 기울임. (x 에 곱해 새 y 에 더한다)
+	/// - `c`: 가로 기울임. (y 에 곱해 새 x 에 더한다)
+	/// - `d`: 세로 배율. (y 에 곱해 새 y 에 더한다)
+	/// - `e`: 가로 이동. (픽셀)
+	/// - `f`: 세로 이동. (픽셀)
+	///
+	/// # 돌려줌
+	/// 그 여섯 값의 행렬.
 	//==============================================================================
 	pub fn create(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> CanvasMatrix {
 		CanvasMatrix {
@@ -64,6 +114,12 @@ impl CanvasMatrix {
 
 	//==============================================================================
 	/// 뒤에 곱하기. (self × other, other 를 먼저 적용한다. 원본 transform 의 셈)
+	///
+	/// # 인자
+	/// - `other`: 뒤에 곱할 행렬. (점에 먼저 적용된다)
+	///
+	/// # 돌려줌
+	/// self × other 행렬.
 	//==============================================================================
 	pub fn multiply(&self, other: &CanvasMatrix) -> CanvasMatrix {
 		CanvasMatrix {
@@ -78,6 +134,13 @@ impl CanvasMatrix {
 
 	//==============================================================================
 	/// 점 옮기기.
+	///
+	/// # 인자
+	/// - `x`: 점 x.
+	/// - `y`: 점 y.
+	///
+	/// # 돌려줌
+	/// 옮긴 점 (x', y').
 	//==============================================================================
 	pub fn transform_point(&self, x: f32, y: f32) -> (f32, f32) {
 		(self.a * x + self.c * y + self.e, self.b * x + self.d * y + self.f)
@@ -85,6 +148,9 @@ impl CanvasMatrix {
 
 	//==============================================================================
 	/// 역행렬. (뒤집을 수 없으면 None)
+	///
+	/// # 돌려줌
+	/// 역행렬. 행렬식이 0 이거나 유한하지 않아 뒤집을 수 없으면 None.
 	//==============================================================================
 	pub fn invert(&self) -> Option<CanvasMatrix> {
 		let determinant = self.a * self.d - self.b * self.c;
@@ -104,6 +170,9 @@ impl CanvasMatrix {
 
 	//==============================================================================
 	/// 모든 값이 유한한지.
+	///
+	/// # 돌려줌
+	/// 여섯 값이 모두 유한하면 true.
 	//==============================================================================
 	pub fn is_finite(&self) -> bool {
 		self.a.is_finite() && self.b.is_finite() && self.c.is_finite() && self.d.is_finite() && self.e.is_finite() && self.f.is_finite()
@@ -111,6 +180,9 @@ impl CanvasMatrix {
 }
 
 impl Default for CanvasMatrix {
+	//==============================================================================
+	/// 단위 행렬. (CanvasMatrix::IDENTITY 와 같다)
+	//==============================================================================
 	fn default() -> CanvasMatrix {
 		CanvasMatrix::IDENTITY
 	}
@@ -135,7 +207,9 @@ pub(crate) enum PathSegment {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CanvasRadius {
+	/// 가로와 세로가 같은 반지름. (원본의 수)
 	Circular(f32),
+	/// 가로 x, 세로 y 반지름. (원본 DOMPointInit {x, y})
 	Elliptical {
 		x: f32,
 		y: f32,
@@ -143,12 +217,18 @@ pub enum CanvasRadius {
 }
 
 impl From<f32> for CanvasRadius {
+	//==============================================================================
+	/// 수 하나로 원 모서리. (Circular)
+	//==============================================================================
 	fn from(radius: f32) -> CanvasRadius {
 		CanvasRadius::Circular(radius)
 	}
 }
 
 impl From<(f32, f32)> for CanvasRadius {
+	//==============================================================================
+	/// (x, y) 로 타원 모서리. (Elliptical)
+	//==============================================================================
 	fn from(radius: (f32, f32)) -> CanvasRadius {
 		CanvasRadius::Elliptical {
 			x: radius.0,
@@ -193,6 +273,24 @@ const BLINK_PI_OVER_TWO_FLOAT: f32 = PI / 2.0;
 /// - 더하는 함수의 점은 matrix 로 옮겨 담는다. Path2D 는 단위 행렬이고, 캔버스의 지금 경로는 더할 때의 변환이다. (원본과 같다)
 /// - arc, ellipse, arcTo, roundRect 는 블링크 canvas_path.cc 와 스키아 SkPathBuilder 의 셈을 옮겨 같은 원뿔 곡선 점과 무게를 담는다.
 ///   (원뿔 곡선은 아핀 변환을 지나도 무게가 같아 옮겨 담은 점도 같다) 칠할 때는 스키아 CPU 래스터처럼 기기 픽셀 0.25 안의 2 차 곡선으로 나눈다.
+///
+/// # 예제
+/// 짝홀 규칙으로 가운데가 빈 사각형
+/// ```rust
+/// use vanilla::{Canvas2D, CanvasFillRule, Path2D};
+///
+/// let mut ring = Path2D::new();
+/// ring.rect(0.0, 0.0, 40.0, 40.0);
+/// ring.rect(10.0, 10.0, 20.0, 20.0);
+/// assert!(!ring.is_empty());
+///
+/// let mut canvas = Canvas2D::new(40, 40);
+/// canvas.fill_path(&ring, CanvasFillRule::EvenOdd);
+/// assert_eq!(canvas.get_image_data(5, 5, 1, 1).data[3], 255);
+/// assert_eq!(canvas.get_image_data(20, 20, 1, 1).data[3], 0);
+/// assert!(!canvas.is_point_in_path2d(&ring, 20.0, 20.0, CanvasFillRule::EvenOdd));
+/// assert!(canvas.is_point_in_path2d(&ring, 20.0, 20.0, CanvasFillRule::NonZero));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Path2D {
@@ -208,6 +306,9 @@ pub struct Path2D {
 impl Path2D {
 	//==============================================================================
 	/// 빈 경로.
+	///
+	/// # 돌려줌
+	/// 조각이 없는 Path2D.
 	//==============================================================================
 	pub fn new() -> Path2D {
 		Path2D::default()
@@ -246,6 +347,9 @@ impl Path2D {
 
 	//==============================================================================
 	/// 비었는지.
+	///
+	/// # 돌려줌
+	/// 조각이 하나도 없으면 true.
 	//==============================================================================
 	pub fn is_empty(&self) -> bool {
 		self.segment_list.is_empty()
@@ -263,6 +367,10 @@ impl Path2D {
 
 	//==============================================================================
 	/// 새 조각. (원본 moveTo)
+	///
+	/// # 인자
+	/// - `x`: 새 조각의 시작 점 x.
+	/// - `y`: 새 조각의 시작 점 y.
 	//==============================================================================
 	pub fn move_to(&mut self, x: f32, y: f32) {
 		self.move_to_with(&CanvasMatrix::IDENTITY, x, y);
@@ -271,6 +379,10 @@ impl Path2D {
 
 	//==============================================================================
 	/// 곧은 선. (원본 lineTo, 조각이 없으면 그 점에서 조각을 시작한다)
+	///
+	/// # 인자
+	/// - `x`: 끝 점 x.
+	/// - `y`: 끝 점 y.
 	//==============================================================================
 	pub fn line_to(&mut self, x: f32, y: f32) {
 		self.line_to_with(&CanvasMatrix::IDENTITY, x, y);
@@ -279,6 +391,12 @@ impl Path2D {
 
 	//==============================================================================
 	/// 2 차 곡선. (원본 quadraticCurveTo)
+	///
+	/// # 인자
+	/// - `control_x`: 조정점 x.
+	/// - `control_y`: 조정점 y.
+	/// - `x`: 끝 점 x.
+	/// - `y`: 끝 점 y.
 	//==============================================================================
 	pub fn quadratic_curve_to(&mut self, control_x: f32, control_y: f32, x: f32, y: f32) {
 		self.quadratic_curve_to_with(&CanvasMatrix::IDENTITY, control_x, control_y, x, y);
@@ -287,6 +405,14 @@ impl Path2D {
 
 	//==============================================================================
 	/// 3 차 곡선. (원본 bezierCurveTo)
+	///
+	/// # 인자
+	/// - `first_control_x`: 첫 조정점 x.
+	/// - `first_control_y`: 첫 조정점 y.
+	/// - `second_control_x`: 둘째 조정점 x.
+	/// - `second_control_y`: 둘째 조정점 y.
+	/// - `x`: 끝 점 x.
+	/// - `y`: 끝 점 y.
 	//==============================================================================
 	pub fn bezier_curve_to(&mut self, first_control_x: f32, first_control_y: f32, second_control_x: f32, second_control_y: f32, x: f32, y: f32) {
 		self.bezier_curve_to_with(&CanvasMatrix::IDENTITY, first_control_x, first_control_y, second_control_x, second_control_y, x, y);
@@ -295,6 +421,17 @@ impl Path2D {
 
 	//==============================================================================
 	/// 원호. (원본 arc, 반지름이 음수면 원본의 예외처럼 아무것도 하지 않고 false)
+	///
+	/// # 인자
+	/// - `x`: 가운데 x.
+	/// - `y`: 가운데 y.
+	/// - `radius`: 반지름. (음수면 false)
+	/// - `start_angle`: 시작 각. (라디안, 0 이 오른쪽, 화면에서 시계 방향이 +)
+	/// - `end_angle`: 끝 각. (라디안)
+	/// - `is_counterclockwise`: true 면 반시계 방향으로 돈다.
+	///
+	/// # 돌려줌
+	/// 반지름이 음수면 false(원본의 예외 자리), 그 밖에는 true. (유한하지 않은 값이 있으면 원본처럼 아무것도 더하지 않고 true)
 	//==============================================================================
 	pub fn arc(&mut self, x: f32, y: f32, radius: f32, start_angle: f32, end_angle: f32, is_counterclockwise: bool) -> bool {
 		let is_accepted = self.arc_with(&CanvasMatrix::IDENTITY, x, y, radius, start_angle, end_angle, is_counterclockwise);
@@ -306,6 +443,16 @@ impl Path2D {
 
 	//==============================================================================
 	/// 두 접선 사이 원호. (원본 arcTo, 반지름이 음수면 false)
+	///
+	/// # 인자
+	/// - `first_x`: 두 접선이 만나는 점 x. (지금 점에서 이 점까지가 첫 접선)
+	/// - `first_y`: 두 접선이 만나는 점 y.
+	/// - `second_x`: 둘째 접선이 지나는 점 x. (만나는 점에서 이 점까지가 둘째 접선)
+	/// - `second_y`: 둘째 접선이 지나는 점 y.
+	/// - `radius`: 반지름. (음수면 false)
+	///
+	/// # 돌려줌
+	/// 반지름이 음수면 false(원본의 예외 자리), 그 밖에는 true. (유한하지 않은 값이 있으면 원본처럼 아무것도 더하지 않고 true)
 	//==============================================================================
 	pub fn arc_to(&mut self, first_x: f32, first_y: f32, second_x: f32, second_y: f32, radius: f32) -> bool {
 		let is_accepted = self.arc_to_with(&CanvasMatrix::IDENTITY, first_x, first_y, second_x, second_y, radius);
@@ -317,6 +464,19 @@ impl Path2D {
 
 	//==============================================================================
 	/// 타원호. (원본 ellipse, 반지름이 음수면 false)
+	///
+	/// # 인자
+	/// - `x`: 가운데 x.
+	/// - `y`: 가운데 y.
+	/// - `radius_x`: 가로 반지름. (돌리기 전, 음수면 false)
+	/// - `radius_y`: 세로 반지름. (돌리기 전, 음수면 false)
+	/// - `rotation`: 타원을 돌리는 각. (라디안, 화면에서 시계 방향이 +)
+	/// - `start_angle`: 시작 각. (라디안, 타원 좌표계에서 0 이 오른쪽)
+	/// - `end_angle`: 끝 각. (라디안)
+	/// - `is_counterclockwise`: true 면 반시계 방향으로 돈다.
+	///
+	/// # 돌려줌
+	/// 반지름이 음수면 false(원본의 예외 자리), 그 밖에는 true. (유한하지 않은 값이 있으면 원본처럼 아무것도 더하지 않고 true)
 	//==============================================================================
 	pub fn ellipse(&mut self, x: f32, y: f32, radius_x: f32, radius_y: f32, rotation: f32, start_angle: f32, end_angle: f32, is_counterclockwise: bool) -> bool {
 		let is_accepted = self.ellipse_with(&CanvasMatrix::IDENTITY, x, y, radius_x, radius_y, rotation, start_angle, end_angle, is_counterclockwise);
@@ -328,6 +488,12 @@ impl Path2D {
 
 	//==============================================================================
 	/// 사각형. (원본 rect, 닫힌 조각을 더하고 (x, y) 에서 새 조각)
+	///
+	/// # 인자
+	/// - `x`: 왼쪽 위 x.
+	/// - `y`: 왼쪽 위 y.
+	/// - `width`: 폭. (음수면 x 에서 왼쪽으로)
+	/// - `height`: 높이. (음수면 y 에서 위로)
 	//==============================================================================
 	pub fn rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
 		self.rect_with(&CanvasMatrix::IDENTITY, x, y, width, height);
@@ -336,6 +502,16 @@ impl Path2D {
 
 	//==============================================================================
 	/// 둥근 사각형. (원본 roundRect, 반지름 1 ~ 4 개. 수(f32)나 타원 모서리((x, y), CanvasRadius::Elliptical)를 받는다. 틀리면 false)
+	///
+	/// # 인자
+	/// - `x`: 왼쪽 위 x.
+	/// - `y`: 왼쪽 위 y.
+	/// - `width`: 폭. (음수면 x 에서 왼쪽으로)
+	/// - `height`: 높이. (음수면 y 에서 위로)
+	/// - `radius_list`: 모서리 반지름 1 ~ 4 개. (원본처럼 1 개는 네 모서리, 2 개는 왼위와 오른아래 / 오른위와 왼아래, 3 개는 왼위 / 오른위와 왼아래 / 오른아래, 4 개는 왼위, 오른위, 오른아래, 왼아래)
+	///
+	/// # 돌려줌
+	/// 반지름이 1 ~ 4 개가 아니거나 음수 반지름이 있으면 false(원본의 예외 자리), 그 밖에는 true.
 	//==============================================================================
 	pub fn round_rect<R: Into<CanvasRadius> + Copy>(&mut self, x: f32, y: f32, width: f32, height: f32, radius_list: &[R]) -> bool {
 		let radius_list: Vec<CanvasRadius> = radius_list.iter().map(|radius| (*radius).into()).collect();
@@ -356,6 +532,10 @@ impl Path2D {
 
 	//==============================================================================
 	/// 다른 경로 더하기. (원본 addPath, 변환을 주면 그 변환으로 옮겨 더한다)
+	///
+	/// # 인자
+	/// - `path`: 더할 경로.
+	/// - `transform`: 더하기 전에 옮길 변환. (None 이면 그대로, 유한하지 않은 값이 있으면 아무것도 더하지 않는다)
 	//==============================================================================
 	pub fn add_path(&mut self, path: &Path2D, transform: Option<CanvasMatrix>) {
 		let matrix = transform.unwrap_or(CanvasMatrix::IDENTITY);
@@ -994,6 +1174,9 @@ fn sin_snap_to_zero(radians: f32) -> f32 {
 	}
 }
 
+//==============================================================================
+/// 0 에 붙인 cos. (스키아 SkScalarCosSnapToZero)
+//==============================================================================
 fn cos_snap_to_zero(radians: f32) -> f32 {
 	let value = radians.cos();
 	if value.abs() <= SKIA_SIN_COS_NEARLY_ZERO {
@@ -1412,6 +1595,25 @@ pub enum CanvasGradientKind {
 
 //==============================================================================
 /// 그라데이션. (원본 CanvasGradient)
+///
+/// # 예제
+/// 검정에서 흰색으로 가는 가로 그라데이션
+/// ```rust
+/// use vanilla::{Canvas2D, CanvasGradientKind};
+///
+/// let mut canvas = Canvas2D::new(100, 10);
+/// let mut gradient = canvas.create_linear_gradient(0.0, 0.0, 100.0, 0.0);
+/// assert!(gradient.add_color_stop(0.0, "#000000"));
+/// assert!(gradient.add_color_stop(1.0, "#ffffff"));
+/// assert!(!gradient.add_color_stop(1.5, "#ff0000"));
+/// assert_eq!(gradient.get_color_stops().len(), 2);
+/// assert!(matches!(gradient.get_kind(), CanvasGradientKind::Linear { .. }));
+///
+/// canvas.set_fill_style(&gradient);
+/// canvas.fill_rect(0.0, 0.0, 100.0, 10.0);
+/// assert!(canvas.get_image_data(1, 5, 1, 1).data[0] < 10);
+/// assert!(canvas.get_image_data(98, 5, 1, 1).data[0] > 245);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct CanvasGradient {
@@ -1432,6 +1634,13 @@ impl CanvasGradient {
 
 	//==============================================================================
 	/// 색 멈춤 더하기. (원본 addColorStop, 자리가 0 ~ 1 밖이면 원본의 예외처럼 더하지 않고 false. 같은 자리는 넣은 차례대로)
+	///
+	/// # 인자
+	/// - `offset`: 자리. (0 ~ 1, 밖이면 false)
+	/// - `color`: 색. (Color 나 CSS 색 글)
+	///
+	/// # 돌려줌
+	/// 더했으면 true. 자리가 0 ~ 1 밖이면 false.
 	//==============================================================================
 	pub fn add_color_stop(&mut self, offset: f32, color: impl Into<Color>) -> bool {
 		if !(0.0..=1.0).contains(&offset) {
@@ -1445,6 +1654,9 @@ impl CanvasGradient {
 
 	//==============================================================================
 	/// 종류.
+	///
+	/// # 돌려줌
+	/// 만들 때의 종류와 좌표.
 	//==============================================================================
 	pub fn get_kind(&self) -> CanvasGradientKind {
 		self.kind
@@ -1452,6 +1664,9 @@ impl CanvasGradient {
 
 	//==============================================================================
 	/// 색 멈춤 목록. (자리 차례)
+	///
+	/// # 돌려줌
+	/// (자리, 색) 목록. (자리 차례, 같은 자리는 넣은 차례)
 	//==============================================================================
 	pub fn get_color_stops(&self) -> &[(f32, Color)] {
 		&self.stop_list
@@ -1463,15 +1678,22 @@ impl CanvasGradient {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CanvasPatternRepetition {
+	/// 가로세로로 되풀이. (원본 "repeat")
 	Repeat,
+	/// 가로로만 되풀이. (원본 "repeat-x")
 	RepeatX,
+	/// 세로로만 되풀이. (원본 "repeat-y")
 	RepeatY,
+	/// 한 장만. (원본 "no-repeat")
 	NoRepeat,
 }
 
 impl CanvasPatternRepetition {
 	//==============================================================================
 	/// 원본 글.
+	///
+	/// # 돌려줌
+	/// "repeat", "repeat-x", "repeat-y", "no-repeat" 가운데 하나.
 	//==============================================================================
 	pub fn get_name(&self) -> &'static str {
 		match self {
@@ -1493,6 +1715,26 @@ impl CanvasPatternRepetition {
 
 //==============================================================================
 /// 패턴. (원본 CanvasPattern, 만들 때의 그림을 프리멀티플라이드 RGBA 로 든다)
+///
+/// # 예제
+/// 빨강과 파랑 두 픽셀을 가로세로로 되풀이해 칠하기
+/// ```rust
+/// use vanilla::{Canvas2D, CanvasPatternRepetition};
+///
+/// let mut tile = Canvas2D::new(2, 1);
+/// tile.set_fill_style("#ff0000");
+/// tile.fill_rect(0.0, 0.0, 1.0, 1.0);
+/// tile.set_fill_style("#0000ff");
+/// tile.fill_rect(1.0, 0.0, 1.0, 1.0);
+///
+/// let mut canvas = Canvas2D::new(6, 1);
+/// let pattern = canvas.create_pattern(&tile, CanvasPatternRepetition::Repeat).unwrap();
+/// assert_eq!(pattern.get_repetition(), CanvasPatternRepetition::Repeat);
+/// canvas.set_fill_style(pattern);
+/// canvas.fill_rect(0.0, 0.0, 6.0, 1.0);
+/// assert_eq!(canvas.get_image_data(2, 0, 1, 1).data, vec![255, 0, 0, 255]);
+/// assert_eq!(canvas.get_image_data(5, 0, 1, 1).data, vec![0, 0, 255, 255]);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct CanvasPattern {
@@ -1506,6 +1748,9 @@ pub struct CanvasPattern {
 impl CanvasPattern {
 	//==============================================================================
 	/// 패턴 변환 설정. (원본 setTransform)
+	///
+	/// # 인자
+	/// - `transform`: 패턴 변환. (패턴 그림 좌표 → 칠할 때의 좌표, 유한하지 않은 값이 있으면 무시)
 	//==============================================================================
 	pub fn set_transform(&mut self, transform: CanvasMatrix) {
 		if transform.is_finite() {
@@ -1515,6 +1760,9 @@ impl CanvasPattern {
 
 	//==============================================================================
 	/// 되풀이.
+	///
+	/// # 돌려줌
+	/// 만들 때 준 되풀이.
 	//==============================================================================
 	pub fn get_repetition(&self) -> CanvasPatternRepetition {
 		self.repetition
@@ -1526,48 +1774,72 @@ impl CanvasPattern {
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub enum CanvasStyle {
+	/// 단색.
 	Color(Color),
+	/// 그라데이션.
 	Gradient(CanvasGradient),
+	/// 패턴.
 	Pattern(CanvasPattern),
 }
 
 impl From<Color> for CanvasStyle {
+	//==============================================================================
+	/// 색으로.
+	//==============================================================================
 	fn from(color: Color) -> CanvasStyle {
 		CanvasStyle::Color(color)
 	}
 }
 
 impl From<&str> for CanvasStyle {
+	//==============================================================================
+	/// CSS 색 글로. (Color::from 을 거친다)
+	//==============================================================================
 	fn from(color_string: &str) -> CanvasStyle {
 		CanvasStyle::Color(Color::from(color_string))
 	}
 }
 
 impl From<&String> for CanvasStyle {
+	//==============================================================================
+	/// String 참조의 CSS 색 글로. (&str 판과 같다)
+	//==============================================================================
 	fn from(color_string: &String) -> CanvasStyle {
 		CanvasStyle::Color(Color::from(color_string.as_str()))
 	}
 }
 
 impl From<CanvasGradient> for CanvasStyle {
+	//==============================================================================
+	/// 그라데이션으로.
+	//==============================================================================
 	fn from(gradient: CanvasGradient) -> CanvasStyle {
 		CanvasStyle::Gradient(gradient)
 	}
 }
 
 impl From<&CanvasGradient> for CanvasStyle {
+	//==============================================================================
+	/// 그라데이션 참조로. (복사해 든다)
+	//==============================================================================
 	fn from(gradient: &CanvasGradient) -> CanvasStyle {
 		CanvasStyle::Gradient(gradient.clone())
 	}
 }
 
 impl From<CanvasPattern> for CanvasStyle {
+	//==============================================================================
+	/// 패턴으로.
+	//==============================================================================
 	fn from(pattern: CanvasPattern) -> CanvasStyle {
 		CanvasStyle::Pattern(pattern)
 	}
 }
 
 impl From<&CanvasPattern> for CanvasStyle {
+	//==============================================================================
+	/// 패턴 참조로. (복사해 든다)
+	//==============================================================================
 	fn from(pattern: &CanvasPattern) -> CanvasStyle {
 		CanvasStyle::Pattern(pattern.clone())
 	}
@@ -1578,8 +1850,10 @@ impl From<&CanvasPattern> for CanvasStyle {
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CanvasFillRule {
+	/// 감긴 수가 0 이 아니면 안. (원본 "nonzero", 기본)
 	#[default]
 	NonZero,
+	/// 겹친 수가 홀수면 안. (원본 "evenodd")
 	EvenOdd,
 }
 
@@ -1588,9 +1862,12 @@ pub enum CanvasFillRule {
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CanvasLineCap {
+	/// 끝에서 자른다. (원본 "butt", 기본)
 	#[default]
 	Butt,
+	/// 반원을 붙인다. (원본 "round")
 	Round,
+	/// 굵기의 반만큼 네모를 붙인다. (원본 "square")
 	Square,
 }
 
@@ -1599,9 +1876,12 @@ pub enum CanvasLineCap {
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CanvasLineJoin {
+	/// 뾰족하게 늘인다. (원본 "miter", 기본, 뾰족 이음 한계를 넘으면 Bevel 처럼 깎는다)
 	#[default]
 	Miter,
+	/// 둥글게 잇는다. (원본 "round")
 	Round,
+	/// 모서리를 깎는다. (원본 "bevel")
 	Bevel,
 }
 
@@ -1610,11 +1890,16 @@ pub enum CanvasLineJoin {
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CanvasTextAlign {
+	/// x 에서 글이 시작한다. (원본 "start", 기본)
 	#[default]
 	Start,
+	/// x 에서 글이 끝난다. (원본 "end")
 	End,
+	/// x 가 글의 왼쪽 끝. (원본 "left")
 	Left,
+	/// x 가 글의 오른쪽 끝. (원본 "right")
 	Right,
+	/// x 가 글의 가운데. (원본 "center")
 	Center,
 }
 
@@ -1623,28 +1908,58 @@ pub enum CanvasTextAlign {
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CanvasTextBaseline {
+	/// y 가 em 상자의 위. (원본 "top")
 	Top,
+	/// y 가 매다는 기준선. (원본 "hanging", 데바나가리 같은 글의 위쪽 기준선)
 	Hanging,
+	/// y 가 em 상자의 가운데. (원본 "middle")
 	Middle,
+	/// y 가 알파벳 기준선. (원본 "alphabetic", 기본)
 	#[default]
 	Alphabetic,
+	/// y 가 표의 문자 기준선. (원본 "ideographic")
 	Ideographic,
+	/// y 가 em 상자의 아래. (원본 "bottom")
 	Bottom,
 }
 
 //==============================================================================
 /// 픽셀 묶음. (원본 ImageData, 프리멀티플라이하지 않은 RGBA)
+///
+/// # 예제
+/// 두 픽셀을 캔버스에 쓰고 되읽기
+/// ```rust
+/// use vanilla::{Canvas2D, ImageData};
+///
+/// let mut image_data = ImageData::new(2, 1);
+/// assert_eq!(image_data.data, vec![0; 8]);
+/// image_data.data.copy_from_slice(&[255, 0, 0, 255, 0, 0, 255, 255]);
+///
+/// let mut canvas = Canvas2D::new(4, 4);
+/// canvas.put_image_data(&image_data, 1, 1);
+/// assert_eq!(canvas.get_image_data(1, 1, 2, 1), image_data);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImageData {
+	/// 폭. (픽셀)
 	pub width: u32,
+	/// 높이. (픽셀)
 	pub height: u32,
+	/// 픽셀. (줄마다 왼쪽에서 오른쪽으로, 픽셀마다 R, G, B, A 바이트, 폭 x 높이 x 4 개)
 	pub data: Vec<u8>,
 }
 
 impl ImageData {
 	//==============================================================================
 	/// 투명한 검정으로 채운 픽셀 묶음. (원본 createImageData, new ImageData(w, h))
+	///
+	/// # 인자
+	/// - `width`: 폭. (픽셀)
+	/// - `height`: 높이. (픽셀)
+	///
+	/// # 돌려줌
+	/// 모든 바이트가 0 인 픽셀 묶음.
 	//==============================================================================
 	pub fn new(width: u32, height: u32) -> ImageData {
 		ImageData {
@@ -1660,23 +1975,34 @@ impl ImageData {
 //==============================================================================
 #[derive(Clone, Copy)]
 pub enum CanvasImageSource<'a> {
+	/// 엔진 그림. (GPU 에 올리며 CPU 픽셀을 놓았으면 텍스처에서 되읽는다)
 	Image(&'a crate::core::image::Image),
+	/// 다른 캔버스.
 	Canvas(&'a Canvas2D),
 }
 
 impl<'a> From<&'a crate::core::image::Image> for CanvasImageSource<'a> {
+	//==============================================================================
+	/// 엔진 그림으로.
+	//==============================================================================
 	fn from(image: &'a crate::core::image::Image) -> CanvasImageSource<'a> {
 		CanvasImageSource::Image(image)
 	}
 }
 
 impl<'a> From<&'a std::rc::Rc<crate::core::image::Image>> for CanvasImageSource<'a> {
+	//==============================================================================
+	/// Rc 에 든 엔진 그림으로.
+	//==============================================================================
 	fn from(image: &'a std::rc::Rc<crate::core::image::Image>) -> CanvasImageSource<'a> {
 		CanvasImageSource::Image(image.as_ref())
 	}
 }
 
 impl<'a> From<&'a Canvas2D> for CanvasImageSource<'a> {
+	//==============================================================================
+	/// 캔버스로.
+	//==============================================================================
 	fn from(canvas: &'a Canvas2D) -> CanvasImageSource<'a> {
 		CanvasImageSource::Canvas(canvas)
 	}
@@ -1685,6 +2011,9 @@ impl<'a> From<&'a Canvas2D> for CanvasImageSource<'a> {
 impl CanvasImageSource<'_> {
 	//==============================================================================
 	/// 크기.
+	///
+	/// # 돌려줌
+	/// (폭, 높이). (픽셀)
 	//==============================================================================
 	pub fn get_size(&self) -> (u32, u32) {
 		match self {

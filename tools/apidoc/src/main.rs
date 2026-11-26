@@ -1239,10 +1239,14 @@ impl Collector {
 	}
 
 	//==============================================================================
-	/// 밖에서 닿는 것만 남긴 모듈 목록. (닿는 모듈은 공개 아이템 모두, 닿지 않는 모듈은 다시 내보낸 이름만, 빈 모듈은 뺀다)
+	/// 밖에서 닿는 것만 남긴 모듈 목록. (닿는 모듈은 공개 아이템 모두, 닿지 않는 모듈은 다시 내보낸 이름만)
+	/// - 빈 모듈은 뺀다. 다만 pub mod 사슬로 밖에서 닿는 묶음 모듈(아래 모듈을 둔 모듈)은 아이템이 없어도 모듈 설명이나 예제가 있으면 둔다.
+	///   (vanilla::experimental, vanilla::experimental::tilemap 같은 것, 원본 자료의 experimental/experimental 자리)
+	/// - 크레이트 뿌리(lib.rs)는 두지 않는다. (원본 자료도 진입점 import.js 를 모듈로 두지 않는다)
 	//==============================================================================
 	fn take_public_modules(&mut self) -> Vec<ModuleEntry> {
 		let modules = std::mem::take(&mut self.modules);
+		let parent_names: HashSet<String> = modules.iter().filter_map(|module| module.name.rfind('/').map(|index| module.name[..index].to_string())).collect();
 		let mut result = Vec::new();
 		for mut module in modules {
 			if !module.is_reachable && !module.is_all_exported {
@@ -1251,7 +1255,9 @@ impl Collector {
 				module.enums.retain(|entry| names.contains(&entry.name));
 				module.functions.retain(|function| names.contains(&function.name));
 			}
-			if module.classes.is_empty() && module.enums.is_empty() && module.functions.is_empty() {
+			let has_document = !module.summary.trim().is_empty() || !module.examples.is_empty();
+			let is_group = module.is_reachable && !module.name.is_empty() && parent_names.contains(&module.name);
+			if module.classes.is_empty() && module.enums.is_empty() && module.functions.is_empty() && !(is_group && has_document) {
 				continue;
 			}
 			result.push(module);
@@ -2355,7 +2361,8 @@ fn collect_api_gaps(modules: &[ModuleEntry]) -> Vec<Gap> {
 			push(&module.source, 1, "모듈 요약", module.name.clone());
 		}
 		let has_class_example = module.classes.iter().any(|class| !class.examples.is_empty());
-		if module.examples.is_empty() && !has_class_example {
+		let has_items = !module.classes.is_empty() || !module.enums.is_empty() || !module.functions.is_empty();
+		if has_items && module.examples.is_empty() && !has_class_example {
 			push(&module.source, 1, "예제 없는 모듈", module.name.clone());
 		}
 		for class in &module.classes {

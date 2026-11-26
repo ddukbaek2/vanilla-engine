@@ -331,11 +331,11 @@ pub fn calculate_distance_gain(distance_model: DistanceModel, distance: f64, ref
 /// 원뿔 이득.
 ///
 /// # 예제
+/// 소리 뒤에 선 리스너의 원뿔 이득
 /// ```
 /// use vanilla::experimental::spatialaudio::calculate_cone_gain;
 /// use vanilla::Vector3;
 ///
-/// // 소리가 +x 를 보고, 리스너는 소리 뒤(-x)에 있다.
 /// let gain = calculate_cone_gain(Vector3::create(0.0, 0.0, 0.0), Vector3::create(1.0, 0.0, 0.0), Vector3::create(-5.0, 0.0, 0.0), 60.0, 180.0, 0.25);
 /// assert_eq!(gain, 0.25);
 /// ```

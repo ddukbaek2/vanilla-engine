@@ -267,8 +267,8 @@ impl ChainDefinition2D {
 ///
 /// let mut world = PhysicsWorld2D::new(&WorldDefinition2D::new(1.0));
 /// let body_id = world.create_body(&BodyDefinition2D::new());
-/// let shape_id = world.create_shape(body_id, &ShapeDefinition2D::new(), Circle2D::create(PhysicsVector2::zero(), 2.0)).expect("모양");
-/// let shape = world.get_shape_mut(shape_id).expect("모양");
+/// let shape_id = world.create_shape(body_id, &ShapeDefinition2D::new(), Circle2D::create(PhysicsVector2::zero(), 2.0)).expect("shape");
+/// let shape = world.get_shape_mut(shape_id).expect("shape");
 /// shape.set_friction(0.2);
 /// shape.set_restitution(0.5);
 /// assert_eq!(shape.get_type(), ShapeType2D::Circle);

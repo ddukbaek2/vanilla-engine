@@ -73,9 +73,11 @@ pub enum TextInputKey {
 	/// - 크롬 맥은 커서를 두고 넘길 수 있는 상자를 처음과 끝으로 넘기고, 넘길 것이 없으면 블링크 키 표대로 줄 앞과 끝으로 옮긴다.
 	/// - Shift 와 함께면(is_shift) 키 묶음의 moveToBeginningOfDocumentAndModifySelection 처럼 글 앞과 끝까지 고른다.
 	ScrollToDocumentStart,
+	/// 맥 End. (ScrollToDocumentStart 의 끝 쪽, 맥 키 묶음의 scrollToEndOfDocument)
 	ScrollToDocumentEnd,
 	/// 맥 PageUp, PageDown. (맥 키 묶음의 scrollPageUp, scrollPageDown, 크롬 맥은 커서를 두고 한 화면만큼 넘긴다)
 	ScrollPageUp,
+	/// 맥 PageDown. (ScrollPageUp 의 아래 쪽, 맥 키 묶음의 scrollPageDown)
 	ScrollPageDown,
 	/// 엔터. (한 줄 필드는 제출 이벤트를 내고, 여러 줄 필드는 줄을 넣는다)
 	Enter,
@@ -534,6 +536,9 @@ impl TextInput {
 
 	//==============================================================================
 	/// 마우스 누름 수 넣기. (웹 플랫폼이 mousedown 의 detail 을 넣는다, 0 이면 1)
+	///
+	/// # 인자
+	/// - `pointer_click_count`: 누름 수. (mousedown 의 detail, 두 번 누름이면 2, 0 이면 1)
 	//==============================================================================
 	pub fn set_pointer_click_count(&self, pointer_click_count: u32) {
 		self.pointer_click_count.set(pointer_click_count.max(1));
@@ -541,6 +546,9 @@ impl TextInput {
 
 	//==============================================================================
 	/// 마지막 마우스 누름 수. (넣은 적이 없으면 1)
+	///
+	/// # 돌려줌
+	/// 마지막 누름 수. (1 이상, 넣은 적이 없으면 1)
 	//==============================================================================
 	pub fn get_pointer_click_count(&self) -> u32 {
 		self.pointer_click_count.get()
@@ -739,6 +747,12 @@ pub fn find_next_grapheme_boundary(text: &str, character_index: usize) -> usize 
 
 //==============================================================================
 /// 글자 묶음 경계 목록. (0 과 문자 수를 넣는다, 오름차순)
+///
+/// # 인자
+/// - `text`: 나눌 글.
+///
+/// # 돌려줌
+/// 글자 묶음 경계의 문자 자리 목록. (0 과 문자 수를 넣는다, 오름차순)
 //==============================================================================
 pub fn collect_grapheme_boundaries(text: &str) -> Vec<usize> {
 	let mut boundary_list = vec![0];
@@ -1414,6 +1428,9 @@ mod tests {
 		assert_eq!(find_previous_word_position("abc def hij opq", 15), 12);
 	}
 
+	//==============================================================================
+	/// 문자 수, 문자 자리와 바이트 자리, UTF-16 자리 바꾸기. (이모지는 UTF-16 두 자리, 범위 밖 자리는 끝으로)
+	//==============================================================================
 	#[test]
 	fn index_conversion() {
 		let text = "a한😀b";

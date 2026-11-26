@@ -14,50 +14,99 @@
 //!   - PaneStyle::create 의 옵션은 PaneStyleOptions 다. 빈 글은 원본의 빈 값처럼 넣지 않는다. 원본 options.type 은 element_type 이다. (type 은 러스트 예약어)
 //==============================================================================
 
-// 패널 크기가 다시 놓일 때 부르는 콜백. (원본 setCallback)
+/// 패널 크기가 다시 놓일 때 부르는 콜백. (원본 setCallback)
 pub type PaneResizeCallback = Box<dyn FnMut()>;
 
 //==============================================================================
 /// 테마 상수. (원본 PaneTheme)
+///
+/// # 예제
+/// 테마 색으로 테두리 스타일 글 짓기 (원본 toolbar 프리셋의 아래 테두리)
+/// ```rust
+/// use vanilla::{Color, PaneTheme};
+///
+/// let border_bottom = format!("1px solid {}", PaneTheme::COLOR_BORDER);
+/// assert_eq!(border_bottom, "1px solid #444");
+/// assert_eq!(Color::from(PaneTheme::COLOR_PANEL), Color::from("#252526"));
+/// assert_eq!(PaneTheme::SIZE_RESIZER, 5.0);
+/// assert_eq!(PaneTheme::FONT_SIZE, "13px");
+/// ```
 //==============================================================================
 pub struct PaneTheme;
 
 impl PaneTheme {
+	/// 바탕 색. (원본 color.background, 패널 컨테이너와 textarea 프리셋의 바탕)
 	pub const COLOR_BACKGROUND: &'static str = "#1e1e1e";
+	/// panel 프리셋의 바탕 색. (원본 color.panel)
 	pub const COLOR_PANEL: &'static str = "#252526";
+	/// toolbar 프리셋의 바탕 색. (원본 color.toolbar)
 	pub const COLOR_TOOLBAR: &'static str = "#2d2d30";
+	/// 테두리 색. (원본 color.border, toolbar 프리셋의 아래 테두리)
 	pub const COLOR_BORDER: &'static str = "#444";
+	/// 글 색. (원본 color.text)
 	pub const COLOR_TEXT: &'static str = "#ccc";
+	/// 흐린 글 색. (원본 color.textDim)
 	pub const COLOR_TEXT_DIM: &'static str = "#aaaaaa";
+	/// 강조 색. (원본 color.accent, accent 단추의 바탕)
 	pub const COLOR_ACCENT: &'static str = "#0e639c";
+	/// 강조 색에 올려 두었을 때의 색. (원본 color.accentHover)
 	pub const COLOR_ACCENT_HOVER: &'static str = "#1177bb";
 	/// 주황색.
 	pub const COLOR_WARNING: &'static str = "#d97706";
+	/// 경고 색에 올려 두었을 때의 색. (원본 color.warningHover)
 	pub const COLOR_WARNING_HOVER: &'static str = "#f59e0b";
+	/// 오류 색. (원본 color.error)
 	pub const COLOR_ERROR: &'static str = "#f44336";
+	/// 성공 색. (원본 color.success)
 	pub const COLOR_SUCCESS: &'static str = "#4CAF50";
+	/// 입력 칸의 바탕 색. (원본 color.inputBg, input 프리셋)
 	pub const COLOR_INPUT_BACKGROUND: &'static str = "#3c3c3c";
+	/// 리사이저 색. (원본 color.resizer, 단추의 기본 바탕과 입력 칸의 테두리에도 쓴다)
 	pub const COLOR_RESIZER: &'static str = "#333";
+	/// 리사이저에 올려 두거나 끄는 동안의 색. (원본 color.resizerHover)
 	pub const COLOR_RESIZER_HOVER: &'static str = "#007acc";
 	/// 리사이저 두께. (픽셀)
 	pub const SIZE_RESIZER: f64 = 5.0;
+	/// 글꼴. (원본 font.family)
 	pub const FONT_FAMILY: &'static str = "sans-serif";
+	/// 고정폭 글꼴. (원본 font.mono, textarea 프리셋)
 	pub const FONT_MONOSPACE: &'static str = "\"Consolas\", monospace";
+	/// 글 크기. (원본 font.size)
 	pub const FONT_SIZE: &'static str = "13px";
+	/// 작은 글 크기. (원본 font.sizeSmall)
 	pub const FONT_SIZE_SMALL: &'static str = "12px";
 }
 
 //==============================================================================
 /// PaneStyle::create 옵션. (원본 options: { id, text, style, type, placeholder, accent, warning })
+///
+/// # 예제
+/// 강조 단추의 옵션 (적지 않은 칸은 빈 글과 false)
+/// ```rust
+/// use vanilla::PaneStyleOptions;
+///
+/// let options = PaneStyleOptions { id: "saveButton", text: "Save", accent: true, style: &[("margin", "4px")], ..Default::default() };
+/// assert_eq!(options.style, &[("margin", "4px")]);
+/// assert_eq!(options.element_type, "");
+/// assert_eq!(options.placeholder, "");
+/// assert!(!options.warning);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PaneStyleOptions<'a> {
+	/// 요소 id. (빈 글이면 넣지 않는다, 데스크탑은 노드 이름이고 비면 태그 이름)
 	pub id: &'a str,
+	/// 글. (원본 innerText, 빈 글이면 넣지 않는다)
 	pub text: &'a str,
+	/// 덧붙이는 스타일. ((CSS 속성 이름, 값) 목록, 프리셋 스타일 뒤에 넣는다)
 	pub style: &'a [(&'a str, &'a str)],
+	/// 요소의 type. (원본 options.type, 빈 글이면 넣지 않는다, 데스크탑은 쓰지 않는다)
 	pub element_type: &'a str,
+	/// 안내 글. (웹은 요소의 placeholder 이고 빈 글이면 넣지 않는다, 데스크탑은 input 과 textarea 의 입력 필드에 넣는다)
 	pub placeholder: &'a str,
+	/// button 프리셋의 바탕을 COLOR_ACCENT 로.
 	pub accent: bool,
+	/// button 프리셋의 바탕을 COLOR_WARNING 으로. (accent 보다 앞선다)
 	pub warning: bool,
 }
 
@@ -89,12 +138,26 @@ pub enum PaneSize {
 
 //==============================================================================
 /// 리사이저로 끌 수 있는 가장자리. (원본 resizableEdges)
+///
+/// # 예제
+/// 왼쪽 가장자리만 막기
+/// ```rust
+/// use vanilla::{PaneOptions, PaneResizableEdges};
+///
+/// let options = PaneOptions { resizable_edges: PaneResizableEdges { left: false, ..Default::default() }, ..Default::default() };
+/// assert!(options.resizable_edges.top && options.resizable_edges.bottom && options.resizable_edges.right);
+/// assert!(!options.resizable_edges.left);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PaneResizableEdges {
+	/// 위 가장자리. (세로로 나눈 부모에서 앞 형제와의 리사이저)
 	pub top: bool,
+	/// 아래 가장자리. (세로로 나눈 부모에서 뒤 형제와의 리사이저)
 	pub bottom: bool,
+	/// 왼쪽 가장자리. (가로로 나눈 부모에서 앞 형제와의 리사이저)
 	pub left: bool,
+	/// 오른쪽 가장자리. (가로로 나눈 부모에서 뒤 형제와의 리사이저)
 	pub right: bool,
 }
 
@@ -114,14 +177,33 @@ impl Default for PaneResizableEdges {
 
 //==============================================================================
 /// Pane 생성 옵션. (원본 options: { direction, size, minSize, maxSize, isResizable, resizableEdges })
+///
+/// # 예제
+/// 고정 크기 목록 패널과 끌 수 없는 비율 패널의 옵션
+/// ```rust
+/// use vanilla::{PaneDirection, PaneOptions, PaneSize};
+///
+/// let list_options = PaneOptions { size: PaneSize::Fixed(240.0), min_size: 170.0, ..Default::default() };
+/// let tool_options = PaneOptions { direction: PaneDirection::Vertical, size: PaneSize::Ratio(0.25), is_resizable: false, ..Default::default() };
+/// assert_eq!(list_options.direction, PaneDirection::Horizontal);
+/// assert_eq!(list_options.max_size, f64::MAX);
+/// assert!(list_options.is_resizable);
+/// assert_eq!(tool_options.min_size, 50.0);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct PaneOptions {
+	/// 자식을 놓는 방향. (기본 Horizontal)
 	pub direction: PaneDirection,
+	/// 처음 크기. (부모의 나누는 방향 쪽 길이, 기본 Flex)
 	pub size: PaneSize,
+	/// 가장 작은 크기. (픽셀, 기본 50)
 	pub min_size: f64,
+	/// 가장 큰 크기. (픽셀, 기본 f64::MAX)
 	pub max_size: f64,
+	/// 리사이저로 끌 수 있는지. (기본 true, 부모와 맞닿은 두 형제가 모두 true 여야 그 사이 리사이저가 끌린다)
 	pub is_resizable: bool,
+	/// 리사이저로 끌 수 있는 가장자리. (기본 네 쪽 모두)
 	pub resizable_edges: PaneResizableEdges,
 }
 
@@ -315,6 +397,17 @@ pub(crate) fn calculate_resized_size(previous_start: f64, next_end: f64, thickne
 
 //==============================================================================
 /// 자리를 차지하는 스크롤 막대(클래식 막대)의 치수. (크롬과 같게, DIP)
+///
+/// # 예제
+/// 윈도우 크롬과 같은 치수로 썸 자리 셈하기 (막대 200, 보이는 길이 200, 내용 800)
+/// ```rust
+/// use vanilla::web::pane::{self, ClassicScrollbarMetrics};
+///
+/// let metrics = ClassicScrollbarMetrics { thickness: 15.0, button_length: 18.0, thumb_thickness: 9.0, thumb_cross_offset: 3.0, thumb_minimum_length: 17.0, thumb_length_inset: 0.0 };
+/// assert_eq!(pane::calculate_classic_thumb_span(&metrics, 200.0, 200.0, 800.0, 0.0), Some((18.0, 41.0)));
+/// assert_eq!(pane::calculate_classic_thumb_span(&metrics, 200.0, 200.0, 800.0, 600.0), Some((141.0, 41.0)));
+/// assert_eq!(pane::calculate_classic_thumb_span(&metrics, 200.0, 200.0, 200.0, 0.0), None);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ClassicScrollbarMetrics {
@@ -322,11 +415,13 @@ pub struct ClassicScrollbarMetrics {
 	pub thickness: f32,
 	/// 양끝 단추 길이. (썸은 그 사이에서 움직인다, 없으면 0)
 	pub button_length: f32,
-	/// 썸 두께와 막대 안쪽에서 썸까지. (막대의 가로지르는 쪽)
+	/// 썸 두께. (막대의 가로지르는 쪽)
 	pub thumb_thickness: f32,
+	/// 막대 안쪽에서 썸까지. (막대의 가로지르는 쪽)
 	pub thumb_cross_offset: f32,
-	/// 썸이 움직이는 칸의 가장 짧은 썸 길이와 그린 썸이 칸 끝에서 떨어지는 만큼.
+	/// 썸이 움직이는 칸의 가장 짧은 썸 길이.
 	pub thumb_minimum_length: f32,
+	/// 그린 썸이 칸 끝에서 떨어지는 만큼.
 	pub thumb_length_inset: f32,
 }
 
@@ -411,6 +506,16 @@ pub fn read_classic_scrollbar_metrics(is_thin: bool) -> Option<ClassicScrollbarM
 //==============================================================================
 /// 클래식 막대의 썸 자리. ((썸 시작, 썸 길이), 막대 길이 방향의 자리, 막대 시작이 0. 넘치지 않거나 썸 칸이 없으면 None)
 /// - 크롬 ScrollbarTheme 처럼 썸 칸은 양끝 단추 사이이고, 썸 길이는 칸 x 보이는 비율(가장 짧은 길이까지)이다.
+///
+/// # 인자
+/// - `metrics`: 막대 치수. (read_classic_scrollbar_metrics)
+/// - `track_length`: 막대 길이.
+/// - `viewport_length`: 보이는 내용의 길이.
+/// - `extent_length`: 내용 전체의 길이.
+/// - `offset`: 굴려 넘긴 만큼.
+///
+/// # 돌려줌
+/// (썸 시작, 썸 길이). 내용이 0.5 를 넘게 넘치지 않거나, 썸 칸이 가장 짧은 썸 길이보다 짧거나, 보이는 길이가 0 이하면 None.
 //==============================================================================
 pub fn calculate_classic_thumb_span(metrics: &ClassicScrollbarMetrics, track_length: f32, viewport_length: f32, extent_length: f32, offset: f32) -> Option<(f32, f32)> {
 	let thumb_room = track_length - metrics.button_length * 2.0;

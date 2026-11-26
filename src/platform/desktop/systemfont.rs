@@ -43,6 +43,9 @@ use crate::core::textstringtexturecache::FontFileSource;
 /// 이어 누르기(두 번 누르기)로 볼 시간. (초, 입력 필드의 두 번, 세 번 누르기)
 /// - 맥: 크롬은 NSEvent clickCount 를 쓰고, 그 시간은 시스템 설정의 두 번 클릭 속도인 NSEvent.doubleClickInterval 이다.
 /// - 윈도우, 리눅스: 크롬 aura 는 운영체제 값을 읽지 않고 ui/events/event_constants.h 의 kDoubleClickTimeMs 500 을 쓴다.
+///
+/// # 돌려줌
+/// 이어 누르기로 볼 시간. (초, 맥은 시스템 설정 값, 읽지 못하거나 다른 운영체제면 0.5)
 //==============================================================================
 pub fn read_double_click_seconds() -> f32 {
 	#[cfg(target_os = "macos")]
@@ -63,6 +66,9 @@ pub fn read_double_click_seconds() -> f32 {
 /// 시스템이 얹는 스크롤 막대를 바라는지. (맥 시스템 설정의 스크롤 막대 보기, 크롬 os_settings_provider_mac.mm 의 PrefersOverlayScrollbars)
 /// - 맥: NSScroller.preferredScrollerStyle 이 NSScrollerStyleOverlay(1) 이면 참. (자동이면 마우스와 트랙패드에 따라 시스템이 정한다)
 /// - 윈도우, 리눅스: 크롬은 얹는 막대 기능(kOverlayScrollbar)이 꺼져 있어 늘 거짓.
+///
+/// # 돌려줌
+/// 얹는 스크롤 막대를 바라면 true. (윈도우, 리눅스는 늘 false)
 //==============================================================================
 pub fn is_overlay_scrollbar_preferred() -> bool {
 	#[cfg(target_os = "macos")]

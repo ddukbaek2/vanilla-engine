@@ -26,7 +26,7 @@ const FORMAT_VERSION: u64 = 1;
 const MAXIMUM_SLOT_ID_LENGTH: usize = 64;
 
 //==============================================================================
-/// CRC-32. (IEEE 802.3, 다항식 0xEDB88320 을 거꾸로 돌린 꼴, 처음과 끝에 0xFFFFFFFF, zlib crc32 와 같다)
+/// CRC-32. (IEEE 802.3, 비트를 거꾸로 돌린 꼴의 다항식 0xEDB88320, 처음과 끝에 0xFFFFFFFF, zlib crc32 와 같다)
 ///
 /// # 인자
 /// - `bytes`: 셀 바이트.
@@ -332,13 +332,13 @@ fn parse_record_text(record_text: &str, expected_slot_id: Option<&str>) -> Optio
 //==============================================================================
 /// 세이브 슬롯 관리.
 /// # 예제
+/// 칸에 저장하고 판 옮겨 읽기
 /// ```
 /// use vanilla::experimental::savegame::{MemorySaveStorage, SaveGameManager, SaveSlotOptions};
 /// use serde_json::json;
 ///
 /// let mut save_game_manager = SaveGameManager::new("example", 2);
 /// save_game_manager.set_storage(Box::new(MemorySaveStorage::new()));
-/// // 판 1 의 gold 를 판 2 의 coins 로 옮긴다.
 /// save_game_manager.add_migration(1, |mut data| {
 /// 	let gold = data["gold"].take();
 /// 	data["coins"] = gold;
