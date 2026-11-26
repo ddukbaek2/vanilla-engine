@@ -5,6 +5,7 @@
 // - 꼭짓점 하나는 자리 3, 노멀 3, 색 3(sRGB), 재질 2(빛남의 세기, 빛을 받지 않음), 무늬 4(무늬 번호, 무늬 색) 이다.
 //   무늬 번호와 색의 뜻은 그리는 셰이더가 정한다. (0 이면 무늬 없음)
 // - 텍스처 좌표(UV)는 꼭짓점 배열 밖의 uv_data 에 꼭짓점마다 2 씩 따로 담는다. UV 를 준 꼭짓점이 하나라도 있으면 나머지는 0 으로 채운다. (도형의 uvs, add_triangles_with_uvs)
+// - 2 번 UV 도 같은 꼴로 uv1_data 에 담는다. (도형의 uvs1, add_triangles_with_uvs 의 uvs1, GLB 의 TEXCOORD_1, 천사 고리처럼 두 번째 펼침을 읽는 것)
 //   (0, 0) 이 그림의 왼쪽 위다. (glTF 와 같음) 상자는 면마다 0 ~ 1, 구는 경도와 위도로 0 ~ 1 이다.
 // - 재질 범위(material_ranges)는 몸의 꼭짓점 번호 가운데 한 재질이 든 자리다. GLB 읽기가 프리미티브마다 담는다. (재질 이름, extras, 텍스처, ToonDrawOptions 의 index_start, index_count)
 // - 바깥선은 부품의 점마다 같은 굵기로 민 껍데기다. 뒷면만 그리므로 따로 담는다. (inverted hull)
@@ -42,6 +43,8 @@ pub struct ToonGeometry {
 	// 삼각형마다 점 번호 셋.
 	pub indices: Vec<u32>,
 	pub uvs: Vec<f32>,
+	/// 점마다 2 번 텍스처 좌표 둘. (비면 없음)
+	pub uvs1: Vec<f32>,
 }
 
 impl ToonGeometry {
@@ -126,6 +129,8 @@ pub struct ToonMeshArrays {
 	pub inner_body_ranges: Vec<(usize, usize)>,
 	// 꼭짓점마다 텍스처 좌표 둘. (UV 를 준 꼭짓점이 없으면 빈 것)
 	pub uv_data: Vec<f32>,
+	/// 꼭짓점마다 2 번 텍스처 좌표 둘. (2 번 UV 를 준 꼭짓점이 없으면 빈 것)
+	pub uv1_data: Vec<f32>,
 	// 재질 범위. (GLB 프리미티브마다)
 	pub material_ranges: Vec<ToonMaterialRange>,
 }
@@ -590,6 +595,8 @@ pub struct MeshBuilder {
 	outline_skin_values: Vec<f32>,
 	// 꼭짓점마다 텍스처 좌표 둘. (UV 를 준 꼭짓점이 있을 때만, 없는 꼭짓점은 0)
 	uv_values: Vec<f32>,
+	/// 꼭짓점마다 2 번 텍스처 좌표 둘. (같은 꼴)
+	uv1_values: Vec<f32>,
 	// 재질 범위. (add_material_range 로 담은 차례)
 	material_ranges: Vec<ToonMaterialRange>,
 }
@@ -652,6 +659,7 @@ impl MeshBuilder {
 		}
 		let point_count = world_positions.len() / 3;
 		self.push_uv_values(if geometry.uvs.len() >= point_count * 2 { Some(&geometry.uvs) } else { None }, point_count);
+		self.push_uv1_values(if geometry.uvs1.len() >= point_count * 2 { Some(&geometry.uvs1) } else { None }, point_count);
 		let flips = MeshBuilder::read_triangle_flips(&geometry.indices, &world_positions, &world_normals);
 		MeshBuilder::push_triangles(&mut self.indices, &geometry.indices, Some(&flips), start_index);
 		if !options.has_outline {
@@ -671,6 +679,7 @@ impl MeshBuilder {
 			self.vertices.extend_from_slice(&[corner[0], corner[1], corner[2], normal[0], normal[1], normal[2], color[0], color[1], color[2], 0.0, unlit, pattern, pattern_color[0], pattern_color[1], pattern_color[2]]);
 		}
 		self.push_uv_values(None, 4);
+		self.push_uv1_values(None, 4);
 		// 첫 삼각형의 면 노멀이 주어진 노멀과 반대면 감기를 뒤집는다.
 		let is_flipped = dot(read_face_normal(corners[0], corners[1], corners[2]), normal) < 0.0;
 		MeshBuilder::push_quad_indices(&mut self.indices, start_index, is_flipped);
@@ -725,13 +734,13 @@ impl MeshBuilder {
 	// 받은 모형의 삼각형 담기. (GLB 의 프리미티브 하나, 감기는 그대로)
 	//==============================================================================
 	pub fn add_triangles(&mut self, positions: &[f32], normals: &[f32], indices: &[u32], matrix: &Matrix4, color: [f32; 3], glow: f32, is_unlit: bool, joints: Option<&[f32]>, weights: Option<&[f32]>) {
-		self.add_triangles_with_uvs(positions, normals, indices, matrix, color, glow, is_unlit, joints, weights, None);
+		self.add_triangles_with_uvs(positions, normals, indices, matrix, color, glow, is_unlit, joints, weights, None, None);
 	}
 
 	//==============================================================================
-	// 받은 모형의 삼각형을 텍스처 좌표와 함께 담기. (uvs 는 꼭짓점마다 둘, 원본 addTriangles 의 마지막 선택 인자)
+	// 받은 모형의 삼각형을 텍스처 좌표와 함께 담기. (uvs, uvs1 은 꼭짓점마다 둘, 원본 addTriangles 의 마지막 두 선택 인자)
 	//==============================================================================
-	pub fn add_triangles_with_uvs(&mut self, positions: &[f32], normals: &[f32], indices: &[u32], matrix: &Matrix4, color: [f32; 3], glow: f32, is_unlit: bool, joints: Option<&[f32]>, weights: Option<&[f32]>, uvs: Option<&[f32]>) {
+	pub fn add_triangles_with_uvs(&mut self, positions: &[f32], normals: &[f32], indices: &[u32], matrix: &Matrix4, color: [f32; 3], glow: f32, is_unlit: bool, joints: Option<&[f32]>, weights: Option<&[f32]>, uvs: Option<&[f32]>, uvs1: Option<&[f32]>) {
 		let unlit = if is_unlit { 1.0 } else { 0.0 };
 		let start_index = self.get_vertex_count();
 		let (world_positions, world_normals) = transform_points(positions, normals, matrix);
@@ -741,6 +750,7 @@ impl MeshBuilder {
 			self.vertices.extend_from_slice(&[color[0], color[1], color[2], glow, unlit, 0.0, 0.0, 0.0, 0.0]);
 		}
 		self.push_uv_values(uvs, positions.len() / 3);
+		self.push_uv1_values(uvs1, positions.len() / 3);
 		self.indices.extend(indices.iter().map(|index| start_index + index));
 		MeshBuilder::push_skin_values(&mut self.skin_values, joints, weights, positions.len() / 3);
 	}
@@ -749,14 +759,29 @@ impl MeshBuilder {
 	// 방금 담은 꼭짓점들의 텍스처 좌표 담기. (uvs 가 None 이면 UV 가 이미 있을 때만 0 으로 채운다, 앞 꼭짓점의 빈자리도 0 으로)
 	//==============================================================================
 	fn push_uv_values(&mut self, uvs: Option<&[f32]>, vertex_count: usize) {
-		if uvs.is_none() && self.uv_values.is_empty() {
+		let start_vertex = self.vertices.len() / VERTEX_FLOAT_COUNT - vertex_count;
+		MeshBuilder::push_uv_target(&mut self.uv_values, uvs, vertex_count, start_vertex);
+	}
+
+	//==============================================================================
+	/// 방금 담은 꼭짓점들의 2 번 텍스처 좌표 담기. (push_uv_values 와 같은 꼴)
+	//==============================================================================
+	fn push_uv1_values(&mut self, uvs1: Option<&[f32]>, vertex_count: usize) {
+		let start_vertex = self.vertices.len() / VERTEX_FLOAT_COUNT - vertex_count;
+		MeshBuilder::push_uv_target(&mut self.uv1_values, uvs1, vertex_count, start_vertex);
+	}
+
+	//==============================================================================
+	/// 텍스처 좌표 칸에 담기. (값이 None 이고 칸이 비면 아무것도 하지 않는다, 앞 꼭짓점의 빈자리는 0)
+	//==============================================================================
+	fn push_uv_target(target: &mut Vec<f32>, uvs: Option<&[f32]>, vertex_count: usize, start_vertex: usize) {
+		if uvs.is_none() && target.is_empty() {
 			return;
 		}
-		let start_vertex = self.vertices.len() / VERTEX_FLOAT_COUNT - vertex_count;
-		self.uv_values.resize(self.uv_values.len().max(start_vertex * 2), 0.0);
+		target.resize(target.len().max(start_vertex * 2), 0.0);
 		for value_index in 0..vertex_count * 2 {
 			let value = uvs.and_then(|uvs| uvs.get(value_index)).copied().unwrap_or(0.0);
-			self.uv_values.push(value);
+			target.push(value);
 		}
 	}
 
@@ -833,6 +858,11 @@ impl MeshBuilder {
 			uv_data = self.uv_values.clone();
 			uv_data.resize(vertex_count * 2, 0.0);
 		}
+		let mut uv1_data = Vec::new();
+		if !self.uv1_values.is_empty() {
+			uv1_data = self.uv1_values.clone();
+			uv1_data.resize(vertex_count * 2, 0.0);
+		}
 		ToonMeshArrays {
 			vertex_data: self.vertices.clone(),
 			index_data: self.indices.clone(),
@@ -845,6 +875,7 @@ impl MeshBuilder {
 			inner_outline_ranges: Vec::new(),
 			inner_body_ranges: Vec::new(),
 			uv_data,
+			uv1_data,
 			material_ranges: self.material_ranges.clone(),
 		}
 	}
@@ -970,6 +1001,7 @@ impl MeshBuilder {
 	pub fn combine(piece_list: &[ToonMeshPiece]) -> ToonMeshArrays {
 		let mut combined = ToonMeshArrays::default();
 		let has_uv = piece_list.iter().any(|piece| !piece.arrays.uv_data.is_empty());
+		let has_uv1 = piece_list.iter().any(|piece| !piece.arrays.uv1_data.is_empty());
 		for piece in piece_list {
 			let arrays = piece.arrays;
 			let offset = piece.offset;
@@ -990,6 +1022,12 @@ impl MeshBuilder {
 				combined.uv_data.resize(start_vertex as usize * 2, 0.0);
 				combined.uv_data.extend(arrays.uv_data.iter().take(piece_vertex_count * 2));
 				combined.uv_data.resize((start_vertex as usize + piece_vertex_count) * 2, 0.0);
+			}
+			if has_uv1 {
+				let piece_vertex_count = arrays.vertex_data.len() / VERTEX_FLOAT_COUNT;
+				combined.uv1_data.resize(start_vertex as usize * 2, 0.0);
+				combined.uv1_data.extend(arrays.uv1_data.iter().take(piece_vertex_count * 2));
+				combined.uv1_data.resize((start_vertex as usize + piece_vertex_count) * 2, 0.0);
 			}
 			combined.material_ranges.extend(arrays.material_ranges.iter().map(|range| ToonMaterialRange { index_start: range.index_start + index_offset, ..range.clone() }));
 			let outline_base_data = if arrays.outline_base_data.len() == arrays.outline_vertex_data.len() { &arrays.outline_base_data } else { &arrays.outline_vertex_data };
@@ -1024,6 +1062,25 @@ mod tests {
 		for point in arrays.outline_vertex_data.chunks(3) {
 			assert!(point[0].abs() > 0.5 && point[1].abs() > 0.5 && point[2].abs() > 0.5);
 		}
+	}
+
+	//==============================================================================
+	/// 2 번 UV 가 앞 꼭짓점을 0 으로 채우고 합칠 때 자리를 지키는지.
+	//==============================================================================
+	#[test]
+	fn second_uv_values_pad_and_combine() {
+		let mut builder = MeshBuilder::new();
+		let positions = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+		let normals = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+		builder.add_triangles(&positions, &normals, &[0, 1, 2], &Matrix4::create_identity(), [1.0; 3], 0.0, false, None, None);
+		builder.add_triangles_with_uvs(&positions, &normals, &[0, 1, 2], &Matrix4::create_identity(), [1.0; 3], 0.0, false, None, None, Some(&[0.0, 0.0, 1.0, 0.0, 0.0, 1.0]), Some(&[0.5, 0.5, 0.6, 0.5, 0.5, 0.6]));
+		let arrays = builder.read_arrays();
+		assert_eq!(arrays.uv1_data.len(), 12);
+		assert_eq!(&arrays.uv1_data[..6], &[0.0; 6]);
+		assert_eq!(arrays.uv1_data[6], 0.5);
+		let plain = MeshBuilder::new().read_arrays();
+		let combined = MeshBuilder::combine(&[ToonMeshPiece { arrays: &plain, offset: [0.0; 3] }, ToonMeshPiece { arrays: &arrays, offset: [0.0; 3] }]);
+		assert_eq!(combined.uv1_data, arrays.uv1_data);
 	}
 
 	#[test]

@@ -60,9 +60,9 @@ use crate::base::matrix4::Matrix4;
 use crate::core::graphic::{GlBuffer, GlProgram, GlTexture, GlVertexArray};
 use crate::graphics3d::GlFramebuffer;
 use crate::core::shaderprogram::ShaderProgram;
-use crate::graphics3d::shadowmap::ShadowMap;
+use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowAtlasLight, ShadowMap, SHADOW_ATLAS_MAXIMUM_LIGHTS};
 use crate::graphics3d::toon::meshbuilder::{ToonMeshArrays, SKIN_FLOAT_COUNT, VERTEX_FLOAT_COUNT};
-use crate::graphics3d::toon::toonlightset::{ToonLightModel, ToonLightSet, ToonPointLight, ToonShade, TOON_MAXIMUM_BAND_STEPS, TOON_MAXIMUM_POINT_LIGHTS};
+use crate::graphics3d::toon::toonlightset::{ToonLightColorUsage, ToonLightModel, ToonLightSet, ToonPointLight, ToonShade, TOON_MAXIMUM_BAND_STEPS, TOON_MAXIMUM_POINT_LIGHTS};
 use crate::graphics3d::toon::toonmaterial::{ToonBlendMode, ToonBufferUsage, ToonMatcapBlend, ToonInstanceLayout, ToonMaterial, ToonMaterialChunks, TOON_INSTANCE_MATRIX_NAME, TOON_INSTANCE_TINT_NAME};
 
 // 한 모형이 쓰는 뼈대 수의 상한. (셰이더의 유니폼 배열 크기)
@@ -71,17 +71,20 @@ pub const TOON_MAXIMUM_JOINTS: usize = 96;
 // 인스턴스 하나의 수 개수. (행렬 16, 틴트 4)
 pub const TOON_INSTANCE_FLOAT_COUNT: usize = 20;
 
-// 텍스처 유닛. (램프, 매트캡, 그림자, 바탕색, 빛남, 데칼, 머티리얼 텍스처는 7 부터 15 까지)
+// 텍스처 유닛. (점광 그림자 아틀라스 0, 램프, 매트캡, 해 그림자, 바탕색, 빛남, 데칼, 천사 고리, 머티리얼 텍스처는 8 부터 15 까지)
+// - 유닛 0 은 엔진 2D 가 기억하는 유닛이라 begin_frame 이 묶음을 적어 두고 end_frame 이 돌린다.
+const LOCAL_SHADOW_TEXTURE_UNIT: u32 = 0;
 const RAMP_TEXTURE_UNIT: u32 = 1;
 const MATCAP_TEXTURE_UNIT: u32 = 2;
 const SHADOW_TEXTURE_UNIT: u32 = 3;
 const BASE_COLOR_TEXTURE_UNIT: u32 = 4;
 const EMISSIVE_TEXTURE_UNIT: u32 = 5;
 const DECAL_TEXTURE_UNIT: u32 = 6;
-const FIRST_MATERIAL_TEXTURE_UNIT: u32 = 7;
+const ANGEL_RING_TEXTURE_UNIT: u32 = 7;
+const FIRST_MATERIAL_TEXTURE_UNIT: u32 = 8;
 
-// 머티리얼이 그리기마다 묶을 수 있는 텍스처 수의 상한. (유닛 7 ~ 15)
-pub const TOON_MAXIMUM_MATERIAL_TEXTURES: usize = 9;
+// 머티리얼이 그리기마다 묶을 수 있는 텍스처 수의 상한. (유닛 8 ~ 15)
+pub const TOON_MAXIMUM_MATERIAL_TEXTURES: usize = 8;
 
 // 어트리뷰트 자리. (모든 프로그램이 같은 자리를 쓴다, 인스턴스 꼴의 사용자 어트리뷰트는 13 부터)
 pub const TOON_ATTRIBUTE_LOCATIONS: [(&str, u32); 13] = [
@@ -125,7 +128,7 @@ in vec3 vertexNormal;
 in vec3 vertexColor;
 in vec2 vertexMaterial;
 in vec4 vertexDetail;
-in vec2 vertexUv;
+in vec4 vertexUv;
 ";
 
 // 꼭짓점을 본으로 움직이고 인스턴스 행렬을 고르는 셰이더 조각.
@@ -170,6 +173,7 @@ const VERTEX_STRUCT_CHUNK: &str = "struct ToonVertex {
 	vec2 material;
 	vec4 detail;
 	vec2 uv;
+	vec2 uv1;
 	vec4 tint;
 	mat4 modelMatrix;
 };
@@ -180,7 +184,8 @@ ToonVertex readVertex() {
 	vertex.color = vertexColor;
 	vertex.material = vertexMaterial;
 	vertex.detail = vertexDetail;
-	vertex.uv = vertexUv;
+	vertex.uv = vertexUv.xy;
+	vertex.uv1 = vertexUv.zw;
 	vertex.tint = readInstanceTint();
 	vertex.modelMatrix = readModelMatrix();
 	return vertex;
@@ -209,6 +214,7 @@ out vec3 surfaceColor;
 out vec2 surfaceMaterial;
 out vec4 surfaceDetail;
 out vec2 surfaceUv;
+out vec2 surfaceUv1;
 out vec4 surfaceTint;
 out vec4 lightSpacePosition;
 void main() {
@@ -224,6 +230,7 @@ void main() {
 	surfaceMaterial = vertex.material;
 	surfaceDetail = vertex.detail;
 	surfaceUv = vertex.uv;
+	surfaceUv1 = vertex.uv1;
 	surfaceTint = vertex.tint;
 	lightSpacePosition = lightViewProjectionMatrix * vec4(position.xyz + worldNormal * 0.02, 1.0);
 	gl_Position = viewProjectionMatrix * position;
@@ -241,6 +248,7 @@ in vec3 surfaceColor;
 in vec2 surfaceMaterial;
 in vec4 surfaceDetail;
 in vec2 surfaceUv;
+in vec2 surfaceUv1;
 in vec4 surfaceTint;
 in vec4 lightSpacePosition;
 uniform vec3 sunDirection;
@@ -267,6 +275,16 @@ uniform vec3 pointLightColors[8];
 uniform vec3 pointLightShapes[8];
 uniform vec4 pointLightSpots[8];
 uniform vec2 pointLightCones[8];
+uniform float pointLightShadowSlots[8];
+uniform vec4 localShadowAtlas;
+uniform vec4 localShadowPositions[4];
+uniform vec4 localShadowForwards[4];
+uniform vec4 localShadowUps[4];
+uniform float localShadowTiles[4];
+uniform sampler2DShadow localShadowTexture;
+uniform vec4 lightColorUsage;
+uniform vec3 lightColorUsageExtra;
+uniform vec4 shadeRimLight;
 uniform vec4 cameraPosition;
 uniform vec3 cameraForward;
 uniform mat3 viewRotation;
@@ -292,6 +310,9 @@ uniform float shadeOffset;
 uniform vec2 highlightScale;
 uniform vec3 matcapSettings;
 uniform sampler2D matcapTexture;
+uniform vec4 angelRingSettings;
+uniform vec3 angelRingColor;
+uniform sampler2D angelRingTexture;
 uniform float shadowEnabled;
 uniform float shadowStrength;
 uniform float shadowTexelSize;
@@ -307,6 +328,7 @@ struct ToonSurface {
 	bool isUnlit;
 	vec4 detail;
 	vec2 uv;
+	vec2 uv1;
 	vec3 localPosition;
 	vec3 worldPosition;
 	vec3 viewDirection;
@@ -348,6 +370,67 @@ float readShadow() {
 		}
 	}
 	return mix(1.0, lit / 9.0, shadowStrength);
+}
+float readLocalShadow(int slot, vec3 position, vec3 normal) {
+	vec4 lightPosition = localShadowPositions[slot];
+	vec4 forwardFar = localShadowForwards[slot];
+	vec4 upTangent = localShadowUps[slot];
+	float tile = localShadowTiles[slot];
+	vec3 toPoint = position - lightPosition.xyz;
+	vec3 forward = forwardFar.xyz;
+	vec3 up = upTangent.xyz;
+	float tangent = upTangent.w;
+	if (tangent <= 0.0) {
+		vec3 magnitude = abs(toPoint);
+		if (magnitude.x >= magnitude.y && magnitude.x >= magnitude.z) {
+			forward = vec3(toPoint.x >= 0.0 ? 1.0 : -1.0, 0.0, 0.0);
+			up = vec3(0.0, 1.0, 0.0);
+			tile += toPoint.x >= 0.0 ? 0.0 : 1.0;
+		}
+		else if (magnitude.y >= magnitude.z) {
+			forward = vec3(0.0, toPoint.y >= 0.0 ? 1.0 : -1.0, 0.0);
+			up = vec3(0.0, 0.0, 1.0);
+			tile += toPoint.y >= 0.0 ? 2.0 : 3.0;
+		}
+		else {
+			forward = vec3(0.0, 0.0, toPoint.z >= 0.0 ? 1.0 : -1.0);
+			up = vec3(0.0, 1.0, 0.0);
+			tile += toPoint.z >= 0.0 ? 4.0 : 5.0;
+		}
+		tangent = 1.0;
+	}
+	float near = lightPosition.w;
+	float far = forwardFar.w;
+	float tileSize = localShadowAtlas.y;
+	float texel = localShadowAtlas.z;
+	float along = dot(forward, toPoint);
+	if (along <= near || along >= far) {
+		return 1.0;
+	}
+	float slope = 1.0 - clamp(dot(normal, -normalize(toPoint)), 0.0, 1.0);
+	vec3 offsetPoint = toPoint + normal * (2.0 * along * tangent * texel / tileSize) * (1.0 + 3.0 * slope);
+	along = max(dot(forward, offsetPoint), near);
+	vec3 right = cross(forward, up);
+	vec2 projected = vec2(dot(right, offsetPoint), dot(up, offsetPoint)) / (along * tangent);
+	if (abs(projected.x) > 1.0 || abs(projected.y) > 1.0) {
+		return 1.0;
+	}
+	float depth = ((far + near) / (far - near) - 2.0 * far * near / ((far - near) * along)) * 0.5 + 0.5 - 0.0005;
+	float grid = localShadowAtlas.x;
+	vec2 origin = vec2(mod(tile, grid), floor(tile / grid)) * tileSize;
+	vec2 center = origin + (projected * 0.5 + 0.5) * tileSize;
+	vec2 low = origin + vec2(texel * 1.5);
+	vec2 high = origin + vec2(tileSize - texel * 1.5);
+	float lit = 0.0;
+	for (int offsetY = -1; offsetY <= 1; ++offsetY) {
+		for (int offsetX = -1; offsetX <= 1; ++offsetX) {
+			lit += texture(localShadowTexture, vec3(clamp(center + vec2(float(offsetX), float(offsetY)) * texel, low, high), depth));
+		}
+	}
+	return mix(1.0, lit / 9.0, localShadowAtlas.w);
+}
+vec3 readLightColor(vec3 color, float usage) {
+	return mix(vec3(readLuminance(color)), color, usage);
 }
 float readToonCoordinate(float cosine, float offset) {
 	return (shadeHalfLambert > 0.5 ? cosine * 0.5 + 0.5 : max(cosine, 0.0)) + offset;
@@ -429,6 +512,7 @@ const SOLID_FRAGMENT_BODY: &str = "ToonSurface readSurface() {
 	surface.isUnlit = surfaceMaterial.y > 0.5;
 	surface.detail = surfaceDetail;
 	surface.uv = surfaceUv;
+	surface.uv1 = surfaceUv1;
 	surface.localPosition = localPosition;
 	surface.worldPosition = worldPosition;
 	surface.viewDirection = readViewDirection();
@@ -449,13 +533,14 @@ ToonLighting readLighting(ToonSurface surface) {
 	float sunCosine = dot(normal, toSun);
 	vec3 sunRamp = readShadeRamp(readToonCoordinate(sunCosine, surface.shadeOffset) * shadow);
 	float sunLevel = readShadeLevel(sunRamp, sunCosine * shadow);
-	vec3 irradiance = sunColor * sunRamp + mix(groundColor, skyColor, normal.y * 0.5 + 0.5);
+	vec3 sunLight = sunRamp * mix(readLightColor(sunColor, lightColorUsage.y), readLightColor(sunColor, lightColorUsage.x), sunLevel);
+	vec3 irradiance = sunLight + mix(groundColor, skyColor, normal.y * 0.5 + 0.5);
 	if (hasSpecular) {
-		specularSum += sunColor * readToonSpecular(normal, toSun, viewDirection) * sunLevel;
+		specularSum += readLightColor(sunColor, lightColorUsage.z) * readToonSpecular(normal, toSun, viewDirection) * sunLevel;
 	}
 	vec3 toFill = -normalize(fillDirection);
 	float fillCosine = dot(normal, toFill);
-	irradiance += fillColor * readShadeLevel(readShadeRamp(readToonCoordinate(fillCosine, surface.shadeOffset)), fillCosine);
+	irradiance += readLightColor(fillColor, lightColorUsage.x) * readShadeLevel(readShadeRamp(readToonCoordinate(fillCosine, surface.shadeOffset)), fillCosine);
 	for (int index = 0; index < 8; ++index) {
 		if (index >= pointLightCount) {
 			break;
@@ -477,11 +562,16 @@ ToonLighting readLighting(ToonSurface surface) {
 			float angular = clamp(dot(spot.xyz, -lightDirection) * cone.x + cone.y, 0.0, 1.0);
 			falloff *= angular * angular;
 		}
+		float lightShadow = 1.0;
+		int shadowSlot = int(pointLightShadowSlots[index] + 0.5) - 1;
+		if (shadowSlot >= 0 && receivesShadow > 0.5) {
+			lightShadow = readLocalShadow(shadowSlot, surface.worldPosition, normal);
+		}
 		float cosine = (dot(normal, lightDirection) + shape.z) / (1.0 + shape.z);
-		float level = readShadeLevel(readShadeRamp(readToonCoordinate(cosine, surface.shadeOffset)), cosine);
-		irradiance += pointLightColors[index] * level * falloff;
+		float level = readShadeLevel(readShadeRamp(readToonCoordinate(cosine, surface.shadeOffset) * lightShadow), cosine * lightShadow);
+		irradiance += readLightColor(pointLightColors[index], lightColorUsage.x) * level * falloff;
 		if (hasSpecular) {
-			specularSum += pointLightColors[index] * readToonSpecular(normal, lightDirection, viewDirection) * level * falloff;
+			specularSum += readLightColor(pointLightColors[index], lightColorUsage.z) * readToonSpecular(normal, lightDirection, viewDirection) * level * falloff;
 		}
 	}
 	lighting.irradiance = irradiance;
@@ -491,7 +581,13 @@ ToonLighting readLighting(ToonSurface surface) {
 		float rimTerm = pow(1.0 - clamp(dot(normal, viewDirection), 0.0, 1.0), rimLight.a);
 		float edgeWidth = max(fwidth(rimTerm), 0.0001);
 		float rim = mix(smoothstep(0.5 - edgeWidth, 0.5 + edgeWidth, rimTerm), rimTerm, rimShape.x);
-		lighting.rim = rimLight.rgb * rim * mix(1.0, sunLevel, rimShape.y);
+		lighting.rim = rimLight.rgb * mix(vec3(1.0), sunColor, lightColorUsage.w) * rim * mix(1.0, sunLevel, rimShape.y);
+	}
+	if (shadeRimLight.a > 0.0) {
+		float shadeRimTerm = pow(1.0 - clamp(dot(normal, viewDirection), 0.0, 1.0), shadeRimLight.a);
+		float edgeWidth = max(fwidth(shadeRimTerm), 0.0001);
+		float shadeRim = mix(smoothstep(0.5 - edgeWidth, 0.5 + edgeWidth, shadeRimTerm), shadeRimTerm, rimShape.x);
+		lighting.rim += shadeRimLight.rgb * mix(vec3(1.0), sunColor, lightColorUsageExtra.x) * clamp(shadeRim - (sunCosine * 0.5 + 0.5), 0.0, 1.0);
 	}
 	lighting.shadow = shadow;
 	lighting.sunLevel = sunLevel;
@@ -516,10 +612,17 @@ void main() {
 		float diffuseScale = energyNormalized > 0.5 ? RECIPROCAL_PI : 1.0;
 		color = albedo * lighting.irradiance * diffuseScale + lighting.specular * surface.specularMask + lighting.rim * surface.rimMask + emission;
 	}
+	vec3 viewNormal = normalize(viewRotation * surface.normal);
 	if (matcapSettings.x > 0.5) {
-		vec3 viewNormal = normalize(viewRotation * surface.normal);
-		vec3 matcap = toLinear(texture(matcapTexture, vec2(viewNormal.x * 0.5 + 0.5, 0.5 - viewNormal.y * 0.5)).rgb);
+		vec3 matcap = toLinear(texture(matcapTexture, vec2(viewNormal.x * 0.5 + 0.5, 0.5 - viewNormal.y * 0.5)).rgb) * mix(vec3(1.0), sunColor, lightColorUsageExtra.y);
 		color = matcapSettings.z > 0.5 ? color + matcap * matcapSettings.y : color * mix(vec3(1.0), matcap, matcapSettings.y);
+	}
+	if (angelRingSettings.x > 0.5) {
+		vec2 ringNormal = mix(viewNormal, vec3(0.0, 0.0, 1.0), angelRingSettings.y).xy * 0.5 + 0.5;
+		vec2 ringUv = vec2(ringNormal.x, 1.0 - mix(1.0 - surface.uv1.y, ringNormal.y, angelRingSettings.z));
+		vec4 ring = texture(angelRingTexture, ringUv);
+		vec3 ringColor = toLinear(ring.rgb) * angelRingColor * mix(vec3(1.0), sunColor, lightColorUsageExtra.z);
+		color = angelRingSettings.w > 0.5 ? color * (1.0 - ring.a) + ringColor * ring.a : color + ringColor;
 	}
 	float opacity = surface.alpha;
 	if (softEdge > 0.0) {
@@ -536,7 +639,10 @@ void main() {
 // 바깥선 껍데기를 그리는 셰이더. (껍데기는 뒷면만 그려 몸 둘레에 테로 보인다)
 const OUTLINE_VERTEX_BODY: &str = "uniform float outlineWidthScale;
 uniform vec3 outlineDistanceScale;
+uniform vec2 outlineFadeDistance;
+uniform float outlineOffsetZ;
 uniform vec4 cameraPosition;
+uniform vec3 cameraForward;
 out float outlineTint;
 void main() {
 	ToonVertex vertex = readVertex();
@@ -548,8 +654,13 @@ void main() {
 	if (outlineDistanceScale.x > 0.0 && cameraPosition.w > 0.5) {
 		scale *= clamp(distance(cameraPosition.xyz, basePosition) / outlineDistanceScale.x, outlineDistanceScale.y, outlineDistanceScale.z);
 	}
+	if (outlineFadeDistance.y > outlineFadeDistance.x && cameraPosition.w > 0.5) {
+		scale *= smoothstep(outlineFadeDistance.y, outlineFadeDistance.x, distance(cameraPosition.xyz, vertex.modelMatrix[3].xyz));
+	}
+	vec3 position = basePosition + offset * scale;
+	vec3 awayFromCamera = cameraPosition.w > 0.5 ? normalize(position - cameraPosition.xyz) : cameraForward;
 	outlineTint = vertex.tint.a;
-	gl_Position = viewProjectionMatrix * vec4(basePosition + offset * scale, 1.0);
+	gl_Position = viewProjectionMatrix * vec4(position + awayFromCamera * outlineOffsetZ, 1.0);
 }
 ";
 
@@ -557,12 +668,13 @@ const OUTLINE_FRAGMENT_SHADER: &str = "#version 300 es
 precision highp float;
 in float outlineTint;
 uniform vec4 outlineColor;
+uniform vec3 outlineLightColor;
 uniform float alpha;
 uniform float hdrOutput;
 uniform float premultipliedOutput;
 out vec4 fragmentColor;
 void main() {
-	vec3 color = hdrOutput > 0.5 ? pow(outlineColor.rgb, vec3(2.2)) : outlineColor.rgb;
+	vec3 color = (hdrOutput > 0.5 ? pow(outlineColor.rgb, vec3(2.2)) : outlineColor.rgb) * outlineLightColor;
 	float outputAlpha = outlineColor.a * alpha * outlineTint;
 	if (premultipliedOutput > 0.5) {
 		color *= outputAlpha;
@@ -651,6 +763,7 @@ pub struct ToonMesh {
 	buffer_list: Vec<GlBuffer>,
 	is_skinned: bool,
 	has_uv: bool,
+	has_second_uv: bool,
 	bounding_center: [f32; 3],
 	bounding_radius: f32,
 	vertex_buffer: GlBuffer,
@@ -827,6 +940,18 @@ pub struct ToonDrawOptions<'a> {
 	pub outline_color: Option<[f32; 4]>,
 	// 껍데기 바깥선 굵기 배. (지은 굵기에 곱한다)
 	pub outline_width_scale: f32,
+	/// 껍데기 바깥선을 카메라에서 먼 쪽으로 밀 거리. (월드 길이, 몸 앞으로 비치지 않게, 유니티 툰 셰이더의 Offset Z 꼴)
+	pub outline_offset_z: f32,
+	/// 천사 고리 텍스처. (보기 공간 노멀의 x 와 2 번 UV 의 y 로 읽는 머리카락 반사 띠, None 이면 없음, 유니티 툰 셰이더의 Angel Ring)
+	pub angel_ring_texture: Option<GlTexture>,
+	/// 천사 고리 색. (선형 배)
+	pub angel_ring_color: [f32; 3],
+	/// 천사 고리 u 를 화면 가운데 쪽으로 당기는 몫. (0 ~ 0.5, AR_OffsetU)
+	pub angel_ring_offset_u: f32,
+	/// 천사 고리 v 를 2 번 UV 에서 보기 노멀 쪽으로 옮기는 몫. (0 ~ 1, AR_OffsetV, 기본 0.3)
+	pub angel_ring_offset_v: f32,
+	/// 천사 고리를 텍스처 알파로 덮을지. (false 면 더한다, ARSampler_AlphaOn)
+	pub is_angel_ring_alpha: bool,
 	// 화면 공간 바깥선의 선 번호. (ToonDrawQueue 가 선의 판에 그릴 때, None 이면 담은 차례 + 1)
 	pub line_id: Option<u32>,
 	// 화면 공간 바깥선을 낼지. (false 면 선은 내지 않고 뒤의 선만 가린다)
@@ -883,6 +1008,12 @@ impl Default for ToonDrawOptions<'_> {
 			matcap_blend: ToonMatcapBlend::Multiply,
 			outline_color: None,
 			outline_width_scale: 1.0,
+			outline_offset_z: 0.0,
+			angel_ring_texture: None,
+			angel_ring_color: [1.0; 3],
+			angel_ring_offset_u: 0.0,
+			angel_ring_offset_v: 0.3,
+			is_angel_ring_alpha: false,
 			line_id: None,
 			has_screen_outline: true,
 			has_crease_line: true,
@@ -993,6 +1124,22 @@ struct SavedState {
 	vertex_array: Option<GlVertexArray>,
 	viewport: [i32; 4],
 	framebuffer: Option<GlFramebuffer>,
+	/// 고른 텍스처 유닛.
+	active_texture: i32,
+	/// 유닛 0 에 묶인 텍스처. (엔진 2D 가 기억하는 유닛)
+	first_unit_texture: Option<GlTexture>,
+}
+
+//==============================================================================
+/// 받을 점광과 스포트라이트 그림자. (ShadowAtlas 에서 읽은 값)
+//==============================================================================
+struct ToonLocalShadowInput {
+	depth_texture: GlTexture,
+	light_list: Vec<ShadowAtlasLight>,
+	grid_size: f32,
+	tile_size: f32,
+	texel_size: f32,
+	strength: f32,
 }
 
 //==============================================================================
@@ -1055,6 +1202,10 @@ pub struct ToonRenderer {
 	view_rotation: [f32; 9],
 	// 껍데기 바깥선의 거리 배. ([기준 거리 (0 이면 끔), 가장 작은 배, 가장 큰 배])
 	outline_distance_scale: [f32; 3],
+	/// 껍데기 바깥선이 사라지는 거리. ([가까운 거리, 먼 거리], 먼 거리가 가까운 거리 이하면 끔)
+	outline_fade_distance: [f32; 2],
+	/// 받을 점광과 스포트라이트 그림자.
+	local_shadow_input: Option<ToonLocalShadowInput>,
 }
 
 //==============================================================================
@@ -1160,6 +1311,27 @@ pub fn read_view_rotation(view_projection_matrix: &Matrix4, forward: [f32; 3]) -
 	right = if right_length > 0.000001 { [right[0] / right_length, right[1] / right_length, right[2] / right_length] } else { [1.0, 0.0, 0.0] };
 	let up = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]];
 	[right[0], up[0], -forward[0], right[1], up[1], -forward[1], right[2], up[2], -forward[2]]
+}
+
+//==============================================================================
+/// UV 꼭짓점 배열 짓기. (2 번 UV 가 없으면 점마다 UV 2, 있으면 UV 와 2 번 UV 를 섞어 4, 셰이더의 vertexUv 는 vec4 라 2 개만 올리면 zw 는 (0, 1))
+//==============================================================================
+pub fn read_uv_data(uv_data: &[f32], uv1_data: Option<&[f32]>, vertex_count: usize) -> Vec<f32> {
+	match uv1_data {
+		None => {
+			uv_data[..vertex_count * 2].to_vec()
+		}
+		Some(uv1_data) => {
+			let mut data = vec![0.0f32; vertex_count * 4];
+			for vertex_index in 0..vertex_count {
+				data[vertex_index * 4] = uv_data[vertex_index * 2];
+				data[vertex_index * 4 + 1] = uv_data[vertex_index * 2 + 1];
+				data[vertex_index * 4 + 2] = uv1_data[vertex_index * 2];
+				data[vertex_index * 4 + 3] = uv1_data[vertex_index * 2 + 1];
+			}
+			data
+		}
+	}
 }
 
 //==============================================================================
@@ -1333,6 +1505,8 @@ impl ToonRenderer {
 			is_scissor_applied: false,
 			view_rotation: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
 			outline_distance_scale: [0.0, 0.5, 4.0],
+			outline_fade_distance: [0.0, 0.0],
+			local_shadow_input: None,
 		})
 	}
 
@@ -1369,7 +1543,7 @@ impl ToonRenderer {
 		unsafe {
 			let previous_program = crate::graphics3d::read_program_binding(gl);
 			solid_program.use_program(gl);
-			for (name, unit) in [("shadowTexture", SHADOW_TEXTURE_UNIT), ("baseColorTexture", BASE_COLOR_TEXTURE_UNIT), ("emissiveTexture", EMISSIVE_TEXTURE_UNIT), ("decalTexture", DECAL_TEXTURE_UNIT), ("rampTexture", RAMP_TEXTURE_UNIT), ("matcapTexture", MATCAP_TEXTURE_UNIT)] {
+			for (name, unit) in [("shadowTexture", SHADOW_TEXTURE_UNIT), ("baseColorTexture", BASE_COLOR_TEXTURE_UNIT), ("emissiveTexture", EMISSIVE_TEXTURE_UNIT), ("decalTexture", DECAL_TEXTURE_UNIT), ("rampTexture", RAMP_TEXTURE_UNIT), ("matcapTexture", MATCAP_TEXTURE_UNIT), ("localShadowTexture", LOCAL_SHADOW_TEXTURE_UNIT), ("angelRingTexture", ANGEL_RING_TEXTURE_UNIT)] {
 				gl.uniform_1_i32(solid_program.get_uniform_location(gl, name).as_ref(), unit as i32);
 			}
 			gl.use_program(previous_program);
@@ -1599,6 +1773,7 @@ impl ToonRenderer {
 		let is_skinned = !arrays.skin_data.is_empty();
 		let vertex_count = arrays.vertex_data.len() / VERTEX_FLOAT_COUNT;
 		let has_uv = vertex_count > 0 && arrays.uv_data.len() >= vertex_count * 2;
+		let has_second_uv = has_uv && arrays.uv1_data.len() >= vertex_count * 2;
 		let (bounding_center, mut bounding_radius) = read_bounding_sphere(&arrays.vertex_data, VERTEX_FLOAT_COUNT);
 		if is_skinned {
 			bounding_radius *= 1.5;
@@ -1614,7 +1789,7 @@ impl ToonRenderer {
 			let vertex_buffer = ToonRenderer::create_array_buffer(gl, &arrays.vertex_data, glow::STATIC_DRAW)?;
 			buffer_list.push(vertex_buffer);
 			let skin_buffer = if is_skinned { Some(ToonRenderer::create_array_buffer(gl, &arrays.skin_data, glow::STATIC_DRAW)?) } else { None };
-			let uv_buffer = if has_uv { Some(ToonRenderer::create_array_buffer(gl, &arrays.uv_data[..vertex_count * 2], glow::STATIC_DRAW)?) } else { None };
+			let uv_buffer = if has_uv { Some(ToonRenderer::create_array_buffer(gl, &read_uv_data(&arrays.uv_data, if has_second_uv { Some(&arrays.uv1_data) } else { None }, vertex_count), glow::STATIC_DRAW)?) } else { None };
 			buffer_list.extend(skin_buffer.iter().chain(uv_buffer.iter()));
 			let body_vertex_array = gl.create_vertex_array().ok()?;
 			gl.bind_vertex_array(Some(body_vertex_array));
@@ -1630,6 +1805,7 @@ impl ToonRenderer {
 				buffer_list: Vec::new(),
 				is_skinned,
 				has_uv,
+				has_second_uv,
 				bounding_center,
 				bounding_radius,
 				vertex_buffer,
@@ -1685,7 +1861,7 @@ impl ToonRenderer {
 		if let Some(uv_buffer) = mesh.uv_buffer {
 			gl.bind_buffer(glow::ARRAY_BUFFER, Some(uv_buffer));
 			gl.enable_vertex_attrib_array(UV_LOCATION);
-			gl.vertex_attrib_pointer_f32(UV_LOCATION, 2, glow::FLOAT, false, 8, 0);
+			gl.vertex_attrib_pointer_f32(UV_LOCATION, if mesh.has_second_uv { 4 } else { 2 }, glow::FLOAT, false, if mesh.has_second_uv { 16 } else { 8 }, 0);
 		}
 		gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(mesh.body_index_buffer));
 	}
@@ -1819,7 +1995,22 @@ impl ToonRenderer {
 				vertex_array: crate::graphics3d::read_vertex_array_binding(gl),
 				viewport,
 				framebuffer: crate::graphics3d::read_framebuffer_binding(gl),
+				active_texture: gl.get_parameter_i32(glow::ACTIVE_TEXTURE),
+				first_unit_texture: ToonRenderer::read_first_unit_texture(gl),
 			});
+		}
+	}
+
+	//==============================================================================
+	/// 유닛 0 에 묶인 텍스처 읽기. (지금 고른 유닛은 그대로 둔다)
+	//==============================================================================
+	fn read_first_unit_texture(gl: &glow::Context) -> Option<GlTexture> {
+		unsafe {
+			let active_texture = gl.get_parameter_i32(glow::ACTIVE_TEXTURE);
+			gl.active_texture(glow::TEXTURE0);
+			let texture = crate::graphics3d::read_texture_binding(gl);
+			gl.active_texture(active_texture as u32);
+			texture
 		}
 	}
 
@@ -1855,6 +2046,9 @@ impl ToonRenderer {
 					gl.disable(capability);
 				}
 			}
+			gl.active_texture(glow::TEXTURE0);
+			gl.bind_texture(glow::TEXTURE_2D, saved_state.first_unit_texture);
+			gl.active_texture(saved_state.active_texture as u32);
 		}
 	}
 
@@ -2014,6 +2208,33 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
+	/// 그림자 아틀라스 깊이 패스 시작. (아틀라스를 묶어 비우고 앞의 상태를 적어 둔다, 칸마다 set_shadow_atlas_tile 뒤에 draw_mesh 가 깊이만 그린다, 끝은 end_shadow_pass)
+	//==============================================================================
+	pub fn begin_shadow_atlas_pass(&mut self, gl: &glow::Context, shadow_atlas: &ShadowAtlas) {
+		self.save_state(gl);
+		self.is_shadow_pass = true;
+		self.is_frame_mirrored = false;
+		self.frame_serial += 1;
+		shadow_atlas.begin_render(gl);
+		unsafe {
+			gl.disable(glow::BLEND);
+			gl.depth_func(glow::LEQUAL);
+			gl.enable(glow::CULL_FACE);
+			gl.cull_face(glow::BACK);
+		}
+	}
+
+	//==============================================================================
+	/// 그림자 아틀라스의 칸 고르기. (그 칸의 보기와 투영과 절두체, 뷰포트를 건다, begin_shadow_atlas_pass 와 end_shadow_pass 사이)
+	//==============================================================================
+	pub fn set_shadow_atlas_tile(&mut self, gl: &glow::Context, shadow_atlas: &ShadowAtlas, tile_index: usize) {
+		self.view_projection_matrix = shadow_atlas.get_tile(tile_index).view_projection_matrix;
+		self.frustum_planes = extract_frustum_planes(&self.view_projection_matrix);
+		self.frame_serial += 1;
+		shadow_atlas.begin_tile(gl, tile_index);
+	}
+
+	//==============================================================================
 	// 그림자 깊이 패스 끝. (프레임버퍼와 뷰포트와 상태를 돌린다)
 	//==============================================================================
 	pub fn end_shadow_pass(&mut self, gl: &glow::Context) {
@@ -2117,6 +2338,8 @@ impl ToonRenderer {
 					let outline_distance_scale = self.outline_distance_scale;
 					gl.uniform_4_f32(program.get_uniform_location(gl, "cameraPosition").as_ref(), camera_position[0], camera_position[1], camera_position[2], camera_position[3]);
 					gl.uniform_3_f32(program.get_uniform_location(gl, "outlineDistanceScale").as_ref(), outline_distance_scale[0], outline_distance_scale[1], outline_distance_scale[2]);
+					gl.uniform_2_f32(program.get_uniform_location(gl, "outlineFadeDistance").as_ref(), self.outline_fade_distance[0], self.outline_fade_distance[1]);
+					gl.uniform_3_f32(program.get_uniform_location(gl, "cameraForward").as_ref(), self.camera_forward[0], self.camera_forward[1], self.camera_forward[2]);
 					gl.uniform_1_f32(program.get_uniform_location(gl, "hdrOutput").as_ref(), hdr_output);
 				}
 				ToonProgramKind::Solid => {
@@ -2137,9 +2360,40 @@ impl ToonRenderer {
 							gl.uniform_1_f32(program.get_uniform_location(gl, "shadowEnabled").as_ref(), 0.0);
 						}
 					}
+					self.upload_local_shadow_uniforms(gl, program);
 				}
 				ToonProgramKind::Depth => {}
 			}
+		}
+	}
+
+	//==============================================================================
+	/// 점광과 스포트라이트 그림자 올리기. (아틀라스의 빛마다 자리, 바탕, 거리, 첫 칸과 점광마다의 칸 번호 + 1)
+	//==============================================================================
+	fn upload_local_shadow_uniforms(&self, gl: &glow::Context, program: &ShaderProgram) {
+		let mut slot_values = [0.0f32; TOON_MAXIMUM_POINT_LIGHTS];
+		let mut position_values = [0.0f32; SHADOW_ATLAS_MAXIMUM_LIGHTS * 4];
+		let mut forward_values = [0.0f32; SHADOW_ATLAS_MAXIMUM_LIGHTS * 4];
+		let mut up_values = [0.0f32; SHADOW_ATLAS_MAXIMUM_LIGHTS * 4];
+		let mut tile_values = [0.0f32; SHADOW_ATLAS_MAXIMUM_LIGHTS];
+		unsafe {
+			if let Some(local_shadow_input) = self.local_shadow_input.as_ref() {
+				for (slot, light) in local_shadow_input.light_list.iter().take(SHADOW_ATLAS_MAXIMUM_LIGHTS).enumerate() {
+					if light.light_index < TOON_MAXIMUM_POINT_LIGHTS {
+						slot_values[light.light_index] = (slot + 1) as f32;
+					}
+					position_values[slot * 4..slot * 4 + 4].copy_from_slice(&[light.position[0], light.position[1], light.position[2], light.near]);
+					forward_values[slot * 4..slot * 4 + 4].copy_from_slice(&[light.forward[0], light.forward[1], light.forward[2], light.far]);
+					up_values[slot * 4..slot * 4 + 4].copy_from_slice(&[light.up[0], light.up[1], light.up[2], light.tangent]);
+					tile_values[slot] = light.first_tile as f32;
+				}
+				gl.uniform_4_f32(program.get_uniform_location(gl, "localShadowAtlas").as_ref(), local_shadow_input.grid_size, local_shadow_input.tile_size, local_shadow_input.texel_size, local_shadow_input.strength);
+			}
+			gl.uniform_1_f32_slice(program.get_uniform_location(gl, "pointLightShadowSlots").as_ref(), &slot_values);
+			gl.uniform_4_f32_slice(program.get_uniform_location(gl, "localShadowPositions").as_ref(), &position_values);
+			gl.uniform_4_f32_slice(program.get_uniform_location(gl, "localShadowForwards").as_ref(), &forward_values);
+			gl.uniform_4_f32_slice(program.get_uniform_location(gl, "localShadowUps").as_ref(), &up_values);
+			gl.uniform_1_f32_slice(program.get_uniform_location(gl, "localShadowTiles").as_ref(), &tile_values);
 		}
 	}
 
@@ -2195,6 +2449,12 @@ impl ToonRenderer {
 			gl.uniform_3_f32(program.get_uniform_location(gl, "fillColor").as_ref(), fill_color[0], fill_color[1], fill_color[2]);
 			gl.uniform_4_f32(program.get_uniform_location(gl, "rimLight").as_ref(), rim_light.color[0], rim_light.color[1], rim_light.color[2], rim_light.power);
 			gl.uniform_2_f32(program.get_uniform_location(gl, "rimShape").as_ref(), rim_light.feather, rim_light.light_mask);
+			let shade_rim_light = light_set.get_shade_rim_light();
+			gl.uniform_4_f32(program.get_uniform_location(gl, "shadeRimLight").as_ref(), shade_rim_light.color[0], shade_rim_light.color[1], shade_rim_light.color[2], shade_rim_light.power);
+			let light_color_usage = light_set.get_light_color_usage();
+			let read_usage = |is_used: bool| if is_used { 1.0 } else { 0.0 };
+			gl.uniform_4_f32(program.get_uniform_location(gl, "lightColorUsage").as_ref(), read_usage(light_color_usage.base), read_usage(light_color_usage.shade), read_usage(light_color_usage.highlight), read_usage(light_color_usage.rim));
+			gl.uniform_3_f32(program.get_uniform_location(gl, "lightColorUsageExtra").as_ref(), read_usage(light_color_usage.shade_rim), read_usage(light_color_usage.matcap), read_usage(light_color_usage.angel_ring));
 			gl.uniform_3_f32(program.get_uniform_location(gl, "specularLight").as_ref(), specular.strength, specular.exponent, specular.feather);
 			gl.uniform_3_f32(program.get_uniform_location(gl, "specularColor").as_ref(), specular.color[0], specular.color[1], specular.color[2]);
 			gl.uniform_1_f32(program.get_uniform_location(gl, "energyNormalized").as_ref(), if light_set.get_light_model().is_energy_normalized { 1.0 } else { 0.0 });
@@ -2355,6 +2615,10 @@ impl ToonRenderer {
 			unsafe {
 				gl.uniform_4_f32(outline_program.get_uniform_location(gl, "outlineColor").as_ref(), outline_color[0], outline_color[1], outline_color[2], outline_color[3]);
 				gl.uniform_1_f32(outline_program.get_uniform_location(gl, "outlineWidthScale").as_ref(), options.outline_width_scale.max(0.0));
+				gl.uniform_1_f32(outline_program.get_uniform_location(gl, "outlineOffsetZ").as_ref(), options.outline_offset_z);
+				let outline_light_set = options.light_set.unwrap_or(&self.light_set);
+				let outline_light_color = if outline_light_set.get_light_color_usage().outline { outline_light_set.get_sun_color() } else { [1.0; 3] };
+				gl.uniform_3_f32(outline_program.get_uniform_location(gl, "outlineLightColor").as_ref(), outline_light_color[0], outline_light_color[1], outline_light_color[2]);
 				gl.uniform_1_f32(outline_program.get_uniform_location(gl, "alpha").as_ref(), options.alpha);
 				gl.uniform_1_f32(outline_program.get_uniform_location(gl, "premultipliedOutput").as_ref(), premultiplied_output);
 			}
@@ -2412,6 +2676,8 @@ impl ToonRenderer {
 			gl.uniform_1_f32(solid_program.get_uniform_location(gl, "shadeOffset").as_ref(), options.shade_offset);
 			gl.uniform_2_f32(solid_program.get_uniform_location(gl, "highlightScale").as_ref(), options.specular_scale.max(0.0), options.rim_scale.max(0.0));
 			gl.uniform_3_f32(solid_program.get_uniform_location(gl, "matcapSettings").as_ref(), enabled(options.matcap_texture), options.matcap_strength, if options.matcap_blend == ToonMatcapBlend::Add { 1.0 } else { 0.0 });
+			gl.uniform_4_f32(solid_program.get_uniform_location(gl, "angelRingSettings").as_ref(), enabled(options.angel_ring_texture), options.angel_ring_offset_u, options.angel_ring_offset_v, if options.is_angel_ring_alpha { 1.0 } else { 0.0 });
+			gl.uniform_3_f32(solid_program.get_uniform_location(gl, "angelRingColor").as_ref(), options.angel_ring_color[0], options.angel_ring_color[1], options.angel_ring_color[2]);
 			gl.active_texture(glow::TEXTURE0 + SHADOW_TEXTURE_UNIT);
 			gl.bind_texture(glow::TEXTURE_2D, Some(self.shadow_input.map(|shadow_input| shadow_input.depth_texture).unwrap_or(self.empty_shadow_texture)));
 		}
@@ -2420,6 +2686,11 @@ impl ToonRenderer {
 		self.bind_texture_unit(gl, DECAL_TEXTURE_UNIT, options.decal_texture);
 		self.bind_texture_unit(gl, RAMP_TEXTURE_UNIT, ramp_texture);
 		self.bind_texture_unit(gl, MATCAP_TEXTURE_UNIT, options.matcap_texture);
+		self.bind_texture_unit(gl, ANGEL_RING_TEXTURE_UNIT, options.angel_ring_texture);
+		unsafe {
+			gl.active_texture(glow::TEXTURE0 + LOCAL_SHADOW_TEXTURE_UNIT);
+			gl.bind_texture(glow::TEXTURE_2D, Some(self.local_shadow_input.as_ref().map(|local_shadow_input| local_shadow_input.depth_texture).unwrap_or(self.empty_shadow_texture)));
+		}
 		for (texture_index, (uniform_name, texture)) in options.textures.iter().take(TOON_MAXIMUM_MATERIAL_TEXTURES).enumerate() {
 			let unit = FIRST_MATERIAL_TEXTURE_UNIT + texture_index as u32;
 			self.bind_texture_unit(gl, unit, Some(*texture));
@@ -2571,6 +2842,46 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
+	/// 껍데기 바깥선이 멀면 사라지는 거리 설정. (가까운 거리 이하는 지은 굵기, 먼 거리 이상은 0, 사이는 smoothstep, 먼 거리가 가까운 거리 이하면 끔, 유니티 툰 셰이더의 Nearest, Farthest Distance)
+	//==============================================================================
+	pub fn set_outline_fade_distance(&mut self, near_distance: f32, far_distance: f32) {
+		self.outline_fade_distance = [near_distance.max(0.0), far_distance.max(0.0)];
+		self.frame_serial += 1;
+	}
+
+	//==============================================================================
+	/// 껍데기 바깥선이 사라지는 거리 반환. ([가까운 거리, 먼 거리])
+	//==============================================================================
+	pub fn get_outline_fade_distance(&self) -> [f32; 2] {
+		self.outline_fade_distance
+	}
+
+	//==============================================================================
+	/// 받을 점광과 스포트라이트 그림자 설정. (ShadowAtlas 나 None, 세기 0 ~ 1, 아틀라스는 기본 빛 묶음의 점광 목록으로 지은 것)
+	//==============================================================================
+	pub fn set_local_shadows(&mut self, shadow_atlas: Option<&ShadowAtlas>, strength: f32) {
+		self.frame_serial += 1;
+		self.local_shadow_input = shadow_atlas.map(|shadow_atlas| {
+			let resolution = shadow_atlas.get_resolution().max(1) as f32;
+			ToonLocalShadowInput { depth_texture: shadow_atlas.get_depth_texture(), light_list: shadow_atlas.get_lights().to_vec(), grid_size: shadow_atlas.get_grid_size() as f32, tile_size: shadow_atlas.get_tile_size() as f32 / resolution, texel_size: 1.0 / resolution, strength: strength.clamp(0.0, 1.0) }
+		});
+	}
+
+	//==============================================================================
+	/// 빛 색 쓰기 설정. (ToonLightSet::set_light_color_usage)
+	//==============================================================================
+	pub fn set_light_color_usage(&mut self, light_color_usage: ToonLightColorUsage) {
+		self.light_set.set_light_color_usage(light_color_usage);
+	}
+
+	//==============================================================================
+	/// 그늘 쪽 림 빛 설정. (ToonLightSet::set_shade_rim_light)
+	//==============================================================================
+	pub fn set_shade_rim_light(&mut self, shade_rim_color: [f32; 3], shade_rim_power: f32) {
+		self.light_set.set_shade_rim_light(shade_rim_color, shade_rim_power);
+	}
+
+	//==============================================================================
 	// 껍데기 바깥선의 거리 배 반환. ([기준 거리, 가장 작은 배, 가장 큰 배])
 	//==============================================================================
 	pub fn get_outline_distance_scale(&self) -> [f32; 3] {
@@ -2661,6 +2972,20 @@ impl ToonRenderer {
 mod tests {
 	use super::*;
 	use crate::base::vector3::Vector3;
+
+	//==============================================================================
+	/// UV 와 2 번 UV 를 점마다 넷으로 섞고, 2 번 UV 가 없으면 둘 그대로인지.
+	//==============================================================================
+	#[test]
+	fn uv_data_mixes_second_uv() {
+		let uv_data = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0];
+		let uv1_data = [0.5, 0.5, 0.6, 0.5, 0.6, 0.6];
+		let data = read_uv_data(&uv_data, Some(&uv1_data), 3);
+		assert_eq!(data.len(), 12);
+		assert_eq!(data[2], 0.5);
+		assert_eq!(data[7], 0.5);
+		assert_eq!(read_uv_data(&uv_data, None, 2), vec![0.0, 0.0, 1.0, 0.0]);
+	}
 
 	#[test]
 	fn frustum_keeps_center_and_drops_behind() {
