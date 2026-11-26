@@ -189,7 +189,7 @@ impl AudioBus {
 	}
 
 	//==============================================================================
-	/// 버스의 GainNode. (원본 getGainNode, 웹 GainNode, 데스크탑 버스의 믹서 크기 노드를 나눠 드는 Rc<MixerGainNode>, AudioContext 가 없을 때 만든 버스는 None)
+	/// 버스의 GainNode. (원본 getGainNode, 웹 GainNode, 데스크탑 버스의 믹서 크기 노드를 나눠 드는 `Rc<MixerGainNode>`, AudioContext 가 없을 때 만든 버스는 None)
 	/// - 노드에 직접 건 크기는 크기 칸과 음소거 칸을 바꾸지 않는다. (원본과 같다)
 	///
 	/// # 돌려줌
