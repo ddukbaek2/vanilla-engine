@@ -16,8 +16,8 @@
 		{
 			"name": "animation/action",
 			"summary": {
-				"ko": "액션. (차례로 스텝을 실행하는 스크립트 꼴 연출)\n- 원본 animation/action.js 를 옮긴 것이다. wait / condition / call / repeat / forever / loop 스텝을 쌓고,\n  start 뒤 매 프레임 step 을 부르면 차례로 돈다.\n- 사용:\n  ```text\n    let mut action: Action<WorldNode> = Action::new()\n        .wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))\n        .condition(|node: &WorldNode| node.is_active(), ActionConditionCallbacks::new())\n        .call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))\n        .repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))\n        .forever(Action::new().wait(2.0, ActionCallbacks::new()));\n    action.start(&mut node_tree[node_id]);\n    // 매 프레임:\n    action.step(&mut node_tree[node_id], time_delta);\n  ```\n- 원본과 다른 점:\n  - 원본은 start(target) 에서 대상을 들고 있다가 step 마다 콜백에 넘긴다. 러스트는 대상을 빌려 들 수 없어서\n    노드 대상은 핸들로 든다: start_on_node(트리, Some(노드)) 가 대상을 들고 step_on_node(트리, 시간) 이 그 노드를 콜백에 넘기며,\n    get_target 이 그 노드를 돌려주고 start_on_node(트리, None) 이 원본 start() 처럼 이전 대상으로 다시 시작한다.\n    노드가 아닌 대상(노드 여럿, 게임 상태)은 T 로 쓰고 start, step 이 대상(&mut T)을 받아 콜백에 넘긴다. (T 의 기본은 WorldNode)\n  - 콜백 객체({ started, updated, completed })는 wait 스텝이 ActionCallbacks(updated 가 (진행률, 대상)),\n    condition 스텝이 ActionConditionCallbacks(updated 가 (대상))다. 원본은 한 객체 꼴에 인자 수만 다르지만,\n    러스트는 콜백의 인자 꼴을 타입으로 정해야 해서 둘로 나눴다.\n  - loop 는 러스트 예약어라 r#loop 로 부른다. (Tween 의 r#in 과 같다)\n  - call 스텝이 이어지면 원본은 재귀로, 러스트 판은 반복문으로 넘긴다. (결과는 같다)\n- 조건 함수는 원본처럼 대상을 받는다(러스트는 &T). wait 은 duration 이 0 이하이면 진행률 1 로 끝낸다.\n  repeat 은 횟수가 0 이면 돌지 않고 넘어간다. (원본과 같다)",
-				"en": "Action. (script-style sequencing that runs steps in order)\n- A port of the original animation/action.js. Stack wait / condition / call / repeat / forever / loop steps,\n  and after start, calling step every frame runs them in order.\n- Usage:\n  ```text\n    let mut action: Action<WorldNode> = Action::new()\n        .wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))\n        .condition(|node: &WorldNode| node.is_active(), ActionConditionCallbacks::new())\n        .call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))\n        .repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))\n        .forever(Action::new().wait(2.0, ActionCallbacks::new()));\n    action.start(&mut node_tree[node_id]);\n    // Every frame:\n    action.step(&mut node_tree[node_id], time_delta);\n  ```\n- Differences from the original:\n  - The original holds the target from start(target) and passes it to the callbacks on every step. Rust cannot hold a borrowed target, so\n    So a node target is held as a handle: start_on_node(tree, Some(node)) holds the target, step_on_node(tree, time) passes that node to the callbacks,\n    get_target returns that node, and start_on_node(tree, None) restarts with the previous target like the original start().\n    A target that is not a node (several nodes, game state) is used as T, and start and step take the target (&mut T) and pass it to the callbacks. (T defaults to WorldNode)\n  - The callback objects ({ started, updated, completed }) are ActionCallbacks for wait steps (updated takes (progress, target)),\n    and ActionConditionCallbacks for condition steps (updated takes (target)). The original uses one object shape with only the argument count differing,\n    but Rust has to fix the callback argument types as types, so they are split in two.\n  - loop is a Rust keyword, so it is called as r#loop. (same as Tween's r#in)\n  - When call steps follow one another, the original moves on recursively and the Rust version with a loop. (same result)\n- The condition function takes the target as in the original (&T in Rust). wait ends with progress 1 if duration is 0 or less.\n  repeat moves on without running if the count is 0. (same as the original)"
+				"ko": "액션. (차례로 스텝을 실행하는 스크립트 꼴 연출)\n- 원본 animation/action.js 를 옮긴 것이다. wait / condition / call / repeat / forever / loop 스텝을 쌓고,\n  start 뒤 매 프레임 step 을 부르면 차례로 돈다.\n- 사용:\n  ```text\n    let mut action: Action<WorldNode> = Action::new()\n        .wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))\n        .condition(|node: &WorldNode| node.is_active(), ActionConditionCallbacks::new())\n        .call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))\n        .repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))\n        .forever(Action::new().wait(2.0, ActionCallbacks::new()));\n    action.start(&mut node_tree, Some(node_id));\n    // 매 프레임:\n    action.step(&mut node_tree, time_delta);\n  ```\n- 원본과 다른 점:\n  - 원본 start(target) 는 대상을 들고 있다가 step(timeDelta) 마다 콜백에 넘긴다. 러스트는 대상을 빌려 들 수 없어서\n    노드 대상은 핸들로 든다: start(트리, Some(노드)) 가 대상을 들고 step(트리, 시간) 이 그 노드를 콜백에 넘기며,\n    get_target 이 그 노드를 돌려주고 start(트리, None) 이 원본 start() 처럼 이전 대상으로 다시 시작한다.\n  - 대상을 들지 않고 매번 넘기는 꼴은 두 엔진 다 start_with(대상), step_with(대상, 시간) 이다. (원본 startWith, stepWith)\n    노드가 아닌 대상(노드 여럿, 게임 상태)은 T 로 쓰고 이 꼴로 돌린다. (T 의 기본은 WorldNode)\n    repeat, forever, loop 의 안쪽 액션도 두 엔진 다 이 꼴로 돌아 대상을 들지 않는다. (안쪽 액션의 get_target 은 그대로)\n  - 콜백 객체({ started, updated, completed })는 wait 스텝이 ActionCallbacks(updated 가 (진행률, 대상)),\n    condition 스텝이 ActionConditionCallbacks(updated 가 (대상))다. 원본은 한 객체 꼴에 인자 수만 다르지만,\n    러스트는 콜백의 인자 꼴을 타입으로 정해야 해서 둘로 나눴다.\n  - loop 는 러스트 예약어라 r#loop 로 부른다. (Tween 의 r#in 과 같다)\n  - call 스텝이 이어지면 원본은 재귀로, 러스트 판은 반복문으로 넘긴다. (결과는 같다)\n- 조건 함수는 원본처럼 대상을 받는다(러스트는 &T). wait 은 duration 이 0 이하이면 진행률 1 로 끝낸다.\n  repeat 은 횟수가 0 이면 돌지 않고 넘어간다. (원본과 같다)",
+				"en": "Action. (script-style sequencing that runs steps in order)\n- A port of the original animation/action.js. Stack wait / condition / call / repeat / forever / loop steps,\n  and after start, calling step every frame runs them in order.\n- Usage:\n  ```text\n    let mut action: Action<WorldNode> = Action::new()\n        .wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))\n        .condition(|node: &WorldNode| node.is_active(), ActionConditionCallbacks::new())\n        .call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))\n        .repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))\n        .forever(Action::new().wait(2.0, ActionCallbacks::new()));\n    action.start(&mut node_tree, Some(node_id));\n    // Every frame:\n    action.step(&mut node_tree, time_delta);\n  ```\n- Differences from the original:\n  - The original start(target) holds the target and passes it to the callbacks on every step(timeDelta). Rust cannot hold a borrowed target, so\n    a node target is held as a handle: start(tree, Some(node)) holds the target, step(tree, time) passes that node to the callbacks,\n    get_target returns that node, and start(tree, None) restarts with the previous target like the original start().\n  - The form that passes the target every time without holding it is start_with(target), step_with(target, time) in both engines. (the original startWith, stepWith)\n    A target that is not a node (several nodes, game state) is used as T and run in this form. (T defaults to WorldNode)\n    The inner actions of repeat, forever and loop also run in this form in both engines and do not hold the target. (the inner action's get_target stays as it was)\n  - The callback objects ({ started, updated, completed }) are ActionCallbacks for wait steps (updated takes (progress, target)),\n    and ActionConditionCallbacks for condition steps (updated takes (target)). The original uses one object shape with only the argument count differing,\n    but Rust has to fix the callback argument types as types, so they are split in two.\n  - loop is a Rust keyword, so it is called as r#loop. (same as Tween's r#in)\n  - When call steps follow one another, the original moves on recursively and the Rust version with a loop. (same result)\n- The condition function takes the target as in the original (&T in Rust). wait ends with progress 1 if duration is 0 or less.\n  repeat moves on without running if the count is 0. (same as the original)"
 			},
 			"classes": [
 				{
@@ -142,7 +142,7 @@
 								"ko": "wait 스텝의 시작, 진행률, 완료 콜백",
 								"en": "Start, progress and completion callbacks of a wait step"
 							},
-							"code": "use vanilla::{Action, ActionCallbacks};\n\nlet mut record: Vec<f32> = Vec::new();\nlet mut action: Action<Vec<f32>> = Action::new()\n\t.wait(1.0, ActionCallbacks::new()\n\t\t.started(|record: &mut Vec<f32>| record.push(-1.0))\n\t\t.updated(|progress, record: &mut Vec<f32>| record.push(progress))\n\t\t.completed(|record: &mut Vec<f32>| record.push(2.0)));\naction.start(&mut record);\naction.step(&mut record, 0.5);\naction.step(&mut record, 0.5);\nassert_eq!(record, vec![-1.0, 0.5, 1.0, 2.0]);\nassert!(action.is_done());",
+							"code": "use vanilla::{Action, ActionCallbacks};\n\nlet mut record: Vec<f32> = Vec::new();\nlet mut action: Action<Vec<f32>> = Action::new()\n\t.wait(1.0, ActionCallbacks::new()\n\t\t.started(|record: &mut Vec<f32>| record.push(-1.0))\n\t\t.updated(|progress, record: &mut Vec<f32>| record.push(progress))\n\t\t.completed(|record: &mut Vec<f32>| record.push(2.0)));\naction.start_with(&mut record);\naction.step_with(&mut record, 0.5);\naction.step_with(&mut record, 0.5);\nassert_eq!(record, vec![-1.0, 0.5, 1.0, 2.0]);\nassert!(action.is_done());",
 							"language": "rust"
 						}
 					]
@@ -269,7 +269,7 @@
 								"ko": "문이 열릴 때까지 기다린 프레임 세기",
 								"en": "Count the frames waited until the door opens"
 							},
-							"code": "use vanilla::{Action, ActionConditionCallbacks};\n\nstruct Door {\n\tis_open: bool,\n\twaited_frame_count: u32,\n\tis_passed: bool,\n}\n\nlet mut door = Door { is_open: false, waited_frame_count: 0, is_passed: false };\nlet mut action: Action<Door> = Action::new()\n\t.condition(|door: &Door| door.is_open, ActionConditionCallbacks::new()\n\t\t.updated(|door: &mut Door| door.waited_frame_count += 1)\n\t\t.completed(|door: &mut Door| door.is_passed = true));\naction.start(&mut door);\naction.step(&mut door, 0.016);\naction.step(&mut door, 0.016);\nassert!(!door.is_passed);\ndoor.is_open = true;\naction.step(&mut door, 0.016);\nassert_eq!(door.waited_frame_count, 3);\nassert!(door.is_passed);\nassert!(action.is_done());",
+							"code": "use vanilla::{Action, ActionConditionCallbacks};\n\nstruct Door {\n\tis_open: bool,\n\twaited_frame_count: u32,\n\tis_passed: bool,\n}\n\nlet mut door = Door { is_open: false, waited_frame_count: 0, is_passed: false };\nlet mut action: Action<Door> = Action::new()\n\t.condition(|door: &Door| door.is_open, ActionConditionCallbacks::new()\n\t\t.updated(|door: &mut Door| door.waited_frame_count += 1)\n\t\t.completed(|door: &mut Door| door.is_passed = true));\naction.start_with(&mut door);\naction.step_with(&mut door, 0.016);\naction.step_with(&mut door, 0.016);\nassert!(!door.is_passed);\ndoor.is_open = true;\naction.step_with(&mut door, 0.016);\nassert_eq!(door.waited_frame_count, 3);\nassert!(door.is_passed);\nassert!(action.is_done());",
 							"language": "rust"
 						}
 					]
@@ -278,8 +278,8 @@
 					"name": "Action",
 					"kind": "struct",
 					"summary": {
-						"ko": "액션.\n- 스텝을 빌더처럼 쌓고 start 뒤 매 프레임 step 을 부르면 차례로 돈다. 대상 꼴 T 는 기본 WorldNode 이다.",
-						"en": "Action.\n- Stack steps like a builder, and after start, calling step every frame runs them in order. The target type T defaults to WorldNode."
+						"ko": "액션.\n- 스텝을 빌더처럼 쌓고 start 뒤 매 프레임 step 을 부르면 차례로 돈다. (대상을 매번 넘기면 start_with, step_with) 대상 꼴 T 는 기본 WorldNode 이다.",
+						"en": "Action.\n- Stack steps like a builder, and after start, calling step every frame runs them in order. (to pass the target every time, use start_with, step_with) The target type T defaults to WorldNode."
 					},
 					"traits": [
 						"Default"
@@ -481,7 +481,7 @@
 										"ko": "0.5초 대기를 세 번",
 										"en": "Wait 0.5 seconds three times"
 									},
-									"code": "use vanilla::{Action, ActionCallbacks};\n\nlet mut count: u32 = 0;\nlet inner_action: Action<u32> = Action::new().wait(0.5, ActionCallbacks::new().completed(|count: &mut u32| *count += 1));\nlet mut action: Action<u32> = Action::new().repeat(3, inner_action);\naction.start(&mut count);\nfor _ in 0..3 {\n\taction.step(&mut count, 0.5);\n}\nassert_eq!(count, 3);\nassert!(action.is_done());",
+									"code": "use vanilla::{Action, ActionCallbacks};\n\nlet mut count: u32 = 0;\nlet inner_action: Action<u32> = Action::new().wait(0.5, ActionCallbacks::new().completed(|count: &mut u32| *count += 1));\nlet mut action: Action<u32> = Action::new().repeat(3, inner_action);\naction.start_with(&mut count);\nfor _ in 0..3 {\n\taction.step_with(&mut count, 0.5);\n}\nassert_eq!(count, 3);\nassert!(action.is_done());",
 									"language": "rust"
 								}
 							]
@@ -561,15 +561,15 @@
 										"ko": "값이 3 이 될 때까지 0.1초마다 하나씩 올리기",
 										"en": "Raise a value by one every 0.1 seconds until it reaches 3"
 									},
-									"code": "use vanilla::{Action, ActionCallbacks};\n\nlet mut count: u32 = 0;\nlet inner_action: Action<u32> = Action::new().wait(0.1, ActionCallbacks::new().completed(|count: &mut u32| *count += 1));\nlet mut action: Action<u32> = Action::new().r#loop(|count: &u32| *count < 3, inner_action);\naction.start(&mut count);\nfor _ in 0..10 {\n\taction.step(&mut count, 0.1);\n}\nassert_eq!(count, 3);\nassert!(action.is_done());",
+									"code": "use vanilla::{Action, ActionCallbacks};\n\nlet mut count: u32 = 0;\nlet inner_action: Action<u32> = Action::new().wait(0.1, ActionCallbacks::new().completed(|count: &mut u32| *count += 1));\nlet mut action: Action<u32> = Action::new().r#loop(|count: &u32| *count < 3, inner_action);\naction.start_with(&mut count);\nfor _ in 0..10 {\n\taction.step_with(&mut count, 0.1);\n}\nassert_eq!(count, 3);\nassert!(action.is_done());",
 									"language": "rust"
 								}
 							]
 						},
 						{
 							"kind": "method",
-							"name": "start",
-							"signature": "pub fn start(&mut self, target: &mut T)",
+							"name": "start_with",
+							"signature": "pub fn start_with(&mut self, target: &mut T)",
 							"params": [
 								{
 									"name": "target",
@@ -581,16 +581,16 @@
 								}
 							],
 							"description": {
-								"ko": "실행 시작. (처음 스텝부터)\n- 앞에 있는 call 스텝은 이 자리에서 바로 돈다. 돌던 중이면 처음부터 다시 한다.",
-								"en": "Starts running. (from the first step)\n- Leading call steps run right here. If already running, starts over from the beginning."
+								"ko": "대상을 들지 않고 실행 시작. (원본 startWith(target), 처음 스텝부터)\n- 앞에 있는 call 스텝은 이 자리에서 바로 돈다. 돌던 중이면 처음부터 다시 한다. 대상은 들지 않는다. (get_target 은 그대로)",
+								"en": "Starts running without holding the target. (the original startWith(target), from the first step)\n- Leading call steps run right here. If it was running, it starts over. The target is not held. (get_target stays as it was)"
 							},
-							"since": "0.3.2",
+							"since": "0.4.0",
 							"source": "src/animation/action.rs",
 							"counterpart": {
 								"engine": "vanilla.js",
 								"module": "animation/action",
 								"class": "Action",
-								"name": "start"
+								"name": "startWith"
 							}
 						},
 						{
@@ -613,8 +613,8 @@
 						},
 						{
 							"kind": "method",
-							"name": "step",
-							"signature": "pub fn step(&mut self, target: &mut T, time_delta: f32)",
+							"name": "step_with",
+							"signature": "pub fn step_with(&mut self, target: &mut T, time_delta: f32)",
 							"params": [
 								{
 									"name": "target",
@@ -634,16 +634,16 @@
 								}
 							],
 							"description": {
-								"ko": "갱신. (매 프레임 호출)\n- start 전이거나 끝났으면 아무것도 하지 않는다. 한 번에 스텝 하나만 진행하고, 끝난 스텝 뒤의 call 스텝은 같은 프레임에 돈다.",
-								"en": "Update. (called every frame)\n- Does nothing before start or after it has finished. Advances only one step at a time, and call steps after a finished step run in the same frame."
+								"ko": "대상을 넘겨 갱신. (원본 stepWith(target, timeDelta), 매 프레임 호출)\n- start 전이거나 끝났으면 아무것도 하지 않는다. 한 번에 스텝 하나만 진행하고, 끝난 스텝 뒤의 call 스텝은 같은 프레임에 돈다.",
+								"en": "Updates with a given target. (the original stepWith(target, timeDelta), call every frame)\n- Does nothing before start or after it is done. Advances only one step at a time, and call steps after a finished step run in the same frame."
 							},
-							"since": "0.3.2",
+							"since": "0.4.0",
 							"source": "src/animation/action.rs",
 							"counterpart": {
 								"engine": "vanilla.js",
 								"module": "animation/action",
 								"class": "Action",
-								"name": "step"
+								"name": "stepWith"
 							},
 							"examples": [
 								{
@@ -651,7 +651,7 @@
 										"ko": "씬 tick 에서 액션 돌리기",
 										"en": "Run an action in the scene tick"
 									},
-									"code": "use vanilla::{Action, ActionCallbacks, WorldNode};\n\nstruct FadeIn {\n\tnode: WorldNode,\n\taction: Action,\n}\n\nimpl FadeIn {\n\tfn new() -> FadeIn {\n\t\tlet mut fade_in = FadeIn {\n\t\t\tnode: WorldNode::new(\"logo\"),\n\t\t\taction: Action::new().wait(2.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress))),\n\t\t};\n\t\tfade_in.action.start(&mut fade_in.node);\n\t\tfade_in\n\t}\n\n\tfn tick(&mut self, time_delta: f32) {\n\t\tself.action.step(&mut self.node, time_delta);\n\t}\n}\n\nlet mut fade_in = FadeIn::new();\nfade_in.tick(1.0);\nassert_eq!(fade_in.node.get_local_opacity(), 0.5);\nfade_in.tick(1.0);\nassert!(fade_in.action.is_done());",
+									"code": "use vanilla::{Action, ActionCallbacks, WorldNode};\n\nstruct FadeIn {\n\tnode: WorldNode,\n\taction: Action,\n}\n\nimpl FadeIn {\n\tfn new() -> FadeIn {\n\t\tlet mut fade_in = FadeIn {\n\t\t\tnode: WorldNode::new(\"logo\"),\n\t\t\taction: Action::new().wait(2.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress))),\n\t\t};\n\t\tfade_in.action.start_with(&mut fade_in.node);\n\t\tfade_in\n\t}\n\n\tfn tick(&mut self, time_delta: f32) {\n\t\tself.action.step_with(&mut self.node, time_delta);\n\t}\n}\n\nlet mut fade_in = FadeIn::new();\nfade_in.tick(1.0);\nassert_eq!(fade_in.node.get_local_opacity(), 0.5);\nfade_in.tick(1.0);\nassert!(fade_in.action.is_done());",
 									"language": "rust"
 								}
 							]
@@ -708,8 +708,8 @@
 						},
 						{
 							"kind": "method",
-							"name": "start_on_node",
-							"signature": "pub fn start_on_node(&mut self, node_tree: &mut NodeTree, node_id: Option<NodeId>) -> bool",
+							"name": "start",
+							"signature": "pub fn start(&mut self, node_tree: &mut NodeTree, node_id: Option<NodeId>) -> bool",
 							"params": [
 								{
 									"name": "node_tree",
@@ -736,26 +736,32 @@
 								}
 							},
 							"description": {
-								"ko": "노드를 대상으로 실행 시작. (원본 start(target), 처음 스텝부터)\n- 대상을 노드 핸들로 들어, step_on_node 가 그 노드를 콜백에 넘기고 get_target 이 돌려준다.\n- `node_id` 가 None 이면 원본처럼 이전 대상(앞서 start_on_node 에 넘긴 노드)으로 다시 시작한다.",
-								"en": "Starts running with a node as the target. (the original start(target), from the first step)\n- Holds the target as a node handle, so step_on_node passes that node to the callbacks and get_target returns it.\n- If `node_id` is None, it restarts with the previous target (the node given to an earlier start_on_node), like the original."
+								"ko": "노드를 대상으로 실행 시작. (원본 start(target), 처음 스텝부터)\n- 대상을 노드 핸들로 들어, step 이 그 노드를 콜백에 넘기고 get_target 이 돌려준다.\n- `node_id` 가 None 이면 원본처럼 이전 대상(앞서 start 에 넘긴 노드)으로 다시 시작한다.",
+								"en": "Starts running with a node as the target. (the original start(target), from the first step)\n- Holds the target as a node handle, so step passes that node to the callbacks and get_target returns it.\n- If `node_id` is None, restarts with the previous target (the node given to start before) like the original."
 							},
-							"since": "0.4.0",
+							"since": "0.3.2",
 							"source": "src/animation/action.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "animation/action",
+								"class": "Action",
+								"name": "start"
+							},
 							"examples": [
 								{
 									"title": {
 										"ko": "노드 대상으로 돌리고, 대상을 안 주고 다시 시작하기",
 										"en": "Run with a node target, then restart without giving a target"
 									},
-									"code": "use vanilla::{Action, ActionCallbacks, NodeTree, WorldNode};\n\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet logo_id = node_tree.create_child(root_id, \"logo\");\nlet mut action: Action = Action::new().wait(2.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)));\nassert!(action.start_on_node(&mut node_tree, Some(logo_id)));\nassert_eq!(action.get_target(), Some(logo_id));\naction.step_on_node(&mut node_tree, 1.0);\nassert_eq!(node_tree[logo_id].get_local_opacity(), 0.5);\n\nassert!(action.start_on_node(&mut node_tree, None));\naction.step_on_node(&mut node_tree, 0.5);\nassert_eq!(node_tree[logo_id].get_local_opacity(), 0.25);",
+									"code": "use vanilla::{Action, ActionCallbacks, NodeTree, WorldNode};\n\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet logo_id = node_tree.create_child(root_id, \"logo\");\nlet mut action: Action = Action::new().wait(2.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)));\nassert!(action.start(&mut node_tree, Some(logo_id)));\nassert_eq!(action.get_target(), Some(logo_id));\naction.step(&mut node_tree, 1.0);\nassert_eq!(node_tree[logo_id].get_local_opacity(), 0.5);\n\nassert!(action.start(&mut node_tree, None));\naction.step(&mut node_tree, 0.5);\nassert_eq!(node_tree[logo_id].get_local_opacity(), 0.25);",
 									"language": "rust"
 								}
 							]
 						},
 						{
 							"kind": "method",
-							"name": "step_on_node",
-							"signature": "pub fn step_on_node(&mut self, node_tree: &mut NodeTree, time_delta: f32)",
+							"name": "step",
+							"signature": "pub fn step(&mut self, node_tree: &mut NodeTree, time_delta: f32)",
 							"params": [
 								{
 									"name": "node_tree",
@@ -775,11 +781,17 @@
 								}
 							],
 							"description": {
-								"ko": "대상 노드로 갱신. (원본 step(timeDelta), 매 프레임 호출)\n- start_on_node 로 넘긴 노드를 콜백에 넘긴다. 대상이 없거나 그 노드가 지워졌으면 아무것도 하지 않는다.",
-								"en": "Updates with the target node. (the original step(timeDelta), call every frame)\n- Passes the node given to start_on_node to the callbacks. Does nothing if there is no target or that node was removed."
+								"ko": "대상 노드로 갱신. (원본 step(timeDelta), 매 프레임 호출)\n- start 로 넘긴 노드를 콜백에 넘긴다. 대상이 없거나 그 노드가 지워졌으면 아무것도 하지 않는다.",
+								"en": "Updates with the target node. (the original step(timeDelta), call every frame)\n- Passes the node given to start to the callbacks. Does nothing if there is no target or that node was removed."
 							},
-							"since": "0.4.0",
-							"source": "src/animation/action.rs"
+							"since": "0.3.2",
+							"source": "src/animation/action.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "animation/action",
+								"class": "Action",
+								"name": "step"
+							}
 						},
 						{
 							"kind": "method",
@@ -789,8 +801,8 @@
 							"returns": {
 								"type": "Option<NodeId>",
 								"description": {
-									"ko": "start_on_node 에 넘긴 대상 노드. 없으면 None. (start(&mut 노드) 로 빌려 준 대상은 들지 않는다)",
-									"en": "The target node given to start_on_node. None if there is none. (a target lent with start(&mut node) is not held)"
+									"ko": "start 에 넘긴 대상 노드. 없으면 None. (start_with(&mut 노드) 로 빌려 준 대상은 들지 않는다)",
+									"en": "The target node given to start. None if there is none. (a target lent with start_with(&mut node) is not held)"
 								}
 							},
 							"description": {
@@ -813,7 +825,7 @@
 								"ko": "노드를 서서히 보이고, 활성인지 보고, 키운 뒤 반복 대기",
 								"en": "Fade in a node, check whether it is active, scale it up, then wait repeatedly"
 							},
-							"code": "use vanilla::{Action, ActionCallbacks, ActionConditionCallbacks, Vector2, WorldNode};\n\nlet mut node = WorldNode::new(\"hero\");\nlet mut action: Action<WorldNode> = Action::new()\n\t.wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))\n\t.condition(|node: &WorldNode| node.is_active(), ActionConditionCallbacks::new())\n\t.call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))\n\t.repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))\n\t.forever(Action::new().wait(2.0, ActionCallbacks::new()));\naction.start(&mut node);\naction.step(&mut node, 0.5);\nassert_eq!(node.get_local_opacity(), 0.5);\naction.step(&mut node, 0.5);\nassert_eq!(node.get_local_opacity(), 1.0);\naction.step(&mut node, 0.0);\nassert_eq!(node.get_local_scale(), Vector2::create(2.0, 2.0));\nfor _ in 0..10 {\n\taction.step(&mut node, 0.5);\n}\nassert!(action.is_running());\nassert!(!action.is_done());",
+							"code": "use vanilla::{Action, ActionCallbacks, ActionConditionCallbacks, Vector2, WorldNode};\n\nlet mut node = WorldNode::new(\"hero\");\nlet mut action: Action<WorldNode> = Action::new()\n\t.wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))\n\t.condition(|node: &WorldNode| node.is_active(), ActionConditionCallbacks::new())\n\t.call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))\n\t.repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))\n\t.forever(Action::new().wait(2.0, ActionCallbacks::new()));\naction.start_with(&mut node);\naction.step_with(&mut node, 0.5);\nassert_eq!(node.get_local_opacity(), 0.5);\naction.step_with(&mut node, 0.5);\nassert_eq!(node.get_local_opacity(), 1.0);\naction.step_with(&mut node, 0.0);\nassert_eq!(node.get_local_scale(), Vector2::create(2.0, 2.0));\nfor _ in 0..10 {\n\taction.step_with(&mut node, 0.5);\n}\nassert!(action.is_running());\nassert!(!action.is_done());",
 							"language": "rust"
 						}
 					]
@@ -119169,8 +119181,8 @@
 								}
 							},
 							"description": {
-								"ko": "노드 만들기. (parent_id 밑에 \"FloatingText\" 노드를 만들고 컴포넌트를 붙인다. 원본 new FloatingText() + add_child)",
-								"en": "Creates a node. (makes a \"FloatingText\" node under parent_id and attaches the component. original new FloatingText() + add_child)"
+								"ko": "노드 만들기. (parent_id 밑에 \"FloatingText\" 노드를 만들고 컴포넌트를 붙인다. 원본 new FloatingText() + add_child)\n- 원본 생성자처럼 노드의 피벗과 앵커는 왼쪽 위다. (spawn 의 월드 좌표가 부모 왼쪽 위 기준)",
+								"en": "Creates the node. (creates a \"FloatingText\" node under parent_id and attaches the component; the original new FloatingText() + add_child)\n- Like the original constructor, the node's pivot and anchor are top-left. (spawn's world position is relative to the parent's top-left)"
 							},
 							"since": "0.3.2",
 							"source": "src/misc/floatingtext.rs"
@@ -123178,8 +123190,8 @@
 		{
 			"name": "misc/storagetext",
 			"summary": {
-				"ko": "저장 글의 짝 없는 서로게이트 보존. (러스트 판에만 있다, LocalStorage 와 PersistedStore 가 쓴다)\n- 원본 localStorage 와 JSON 은 JS 글(UTF-16)이라 짝 없는 서로게이트(짝을 잃은 U+D800 ~ U+DFFF)를 담는다.\n  잘린 이모지처럼 사용자 입력에서 생기고, JSON.stringify 는 그것을 \\ud83d 같은 이스케이프로 쓴다. (ES2019 의 잘 짜인 JSON.stringify)\n- 러스트 String 은 UTF-8 이라 그런 글을 담지 못한다. 그래서 러스트 쪽에는 대체 문자(U+FFFD)로 보이고,\n  고치지 않은 글을 다시 쓸 때는 원래 UTF-16 단위 그대로 쓴다. 원본 판이 저장한 값을 러스트 판이 읽고 다시 써도 잃지 않는다.\n- PreservedText: 원래 UTF-16 단위와 대체 문자로 보인 글.\n- parse_json, parse_json_code_units: JSON.parse 처럼 읽되 짝 없는 서로게이트(이스케이프와 날 단위 모두)를 대체 문자로 읽고,\n  그런 글이 있던 자리(JSON 경로)와 원래 단위를 JsonSurrogateTable 에 남긴다. 수는 serde_json 이 읽은 것과 같다.\n- stringify_json: serde_json 의 짧은 꼴(Value::to_string)과 같은 글을 쓰되, 표의 자리에 대체 문자로 보인 글이 그대로 있으면 원래 단위를,\n  다른 자리라도 같은 글이면(원본에서 글을 옮겨 담은 것과 같다) 원래 단위를 JSON.stringify 처럼 \\udXXX 로 쓴다.\n  대체 문자로 보이는 글이 같은데 원래 단위가 서로 다른 글이 둘 이상이면 자리가 맞는 것만 원래 단위로 쓴다.",
-				"en": "Preserves unpaired surrogates in stored text. (only in the Rust version, used by LocalStorage and PersistedStore)\n- The original localStorage and JSON are JS strings (UTF-16), so they hold unpaired surrogates (U+D800 ~ U+DFFF that lost their pair).\n  They come from user input such as cut emoji, and JSON.stringify writes them as escapes like \\ud83d. (the well-formed JSON.stringify of ES2019)\n- Rust String is UTF-8 and cannot hold such text. So they appear as the replacement character (U+FFFD) on the Rust side,\n  and unmodified text is written back in its original UTF-16 units. Values saved by the original version are not lost when the Rust version reads and rewrites them.\n- PreservedText: the original UTF-16 units and the text as displayed with replacement characters.\n- parse_json, parse_json_code_units: read like JSON.parse but read unpaired surrogates (both escapes and raw units) as the replacement character,\n  and record the places (JSON paths) where such text was and the original units in a JsonSurrogateTable. Numbers are the same as what serde_json reads.\n- stringify_json: writes the same text as serde_json's compact form (Value::to_string), but if text displayed with replacement characters is still at a place in the table, it writes the original units,\n  and even at another place, if the text is the same (same as moving text over in the original), it writes the original units as \\udXXX like JSON.stringify.\n  If two or more texts look the same with replacement characters but have different original units, only those at matching places are written in the original units."
+				"ko": "엔진의 JSON 글 쓰기와 저장 글의 짝 없는 서로게이트 보존. (엔진이 JSON 을 쓰는 길 모두가 쓴다, 서로게이트 표는 LocalStorage 와 PersistedStore 가 쓴다)\n- 원본 localStorage 와 JSON 은 JS 글(UTF-16)이라 짝 없는 서로게이트(짝을 잃은 U+D800 ~ U+DFFF)를 담는다.\n  잘린 이모지처럼 사용자 입력에서 생기고, JSON.stringify 는 그것을 \\ud83d 같은 이스케이프로 쓴다. (ES2019 의 잘 짜인 JSON.stringify)\n- 러스트 String 은 UTF-8 이라 그런 글을 담지 못한다. 그래서 러스트 쪽에는 대체 문자(U+FFFD)로 보이고,\n  고치지 않은 글을 다시 쓸 때는 원래 UTF-16 단위 그대로 쓴다. 원본 판이 저장한 값을 러스트 판이 읽고 다시 써도 잃지 않는다.\n- PreservedText: 원래 UTF-16 단위와 대체 문자로 보인 글.\n- parse_json, parse_json_code_units: JSON.parse 처럼 읽되 짝 없는 서로게이트(이스케이프와 날 단위 모두)를 대체 문자로 읽고,\n  그런 글이 있던 자리(JSON 경로)와 원래 단위를 JsonSurrogateTable 에 남긴다. 수는 serde_json 이 읽은 것과 같다.\n- stringify_json, stringify_json_with_space: 원본 JSON.stringify 와 글자까지 같은 글을 쓰되(엔진이 JSON 을 쓰는 길 모두가 쓴다), 표의 자리에 대체 문자로 보인 글이 그대로 있으면 원래 단위를,\n  다른 자리라도 같은 글이면(원본에서 글을 옮겨 담은 것과 같다) 원래 단위를 JSON.stringify 처럼 \\udXXX 로 쓴다.\n  대체 문자로 보이는 글이 같은데 원래 단위가 서로 다른 글이 둘 이상이면 자리가 맞는 것만 원래 단위로 쓴다.",
+				"en": "The engine's JSON text writing and preservation of unpaired surrogates in stored text. (used by every engine path that writes JSON; the surrogate table is used by LocalStorage and PersistedStore)\n- The original localStorage and JSON are JS strings (UTF-16), so they hold unpaired surrogates (U+D800 ~ U+DFFF that lost their pair).\n  They come from user input such as cut emoji, and JSON.stringify writes them as escapes like \\ud83d. (the well-formed JSON.stringify of ES2019)\n- Rust String is UTF-8 and cannot hold such text. So they appear as the replacement character (U+FFFD) on the Rust side,\n  and unmodified text is written back in its original UTF-16 units. Values saved by the original version are not lost when the Rust version reads and rewrites them.\n- PreservedText: the original UTF-16 units and the text as displayed with replacement characters.\n- parse_json, parse_json_code_units: read like JSON.parse but read unpaired surrogates (both escapes and raw units) as the replacement character,\n  and record the places (JSON paths) where such text was and the original units in a JsonSurrogateTable. Numbers are the same as what serde_json reads.\n- stringify_json, stringify_json_with_space: write text identical to the original JSON.stringify down to the character (used by every engine path that writes JSON), but if text displayed with replacement characters is still at a place in the table, it writes the original units,\n  and even at another place, if the text is the same (same as moving text over in the original), it writes the original units as \\udXXX like JSON.stringify.\n  If two or more texts look the same with replacement characters but have different original units, only those at matching places are written in the original units."
 			},
 			"classes": [
 				{
@@ -123659,8 +123671,8 @@
 							"name": "surrogate_table",
 							"type": "&JsonSurrogateTable",
 							"description": {
-								"ko": "parse_json 이 남긴 표. (빈 표면 serde_json 의 짧은 꼴과 같다)",
-								"en": "Table left by parse_json. (with an empty table it is the same as the serde_json compact form)"
+								"ko": "parse_json 이 남긴 표. (따로 읽은 글이 없으면 JsonSurrogateTable::new())",
+								"en": "The table left by parse_json. (JsonSurrogateTable::new() if no text was read)"
 							}
 						}
 					],
@@ -123672,11 +123684,21 @@
 						}
 					},
 					"description": {
-						"ko": "JSON 쓰기. (serde_json 의 짧은 꼴과 같고, 표에 남은 글은 원래 단위로)",
-						"en": "Writes JSON. (same as serde_json's compact form, strings kept in the table are written with their original units)"
+						"ko": "JSON 쓰기. (원본 JSON.stringify(value) 와 글자까지 같다, 표에 남은 글은 원래 단위로)\n- 수는 원본 String(수) 꼴이다. (1.0 → 1, -0 → 0, 1e21 → 1e+21, 큰 정수도 f64 로 바꿔 쓴다)\n- 객체 칸 차례는 원본 JS 객체처럼 배열 번호 꼴 이름(\"0\" ~ \"4294967294\")을 수 차례로 먼저, 나머지는 넣은 차례다.\n- 글은 원본 QuoteJSONString 꼴이다. (quote_json_text)\n- 엔진이 JSON 을 쓰는 길(LocalStorage, PersistedStore, UIDocument, WebSocketClient, 초안 세이브)이 모두 이것을 쓴다.",
+						"en": "Writes JSON. (identical to the original JSON.stringify(value) down to the character; text left in the table is written in its original units)\n- Numbers use the original String(number) form. (1.0 → 1, -0 → 0, 1e21 → 1e+21, large integers are also converted to f64)\n- Object entries are ordered like an original JS object: array-index-like names (\"0\" ~ \"4294967294\") first in numeric order, then the rest in insertion order.\n- Text uses the original QuoteJSONString form. (quote_json_text)\n- Every engine path that writes JSON (LocalStorage, PersistedStore, UIDocument, WebSocketClient, the draft save) uses this."
 					},
 					"since": "0.4.0",
-					"source": "src/misc/storagetext.rs"
+					"source": "src/misc/storagetext.rs",
+					"examples": [
+						{
+							"title": {
+								"ko": "원본 JSON.stringify 와 같은 글",
+								"en": "The same text as the original JSON.stringify"
+							},
+							"code": "use vanilla::misc::storagetext::{self, JsonSurrogateTable};\n\nlet value = serde_json::json!({ \"b\": 1.0, \"2\": -0.0, \"a\": [1e21, 0.1, 1e-7], \"1\": \"x\\ny\" });\nassert_eq!(storagetext::stringify_json(&value, &JsonSurrogateTable::new()), r#\"{\"1\":\"x\\ny\",\"2\":0,\"b\":1,\"a\":[1e+21,0.1,1e-7]}\"#);",
+							"language": "rust"
+						}
+					]
 				},
 				{
 					"kind": "method",
@@ -123721,6 +123743,98 @@
 					},
 					"since": "0.4.0",
 					"source": "src/misc/storagetext.rs"
+				},
+				{
+					"kind": "method",
+					"name": "stringify_json_with_space",
+					"signature": "pub fn stringify_json_with_space(value: &Value, space: &str, surrogate_table: &JsonSurrogateTable) -> String",
+					"params": [
+						{
+							"name": "value",
+							"type": "&Value",
+							"description": {
+								"ko": "쓸 값.",
+								"en": "Value to write."
+							}
+						},
+						{
+							"name": "space",
+							"type": "&str",
+							"description": {
+								"ko": "들여쓰기 글. (원본 JSON.stringify 의 셋째 인자, 예: \"\\t\", \"  \")",
+								"en": "The indent text. (the third argument of the original JSON.stringify, e.g. \"\\t\", \"  \")"
+							}
+						},
+						{
+							"name": "surrogate_table",
+							"type": "&JsonSurrogateTable",
+							"description": {
+								"ko": "parse_json 이 남긴 표. (따로 읽은 글이 없으면 JsonSurrogateTable::new())",
+								"en": "The table left by parse_json. (JsonSurrogateTable::new() if no text was read)"
+							}
+						}
+					],
+					"returns": {
+						"type": "String",
+						"description": {
+							"ko": "JSON 글.",
+							"en": "JSON text."
+						}
+					},
+					"description": {
+						"ko": "들여 쓴 JSON 쓰기. (원본 JSON.stringify(value, null, space) 와 글자까지 같다)\n- 빈 배열과 빈 객체는 [] 와 {}, 그 밖에는 한 칸에 한 줄씩 space 를 깊이만큼 앞에 둔다. 객체 칸은 \"이름\": 값 꼴이다.\n- 원본처럼 space 는 앞 10 글자까지만 쓴다. (빈 글이면 stringify_json 과 같다)",
+						"en": "Writes indented JSON. (identical to the original JSON.stringify(value, null, space) down to the character)\n- Empty arrays and objects are [] and {}; otherwise one entry per line with space repeated by depth in front. Object entries take the \"name\": value form.\n- As in the original, only the first 10 characters of space are used. (an empty string is the same as stringify_json)"
+					},
+					"since": "0.4.0",
+					"source": "src/misc/storagetext.rs",
+					"examples": [
+						{
+							"title": {
+								"ko": "탭으로 들여 쓰기",
+								"en": "Indenting with tabs"
+							},
+							"code": "use vanilla::misc::storagetext::{self, JsonSurrogateTable};\n\nlet value = serde_json::json!({ \"version\": 1, \"root\": { \"list\": [2.5, []], \"empty\": {} } });\nlet json_text = storagetext::stringify_json_with_space(&value, \"\\t\", &JsonSurrogateTable::new());\nassert_eq!(json_text, \"{\\n\\t\\\"version\\\": 1,\\n\\t\\\"root\\\": {\\n\\t\\t\\\"list\\\": [\\n\\t\\t\\t2.5,\\n\\t\\t\\t[]\\n\\t\\t],\\n\\t\\t\\\"empty\\\": {}\\n\\t}\\n}\");",
+							"language": "rust"
+						}
+					]
+				},
+				{
+					"kind": "method",
+					"name": "quote_json_text",
+					"signature": "pub fn quote_json_text(text: &str) -> String",
+					"params": [
+						{
+							"name": "text",
+							"type": "&str",
+							"description": {
+								"ko": "쓸 글.",
+								"en": "Text to write."
+							}
+						}
+					],
+					"returns": {
+						"type": "String",
+						"description": {
+							"ko": "JSON 글.",
+							"en": "JSON text."
+						}
+					},
+					"description": {
+						"ko": "JSON.stringify 의 글 따옴표. (원본 JSON.stringify(text) 와 같다, 앞뒤 따옴표까지)",
+						"en": "Quotes text for JSON.stringify. (same as the original JSON.stringify(text), including the surrounding quotes)"
+					},
+					"since": "0.4.0",
+					"source": "src/misc/storagetext.rs",
+					"examples": [
+						{
+							"title": {
+								"ko": "이스케이프",
+								"en": "Escapes"
+							},
+							"code": "use vanilla::misc::storagetext;\n\nassert_eq!(storagetext::quote_json_text(\"a\\\"b\\\\\\n\\u{1}\"), r#\"\"a\\\"b\\\\\\n\\u0001\"\"#);",
+							"language": "rust"
+						}
+					]
 				}
 			],
 			"enums": [
