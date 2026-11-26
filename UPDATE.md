@@ -1,6 +1,8 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- 여러 줄 입력 필드의 줄 나누기: 데스크탑과 웹 캔버스 모드가 같은 셈이다. 크롬 textarea 처럼 블링크 줄 나누기(LazyLineBreakIterator 의 빠른 표: 아스키 짝은 여는 괄호 앞과 '-', '?' 뒤에서만, '-' 뒤 숫자는 앞이 영숫자일 때만, 라틴 1 짝은 두 글자 ICU 값)에 ICU4X LineSegmenter 사전판을 normal 엄격도(작은 가나와 장음 부호 앞에서 나눔)로 쓴다. 크롬 158 의 textarea 에서 뜬 30 글(영어, 주소, 문장 부호, 한국어, 일본어, 중국어, 태국어, 러시아어, 라틴 1)의 나눔 자리가 모두 같다. (지금까지 데스크탑은 순수 UAX #14 strict 라 '/' 뒤와 작은 가나 앞이 크롬과 달랐고, 웹 캔버스 모드는 낱말 경계로 갈음했다) icu_segmenter 가 웹 의존에도 들어간다
+  - 옮기는 법: 없다. 줄이 나뉘는 자리가 크롬과 같게 바뀐다.
 - FBX 재질 여럿: 메시 하나에 재질이 여럿인 FBX(LayerElementMaterial 의 Materials, MappingInformationType ByPolygon 이나 AllSame)를 폴리곤의 재질 번호대로 부분 메시로 나눠 재질마다 드로어블 하나로 그린다. (three.js FBXLoader 의 그룹, 유니티와 언리얼의 서브메시) 지금까지는 재질 번호를 폴리곤 순번이 아니라 폴리곤 정점 순번으로 찾았고, 메시마다 소유 노드의 첫 재질 하나로만 그려 Quaternius 마네킹(M_Main, M_Joints)이 온통 주황이었다. 새 SkinnedModel::split_fbx_corners_by_material 과 FbxCornerArrays, FBX MeshDescription 과 드로어블의 material_name 이 FBX Material 이름(glb 처럼), FbxMaterial.name. 원본과 같다. 단위 시험 multiple_materials_split_by_polygon, mannequin_fbx_materials_from_examples(원본과 같은 삼각형 수 5732, 8012). 문서 그림 model-viewer, 셰이더 해시를 바꾼 뒤의 effect-gallery, shader-sprite, screen-effect 다시 찍음(같은 크기, cwebp -q 85).
   - 옮기는 법: FBX 모델의 드로어블 목록이 재질 수만큼 늘어난다. 드로어블 0 하나가 메시 전체라고 기대하던 코드는 material_name 이나 material_index 로 찾는다.
 - 크레이트 라이선스 파일: vanilla-engine-macros, vanilla-engine-apidoc, vanilla-engine-licenses 에도 뿌리와 같은 LICENSE(저작권자 vanillapunch)를 두고 include 에 넣어 cargo package 꾸러미에 실린다. apidoc, licenses 에 authors 를 적고, licenses 는 SPDX 전문 texts 도 싣는다.
