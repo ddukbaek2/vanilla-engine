@@ -207,6 +207,31 @@ fn run_comparison_scene() -> String {
 				Some(hit) => line_list.push(format!("step {} ray {} {} {} {} {}", step_index, hit.shape_id.get_index(), to_bits(hit.fraction), to_bits(hit.point.x), to_bits(hit.normal.x), to_bits(hit.normal.y))),
 			}
 			line_list.push(format!("step {} awake {} contacts {}", step_index, world.get_awake_body_count(), world.get_contact_count()));
+			// 질의: 모든 광선 맞음(돌려준 값 1 로 끝까지), 상자, 점, 모양 겹침. (부른 차례대로 모양 번호)
+			let mut ray_hit_list: Vec<String> = Vec::new();
+			world.cast_ray(PhysicsVector2::create(-8.0, -3.0), PhysicsVector2::create(20.0, 2.5), &query_filter, |shape_id, point, normal, fraction| {
+				ray_hit_list.push(format!("{}:{}:{}:{}", shape_id.get_index(), to_bits(fraction), to_bits(point.y), to_bits(normal.x)));
+				1.0
+			});
+			line_list.push(format!("step {} rays {}", step_index, ray_hit_list.join(" ")));
+			let mut aabb_list: Vec<String> = Vec::new();
+			world.overlap_aabb(&AABB2D::create(-3.0, -4.0, 3.0, 0.5), &query_filter, |shape_id| {
+				aabb_list.push(shape_id.get_index().to_string());
+				true
+			});
+			line_list.push(format!("step {} aabb {}", step_index, aabb_list.join(" ")));
+			let mut point_list: Vec<String> = Vec::new();
+			world.overlap_point(PhysicsVector2::create(0.2, -0.5), &query_filter, |shape_id| {
+				point_list.push(shape_id.get_index().to_string());
+				true
+			});
+			line_list.push(format!("step {} point {}", step_index, point_list.join(" ")));
+			let mut shape_list: Vec<String> = Vec::new();
+			world.overlap_shape(Circle2D::create(PhysicsVector2::zero(), 1.2), PhysicsVector2::create(-1.0, -1.5), 0.3, &query_filter, |shape_id| {
+				shape_list.push(shape_id.get_index().to_string());
+				shape_list.len() < 4
+			});
+			line_list.push(format!("step {} shape {}", step_index, shape_list.join(" ")));
 		}
 	}
 	for body_id in world.get_body_ids() {

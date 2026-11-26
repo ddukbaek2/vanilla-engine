@@ -6,6 +6,7 @@
 //!   떨어진 채 꼭짓점끼리 가장 가까우면 선분 거리로 꼭짓점과 꼭짓점 사이 법선을 쓴다. (Erin Catto, GDC 2007 Contact Manifolds 와 Box2D 3 의 방식)
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
+use crate::experimental::jsmath::js_max;
 use super::geometry2d::ShapeType2D;
 use super::shape2d::Shape2D;
 
@@ -660,7 +661,7 @@ pub(crate) fn test_point_in_world_shape(shape: &WorldShape, point_x: f64, point_
 		let mut maximum_separation = f64::NEG_INFINITY;
 		for index in 0..shape.count {
 			let separation = shape.normal_x[index] * (point_x - shape.vertex_x[index]) + shape.normal_y[index] * (point_y - shape.vertex_y[index]);
-			maximum_separation = maximum_separation.max(separation);
+			maximum_separation = js_max(maximum_separation, separation);
 		}
 		if maximum_separation <= 0.0 {
 			return true;

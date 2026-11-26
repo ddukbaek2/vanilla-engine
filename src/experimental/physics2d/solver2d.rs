@@ -7,6 +7,7 @@
 //! - 부드러운 구속은 고유 진동수(헤르츠)와 감쇠비로 정한다. (Erin Catto, GDC 2011 Soft Constraints)
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
+use crate::experimental::jsmath::{js_max, js_min};
 use super::body2d::{Body2D, NO_INDEX};
 use super::narrowphase2d::Manifold;
 
@@ -339,7 +340,7 @@ pub(crate) fn solve_contact(contact: &mut Contact, solver_body_list: &mut [Solve
 			velocity_bias = current_separation * inverse_sub_step_time;
 		}
 		else if use_bias {
-			velocity_bias = (softness.bias_rate * current_separation).max(-maximum_bias_velocity);
+			velocity_bias = js_max(softness.bias_rate * current_separation, -maximum_bias_velocity);
 			mass_scale = softness.mass_scale;
 			impulse_scale = softness.impulse_scale;
 		}
@@ -347,10 +348,10 @@ pub(crate) fn solve_contact(contact: &mut Contact, solver_body_list: &mut [Solve
 		let relative_velocity_y = velocity_b_y + angular_velocity_b * anchor_b_x - velocity_a_y - angular_velocity_a * anchor_a_x;
 		let normal_velocity = normal_x * relative_velocity_x + normal_y * relative_velocity_y;
 		let mut impulse = -manifold_point.normal_mass * mass_scale * (normal_velocity + velocity_bias) - impulse_scale * manifold_point.normal_impulse;
-		let new_impulse = (manifold_point.normal_impulse + impulse).max(0.0);
+		let new_impulse = js_max(manifold_point.normal_impulse + impulse, 0.0);
 		impulse = new_impulse - manifold_point.normal_impulse;
 		manifold_point.normal_impulse = new_impulse;
-		manifold_point.maximum_normal_impulse = manifold_point.maximum_normal_impulse.max(impulse);
+		manifold_point.maximum_normal_impulse = js_max(manifold_point.maximum_normal_impulse, impulse);
 		let impulse_x = impulse * normal_x;
 		let impulse_y = impulse * normal_y;
 		velocity_a_x -= inverse_mass_a * impulse_x;
@@ -373,7 +374,7 @@ pub(crate) fn solve_contact(contact: &mut Contact, solver_body_list: &mut [Solve
 		let tangent_velocity = tangent_x * relative_velocity_x + tangent_y * relative_velocity_y;
 		let mut impulse = -manifold_point.tangent_mass * tangent_velocity;
 		let maximum_friction = friction * manifold_point.normal_impulse;
-		let new_impulse = (-maximum_friction).max((manifold_point.tangent_impulse + impulse).min(maximum_friction));
+		let new_impulse = js_max(-maximum_friction, js_min(manifold_point.tangent_impulse + impulse, maximum_friction));
 		impulse = new_impulse - manifold_point.tangent_impulse;
 		manifold_point.tangent_impulse = new_impulse;
 		let impulse_x = impulse * tangent_x;
@@ -427,10 +428,10 @@ pub(crate) fn apply_contact_restitution(contact: &mut Contact, solver_body_list:
 		let relative_velocity_y = velocity_b_y + angular_velocity_b * anchor_b_x - velocity_a_y - angular_velocity_a * anchor_a_x;
 		let normal_velocity = normal_x * relative_velocity_x + normal_y * relative_velocity_y;
 		let mut impulse = -manifold_point.normal_mass * (normal_velocity + restitution * manifold_point.relative_velocity);
-		let new_impulse = (manifold_point.normal_impulse + impulse).max(0.0);
+		let new_impulse = js_max(manifold_point.normal_impulse + impulse, 0.0);
 		impulse = new_impulse - manifold_point.normal_impulse;
 		manifold_point.normal_impulse = new_impulse;
-		manifold_point.maximum_normal_impulse = manifold_point.maximum_normal_impulse.max(impulse);
+		manifold_point.maximum_normal_impulse = js_max(manifold_point.maximum_normal_impulse, impulse);
 		let impulse_x = impulse * normal_x;
 		let impulse_y = impulse * normal_y;
 		velocity_a_x -= inverse_mass_a * impulse_x;

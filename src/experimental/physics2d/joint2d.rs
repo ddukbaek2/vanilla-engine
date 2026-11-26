@@ -4,6 +4,7 @@
 //! - 원본과 다른 점: 정의의 몸 아이디는 Option 이다. (원본은 null) 사용자 값은 u64 다.
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
+use crate::experimental::jsmath::{js_max, js_min};
 use super::body2d::{Body2D, NO_INDEX};
 use super::physicsid2d::{BodyId2D, JointId2D};
 use super::physicsmath2d::PhysicsMath2D;
@@ -633,7 +634,7 @@ impl Joint2D {
 	/// - `length`: 쉬는 길이.
 	//==============================================================================
 	pub fn set_length(&mut self, length: f64) {
-		self.length = length.max(0.0);
+		self.length = js_max(length, 0.0);
 		self.is_wake_requested = true;
 	}
 
@@ -675,7 +676,7 @@ impl Joint2D {
 	/// - `hertz`: 진동수.
 	//==============================================================================
 	pub fn set_spring_hertz(&mut self, hertz: f64) {
-		self.hertz = hertz.max(0.0);
+		self.hertz = js_max(hertz, 0.0);
 		self.is_wake_requested = true;
 	}
 
@@ -686,7 +687,7 @@ impl Joint2D {
 	/// - `damping_ratio`: 감쇠비.
 	//==============================================================================
 	pub fn set_spring_damping_ratio(&mut self, damping_ratio: f64) {
-		self.damping_ratio = damping_ratio.max(0.0);
+		self.damping_ratio = js_max(damping_ratio, 0.0);
 		self.is_wake_requested = true;
 	}
 
@@ -739,7 +740,7 @@ impl Joint2D {
 	/// - `max_motor_torque`: 가장 큰 돌림힘.
 	//==============================================================================
 	pub fn set_max_motor_torque(&mut self, max_motor_torque: f64) {
-		self.max_motor_torque = max_motor_torque.max(0.0);
+		self.max_motor_torque = js_max(max_motor_torque, 0.0);
 		self.is_wake_requested = true;
 	}
 
@@ -785,10 +786,10 @@ impl Joint2D {
 	/// - `upper`: 위 한도. (lower 보다 작으면 둘을 바꾼다)
 	//==============================================================================
 	pub fn set_limits(&mut self, lower: f64, upper: f64) {
-		let minimum = lower.min(upper);
-		let maximum = lower.max(upper);
+		let minimum = js_min(lower, upper);
+		let maximum = js_max(lower, upper);
 		if self.joint_type == JointType2D::Distance {
-			self.min_length = minimum.max(0.0);
+			self.min_length = js_max(minimum, 0.0);
 			self.max_length = maximum;
 		}
 		else {
@@ -832,8 +833,8 @@ impl Joint2D {
 	/// - `damping_ratio`: 감쇠비.
 	//==============================================================================
 	pub fn set_linear_spring(&mut self, hertz: f64, damping_ratio: f64) {
-		self.linear_hertz = hertz.max(0.0);
-		self.linear_damping_ratio = damping_ratio.max(0.0);
+		self.linear_hertz = js_max(hertz, 0.0);
+		self.linear_damping_ratio = js_max(damping_ratio, 0.0);
 		self.is_wake_requested = true;
 	}
 
@@ -845,8 +846,8 @@ impl Joint2D {
 	/// - `damping_ratio`: 감쇠비.
 	//==============================================================================
 	pub fn set_angular_spring(&mut self, hertz: f64, damping_ratio: f64) {
-		self.angular_hertz = hertz.max(0.0);
-		self.angular_damping_ratio = damping_ratio.max(0.0);
+		self.angular_hertz = js_max(hertz, 0.0);
+		self.angular_damping_ratio = js_max(damping_ratio, 0.0);
 		self.is_wake_requested = true;
 	}
 
@@ -1187,7 +1188,7 @@ pub(crate) fn solve_joint(joint: &mut Joint2D, solver_body_list: &mut [SolverBod
 							joint.upper_impulse
 						};
 						let mut impulse = -mass_scale * axial_mass * (speed + bias) - impulse_scale * old_impulse;
-						let new_impulse = (old_impulse + impulse).max(0.0);
+						let new_impulse = js_max(old_impulse + impulse, 0.0);
 						impulse = new_impulse - old_impulse;
 						if side == 0 {
 							joint.lower_impulse = new_impulse;
@@ -1248,7 +1249,7 @@ pub(crate) fn solve_joint(joint: &mut Joint2D, solver_body_list: &mut [SolverBod
 					let mut impulse = -joint.axial_mass * angular_speed;
 					let old_impulse = joint.motor_impulse;
 					let maximum_impulse = sub_step_time * joint.max_motor_torque;
-					joint.motor_impulse = (-maximum_impulse).max((old_impulse + impulse).min(maximum_impulse));
+					joint.motor_impulse = js_max(-maximum_impulse, js_min(old_impulse + impulse, maximum_impulse));
 					impulse = joint.motor_impulse - old_impulse;
 					angular_velocity_a -= inverse_inertia_a * impulse;
 					angular_velocity_b += inverse_inertia_b * impulse;
@@ -1288,7 +1289,7 @@ pub(crate) fn solve_joint(joint: &mut Joint2D, solver_body_list: &mut [SolverBod
 							joint.upper_impulse
 						};
 						let mut impulse = -joint.axial_mass * mass_scale * (angular_speed + bias) - impulse_scale * old_impulse;
-						let new_impulse = (old_impulse + impulse).max(0.0);
+						let new_impulse = js_max(old_impulse + impulse, 0.0);
 						impulse = new_impulse - old_impulse;
 						if side == 0 {
 							joint.lower_impulse = new_impulse;
@@ -1371,7 +1372,7 @@ pub(crate) fn solve_joint(joint: &mut Joint2D, solver_body_list: &mut [SolverBod
 				let mut impulse = -joint.motor_mass * angular_speed;
 				let old_impulse = joint.motor_impulse;
 				let maximum_impulse = sub_step_time * joint.max_motor_torque;
-				joint.motor_impulse = (-maximum_impulse).max((old_impulse + impulse).min(maximum_impulse));
+				joint.motor_impulse = js_max(-maximum_impulse, js_min(old_impulse + impulse, maximum_impulse));
 				impulse = joint.motor_impulse - old_impulse;
 				angular_velocity_a -= inverse_inertia_a * impulse;
 				angular_velocity_b += inverse_inertia_b * impulse;
@@ -1424,7 +1425,7 @@ pub(crate) fn solve_joint(joint: &mut Joint2D, solver_body_list: &mut [SolverBod
 						joint.upper_impulse
 					};
 					let mut impulse = -joint.axial_mass * mass_scale * (speed + bias) - impulse_scale * old_impulse;
-					let new_impulse = (old_impulse + impulse).max(0.0);
+					let new_impulse = js_max(old_impulse + impulse, 0.0);
 					impulse = new_impulse - old_impulse;
 					if side == 0 {
 						joint.lower_impulse = new_impulse;
