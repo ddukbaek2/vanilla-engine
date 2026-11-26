@@ -30,7 +30,8 @@
 //!   맥 시스템 UI 글꼴(SFNS, opsz 17 ~ 96, 처음 28)이 16px 에서 opsz 17 과 trak -40 단위로 크롬과 같아진다. (색 이모지는 CoreText 의 전진폭 그대로 둔다)
 //! - 낱말마다 모양 짓기: 크롬 캔버스(platform/fonts/plain_text_node.cc 의 SegmentWord)는 글을 낱말로 나눠 따로 모양 짓는다. 빈칸을 낀 커닝과 합자가 없다.
 //!   빈칸(U+0020), 탭, ZWSP 는 하나씩, 한중일 글자와 이모지는 글자마다 따로다. (find_chrome_word_end) 캔버스의 탭, 줄바꿈, 폼 피드, 캐리지 리턴은 빈칸으로 바꾼다.
-//! - 맥: 파일에서 읽은 색 이모지 글꼴(sbix)과 윤곽 표가 없는 글꼴(PingFang 의 hvgl)은 CoreText 로 그린다. (platform/desktop/coretextglyph.rs, 원본 크롬 맥도 CoreText 로 그린다)
+//! - 맥: 글리프를 원본 크롬 맥처럼 CoreText 로 그린다. (platform/desktop/coretextglyph.rs) 색이 아닌 글리프는 크롬 Canvas2D 와 같은 설정의 A8 마스크(글꼴 부드럽게,
+//!   CoreGraphics 감마 풀기, 글자 색 밝기의 감마 전보정, 1/4 픽셀 서브픽셀 자리)이고, 파일에서 읽은 색 이모지 글꼴(sbix)은 CoreText 색 그림이다. (rasterize_glyph_at)
 //!   색 이모지의 전진폭은 CoreText 가 작은 크기에서 키워 그리는 비를 곱하고 정수 픽셀로 반올림한다. (16px 에서 20, 13px 에서 16, 크롬 measureText 와 같다)
 //!
 //! # 예제
@@ -1878,11 +1879,66 @@ pub struct GlyphRaster {
 /// ```
 //==============================================================================
 pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32) -> GlyphRaster {
+	rasterize_glyph_at(face, glyph_index, pixel_size, 0.0, [255, 255, 255])
+}
+
+//==============================================================================
+/// 서브픽셀 자리와 글자 색 밝기로 글리프 래스터. (맥은 크롬처럼 CoreText 로 그리고, 그 밖은 rasterize_glyph 와 같다)
+/// - 맥: 색이 아닌 글리프는 크롬 맥 Canvas2D 와 같은 길로 그린다. (스키아 SkScalerContext_Mac 의 A8 마스크: 글꼴 부드럽게, CoreGraphics 감마 풀기, 글자 색 밝기의 감마 전보정)
+///   글자 색 밝기는 맥 스키아처럼 글꼴 부드럽게가 회색이면 1/2 을 곱한 색의 3 비트 단계이고, 감마는 크롬 맥의 sRGB, 대비는 0 이다. (SkTypeface_Mac::onFilterRec, 크로미엄 skia/BUILD.gn)
+///   가짜 기울임은 CoreText 의 글자 행렬 기울기로 그린다. 색 글리프는 rasterize_glyph 와 같다.
+/// - 그 밖의 데스크탑은 서브픽셀 자리와 밝기를 쓰지 않는다.
+///
+/// # 인자
+/// - `face`: 그릴 얼굴. (가짜 굵게, 가짜 기울임을 입힐지 함께)
+/// - `glyph_index`: 글리프 번호.
+/// - `pixel_size`: 글자 크기. (픽셀)
+/// - `subpixel_x`: 서브픽셀 가로 자리. (0, 0.25, 0.5, 0.75, 스키아처럼 글리프 자리에 1/8 을 더해 내린 정수 자리의 나머지를 1/4 단위로 내린 값)
+/// - `luminance_color`: 글자 색. (sRGB 의 빨강, 초록, 파랑, 원본처럼 흰색으로 굽는 글은 [255, 255, 255])
+///
+/// # 돌려줌
+/// 래스터. 윤곽이 없는 글리프(빈칸)는 너비와 높이가 0. left_x 는 서브픽셀 몫을 뺀 정수 자리에서 잰다.
+///
+/// # 예제
+/// 서브픽셀 자리를 옮겨도 덮인 정도의 합은 거의 같다
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::core::textshaping::{rasterize_glyph_at, shape_text, LoadedFont, ResolvedFontFace};
+/// use vanilla::platform::find_fallback_font_file;
+/// use vanilla::{FontFaceDescriptors, ShapingDirection};
+///
+/// if let Some(source) = find_fallback_font_file("H", 400, false, false) {
+/// 	let face = ResolvedFontFace {
+/// 		font: Rc::new(LoadedFont::create_from_bytes(std::fs::read(&source.path).expect("font file")).expect("font")),
+/// 		descriptors: FontFaceDescriptors::new(),
+/// 		is_synthetic_bold: false,
+/// 		is_synthetic_italic: false,
+/// 	};
+/// 	let glyph_index = shape_text(&[face.clone()], "H", 24.0, ShapingDirection::LeftToRight, None).glyph_list[0].glyph_index;
+/// 	let glyph_raster = rasterize_glyph_at(&face, glyph_index, 24.0, 0.0, [255, 255, 255]);
+/// 	let shifted_glyph_raster = rasterize_glyph_at(&face, glyph_index, 24.0, 0.5, [255, 255, 255]);
+/// 	let sum = |coverage: &[u8]| coverage.iter().map(|value| *value as u32).sum::<u32>() as f32;
+/// 	assert!(glyph_raster.width > 0 && shifted_glyph_raster.width > 0);
+/// 	assert!((sum(&glyph_raster.coverage) / sum(&shifted_glyph_raster.coverage) - 1.0).abs() < 0.1);
+/// }
+/// ```
+//==============================================================================
+pub fn rasterize_glyph_at(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32, subpixel_x: f32, luminance_color: [u8; 3]) -> GlyphRaster {
 	#[cfg(target_os = "macos")]
 	{
 		if let Some(glyph_raster) = rasterize_core_text_glyph(face, glyph_index, pixel_size) {
 			return glyph_raster;
 		}
+		let is_color_glyph = face.font.has_color_tables && colorglyph::has_color_glyph(face.font.get_shaping_face(), glyph_index);
+		if !is_color_glyph {
+			if let Some(glyph_raster) = rasterize_core_text_mask(face, glyph_index, pixel_size, subpixel_x, luminance_color) {
+				return glyph_raster;
+			}
+		}
+	}
+	#[cfg(not(target_os = "macos"))]
+	{
+		let _ = (subpixel_x, luminance_color);
 	}
 	if face.font.has_color_tables {
 		if let Some(color_glyph_raster) = colorglyph::rasterize_color_glyph(face.font.get_shaping_face(), glyph_index, pixel_size) {
@@ -1969,7 +2025,8 @@ pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f3
 //==============================================================================
 #[cfg(target_os = "macos")]
 fn rasterize_core_text_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32) -> Option<GlyphRaster> {
-	if !face.font.is_core_text_raster() {
+	// 색 이모지 글꼴(sbix)만. (윤곽 표가 없는 글꼴은 rasterize_core_text_mask 가 그린다)
+	if !face.font.is_core_text_raster() || face.font.get_shaping_face().tables().sbix.is_none() {
 		return None;
 	}
 	let source_path = face.font.source_path.as_ref()?;
@@ -2029,6 +2086,78 @@ fn rasterize_core_text_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_si
 	}
 	if face.is_synthetic_italic {
 		apply_synthetic_italic(&mut glyph_raster);
+	}
+	Some(glyph_raster)
+}
+
+//==============================================================================
+/// 맥 CoreText 로 색이 아닌 글리프의 덮인 정도 그리기. (크롬 맥 Canvas2D 의 A8 마스크, CoreText 가 글꼴을 짓지 못하거나 그릴 것이 없으면 None)
+/// - 파일에서 읽은 글꼴은 그 파일로, 바이트로 올린 글꼴은 그 바이트로 CoreText 글꼴을 짓는다. (크롬도 받은 웹 글꼴을 CoreText 로 그린다)
+/// - 가짜 굵게는 rasterize_glyph 처럼 덮인 정도를 넓힌다.
+//==============================================================================
+#[cfg(target_os = "macos")]
+fn rasterize_core_text_mask(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32, subpixel_x: f32, luminance_color: [u8; 3]) -> Option<GlyphRaster> {
+	use crate::core::maskgamma;
+	use crate::platform::desktop::coretextglyph::{self, CoreTextFontSource, SmoothBehavior};
+	let font_source = match face.font.source_path.as_ref() {
+		Some(source_path) => {
+			CoreTextFontSource::Path(source_path)
+		}
+		None => {
+			CoreTextFontSource::Bytes(face.font.get_font_bytes())
+		}
+	};
+	// 감마 전보정 표. (SkTypeface_Mac::onFilterRec: 글꼴 부드럽게가 회색이면 밝기 색에 1/2, LCD 면 3/4 를 곱하고 대비 0, 부드럽게가 없으면 고치지 않는다. 감마는 크롬 맥의 SK_GAMMA_SRGB)
+	let smooth_behavior = coretextglyph::read_smooth_behavior();
+	let correcting_table = match smooth_behavior {
+		SmoothBehavior::None => {
+			None
+		}
+		SmoothBehavior::Some | SmoothBehavior::Subpixel => {
+			let scale_channel = |value: u8| -> u8 {
+				let canonical_value = maskgamma::canonicalize_channel(value) as u32;
+				if smooth_behavior == SmoothBehavior::Some {
+					(canonical_value / 2) as u8
+				}
+				else {
+					(canonical_value * 3 / 4) as u8
+				}
+			};
+			let luminance = maskgamma::resolve_a8_luminance(scale_channel(luminance_color[0]), scale_channel(luminance_color[1]), scale_channel(luminance_color[2]));
+			maskgamma::find_a8_correcting_table(luminance, 0.0, 0.0)
+		}
+	};
+	let skew_x = if face.is_synthetic_italic {
+		SYNTHETIC_ITALIC_SKEW
+	}
+	else {
+		0.0
+	};
+	let glyph_mask = coretextglyph::rasterize_glyph_mask(font_source, face.font.face_index, glyph_index, pixel_size, &face.font.read_core_text_variation_list(pixel_size), subpixel_x, skew_x, correcting_table.as_ref())?;
+	let mut glyph_raster = GlyphRaster {
+		coverage: glyph_mask.coverage,
+		width: glyph_mask.width,
+		height: glyph_mask.height,
+		left_x: glyph_mask.left_x,
+		top_y: glyph_mask.top_y,
+		color_pixels: None,
+	};
+	if face.is_synthetic_bold {
+		let radius = calculate_synthetic_bold_radius(pixel_size);
+		let margin = radius.ceil() as i32 + 1;
+		let width = glyph_raster.width + margin * 2;
+		let height = glyph_raster.height + margin * 2;
+		let mut padded = vec![0u8; (width * height) as usize];
+		for position_y in 0..glyph_raster.height {
+			for position_x in 0..glyph_raster.width {
+				padded[((position_y + margin) * width + position_x + margin) as usize] = glyph_raster.coverage[(position_y * glyph_raster.width + position_x) as usize];
+			}
+		}
+		glyph_raster.coverage = dilate_coverage(&padded, width, height, radius);
+		glyph_raster.width = width;
+		glyph_raster.height = height;
+		glyph_raster.left_x -= margin;
+		glyph_raster.top_y += margin;
 	}
 	Some(glyph_raster)
 }
