@@ -28,8 +28,9 @@
 //!     웹은 원본처럼 브라우저 창이 그 자리에서 답한다. 데스크탑은 엔진이 그린 같은 질문 창이 떠서 답할 때까지 씬이 멈추고, 답은 다음 tick 에 받는다.
 //!   - Statistics 의 clientNativeSize 는 ViewManager::get_client_native_size(웹은 페이지 전체 크기, 데스크탑은 창 안쪽 논리 크기)다.
 //!     메모리는 웹에서 원본처럼 Chrome 의 performance.memory 를 읽고, 없는 브라우저는 "(N/A)" 다.
-//!     데스크탑은 자바스크립트 힙이 없어 같은 칸에 러스트가 쓰는 시스템 할당자의 힙(쓰는 중, 잡아 둔 것)을 적는다. (platform/desktop.rs read_heap_usage)
-//!     jsHeapSizeLimit 는 V8 이 정한 힙 상한인데 시스템 할당자에는 그런 상한이 없어 "(N/A)" 다. 힙을 못 읽는 OS 는 셋 다 "(N/A)" 다.
+//!     데스크탑은 자바스크립트 힙이 없어 같은 칸에 같은 뜻의 값을 운영체제 API 로 읽어 적는다. 쓰는 중과 잡아 둔 것은 러스트가 쓰는 시스템 할당자의 힙,
+//!     jsHeapSizeLimit 는 운영체제가 이 프로세스의 힙에 허락하는 상한이다. (platform/desktop.rs read_heap_usage, read_heap_size_limit)
+//!     두 엔진 모두 구하지 못한 칸은 칸마다 "(N/A)" 다. (힙을 못 읽으면 셋 다)
 //!     viewScaleMode 는 러스트 열거 이름(StretchHeight 등)으로 적는다.
 //!   - 화면 비율 가이드는 원본처럼 그때의 좌표계에 기대지 않고 스스로 뷰 좌표계(apply_view_rect)를 걸고 그린다. (원본 GameScene 에서 같은 결과)
 //! - Settings 의 Show FPS 를 켜면 패널을 닫아도 창 왼쪽 위에 지난 1 초의 프레임 수를 그린다. (원본과 같다, canvas native 좌표, 패널이 보이면 패널 위에)
@@ -2565,7 +2566,7 @@ fn format_megabytes(bytes: f64) -> String {
 }
 
 //==============================================================================
-/// 자바스크립트 힙 크기. (원본 performance.memory 의 usedJSHeapSize, totalJSHeapSize, jsHeapSizeLimit, 바이트, 상한이 없으면 None)
+/// 자바스크립트 힙 크기. (원본 performance.memory 의 usedJSHeapSize, totalJSHeapSize, jsHeapSizeLimit, 바이트, 상한을 못 구하면 None)
 //==============================================================================
 struct PerformanceMemory {
 	used_heap_size: f64,
@@ -2590,12 +2591,12 @@ fn read_performance_memory() -> Option<PerformanceMemory> {
 	Some(PerformanceMemory {
 		used_heap_size: read_size("usedJSHeapSize")?,
 		total_heap_size: read_size("totalJSHeapSize")?,
-		heap_size_limit: Some(read_size("jsHeapSizeLimit")?),
+		heap_size_limit: read_size("jsHeapSizeLimit"),
 	})
 }
 
 //==============================================================================
-/// 자바스크립트 힙 크기 읽기. (데스크탑에는 자바스크립트 힙이 없어 시스템 할당자의 힙을 읽는다, 상한은 없다. 못 읽는 OS 는 None)
+/// 자바스크립트 힙 크기 읽기. (데스크탑에는 자바스크립트 힙이 없어 시스템 할당자의 힙과 운영체제가 허락하는 힙 한도를 읽는다. 힙을 못 읽는 OS 는 None)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn read_performance_memory() -> Option<PerformanceMemory> {
@@ -2603,7 +2604,7 @@ fn read_performance_memory() -> Option<PerformanceMemory> {
 	Some(PerformanceMemory {
 		used_heap_size,
 		total_heap_size,
-		heap_size_limit: None,
+		heap_size_limit: crate::platform::desktop::read_heap_size_limit(),
 	})
 }
 
