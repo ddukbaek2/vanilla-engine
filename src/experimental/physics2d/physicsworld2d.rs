@@ -22,6 +22,7 @@ use super::joint2d::{prepare_joint, solve_joint, warm_start_joint, DistanceJoint
 use super::narrowphase2d::{collide_shapes, fill_world_shape, ray_cast_world_shape, test_point_in_world_shape, Manifold, WorldShape};
 use super::physicsid2d::{BodyId2D, JointId2D, ShapeId2D};
 use super::physicsmath2d::PhysicsMath2D;
+use super::physicsuserdata2d::PhysicsUserData2D;
 use super::physicsvector2::PhysicsVector2;
 use super::shape2d::{compute_shape_aabb, compute_shape_extent, compute_shape_mass, set_shape_geometry, should_filters_collide, ChainDefinition2D, QueryFilter2D, Shape2D, ShapeDefinition2D};
 use super::solver2d::{apply_contact_restitution, integrate_rotation, make_softness, prepare_contact, solve_contact, warm_start_contact, Contact, SolverBody, StepContext, STATIC_SOLVER_BODY};
@@ -451,7 +452,7 @@ impl PhysicsWorld2D {
 		data.enable_sleep = body_definition.enable_sleep;
 		data.is_awake = data.body_type != BodyType2D::Static && body_definition.is_awake;
 		data.is_fixed_rotation = body_definition.is_fixed_rotation;
-		data.user_data = body_definition.user_data;
+		data.user_data = body_definition.user_data.clone();
 		let body_id = data.id;
 		self.body_list[index] = Some(data);
 		self.update_body_mass(index);
@@ -651,7 +652,7 @@ impl PhysicsWorld2D {
 		data.is_sensor = shape_definition.is_sensor;
 		data.enable_sensor_events = shape_definition.enable_sensor_events;
 		data.enable_contact_events = shape_definition.enable_contact_events;
-		data.user_data = shape_definition.user_data;
+		data.user_data = shape_definition.user_data.clone();
 		let mut aabb = AABB2D::new();
 		compute_shape_aabb(&data, position_x, position_y, rotation_cosine, rotation_sine, &mut aabb);
 		data.aabb = aabb;
@@ -693,7 +694,7 @@ impl PhysicsWorld2D {
 		shape_definition.friction = chain_definition.friction;
 		shape_definition.restitution = chain_definition.restitution;
 		shape_definition.filter = chain_definition.filter;
-		shape_definition.user_data = chain_definition.user_data;
+		shape_definition.user_data = chain_definition.user_data.clone();
 		let segment_count = if chain_definition.is_loop && point_count > 2 {
 			point_count
 		}
@@ -821,7 +822,7 @@ impl PhysicsWorld2D {
 	//==============================================================================
 	/// 관절 만들기. (공통, 새 관절 칸 번호)
 	//==============================================================================
-	fn create_joint_internal(&mut self, joint_type: JointType2D, body_id_a: Option<BodyId2D>, body_id_b: Option<BodyId2D>, local_anchor_a: PhysicsVector2, local_anchor_b: PhysicsVector2, collide_connected: bool, user_data: u64) -> Option<usize> {
+	fn create_joint_internal(&mut self, joint_type: JointType2D, body_id_a: Option<BodyId2D>, body_id_b: Option<BodyId2D>, local_anchor_a: PhysicsVector2, local_anchor_b: PhysicsVector2, collide_connected: bool, user_data: PhysicsUserData2D) -> Option<usize> {
 		let body_index_a = self.resolve_body_index(body_id_a?)?;
 		let body_index_b = self.resolve_body_index(body_id_b?)?;
 		if body_index_a == body_index_b {
@@ -875,7 +876,7 @@ impl PhysicsWorld2D {
 	/// 새 관절 아이디. (몸이 없으면 None)
 	//==============================================================================
 	pub fn create_distance_joint(&mut self, definition: &DistanceJointDefinition2D) -> Option<JointId2D> {
-		let index = self.create_joint_internal(JointType2D::Distance, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data)?;
+		let index = self.create_joint_internal(JointType2D::Distance, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data.clone())?;
 		let linear_slop = self.linear_slop;
 		let data = self.joint_list[index].as_mut().expect("관절");
 		data.length = js_max(linear_slop, definition.length);
@@ -898,7 +899,7 @@ impl PhysicsWorld2D {
 	/// 새 관절 아이디. (몸이 없으면 None)
 	//==============================================================================
 	pub fn create_revolute_joint(&mut self, definition: &RevoluteJointDefinition2D) -> Option<JointId2D> {
-		let index = self.create_joint_internal(JointType2D::Revolute, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data)?;
+		let index = self.create_joint_internal(JointType2D::Revolute, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data.clone())?;
 		let data = self.joint_list[index].as_mut().expect("관절");
 		data.reference_angle = PhysicsMath2D::unwind_angle(definition.reference_angle);
 		data.enable_spring = definition.enable_spring;
@@ -923,7 +924,7 @@ impl PhysicsWorld2D {
 	/// 새 관절 아이디. (몸이 없으면 None)
 	//==============================================================================
 	pub fn create_weld_joint(&mut self, definition: &WeldJointDefinition2D) -> Option<JointId2D> {
-		let index = self.create_joint_internal(JointType2D::Weld, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data)?;
+		let index = self.create_joint_internal(JointType2D::Weld, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data.clone())?;
 		let data = self.joint_list[index].as_mut().expect("관절");
 		data.reference_angle = PhysicsMath2D::unwind_angle(definition.reference_angle);
 		data.linear_hertz = js_max(definition.linear_hertz, 0.0);
@@ -947,7 +948,7 @@ impl PhysicsWorld2D {
 		if axis_length <= 0.0 || axis_length.is_nan() {
 			return None;
 		}
-		let index = self.create_joint_internal(JointType2D::Wheel, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data)?;
+		let index = self.create_joint_internal(JointType2D::Wheel, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data.clone())?;
 		let data = self.joint_list[index].as_mut().expect("관절");
 		data.local_axis_a_x = definition.local_axis_a.x / axis_length;
 		data.local_axis_a_y = definition.local_axis_a.y / axis_length;

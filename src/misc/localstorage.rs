@@ -989,7 +989,7 @@ impl LocalStorage {
 				storagetext::stringify_json(value, surrogate_table)
 			}
 			None => {
-				value.to_string()
+				storagetext::stringify_json(value, &JsonSurrogateTable::new())
 			}
 		};
 		let is_written = write_item_text(&storage_key, &string_value);
@@ -1351,7 +1351,7 @@ mod storage_backend {
 					file_text.push_str(&quote_json_code_units(key_code_units));
 				}
 				None => {
-					file_text.push_str(&serde_json::to_string(key.get_lossy_text()).unwrap_or_default());
+					file_text.push_str(&storagetext::quote_json_text(key.get_lossy_text()));
 				}
 			}
 			file_text.push_str(": ");
@@ -1360,7 +1360,7 @@ mod storage_backend {
 					file_text.push_str(&quote_json_code_units(code_units));
 				}
 				None => {
-					file_text.push_str(&serde_json::to_string(value).unwrap_or_default());
+					file_text.push_str(&storagetext::quote_json_text(value));
 				}
 			}
 		}

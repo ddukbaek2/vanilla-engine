@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use vanilla::experimental::tilemap::{RuleTile, RuleTileNeighbor, RuleTileTransform, TileCollisionShape, TileCollisionShapeKind, TiledMapReader, Tilemap, TilemapLayer};
-use vanilla::{Color, Component, ComponentBase, Engine, EngineConfiguration, Graphic, Image, ImageAsset, JsonAsset, NodeId, NodeTransform, NodeTree, Paint, Pivot, Scene, SceneBase, Vector2};
+use vanilla::{Color, Component, ComponentBase, Engine, EngineConfiguration, Graphic, Image, ImageAsset, JsonAsset, NodeId, NodeTransform, NodeTree, Paint, Pivot, Promise, Scene, SceneBase, Vector2};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -180,7 +180,7 @@ impl TilemapShowcaseScene {
 	//==============================================================================
 	fn create_flip_strip(node_tree: &mut NodeTree, root_id: NodeId, orthogonal_tilemap: &Tilemap) {
 		let mut strip_map = Tilemap::new();
-		strip_map.set_tile_size(16, 16);
+		strip_map.set_tile_size(16.0, 16.0);
 		strip_map.set_map_size(12, 3);
 		if let Some(terrain_tileset) = orthogonal_tilemap.get_tileset(0) {
 			strip_map.add_tileset(terrain_tileset.clone(), 1);
@@ -203,6 +203,60 @@ impl TilemapShowcaseScene {
 		strip_node.set_local_scale(Vector2::create(3.0, 3.0));
 		strip_node.set_content_size(strip_size);
 		strip_node.add_component(strip_map);
+	}
+
+	//==============================================================================
+	// 읽은 지도로 노드 짓기.
+	//==============================================================================
+	fn build_maps(&mut self, tilemap_list: Vec<Option<Tilemap>>, image_table: &HashMap<String, Rc<Image>>) {
+		let read_image = |image_path: &str| -> Option<Rc<Image>> {
+			image_table.get(image_path).cloned()
+		};
+
+		let fixed_animation_time = self.fixed_animation_time;
+		let root_id = self.scene_base.get_root_id();
+		let node_tree = self.scene_base.get_node_tree_mut();
+		node_tree[root_id].set_pivot(Pivot::TOP_LEFT);
+		node_tree[root_id].set_anchor(Pivot::TOP_LEFT);
+		let mut orthogonal_tilemap_copy: Option<Tilemap> = None;
+		for (map_index, (file_name, tilemap)) in MAP_FILE_LIST.iter().zip(tilemap_list).enumerate() {
+			let panel_layout = PANEL_LAYOUT_LIST[map_index];
+			let panel_id = TilemapShowcaseScene::create_top_left_node(node_tree, root_id, "Panel", Vector2::create(panel_layout[0], panel_layout[1]));
+			node_tree[panel_id].set_content_size(Vector2::create(panel_layout[2], panel_layout[3]));
+			node_tree[panel_id].add_component(Paint::create_with_color(Color::create(0.11, 0.13, 0.19, 1.0)));
+
+			let mut tilemap = match tilemap {
+				Some(tilemap) => {
+					tilemap
+				}
+				None => {
+					continue;
+				}
+			};
+			TiledMapReader::attach_images(&mut tilemap, &read_image);
+			if let Some(animation_time) = fixed_animation_time {
+				tilemap.set_animation_speed(0.0);
+				tilemap.set_animation_time(animation_time);
+			}
+			let map_id = TilemapShowcaseScene::create_top_left_node(node_tree, root_id, file_name, Vector2::create(panel_layout[4], panel_layout[5]));
+			node_tree[map_id].set_local_scale(Vector2::create(panel_layout[6], panel_layout[6]));
+			node_tree[map_id].set_content_size(tilemap.read_map_pixel_size());
+			if map_index == 0 {
+				TilemapShowcaseScene::decorate_orthogonal_map(node_tree, map_id, &mut tilemap);
+				orthogonal_tilemap_copy = Some(Tilemap::new());
+				if let Some(strip_source) = orthogonal_tilemap_copy.as_mut() {
+					for tileset_index in 0..tilemap.get_tilesets().len() {
+						if let Some(tileset) = tilemap.get_tileset(tileset_index) {
+							strip_source.add_tileset(tileset.clone(), tilemap.get_tileset_first_gid(tileset_index));
+						}
+					}
+				}
+			}
+			node_tree[map_id].add_component(tilemap);
+		}
+		if let Some(orthogonal_tilemap) = orthogonal_tilemap_copy {
+			TilemapShowcaseScene::create_flip_strip(node_tree, root_id, &orthogonal_tilemap);
+		}
 	}
 }
 
@@ -235,9 +289,9 @@ impl Scene for TilemapShowcaseScene {
 	}
 
 	//==============================================================================
-	// 초기화. (지도를 읽어 노드를 짓는다)
+	// 초기화. (지도를 읽는 작업을 맡기고, 다 읽으면 노드를 짓는다)
 	//==============================================================================
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, engine: &mut Engine) {
 		let mut json_table: HashMap<String, Value> = HashMap::new();
 		for (file_name, json_asset) in self.json_asset_list.iter() {
 			if let Some(data) = json_asset.get_data() {
@@ -250,63 +304,36 @@ impl Scene for TilemapShowcaseScene {
 				image_table.insert(file_name.clone(), image);
 			}
 		}
-		let read_tileset = |tileset_path: &str| -> Option<Value> {
-			json_table.get(tileset_path).cloned()
-		};
-		let read_image = |image_path: &str| -> Option<Rc<Image>> {
-			image_table.get(image_path).cloned()
-		};
-
-		let fixed_animation_time = self.fixed_animation_time;
-		let root_id = self.scene_base.get_root_id();
-		let node_tree = self.scene_base.get_node_tree_mut();
-		node_tree[root_id].set_pivot(Pivot::TOP_LEFT);
-		node_tree[root_id].set_anchor(Pivot::TOP_LEFT);
-		let mut orthogonal_tilemap_copy: Option<Tilemap> = None;
-		for (map_index, file_name) in MAP_FILE_LIST.iter().enumerate() {
-			let panel_layout = PANEL_LAYOUT_LIST[map_index];
-			let panel_id = TilemapShowcaseScene::create_top_left_node(node_tree, root_id, "Panel", Vector2::create(panel_layout[0], panel_layout[1]));
-			node_tree[panel_id].set_content_size(Vector2::create(panel_layout[2], panel_layout[3]));
-			node_tree[panel_id].add_component(Paint::create_with_color(Color::create(0.11, 0.13, 0.19, 1.0)));
-
-			let map_data = match json_table.get(*file_name) {
-				Some(map_data) => {
-					map_data
-				}
-				None => {
-					eprintln!("tilemapshowcase: {} 를 읽지 못했습니다.", file_name);
-					continue;
-				}
+		// 지도 읽기는 원본 readMap 처럼 async 라 엔진 작업으로 맡긴다. (바깥 타일셋은 가진 JSON 이라 Promise::resolved, 맡기는 자리의 첫 폴링에 끝난다)
+		engine.spawn_scene_task(self, move |mut scene_context| async move {
+			let read_tileset = |tileset_path: &str| -> Promise<Option<Value>> {
+				Promise::resolved(json_table.get(tileset_path).cloned())
 			};
-			let mut tilemap = Tilemap::new();
-			if let Err(error) = TiledMapReader::read_map(map_data, &mut tilemap, file_name, Some(&read_tileset)) {
-				eprintln!("tilemapshowcase: {}", error);
-				continue;
-			}
-			TiledMapReader::attach_images(&mut tilemap, &read_image);
-			if let Some(animation_time) = fixed_animation_time {
-				tilemap.set_animation_speed(0.0);
-				tilemap.set_animation_time(animation_time);
-			}
-			let map_id = TilemapShowcaseScene::create_top_left_node(node_tree, root_id, file_name, Vector2::create(panel_layout[4], panel_layout[5]));
-			node_tree[map_id].set_local_scale(Vector2::create(panel_layout[6], panel_layout[6]));
-			node_tree[map_id].set_content_size(tilemap.read_map_pixel_size());
-			if map_index == 0 {
-				TilemapShowcaseScene::decorate_orthogonal_map(node_tree, map_id, &mut tilemap);
-				orthogonal_tilemap_copy = Some(Tilemap::new());
-				if let Some(strip_source) = orthogonal_tilemap_copy.as_mut() {
-					for tileset_index in 0..tilemap.get_tilesets().len() {
-						if let Some(tileset) = tilemap.get_tileset(tileset_index) {
-							strip_source.add_tileset(tileset.clone(), tilemap.get_tileset_first_gid(tileset_index));
-						}
+			let mut tilemap_list: Vec<Option<Tilemap>> = Vec::new();
+			for file_name in MAP_FILE_LIST.iter() {
+				let map_data = match json_table.get(*file_name) {
+					Some(map_data) => {
+						map_data
+					}
+					None => {
+						eprintln!("tilemapshowcase: {} 를 읽지 못했습니다.", file_name);
+						tilemap_list.push(None);
+						continue;
+					}
+				};
+				let mut tilemap = Tilemap::new();
+				match TiledMapReader::read_map(map_data, &mut tilemap, file_name, Some(&read_tileset)).await {
+					Ok(_) => {
+						tilemap_list.push(Some(tilemap));
+					}
+					Err(error) => {
+						eprintln!("tilemapshowcase: {}", error);
+						tilemap_list.push(None);
 					}
 				}
 			}
-			node_tree[map_id].add_component(tilemap);
-		}
-		if let Some(orthogonal_tilemap) = orthogonal_tilemap_copy {
-			TilemapShowcaseScene::create_flip_strip(node_tree, root_id, &orthogonal_tilemap);
-		}
+			scene_context.with(move |scene, _engine| scene.build_maps(tilemap_list, &image_table));
+		});
 	}
 
 	//==============================================================================

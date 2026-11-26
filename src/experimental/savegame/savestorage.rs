@@ -41,7 +41,8 @@ pub trait SaveStorage {
 	/// # 돌려줌
 	/// 저장된 글. (없거나 못 읽으면 None)
 	//==============================================================================
-	fn read_text(&self, _key: &str) -> Option<String> {
+	fn read_text(&self, key: &str) -> Option<String> {
+		let _ = key;
 		None
 	}
 
@@ -55,7 +56,8 @@ pub trait SaveStorage {
 	/// # 돌려줌
 	/// 오래 남는 곳에 썼으면 true.
 	//==============================================================================
-	fn write_text(&mut self, _key: &str, _text: &str) -> bool {
+	fn write_text(&mut self, key: &str, text: &str) -> bool {
+		let _ = (key, text);
 		false
 	}
 
@@ -65,7 +67,9 @@ pub trait SaveStorage {
 	/// # 인자
 	/// - `key`: 지울 키.
 	//==============================================================================
-	fn remove_text(&mut self, _key: &str) {}
+	fn remove_text(&mut self, key: &str) {
+		let _ = key;
+	}
 
 	//==============================================================================
 	/// 앞머리가 같은 키를 모두 읽기.
@@ -76,7 +80,8 @@ pub trait SaveStorage {
 	/// # 돌려줌
 	/// 정렬한 키 목록.
 	//==============================================================================
-	fn list_keys(&self, _prefix: &str) -> Vec<String> {
+	fn list_keys(&self, prefix: &str) -> Vec<String> {
+		let _ = prefix;
 		Vec::new()
 	}
 }
@@ -286,7 +291,8 @@ pub trait SaveCloudProvider {
 	/// # 돌려줌
 	/// 올렸으면 true.
 	//==============================================================================
-	fn upload(&mut self, _slot_id: &str, _exported_text: &str) -> bool {
+	fn upload(&mut self, slot_id: &str, exported_text: &str) -> bool {
+		let _ = (slot_id, exported_text);
 		false
 	}
 
@@ -299,7 +305,8 @@ pub trait SaveCloudProvider {
 	/// # 돌려줌
 	/// export_slot 의 JSON. (없으면 None)
 	//==============================================================================
-	fn download(&mut self, _slot_id: &str) -> Option<String> {
+	fn download(&mut self, slot_id: &str) -> Option<String> {
+		let _ = slot_id;
 		None
 	}
 
@@ -309,7 +316,9 @@ pub trait SaveCloudProvider {
 	/// # 인자
 	/// - `slot_id`: 칸 이름.
 	//==============================================================================
-	fn remove(&mut self, _slot_id: &str) {}
+	fn remove(&mut self, slot_id: &str) {
+		let _ = slot_id;
+	}
 
 	//==============================================================================
 	/// 클라우드에 있는 칸 이름을 모두 읽기.

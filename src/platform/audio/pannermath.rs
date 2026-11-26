@@ -551,10 +551,28 @@ pub fn calculate_equal_power_gains(azimuth: f64, input_channel_count: usize) -> 
 }
 
 //==============================================================================
-// 등력 좌우를 표본 하나에. (EqualPowerPanner::Pan 의 안쪽, 이득은 f64 로 곱해 f32 로)
+/// 등력 좌우를 표본 하나에. (크로미엄 EqualPowerPanner::Pan 의 안쪽, 이득은 f64 로 곱해 f32 로, (왼쪽, 오른쪽))
+/// - 모노는 왼쪽 = 입력 x 왼쪽 이득, 오른쪽 = 입력 x 오른쪽 이득. 스테레오는 접은 방위각이 0 이하면 왼쪽 = 왼쪽 + 오른쪽 x 왼쪽 이득, 오른쪽 = 오른쪽 x 오른쪽 이득, 아니면 거꾸로.
+/// - 데스크탑 믹서의 PannerNode 가 이 함수로 섞는다. (웹은 브라우저 PannerNode 가 같은 셈으로 섞는다)
+///
+/// # 인자
+/// - `azimuth`: 방위각. (도)
+/// - `input_channel_count`: 입력 채널 수. (1 이나 2)
+/// - `input_left`: 왼쪽 입력 표본. (모노는 이것만 쓴다)
+/// - `input_right`: 오른쪽 입력 표본.
+///
+/// # 돌려줌
+/// (왼쪽 출력 표본, 오른쪽 출력 표본).
+///
+/// # 예제
+/// ```
+/// use vanilla::experimental::spatialaudio::pan_equal_power_sample;
+///
+/// let (left, right) = pan_equal_power_sample(90.0, 1, 0.5, 0.0);
+/// assert!(left.abs() < 1e-7 && right == 0.5);
+/// ```
 //==============================================================================
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn pan_equal_power_sample(azimuth: f64, input_channel_count: usize, input_left: f32, input_right: f32) -> (f32, f32) {
+pub fn pan_equal_power_sample(azimuth: f64, input_channel_count: usize, input_left: f32, input_right: f32) -> (f32, f32) {
 	let (gain_left, gain_right) = calculate_equal_power_gains(azimuth, input_channel_count);
 	if input_channel_count == 1 {
 		return ((input_left as f64 * gain_left) as f32, (input_left as f64 * gain_right) as f32);

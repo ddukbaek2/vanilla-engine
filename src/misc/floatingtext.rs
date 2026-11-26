@@ -133,6 +133,7 @@ impl FloatingText {
 
 	//==============================================================================
 	/// 노드 만들기. (parent_id 밑에 "FloatingText" 노드를 만들고 컴포넌트를 붙인다. 원본 new FloatingText() + add_child)
+	/// - 원본 생성자처럼 노드의 피벗과 앵커는 왼쪽 위다. (spawn 의 월드 좌표가 부모 왼쪽 위 기준)
 	///
 	/// # 인자
 	/// - `node_tree`: 노드를 만들 트리.
@@ -143,6 +144,9 @@ impl FloatingText {
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId) -> NodeId {
 		let floating_text_node_id = node_tree.create_child(parent_id, "FloatingText");
+		// 원본 생성자처럼 피벗과 앵커를 왼쪽 위로. (부모 왼쪽 위가 월드 좌표의 0, 0 이다)
+		node_tree[floating_text_node_id].set_pivot(Pivot::TOP_LEFT);
+		node_tree[floating_text_node_id].set_anchor(Pivot::TOP_LEFT);
 		node_tree.add_component(floating_text_node_id, FloatingText::new());
 		floating_text_node_id
 	}
@@ -359,6 +363,8 @@ mod tests {
 		let mut node_tree = NodeTree::new();
 		let root_id = node_tree.get_root_id();
 		let floating_text_id = FloatingText::create(&mut node_tree, root_id);
+		assert_eq!(node_tree[floating_text_id].get_pivot(), Pivot::TOP_LEFT);
+		assert_eq!(node_tree[floating_text_id].get_anchor(), Pivot::TOP_LEFT);
 		let options = FloatingTextOptions {
 			jitter: 0.0,
 			duration: 1.0,

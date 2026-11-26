@@ -10,15 +10,17 @@
 //!         .call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))
 //!         .repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))
 //!         .forever(Action::new().wait(2.0, ActionCallbacks::new()));
-//!     action.start(&mut node_tree[node_id]);
+//!     action.start(&mut node_tree, Some(node_id));
 //!     // 매 프레임:
-//!     action.step(&mut node_tree[node_id], time_delta);
+//!     action.step(&mut node_tree, time_delta);
 //!   ```
 //! - 원본과 다른 점:
-//!   - 원본은 start(target) 에서 대상을 들고 있다가 step 마다 콜백에 넘긴다. 러스트는 대상을 빌려 들 수 없어서
-//!     노드 대상은 핸들로 든다: start_on_node(트리, Some(노드)) 가 대상을 들고 step_on_node(트리, 시간) 이 그 노드를 콜백에 넘기며,
-//!     get_target 이 그 노드를 돌려주고 start_on_node(트리, None) 이 원본 start() 처럼 이전 대상으로 다시 시작한다.
-//!     노드가 아닌 대상(노드 여럿, 게임 상태)은 T 로 쓰고 start, step 이 대상(&mut T)을 받아 콜백에 넘긴다. (T 의 기본은 WorldNode)
+//!   - 원본 start(target) 는 대상을 들고 있다가 step(timeDelta) 마다 콜백에 넘긴다. 러스트는 대상을 빌려 들 수 없어서
+//!     노드 대상은 핸들로 든다: start(트리, Some(노드)) 가 대상을 들고 step(트리, 시간) 이 그 노드를 콜백에 넘기며,
+//!     get_target 이 그 노드를 돌려주고 start(트리, None) 이 원본 start() 처럼 이전 대상으로 다시 시작한다.
+//!   - 대상을 들지 않고 매번 넘기는 꼴은 두 엔진 다 start_with(대상), step_with(대상, 시간) 이다. (원본 startWith, stepWith)
+//!     노드가 아닌 대상(노드 여럿, 게임 상태)은 T 로 쓰고 이 꼴로 돌린다. (T 의 기본은 WorldNode)
+//!     repeat, forever, loop 의 안쪽 액션도 두 엔진 다 이 꼴로 돌아 대상을 들지 않는다. (안쪽 액션의 get_target 은 그대로)
 //!   - 콜백 객체({ started, updated, completed })는 wait 스텝이 ActionCallbacks(updated 가 (진행률, 대상)),
 //!     condition 스텝이 ActionConditionCallbacks(updated 가 (대상))다. 원본은 한 객체 꼴에 인자 수만 다르지만,
 //!     러스트는 콜백의 인자 꼴을 타입으로 정해야 해서 둘로 나눴다.
@@ -52,9 +54,9 @@ type ActionConditionFunction<T> = Box<dyn FnMut(&T) -> bool>;
 /// 		.started(|record: &mut Vec<f32>| record.push(-1.0))
 /// 		.updated(|progress, record: &mut Vec<f32>| record.push(progress))
 /// 		.completed(|record: &mut Vec<f32>| record.push(2.0)));
-/// action.start(&mut record);
-/// action.step(&mut record, 0.5);
-/// action.step(&mut record, 0.5);
+/// action.start_with(&mut record);
+/// action.step_with(&mut record, 0.5);
+/// action.step_with(&mut record, 0.5);
 /// assert_eq!(record, vec![-1.0, 0.5, 1.0, 2.0]);
 /// assert!(action.is_done());
 /// ```
@@ -179,12 +181,12 @@ impl<T> Default for ActionCallbacks<T> {
 /// 	.condition(|door: &Door| door.is_open, ActionConditionCallbacks::new()
 /// 		.updated(|door: &mut Door| door.waited_frame_count += 1)
 /// 		.completed(|door: &mut Door| door.is_passed = true));
-/// action.start(&mut door);
-/// action.step(&mut door, 0.016);
-/// action.step(&mut door, 0.016);
+/// action.start_with(&mut door);
+/// action.step_with(&mut door, 0.016);
+/// action.step_with(&mut door, 0.016);
 /// assert!(!door.is_passed);
 /// door.is_open = true;
-/// action.step(&mut door, 0.016);
+/// action.step_with(&mut door, 0.016);
 /// assert_eq!(door.waited_frame_count, 3);
 /// assert!(door.is_passed);
 /// assert!(action.is_done());
@@ -326,7 +328,7 @@ enum ActionStep<T> {
 
 //==============================================================================
 /// 액션.
-/// - 스텝을 빌더처럼 쌓고 start 뒤 매 프레임 step 을 부르면 차례로 돈다. 대상 꼴 T 는 기본 WorldNode 이다.
+/// - 스텝을 빌더처럼 쌓고 start 뒤 매 프레임 step 을 부르면 차례로 돈다. (대상을 매번 넘기면 start_with, step_with) 대상 꼴 T 는 기본 WorldNode 이다.
 ///
 /// # 예제
 /// 노드를 서서히 보이고, 활성인지 보고, 키운 뒤 반복 대기
@@ -340,15 +342,15 @@ enum ActionStep<T> {
 /// 	.call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))
 /// 	.repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))
 /// 	.forever(Action::new().wait(2.0, ActionCallbacks::new()));
-/// action.start(&mut node);
-/// action.step(&mut node, 0.5);
+/// action.start_with(&mut node);
+/// action.step_with(&mut node, 0.5);
 /// assert_eq!(node.get_local_opacity(), 0.5);
-/// action.step(&mut node, 0.5);
+/// action.step_with(&mut node, 0.5);
 /// assert_eq!(node.get_local_opacity(), 1.0);
-/// action.step(&mut node, 0.0);
+/// action.step_with(&mut node, 0.0);
 /// assert_eq!(node.get_local_scale(), Vector2::create(2.0, 2.0));
 /// for _ in 0..10 {
-/// 	action.step(&mut node, 0.5);
+/// 	action.step_with(&mut node, 0.5);
 /// }
 /// assert!(action.is_running());
 /// assert!(!action.is_done());
@@ -362,7 +364,7 @@ pub struct Action<T = WorldNode> {
 	completed_count: u32,
 	is_running: bool,
 	is_done: bool,
-	// start_on_node 로 넘긴 대상 노드. (원본 #target 자리, 대상을 안 주면 이 노드)
+	// start 로 넘긴 대상 노드. (원본 #target 자리, 대상을 안 주면 이 노드)
 	target_id: Option<NodeId>,
 }
 
@@ -415,11 +417,11 @@ impl<T> Action<T> {
 						self.current_step_index += 1;
 						continue;
 					}
-					inner_action.start(target);
+					inner_action.start_with(target);
 					return;
 				}
 				ActionStep::Forever { inner_action } => {
-					inner_action.start(target);
+					inner_action.start_with(target);
 					return;
 				}
 				ActionStep::WhileLoop { condition_function, inner_action } => {
@@ -427,7 +429,7 @@ impl<T> Action<T> {
 						self.current_step_index += 1;
 						continue;
 					}
-					inner_action.start(target);
+					inner_action.start_with(target);
 					return;
 				}
 			}
@@ -504,9 +506,9 @@ impl<T> Action<T> {
 	/// let mut count: u32 = 0;
 	/// let inner_action: Action<u32> = Action::new().wait(0.5, ActionCallbacks::new().completed(|count: &mut u32| *count += 1));
 	/// let mut action: Action<u32> = Action::new().repeat(3, inner_action);
-	/// action.start(&mut count);
+	/// action.start_with(&mut count);
 	/// for _ in 0..3 {
-	/// 	action.step(&mut count, 0.5);
+	/// 	action.step_with(&mut count, 0.5);
 	/// }
 	/// assert_eq!(count, 3);
 	/// assert!(action.is_done());
@@ -550,9 +552,9 @@ impl<T> Action<T> {
 	/// let mut count: u32 = 0;
 	/// let inner_action: Action<u32> = Action::new().wait(0.1, ActionCallbacks::new().completed(|count: &mut u32| *count += 1));
 	/// let mut action: Action<u32> = Action::new().r#loop(|count: &u32| *count < 3, inner_action);
-	/// action.start(&mut count);
+	/// action.start_with(&mut count);
 	/// for _ in 0..10 {
-	/// 	action.step(&mut count, 0.1);
+	/// 	action.step_with(&mut count, 0.1);
 	/// }
 	/// assert_eq!(count, 3);
 	/// assert!(action.is_done());
@@ -564,13 +566,13 @@ impl<T> Action<T> {
 	}
 
 	//==============================================================================
-	/// 실행 시작. (처음 스텝부터)
-	/// - 앞에 있는 call 스텝은 이 자리에서 바로 돈다. 돌던 중이면 처음부터 다시 한다.
+	/// 대상을 들지 않고 실행 시작. (원본 startWith(target), 처음 스텝부터)
+	/// - 앞에 있는 call 스텝은 이 자리에서 바로 돈다. 돌던 중이면 처음부터 다시 한다. 대상은 들지 않는다. (get_target 은 그대로)
 	///
 	/// # 인자
 	/// - `target`: 콜백에 넘길 대상. (첫 스텝의 시작 콜백까지 이 자리에서 부른다)
 	//==============================================================================
-	pub fn start(&mut self, target: &mut T) {
+	pub fn start_with(&mut self, target: &mut T) {
 		self.current_step_index = 0;
 		self.current_step_elapsed = 0.0;
 		self.completed_count = 0;
@@ -588,7 +590,7 @@ impl<T> Action<T> {
 	}
 
 	//==============================================================================
-	/// 갱신. (매 프레임 호출)
+	/// 대상을 넘겨 갱신. (원본 stepWith(target, timeDelta), 매 프레임 호출)
 	/// - start 전이거나 끝났으면 아무것도 하지 않는다. 한 번에 스텝 하나만 진행하고, 끝난 스텝 뒤의 call 스텝은 같은 프레임에 돈다.
 	///
 	/// # 인자
@@ -611,12 +613,12 @@ impl<T> Action<T> {
 	/// 			node: WorldNode::new("logo"),
 	/// 			action: Action::new().wait(2.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress))),
 	/// 		};
-	/// 		fade_in.action.start(&mut fade_in.node);
+	/// 		fade_in.action.start_with(&mut fade_in.node);
 	/// 		fade_in
 	/// 	}
 	///
 	/// 	fn tick(&mut self, time_delta: f32) {
-	/// 		self.action.step(&mut self.node, time_delta);
+	/// 		self.action.step_with(&mut self.node, time_delta);
 	/// 	}
 	/// }
 	///
@@ -627,7 +629,7 @@ impl<T> Action<T> {
 	/// assert!(fade_in.action.is_done());
 	/// ```
 	//==============================================================================
-	pub fn step(&mut self, target: &mut T, time_delta: f32) {
+	pub fn step_with(&mut self, target: &mut T, time_delta: f32) {
 		if !self.is_running || self.is_done {
 			return;
 		}
@@ -660,28 +662,28 @@ impl<T> Action<T> {
 				}
 			}
 			ActionStep::Repeat { times, inner_action } => {
-				inner_action.step(target, time_delta);
+				inner_action.step_with(target, time_delta);
 				if inner_action.is_done() {
 					self.completed_count += 1;
 					if self.completed_count >= *times {
 						is_advancing = true;
 					}
 					else {
-						inner_action.start(target);
+						inner_action.start_with(target);
 					}
 				}
 			}
 			ActionStep::Forever { inner_action } => {
-				inner_action.step(target, time_delta);
+				inner_action.step_with(target, time_delta);
 				if inner_action.is_done() {
-					inner_action.start(target);
+					inner_action.start_with(target);
 				}
 			}
 			ActionStep::WhileLoop { condition_function, inner_action } => {
-				inner_action.step(target, time_delta);
+				inner_action.step_with(target, time_delta);
 				if inner_action.is_done() {
 					if condition_function(target) {
-						inner_action.start(target);
+						inner_action.start_with(target);
 					}
 					else {
 						is_advancing = true;
@@ -721,8 +723,8 @@ impl<T> Action<T> {
 impl Action<WorldNode> {
 	//==============================================================================
 	/// 노드를 대상으로 실행 시작. (원본 start(target), 처음 스텝부터)
-	/// - 대상을 노드 핸들로 들어, step_on_node 가 그 노드를 콜백에 넘기고 get_target 이 돌려준다.
-	/// - `node_id` 가 None 이면 원본처럼 이전 대상(앞서 start_on_node 에 넘긴 노드)으로 다시 시작한다.
+	/// - 대상을 노드 핸들로 들어, step 이 그 노드를 콜백에 넘기고 get_target 이 돌려준다.
+	/// - `node_id` 가 None 이면 원본처럼 이전 대상(앞서 start 에 넘긴 노드)으로 다시 시작한다.
 	///
 	/// # 인자
 	/// - `node_tree`: 대상 노드가 든 트리.
@@ -740,17 +742,17 @@ impl Action<WorldNode> {
 	/// let root_id = node_tree.get_root_id();
 	/// let logo_id = node_tree.create_child(root_id, "logo");
 	/// let mut action: Action = Action::new().wait(2.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)));
-	/// assert!(action.start_on_node(&mut node_tree, Some(logo_id)));
+	/// assert!(action.start(&mut node_tree, Some(logo_id)));
 	/// assert_eq!(action.get_target(), Some(logo_id));
-	/// action.step_on_node(&mut node_tree, 1.0);
+	/// action.step(&mut node_tree, 1.0);
 	/// assert_eq!(node_tree[logo_id].get_local_opacity(), 0.5);
 	///
-	/// assert!(action.start_on_node(&mut node_tree, None));
-	/// action.step_on_node(&mut node_tree, 0.5);
+	/// assert!(action.start(&mut node_tree, None));
+	/// action.step(&mut node_tree, 0.5);
 	/// assert_eq!(node_tree[logo_id].get_local_opacity(), 0.25);
 	/// ```
 	//==============================================================================
-	pub fn start_on_node(&mut self, node_tree: &mut NodeTree, node_id: Option<NodeId>) -> bool {
+	pub fn start(&mut self, node_tree: &mut NodeTree, node_id: Option<NodeId>) -> bool {
 		let target_id = match node_id.or(self.target_id) {
 			Some(target_id) => {
 				target_id
@@ -762,7 +764,7 @@ impl Action<WorldNode> {
 		self.target_id = Some(target_id);
 		match node_tree.get_node_mut(target_id) {
 			Some(target_node) => {
-				self.start(target_node);
+				self.start_with(target_node);
 				true
 			}
 			None => {
@@ -773,13 +775,13 @@ impl Action<WorldNode> {
 
 	//==============================================================================
 	/// 대상 노드로 갱신. (원본 step(timeDelta), 매 프레임 호출)
-	/// - start_on_node 로 넘긴 노드를 콜백에 넘긴다. 대상이 없거나 그 노드가 지워졌으면 아무것도 하지 않는다.
+	/// - start 로 넘긴 노드를 콜백에 넘긴다. 대상이 없거나 그 노드가 지워졌으면 아무것도 하지 않는다.
 	///
 	/// # 인자
 	/// - `node_tree`: 대상 노드가 든 트리.
 	/// - `time_delta`: 지난 프레임에서 흐른 시간. (초)
 	//==============================================================================
-	pub fn step_on_node(&mut self, node_tree: &mut NodeTree, time_delta: f32) {
+	pub fn step(&mut self, node_tree: &mut NodeTree, time_delta: f32) {
 		let target_id = match self.target_id {
 			Some(target_id) => {
 				target_id
@@ -789,7 +791,7 @@ impl Action<WorldNode> {
 			}
 		};
 		if let Some(target_node) = node_tree.get_node_mut(target_id) {
-			self.step(target_node, time_delta);
+			self.step_with(target_node, time_delta);
 		}
 	}
 
@@ -797,7 +799,7 @@ impl Action<WorldNode> {
 	/// 대상 반환. (원본 getTarget)
 	///
 	/// # 돌려줌
-	/// start_on_node 에 넘긴 대상 노드. 없으면 None. (start(&mut 노드) 로 빌려 준 대상은 들지 않는다)
+	/// start 에 넘긴 대상 노드. 없으면 None. (start_with(&mut 노드) 로 빌려 준 대상은 들지 않는다)
 	//==============================================================================
 	pub fn get_target(&self) -> Option<NodeId> {
 		self.target_id
@@ -840,14 +842,14 @@ mod tests {
 				.updated(|progress, recorder: &mut Recorder| recorder.log.push(format!("updated {:.2}", progress)))
 				.completed(|recorder: &mut Recorder| recorder.log.push(String::from("completed"))))
 			.call(|recorder: &mut Recorder| recorder.log.push(String::from("called")));
-		action.start(&mut recorder);
+		action.start_with(&mut recorder);
 		assert_eq!(recorder.log, vec!["started"]);
-		action.step(&mut recorder, 0.5);
-		action.step(&mut recorder, 0.75);
+		action.step_with(&mut recorder, 0.5);
+		action.step_with(&mut recorder, 0.75);
 		assert_eq!(recorder.log, vec!["started", "updated 0.50", "updated 1.00", "completed", "called"]);
 		assert!(action.is_done());
 		assert!(!action.is_running());
-		action.step(&mut recorder, 1.0);
+		action.step_with(&mut recorder, 1.0);
 		assert_eq!(recorder.log.len(), 5);
 	}
 
@@ -861,14 +863,14 @@ mod tests {
 			.call(|recorder: &mut Recorder| recorder.counter += 1)
 			.condition(|recorder: &Recorder| recorder.is_ready, ActionConditionCallbacks::new().updated(|recorder: &mut Recorder| recorder.log.push(String::from("waiting"))))
 			.call(|recorder: &mut Recorder| recorder.counter += 10);
-		action.start(&mut recorder);
+		action.start_with(&mut recorder);
 		assert_eq!(recorder.counter, 1);
-		action.step(&mut recorder, 0.1);
-		action.step(&mut recorder, 0.1);
+		action.step_with(&mut recorder, 0.1);
+		action.step_with(&mut recorder, 0.1);
 		assert_eq!(recorder.log, vec!["waiting", "waiting"]);
 		assert!(!action.is_done());
 		recorder.is_ready = true;
-		action.step(&mut recorder, 0.1);
+		action.step_with(&mut recorder, 0.1);
 		assert_eq!(recorder.counter, 11);
 		assert!(action.is_done());
 	}
@@ -882,13 +884,13 @@ mod tests {
 		let inner_action: Action<Recorder> = Action::new().wait(0.5, ActionCallbacks::new().completed(|recorder: &mut Recorder| recorder.counter += 1));
 		let skipped_action: Action<Recorder> = Action::new().wait(0.5, ActionCallbacks::new().completed(|recorder: &mut Recorder| recorder.counter += 100));
 		let mut action: Action<Recorder> = Action::new().repeat(3, inner_action).repeat(0, skipped_action);
-		action.start(&mut recorder);
+		action.start_with(&mut recorder);
 		for _ in 0..2 {
-			action.step(&mut recorder, 0.5);
+			action.step_with(&mut recorder, 0.5);
 		}
 		assert_eq!(recorder.counter, 2);
 		assert!(!action.is_done());
-		action.step(&mut recorder, 0.5);
+		action.step_with(&mut recorder, 0.5);
 		assert_eq!(recorder.counter, 3);
 		assert!(action.is_done());
 	}
@@ -903,23 +905,23 @@ mod tests {
 			.r#loop(|recorder: &Recorder| recorder.counter < 2, Action::new().wait(0.1, ActionCallbacks::new().completed(|recorder: &mut Recorder| recorder.counter += 1)))
 			.r#loop(|_recorder: &Recorder| false, Action::new().call(|recorder: &mut Recorder| recorder.counter += 1000))
 			.call(|recorder: &mut Recorder| recorder.log.push(String::from("after loop")));
-		loop_action.start(&mut recorder);
-		loop_action.step(&mut recorder, 0.1);
+		loop_action.start_with(&mut recorder);
+		loop_action.step_with(&mut recorder, 0.1);
 		assert!(!loop_action.is_done());
-		loop_action.step(&mut recorder, 0.1);
+		loop_action.step_with(&mut recorder, 0.1);
 		assert_eq!(recorder.counter, 2);
 		assert_eq!(recorder.log, vec!["after loop"]);
 		assert!(loop_action.is_done());
 
 		let mut forever_action: Action<Recorder> = Action::new().forever(Action::new().wait(0.1, ActionCallbacks::new().completed(|recorder: &mut Recorder| recorder.counter += 1)));
-		forever_action.start(&mut recorder);
+		forever_action.start_with(&mut recorder);
 		for _ in 0..5 {
-			forever_action.step(&mut recorder, 0.1);
+			forever_action.step_with(&mut recorder, 0.1);
 		}
 		assert_eq!(recorder.counter, 7);
 		assert!(forever_action.is_running());
 		forever_action.stop();
-		forever_action.step(&mut recorder, 0.1);
+		forever_action.step_with(&mut recorder, 0.1);
 		assert_eq!(recorder.counter, 7);
 		assert!(forever_action.is_done());
 	}
@@ -934,11 +936,11 @@ mod tests {
 			.call(|node: &mut WorldNode| node.set_local_opacity(0.0))
 			.wait(2.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))
 			.call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)));
-		action.start(&mut node);
+		action.start_with(&mut node);
 		assert_eq!(node.get_local_opacity(), 0.0);
-		action.step(&mut node, 1.0);
+		action.step_with(&mut node, 1.0);
 		assert_eq!(node.get_local_opacity(), 0.5);
-		action.step(&mut node, 1.0);
+		action.step_with(&mut node, 1.0);
 		assert_eq!(node.get_local_opacity(), 1.0);
 		assert_eq!(node.get_local_scale(), Vector2::create(2.0, 2.0));
 		assert!(action.is_done());

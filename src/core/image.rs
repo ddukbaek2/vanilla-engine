@@ -145,6 +145,16 @@ impl Image {
 				return crate::core::avifimage::decode_avif(bytes);
 			}
 		}
+		if sniff_image_mime_type(bytes) == Some("image/jpeg") {
+			let decoded = crate::core::jpegimage::decode_jpeg(bytes).map_err(|error| format!("이미지 해석 실패: {}", error))?;
+			let pixels = match read_embedded_color_profile(bytes) {
+				Some(color_profile) if color_profile.needs_conversion() => color_profile.convert_to_srgb_premultiplied(&decoded.pixels),
+				_ => decoded.pixels,
+			};
+			// JPEG 은 늘 불투명이라 곧은 알파와 곱한 알파가 같다.
+			let (width, height, pixels) = crate::core::jpegimage::apply_orientation(decoded.width, decoded.height, pixels, decoded.orientation);
+			return Ok(Image::create_from_premultiplied_pixels(width, height, pixels));
+		}
 		let dynamic_image = image::load_from_memory(bytes).map_err(|error| format!("이미지 해석 실패: {}", error))?;
 		let rgba_image = dynamic_image.to_rgba8();
 		let width = rgba_image.width();
@@ -156,6 +166,20 @@ impl Image {
 			}
 		}
 		Ok(Image::create_from_pixels(width, height, straight_pixels))
+	}
+
+	//==============================================================================
+	/// 래스터 그림을 곧은 알파 RGBA 로 풀기. (마우스 포인터 그림처럼 알파를 곱하지 않은 픽셀이 필요한 곳, JPEG 은 엔진 해독기, 그 밖은 image 크레이트)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(crate) fn decode_straight_pixels(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+		if sniff_image_mime_type(bytes) == Some("image/jpeg") {
+			let image = Image::load_raster_from_memory(bytes)?;
+			let pixels = image.pixels.borrow().clone();
+			return Ok((image.width, image.height, pixels));
+		}
+		let rgba_image = image::load_from_memory(bytes).map_err(|error| error.to_string())?.to_rgba8();
+		Ok((rgba_image.width(), rgba_image.height(), rgba_image.into_raw()))
 	}
 
 	//==============================================================================
@@ -434,11 +458,39 @@ fn decode_svg(bytes: &[u8]) -> Result<Rc<Image>, String> {
 			std::sync::Arc::new(font_database)
 		}).clone();
 	}
+	// SVG 안의 JPEG 도 엔진 해독기로 푼다. (크롬은 SVG 안의 그림도 같은 libjpeg-turbo 로 푼다, 푼 것을 PNG 로 넘겨 resvg 가 그린다)
+	let default_data_resolver = resvg::usvg::ImageHrefResolver::default_data_resolver();
+	let default_string_resolver = resvg::usvg::ImageHrefResolver::default_string_resolver();
+	options.image_href_resolver = resvg::usvg::ImageHrefResolver {
+		resolve_data: Box::new(move |mime_type, data, options| default_data_resolver(mime_type, data, options).map(convert_svg_jpeg_to_png)),
+		resolve_string: Box::new(move |href, options| default_string_resolver(href, options).map(convert_svg_jpeg_to_png)),
+	};
 	let tree = resvg::usvg::Tree::from_data(bytes, &options).map_err(|error| format!("SVG 해석 실패: {}", error))?;
 	let image_size = tree.size().to_int_size();
 	let mut pixmap = resvg::tiny_skia::Pixmap::new(image_size.width(), image_size.height()).ok_or_else(|| String::from("SVG 크기가 0"))?;
 	resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
 	Ok(Image::create_from_premultiplied_pixels(image_size.width(), image_size.height(), pixmap.take()))
+}
+
+//==============================================================================
+/// SVG 안의 JPEG 을 엔진 해독기로 풀어 PNG 로 바꾼다. (못 풀면 그대로 둔다)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn convert_svg_jpeg_to_png(image_kind: resvg::usvg::ImageKind) -> resvg::usvg::ImageKind {
+	let resvg::usvg::ImageKind::JPEG(data) = &image_kind else {
+		return image_kind;
+	};
+	let Ok((width, height, pixels)) = Image::decode_straight_pixels(data) else {
+		return image_kind;
+	};
+	let Some(rgba_image) = image::RgbaImage::from_raw(width, height, pixels) else {
+		return image_kind;
+	};
+	let mut png_bytes: Vec<u8> = Vec::new();
+	if rgba_image.write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png).is_err() {
+		return image_kind;
+	}
+	resvg::usvg::ImageKind::PNG(std::sync::Arc::new(png_bytes))
 }
 
 #[cfg(test)]
