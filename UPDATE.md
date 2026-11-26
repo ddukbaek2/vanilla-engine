@@ -1,6 +1,8 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- 초안 세이브(experimental::savegame): 기록의 머리와 자료 JSON 을 원본 JSON.stringify 와 글자까지 같게 쓴다(수는 원본 String(number) 꼴로 1.0 은 1, -0 은 0, 1e21 은 1e+21, 객체 칸은 배열 번호 꼴 이름을 먼저). 같은 자료면 기록 글, byteSize, CRC 가 원본과 같다. 머리 읽기는 원본처럼 savedTime, byteSize, sequence 가 0 이상 정수, version 이 u32 안의 0 이상 정수여야 받고(소수와 음수 시각을 받던 것), 저장 시각은 내림해 유한한 0 이상이 아니면 0 으로 쓴다. save 가 Serialize 를 받고(Value 그대로도 된다) 바꾸지 못하면 새 SaveGameError::InvalidData. SaveStorage, SaveCloudProvider 트레이트에 원본처럼 아무것도 하지 않는 기본 구현을 두었다(필요한 함수만 구현한다). 원본과 같은 수 글꼴 기록을 두 저장소 시험에 같이 둔다
+  - 옮기는 법: save 의 data 는 그대로 &Value 를 넘겨도 된다. SaveGameError 를 match 하던 코드는 InvalidData 갈래를 더한다.
 - FBX 재질 여럿: 메시 하나에 재질이 여럿인 FBX(LayerElementMaterial 의 Materials, MappingInformationType ByPolygon 이나 AllSame)를 폴리곤의 재질 번호대로 부분 메시로 나눠 재질마다 드로어블 하나로 그린다. (three.js FBXLoader 의 그룹, 유니티와 언리얼의 서브메시) 지금까지는 재질 번호를 폴리곤 순번이 아니라 폴리곤 정점 순번으로 찾았고, 메시마다 소유 노드의 첫 재질 하나로만 그려 Quaternius 마네킹(M_Main, M_Joints)이 온통 주황이었다. 새 SkinnedModel::split_fbx_corners_by_material 과 FbxCornerArrays, FBX MeshDescription 과 드로어블의 material_name 이 FBX Material 이름(glb 처럼), FbxMaterial.name. 원본과 같다. 단위 시험 multiple_materials_split_by_polygon, mannequin_fbx_materials_from_examples(원본과 같은 삼각형 수 5732, 8012). 문서 그림 model-viewer, 셰이더 해시를 바꾼 뒤의 effect-gallery, shader-sprite, screen-effect 다시 찍음(같은 크기, cwebp -q 85).
   - 옮기는 법: FBX 모델의 드로어블 목록이 재질 수만큼 늘어난다. 드로어블 0 하나가 메시 전체라고 기대하던 코드는 material_name 이나 material_index 로 찾는다.
 - 크레이트 라이선스 파일: vanilla-engine-macros, vanilla-engine-apidoc, vanilla-engine-licenses 에도 뿌리와 같은 LICENSE(저작권자 vanillapunch)를 두고 include 에 넣어 cargo package 꾸러미에 실린다. apidoc, licenses 에 authors 를 적고, licenses 는 SPDX 전문 texts 도 싣는다.
