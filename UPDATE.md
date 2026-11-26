@@ -1,6 +1,7 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- 초안(experimental, 0.4.0 뒤 기능, API 가 바뀔 수 있다) 2D 뼈대 애니메이션 vanilla::experimental::skeleton2d: vanilla.js 의 src/experimental/skeleton2d 와 같은 API. 뼈, 슬롯과 붙임(네모, 메시), 스킨 메시(뼈 무게), 클립(뼈 회전, 이동, 크기, 기울임, 슬롯 색과 붙임, 그리기 차례, 사건, 곡선 선형, 계단, 베지어), 애니메이션 상태(트랙 층 섞기, 크로스페이드), 두 뼈와 한 뼈 IK, 엔진 자체 JSON 과 DragonBones 5.x JSON 읽기(Spine 은 런타임 라이선스 때문에 읽지 않는다), 노드에 붙는 Skeleton2DAnimator(SpriteAtlas 조각, Graphic::draw_vertices 로 그린다, Graphic 은 고치지 않음). 예제 skeleton2d(자산 examples/assets/skeleton2d, 원본 예제와 화소 차이 평균 0.0006)
 - 폴더: 원본 vanilla.js 가 src/experimental 에 있던 다 자란 기능을 제자리로 옮겨, 두 엔진의 폴더가 같아졌다. 러스트 판은 이미 이 자리였고 모듈 경로(vanilla::graphics3d 같은)는 그대로다. 원본에서 import.js 로 쓰던 게임은 그대로, 파일 경로로 직접 import 하던 게임은 새 경로로 바꾼다. 파일 머리 주석과 ARCHITECTURE 9장의 원본 경로를 새 경로로 고쳤다. (원본의 옛 경로 → 새 경로)
   - src/experimental/graphics/*.js (3D) → src/graphics3d/*.js (러스트 graphics3d/)
   - src/experimental/graphics/toon/*.js (툰 3D) → src/graphics3d/toon/*.js (러스트 graphics3d/toon/)
