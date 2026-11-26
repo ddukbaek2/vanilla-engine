@@ -1,6 +1,8 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- AudioPlayer 버리기: 플레이어를 버려도 트는 소리는 원본 WebAudio 소스 노드처럼 끝까지 운다. 데스크탑은 믹서가 소스가 끝날 때까지 플레이어 노드(와 그리로 내는 버스 노드)를 들고 끝나면 뺀다. 웹은 onended 를 스스로 풀리는 콜백으로 바꿔 소스가 끝까지 울고, 끝나면 GainNode 를 뗀다. 컨텍스트 재개를 기다리던 재생도 원본처럼 재개 뒤에 튼다. (지금까지는 버리면 소리가 멈췄다)
+  - 옮기는 법: 플레이어를 버려 소리를 끄던 코드는 버리기 전에 stop() 을 부른다. 루프 소리는 stop 하지 않으면 원본처럼 계속 운다.
 - 사인, 코사인, 탄젠트: math::sin, cos, tan 과 트윈 감속 함수(sinusoidal, elastic)가 시스템 libm 대신 크롬 Math.sin, cos, tan 과 같은 셈(바르게 반올림한 f64, src/base/trigonometry.rs, 2/π 비트 표 Payne-Hanek 줄이기와 두 배 정밀도 급수, fma 없이)을 하고 f32 로 담는다. 크롬 158 과 22,000 입력에서 sin, cos, tan 이 모두 같은 비트였다. (맥 시스템 libm 은 sin 896, tan 8,719 곳이 달랐다) 시스템 libm 은 맥, 윈도우, 리눅스, wasm 마다 끝자리가 달랐다. math::tan 은 sin / cos 가 아니라 바로 셈한다. 셈이 표준 함수보다 느리다(호출 한 번 0.5 마이크로초 안팎).
 - 그림(데스크탑): 박힌 색 프로필을 크롬처럼 sRGB 로 바꾼다. PNG 의 cICP, iCCP, sRGB, gAMA 와 cHRM, JPEG 의 APP2 ICC, WebP 의 ICCP, AVIF 의 colr(ICC, nclx 의 원색과 전달 특성, PQ, HLG). ICC 는 스키아의 러스트 해석기처럼 읽고(para, curv, mft1, mft2, mAB, mBA, cicp), 색 공간 고르기는 크롬 skia/ext/color_profile.cc 와 SkColorSpace, 바꾸기는 skcms 와 SkColorSpaceXformSteps 의 셈이다(core/colorprofile.rs, 새 직접 의존 png 0.18 은 image 가 이미 쓰는 같은 판). 크롬 158 의 WebGL texImage2D 와 PNG, WebP 시험 그림 31 장이 비트까지 같다. AVIF 는 YUV 를 RGB 로 바꾸는 셈(크롬은 libyuv) 때문에 한두 단계, 프로필이 붙으면 몇 단계 다르고 JPEG 은 해독기 차이로 한두 단계 다르다. 3D 재질은 원본 createImageBitmap(colorSpaceConversion "none")처럼 바꾸지 않는다. (지금까지는 색 프로필을 걸지 않았다)
 - 움직이는 AVIF(데스크탑): 크롬(CrabbyAvif)처럼 주 상표 avis 면 트랙의 첫 장, avif 면 주 그림 항목을 풀고, 트랙만 있는 파일도 푼다. 크롬도 drawImage 와 texImage2D 에서 늘 첫 장을 써서(bitmap_image.cc ImageForDefaultFrame, image_extractor.cc) 움직이지 않는다. (지금까지는 avis 파일에서 주 그림 항목을 풀어 크롬과 다른 장이 나올 수 있었고, 트랙만 있는 파일은 풀지 못했다) nclx 전달 특성 9, 10, 11, 12 인 AVIF 는 크롬처럼 풀지 못한다

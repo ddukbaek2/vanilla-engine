@@ -162,7 +162,7 @@ struct MixerGainNodeInner {
 
 impl Drop for MixerGainNodeInner {
 	//==============================================================================
-	/// 버스 손잡이가 모두 없어지면 믹서에서 버스 노드를 뺀다.
+	/// 버스 손잡이가 모두 없어지면 믹서에서 버스 노드를 뺀다. (그 버스로 내는 플레이어가 남아 있으면 그것이 빠진 뒤에)
 	//==============================================================================
 	fn drop(&mut self) {
 		self.mixer_link.send(MixerCommand::RemoveBus { bus_id: self.bus_id });
@@ -752,7 +752,7 @@ impl AudioPlayerBackend {
 
 impl Drop for AudioPlayerBackend {
 	//==============================================================================
-	/// 믹서에서 플레이어 노드를 뺀다.
+	/// 믹서에 플레이어를 놓는다고 알린다. (원본 WebAudio 소스 노드처럼 트는 소리는 끝까지 울고, 끝나면 믹서가 노드를 뺀다)
 	//==============================================================================
 	fn drop(&mut self) {
 		self.send(MixerCommand::RemovePlayer { player_id: self.player_id });

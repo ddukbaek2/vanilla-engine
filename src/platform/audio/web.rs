@@ -16,8 +16,9 @@
 //! - 비동기: 프로미스는 wasm-bindgen-futures 의 spawn_local 과 JsFuture 로 기다린다. (원본 then / await 자리)
 //!   콜백은 매니저나 플레이어의 상태를 Weak 로 들어, 그 사이 버려졌으면 아무것도 하지 않는다.
 //! - 원본과 다른 점:
-//!   플레이어를 버리면 재생 중인 소스 노드를 멈추고 GainNode 를 뗀다. (onended 콜백이 버려진 클로저를 부르지 않게)
-//!   일시 중단 상태에서 play 한 뒤 재개를 기다리는 사이 다른 소스가 시작됐으면 그것을 멈추고 튼다. (원본은 둘 다 운다)
+//!   플레이어를 버려도 원본처럼 트는 소스 노드는 끝까지 운다. 재개를 기다리던 재생도 재개 뒤에 튼다. (원본은 그 콜백이 플레이어를 붙든다)
+//!   onended 를 스스로 풀리는 콜백(Closure::once_into_js)으로 바꿔 버린 클로저를 부르지 않고, 끝나면 GainNode 들을 뗀다.
+//! - 한 플레이어는 소리 하나다. 재개를 기다리는 사이 다른 소스가 시작됐으면 원본 startPlayback 처럼 그것을 멈추고 튼다.
 //!
 //! # 예제
 //! fetch 와 디코딩이 끝나기를 기다린 뒤 길이 보기 (웹은 끝나야 버퍼가 생긴다, 데스크탑에서도 같은 코드가 돈다)
@@ -412,6 +413,12 @@ struct PlaybackState {
 	is_playing: bool,
 	/// 재생 요청 번호. (재생과 정지마다 늘려, 컨텍스트를 깨우는 동안 늦게 끝난 지난 요청이 소리를 내지 않게 한다)
 	play_request_id: u64,
+	/// 플레이어를 버렸는지. (트는 소리와 재개를 기다리는 재생은 끝까지 간다)
+	is_released: bool,
+	/// 재개를 기다리는 재생 수.
+	waiting_resume_count: u32,
+	/// 버린 플레이어의 GainNode 들. (소리가 끝나면 뗀다)
+	released_node_list: Vec<web_sys::AudioNode>,
 }
 
 impl PlaybackState {
@@ -427,6 +434,34 @@ impl PlaybackState {
 		}
 		self.ended_callback = None;
 	}
+
+	//==============================================================================
+	/// 버린 플레이어의 소리가 다 끝났으면 GainNode 들을 뗀다.
+	//==============================================================================
+	fn disconnect_released_nodes_if_idle(&mut self) {
+		if self.is_released && self.audio_source.is_none() && self.waiting_resume_count == 0 {
+			for node in self.released_node_list.drain(..) {
+				let _ = node.disconnect();
+			}
+		}
+	}
+}
+
+//==============================================================================
+/// 버린 플레이어의 소스를 끝까지 울린다. (onended 를 스스로 풀리는 콜백으로 바꾸고, 끝나면 GainNode 들을 뗀다)
+///
+/// # 인자
+/// - `audio_source`: 트는 소스 노드.
+/// - `node_list`: 끝나면 뗄 노드들.
+//==============================================================================
+fn release_source_until_end(audio_source: &web_sys::AudioBufferSourceNode, node_list: Vec<web_sys::AudioNode>) {
+	let ended_callback = Closure::once_into_js(move || {
+		for node in node_list.iter() {
+			let _ = node.disconnect();
+		}
+	});
+	let scheduled_source_node: &web_sys::AudioScheduledSourceNode = audio_source;
+	scheduled_source_node.set_onended(Some(ended_callback.unchecked_ref()));
 }
 
 //==============================================================================
@@ -524,6 +559,9 @@ impl AudioPlayerBackend {
 				ended_callback: None,
 				is_playing: false,
 				play_request_id: 0,
+				is_released: false,
+				waiting_resume_count: 0,
+				released_node_list: Vec::new(),
 			})),
 			playback_rate: 1.0,
 		}
@@ -581,19 +619,19 @@ impl AudioPlayerBackend {
 					return;
 				}
 			};
-			let weak_playback_state = Rc::downgrade(&self.playback_state);
+			// 원본처럼 재개 콜백이 상태를 붙든다. (그 사이 플레이어를 버려도 재개 뒤에 튼다)
+			let playback_state_cell = self.playback_state.clone();
+			playback_state_cell.borrow_mut().waiting_resume_count += 1;
 			let audio_buffer = audio_buffer.clone();
 			let playback_rate = self.playback_rate;
 			spawn_local(async move {
-				if JsFuture::from(resume_promise).await.is_err() {
-					return;
-				}
-				if let Some(playback_state_cell) = weak_playback_state.upgrade() {
-					if playback_state_cell.borrow().play_request_id != play_request_id {
-						return;
-					}
+				let is_resumed = JsFuture::from(resume_promise).await.is_ok();
+				playback_state_cell.borrow_mut().waiting_resume_count -= 1;
+				let is_current_request = playback_state_cell.borrow().play_request_id == play_request_id;
+				if is_resumed && is_current_request {
 					start_source(&playback_state_cell, &audio_context, &gain_node, &audio_buffer, is_loop, time, playback_rate);
 				}
+				playback_state_cell.borrow_mut().disconnect_released_nodes_if_idle();
 			});
 			return;
 		}
@@ -763,16 +801,25 @@ impl AudioPlayerBackend {
 
 impl Drop for AudioPlayerBackend {
 	//==============================================================================
-	/// 버릴 때 소스를 멈추고 GainNode 를 뗀다.
+	/// 버릴 때: 트는 소스는 원본 WebAudio 처럼 끝까지 울리고 끝나면 GainNode 를 뗀다. (소리가 없으면 바로 뗀다)
 	//==============================================================================
 	fn drop(&mut self) {
-		self.playback_state.borrow_mut().stop_source();
+		let mut node_list: Vec<web_sys::AudioNode> = Vec::new();
 		if let Some(gain_node) = &self.gain_node {
-			let _ = gain_node.disconnect();
+			node_list.push(gain_node.clone().into());
 		}
 		if let Some(panner_node) = &self.panner_node {
-			let _ = panner_node.disconnect();
+			node_list.push(panner_node.clone());
 		}
+		let mut playback_state = self.playback_state.borrow_mut();
+		playback_state.is_released = true;
+		if let Some(audio_source) = playback_state.audio_source.take() {
+			release_source_until_end(&audio_source, node_list);
+			playback_state.ended_callback = None;
+			return;
+		}
+		playback_state.released_node_list = node_list;
+		playback_state.disconnect_released_nodes_if_idle();
 	}
 }
 
@@ -900,6 +947,13 @@ fn start_source(playback_state_cell: &Rc<RefCell<PlaybackState>>, audio_context:
 	}
 	if let Some(stop_time) = pending_stop_time {
 		let _ = scheduled_source_node.stop_with_when(stop_time);
+	}
+	if playback_state.is_released {
+		// 버린 플레이어: 손잡이 없이 끝까지 울린다. (onended 를 바꾼 뒤에 앞 클로저를 버린다)
+		let node_list = std::mem::take(&mut playback_state.released_node_list);
+		release_source_until_end(&audio_source, node_list);
+		drop(ended_callback);
+		return;
 	}
 	playback_state.audio_source = Some(audio_source);
 	playback_state.ended_callback = Some(ended_callback);

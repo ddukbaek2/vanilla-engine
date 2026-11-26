@@ -10,9 +10,10 @@
 //!   (웹은 &AudioNode 라 다른 AudioNode 도 넘길 수 있고, 데스크탑은 믹서 버스의 &MixerGainNode 다)
 //!   데스크탑은 내보낼 곳을 직접 넘겨 만든 플레이어도 원본 WebAudio 처럼 이어진 동안 그 버스 노드를 살려 둔다.
 //! - play 는 원본처럼 AudioContext 가 멈춰 있으면 깨운 뒤 튼다. (웹은 resume() 을 기다렸다가, 데스크탑은 그 자리에서)
+//! - 플레이어를 버려도 트는 소리는 원본 WebAudio 소스 노드처럼 끝까지 운다. (데스크탑은 믹서가 소스가 끝날 때까지 노드를 들고, 웹은 소스 노드가 운다)
+//!   루프 소리는 원본처럼 멈추지 않으니 버리기 전에 stop 한다.
 //! - 원본과 다른 점:
 //!   애셋은 `Rc<AudioAsset>` 로 나눠 든다.
-//!   플레이어를 버리면 재생 중인 소리도 멈춘다. (원본은 가비지 수거와 상관없이 소스 노드가 끝까지 운다)
 //!   데스크탑의 is_playing() 은 onended 콜백 대신 믹서가 소스를 끝냈는지 읽는다. (끝나면 거짓)
 //!   get_audio_context 는 만든 매니저의 AudioContext 를 빌려 준다. (웹 WebAudio AudioContext, 데스크탑 엔진 믹서의 AudioContext, 매니저 없이 만든 플레이어는 None)
 //!   set_playback_rate 는 원본에 없던 것을 러스트 판에서 먼저 만들었다. (원본에도 넣었다)

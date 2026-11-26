@@ -408,6 +408,8 @@ struct PlayerNode {
 	output_bus_id: Option<u64>,
 	source: Option<(BufferSource, u64)>,
 	ended_generation: Arc<AtomicU64>,
+	/// 플레이어 손잡이를 버렸는지. (WebAudio 소스 노드처럼 트는 소리가 끝날 때까지 남고 끝나면 빠진다)
+	is_released: bool,
 }
 
 //==============================================================================
@@ -419,6 +421,8 @@ struct BusNode {
 	input: [[f32; RENDER_QUANTUM_FRAMES]; 2],
 	/// 이 퀀텀에 소리 나는 입력이 있었는지. (없으면 크롬처럼 자동화만 흘린다)
 	has_sound_input: bool,
+	/// 버스 손잡이를 모두 버렸는지. (WebAudio 처럼 이 버스로 내는 플레이어가 남아 있는 동안 살아 있다)
+	is_released: bool,
 }
 
 //==============================================================================
@@ -513,10 +517,13 @@ impl MixerRenderer {
 		while let Ok(command) = self.command_receiver.try_recv() {
 			match command {
 				MixerCommand::AddBus { bus_id } => {
-					self.bus_list.push(BusNode { bus_id, gain: create_gain_param(), input: [[0.0; RENDER_QUANTUM_FRAMES]; 2], has_sound_input: false });
+					self.bus_list.push(BusNode { bus_id, gain: create_gain_param(), input: [[0.0; RENDER_QUANTUM_FRAMES]; 2], has_sound_input: false, is_released: false });
 				}
 				MixerCommand::RemoveBus { bus_id } => {
-					self.bus_list.retain(|bus| bus.bus_id != bus_id);
+					if let Some(bus) = self.bus_list.iter_mut().find(|bus| bus.bus_id == bus_id) {
+						bus.is_released = true;
+					}
+					self.remove_released_nodes();
 				}
 				MixerCommand::BusGainAutomation { bus_id, automation } => {
 					let (current_frame, sample_rate) = (self.current_frame, self.sample_rate);
@@ -525,10 +532,13 @@ impl MixerRenderer {
 					}
 				}
 				MixerCommand::AddPlayer { player_id, output_bus_id, ended_generation, gain_value } => {
-					self.player_list.push(PlayerNode { player_id, gain: create_gain_param(), gain_value, pan: None, panner: None, output_bus_id, source: None, ended_generation });
+					self.player_list.push(PlayerNode { player_id, gain: create_gain_param(), gain_value, pan: None, panner: None, output_bus_id, source: None, ended_generation, is_released: false });
 				}
 				MixerCommand::RemovePlayer { player_id } => {
-					self.player_list.retain(|player| player.player_id != player_id);
+					if let Some(player) = self.find_player(player_id) {
+						player.is_released = true;
+					}
+					self.remove_released_nodes();
 				}
 				MixerCommand::PlayerGainAutomation { player_id, automation } => {
 					let (current_frame, sample_rate) = (self.current_frame, self.sample_rate);
@@ -748,8 +758,18 @@ impl MixerRenderer {
 			}
 		}
 		self.beep_list.retain(|beep| !beep.oscillator.is_finished());
+		self.remove_released_nodes();
 		self.current_frame += RENDER_QUANTUM_FRAMES as u64;
 		self.shared.set_rendered_seconds(self.current_frame as f64 / self.sample_rate);
+	}
+
+	//==============================================================================
+	/// 버린 노드 치우기. (손잡이를 버린 플레이어는 트는 소리가 끝나면, 버린 버스는 그리로 내는 플레이어가 없으면 빠진다)
+	//==============================================================================
+	fn remove_released_nodes(&mut self) {
+		self.player_list.retain(|player| !player.is_released || player.source.is_some());
+		let player_list = &self.player_list;
+		self.bus_list.retain(|bus| !bus.is_released || player_list.iter().any(|player| player.output_bus_id == Some(bus.bus_id)));
 	}
 
 	//==============================================================================
@@ -963,6 +983,38 @@ mod tests {
 		renderer.render_interleaved(&mut silent, 2);
 		assert!(silent.iter().all(|sample| *sample == 0.0));
 		assert_eq!(shared.get_rendered_seconds(), rendered_seconds);
+	}
+
+	//==============================================================================
+	/// 플레이어와 버스 손잡이를 버려도 트는 소리는 끝까지 울고, 끝나면 노드가 빠진다. (WebAudio 소스 노드처럼)
+	//==============================================================================
+	#[test]
+	fn released_player_plays_until_source_ends() {
+		let (command_sender, mut renderer, _shared) = create_renderer(44100.0);
+		let ended_generation = Arc::new(AtomicU64::new(0));
+		command_sender.send(MixerCommand::AddBus { bus_id: 1 }).unwrap();
+		command_sender.send(MixerCommand::AddPlayer { player_id: 2, output_bus_id: Some(1), ended_generation: ended_generation.clone(), gain_value: Arc::new(AtomicU32::new(0)) }).unwrap();
+		command_sender.send(MixerCommand::StartSource { player_id: 2, audio_buffer: create_buffer(vec![vec![0.5; 300]], 44100.0), is_loop: false, offset_seconds: 0.0, playback_rate: 1.0, generation: 1 }).unwrap();
+		command_sender.send(MixerCommand::RemovePlayer { player_id: 2 }).unwrap();
+		command_sender.send(MixerCommand::RemoveBus { bus_id: 1 }).unwrap();
+		let mut output = vec![0.0f32; 2 * 256];
+		renderer.render_interleaved(&mut output, 2);
+		assert_eq!(output[0], 0.5);
+		assert_eq!(output[2 * 255], 0.5);
+		assert_eq!(renderer.player_list.len(), 1);
+		assert_eq!(renderer.bus_list.len(), 1);
+		let mut tail = vec![0.0f32; 2 * 256];
+		renderer.render_interleaved(&mut tail, 2);
+		assert_eq!(tail[2 * 43], 0.5);
+		assert_eq!(tail[2 * 44], 0.0);
+		assert_eq!(ended_generation.load(Ordering::Acquire), 1);
+		assert!(renderer.player_list.is_empty());
+		assert!(renderer.bus_list.is_empty());
+		// 멈춘(소스 없는) 플레이어는 버리면 바로 빠진다.
+		command_sender.send(MixerCommand::AddPlayer { player_id: 3, output_bus_id: None, ended_generation: ended_generation.clone(), gain_value: Arc::new(AtomicU32::new(0)) }).unwrap();
+		command_sender.send(MixerCommand::RemovePlayer { player_id: 3 }).unwrap();
+		renderer.render_interleaved(&mut tail, 2);
+		assert!(renderer.player_list.is_empty());
 	}
 
 	//==============================================================================
