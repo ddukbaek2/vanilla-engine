@@ -3,7 +3,7 @@
 //! - 원본은 캔버스를 잡고 request_animation_frame 으로 프레임을 돈다.
 //!   러스트 판은 창, GL 컨텍스트, 입력 이벤트, 화면 넘기기를 플랫폼 층(crate::platform)이 맡고,
 //!   여기 EngineRunner 는 플랫폼을 모른 채 씬과 프레임 흐름만 돈다. (데스크탑: platform/desktop.rs, 웹: platform/web.rs)
-//! - 씬에는 &mut Engine 을 넘긴다. 씬은 여기서 매니저(시간, 뷰, 입력)를 꺼내 쓴다. (원본 Engine.get_engine() 자리)
+//! - 씬에는 &mut Engine 을 넘긴다. 씬은 여기서 매니저(시간, 뷰, 입력)를 꺼내 쓴다. (원본 Engine.getEngine() 자리)
 //! - Graphic 은 플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘겨받고, 씬의 draw 계열에 따로 넘긴다.
 //! - 오디오 매니저를 원본처럼 생성할 때 만들어 든다. AudioContext(소리 장치)는 처음 쓸 때 만든다. 프레임마다 하는 오디오 일은 없다.
 //!   웹은 플랫폼이 click / touchstart / keydown 에서 resume_on_user_gesture, focus / visibilitychange 에서 resume 을 부른다.
@@ -135,7 +135,7 @@ pub struct EngineConfiguration {
 	pub default_bold_font_bytes: Option<Vec<u8>>,
 	/// 웹에서 그릴 캔버스 id. (없으면 만들어 body 에 붙인다)
 	pub canvas_id: String,
-	/// 웹 기본 폰트 주소. (원본 default_font_url. 웹에서 default_font_bytes 가 없으면 여기서 받아 기본 폰트로 쓴다. 빈 글이면 받지 않는다)
+	/// 웹 기본 폰트 주소. (원본 defaultFontUrl. 웹에서 default_font_bytes 가 없으면 여기서 받아 기본 폰트로 쓴다. 빈 글이면 받지 않는다)
 	/// - 기본값은 빈 글이다. (원본 기본값 DOSGothic 은 넣지 않는다) 아무 글꼴도 주지 않으면 원본처럼 브라우저 시스템 글꼴로 그린다.
 	/// - 게임 글꼴을 쓰려면 이 주소나 default_font_bytes, FontAsset 으로 준다.
 	/// - 데스크탑은 쓰지 않고 default_font_paths(비면 운영체제가 찾은 시스템 글꼴 사슬)를 본다.

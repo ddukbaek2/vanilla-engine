@@ -4,7 +4,7 @@
 //! - AudioContext: 원본처럼 AudioContext, 없으면 webkitAudioContext. user gesture 뒤에 만든다. (create_audio_player 는 그 전에도 만든다)
 //! - resume: "suspended" 나 "interrupted"(iOS WebKit 의 비표준 상태) 일 때만 resume() 하고 거부는 넘긴다.
 //!   상태는 문자열로 읽는다. (web-sys 의 AudioContextState 에 "interrupted" 가 없다)
-//! - iOS 시계 확인: 원본 verify_context_clock 그대로. (2026-10-22 03:41, iOS 26.6.2 버전업 대응)
+//! - iOS 시계 확인: 원본 verifyContextClock 그대로. (2026-10-22 03:41, iOS 26.6.2 버전업 대응)
 //!   복원 뒤 "running" 인데 0.5초 동안 current_time 이 실제 시간의 1/4 보다 덜 흐르면 suspend() 후 resume() 하고 다시 확인한다.
 //!   그 resume() 이 거부되면 같은 간격 뒤 resume_context() 로 다시 복원한다. 한 번에 하나만 돈다.
 //! - 디코딩: 원본처럼 OfflineAudioContext(1, 1, 44100) 로 한다. 없으면 잠시 쓰는 AudioContext 로 하고 닫는다.
@@ -170,7 +170,7 @@ fn is_context_state_running(audio_context: &AudioContext) -> bool {
 }
 
 //==============================================================================
-/// 오디오 컨텍스트가 있고 돌고 있는지. (원본 audio_context !== null && state === "running")
+/// 오디오 컨텍스트가 있고 돌고 있는지. (원본 audioContext !== null && state === "running")
 //==============================================================================
 pub fn is_audio_context_running(state: &AudioManagerState) -> bool {
 	match &state.audio_context {
@@ -310,7 +310,7 @@ pub fn suspend_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 }
 
 //==============================================================================
-/// 복원 뒤 시계 확인. (iOS 전용, 원본 verify_context_clock)
+/// 복원 뒤 시계 확인. (iOS 전용, 원본 verifyContextClock)
 /// - CONTEXT_CLOCK_CHECK_INTERVAL 동안 current_time 이 흐르는지 보고, 멈춰 있으면 suspend() 후 resume() 하고 다시 확인한다.
 /// - 그 resume() 이 거부되면 같은 간격 뒤 resume_context() 로 다시 복원한다.
 /// - 페이지가 가려지거나 컨텍스트가 "running" 이 아니게 되면 그만둔다.
@@ -495,7 +495,7 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	/// 소리를 낼 수 있는지. (원본 audio_context && gain_node)
+	/// 소리를 낼 수 있는지. (원본 audioContext && gain_node)
 	//==============================================================================
 	pub fn is_available(&self) -> bool {
 		self.audio_context.is_some() && self.gain_node.is_some()
@@ -696,7 +696,7 @@ impl AudioBusBackend {
 	}
 
 	//==============================================================================
-	/// 소리를 모을 수 있는지. (원본 audio_context && gain_node)
+	/// 소리를 모을 수 있는지. (원본 audioContext && gain_node)
 	//==============================================================================
 	pub fn is_available(&self) -> bool {
 		self.audio_context.is_some() && self.gain_node.is_some()
@@ -752,7 +752,7 @@ impl Drop for AudioBusBackend {
 }
 
 //==============================================================================
-/// 소스 노드를 만들어 튼다. (원본 start_playback)
+/// 소스 노드를 만들어 튼다. (원본 startPlayback)
 //==============================================================================
 fn start_source(playback_state_cell: &Rc<RefCell<PlaybackState>>, audio_context: &AudioContext, gain_node: &web_sys::GainNode, audio_buffer: &AudioBuffer, is_loop: bool, time: f64, playback_rate: f64) {
 	let audio_source = match audio_context.create_buffer_source() {
@@ -948,7 +948,7 @@ fn to_oscillator_type(beep_waveform: BeepWaveform) -> web_sys::OscillatorType {
 }
 
 //==============================================================================
-/// 비프 톤 하나 재생. (원본 play_tone 의 OscillatorNode + GainNode 스케줄링)
+/// 비프 톤 하나 재생. (원본 playTone 의 OscillatorNode + GainNode 스케줄링)
 //==============================================================================
 pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelope) {
 	let audio_context = match &state.audio_context {

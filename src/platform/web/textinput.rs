@@ -39,7 +39,7 @@ use wasm_bindgen::{JsCast, JsValue};
 const HIDDEN_INPUT_CLASS_NAME: &str = "uiinputfield-hidden";
 /// 한 번만 넣는 전역 스타일 id. (원본 GLOBAL_STYLE_ID)
 const GLOBAL_STYLE_ID: &str = "uiinputfield-hidden-style";
-/// 숨긴 <input> 의 선택, 안내 글, 자동 완성 색을 지우는 스타일. (원본 ensure_global_hidden_input_style)
+/// 숨긴 <input> 의 선택, 안내 글, 자동 완성 색을 지우는 스타일. (원본 ensureGlobalHiddenInputStyle)
 const GLOBAL_STYLE_TEXT: &str = "
 input.uiinputfield-hidden::selection { background: transparent; color: transparent; }
 textarea.uiinputfield-hidden::selection { background: transparent; color: transparent; }
@@ -78,7 +78,7 @@ const HIDDEN_INPUT_STYLE_LIST: [(&str, &str); 20] = [
 	// iOS 줌인 방지.
 	("font-size", "16px"),
 ];
-/// 문맥 메뉴 스타일. (원본 show_context_menu)
+/// 문맥 메뉴 스타일. (원본 showContextMenu)
 const CONTEXT_MENU_STYLE_LIST: [(&str, &str); 12] = [
 	("position", "absolute"),
 	("z-index", "10000"),
@@ -526,7 +526,7 @@ pub(super) fn add_text_input_listeners(canvas: &web_sys::HtmlCanvasElement) -> R
 }
 
 //==============================================================================
-/// 전역 스타일 한 번 넣기. (원본 ensure_global_hidden_input_style)
+/// 전역 스타일 한 번 넣기. (원본 ensureGlobalHiddenInputStyle)
 //==============================================================================
 fn ensure_global_hidden_input_style() -> Result<(), String> {
 	let document = get_document().ok_or_else(|| String::from("document 없음"))?;
@@ -667,7 +667,7 @@ pub(super) fn apply_frame(engine: &Engine) {
 		}
 	}
 
-	// 문맥 메뉴의 필드가 포커스를 잃었으면 닫는다. (원본 handle_blur 의 hide_context_menu)
+	// 문맥 메뉴의 필드가 포커스를 잃었으면 닫는다. (원본 handleBlur 의 hide_context_menu)
 	let menu_field_id = CONTEXT_MENU.with(|menu_cell| menu_cell.borrow().as_ref().map(|context_menu| context_menu.field_id));
 	if let Some(menu_field_id) = menu_field_id {
 		let is_menu_field_focused = field_state_list.iter().any(|field_state| field_state.field_id == menu_field_id && field_state.is_focused);
@@ -1095,7 +1095,7 @@ fn handle_canvas_context_menu(event: web_sys::Event) {
 }
 
 //==============================================================================
-/// DOM 문맥 메뉴 열기. (잘라내기 / 복사 / 붙여넣기. 원본 show_context_menu, body 의 absolute 라 뷰포트 좌표 clientX, clientY 에 문서 스크롤을 더해 놓는다)
+/// DOM 문맥 메뉴 열기. (잘라내기 / 복사 / 붙여넣기. 원본 showContextMenu, body 의 absolute 라 뷰포트 좌표 clientX, clientY 에 문서 스크롤을 더해 놓는다)
 //==============================================================================
 fn show_context_menu(field_id: u64, has_selection: bool, client_x: f64, client_y: f64) -> Result<(), String> {
 	hide_context_menu();
@@ -1234,7 +1234,7 @@ fn add_context_menu_dismiss_listener(menu_serial: u64) {
 }
 
 //==============================================================================
-/// DOM 문맥 메뉴 닫기. (원본 hide_context_menu. 리스너는 다음 프레임에 버린다)
+/// DOM 문맥 메뉴 닫기. (원본 hideContextMenu. 리스너는 다음 프레임에 버린다)
 //==============================================================================
 fn hide_context_menu() {
 	let context_menu = CONTEXT_MENU.with(|menu_cell| menu_cell.borrow_mut().take());

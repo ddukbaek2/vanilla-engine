@@ -3,7 +3,7 @@
 //! - 원본 misc/imagescroller.js 를 옮긴 것이다. 이미지 한 장을 보이는 영역(view_rect) 안에 타일처럼 깔고, 속도에 맞춰 흘려 그린다. (무한 배경)
 //! - 원본처럼 컴포넌트가 아니라 그냥 값이다. 들고 있는 쪽이 tick 과 draw 를 불러 준다.
 //! - 원본과 다른 점:
-//!   이미지는 `Rc<Image>` 다. 원본 set_image 가 받던 ImageAsset 은 set_image_asset 으로 넘긴다.
+//!   이미지는 `Rc<Image>` 다. 원본 setImage 가 받던 ImageAsset 은 set_image_asset 으로 넘긴다.
 //!   get_scroll_position / get_scroll_speed 는 원본처럼 고칠 수 있는 참조가 아니라 값을 돌려준다. (tick 은 안에서 바로 더한다)
 //==============================================================================
 use crate::base::rect::Rect;

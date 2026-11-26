@@ -110,7 +110,7 @@ pub struct ImageDescription {
 }
 
 //==============================================================================
-/// 이미지 서술 옵션. (원본 load_image_description 의 options { flip_y, is_color_data, anisotropy })
+/// 이미지 서술 옵션. (원본 loadImageDescription 의 options { flip_y, is_color_data, anisotropy })
 ///
 /// # 예제
 /// 기본값은 모두 끈 것이고, 옵션을 None 으로 주면 기본값과 같다
@@ -264,7 +264,7 @@ impl IntoFuture for ImageDescriptionLoadHandle {
 }
 
 //==============================================================================
-/// 중립 머티리얼 서술. (원본 create_default_description 이 만드는 객체, 팩터 + 이미지, GL 무관)
+/// 중립 머티리얼 서술. (원본 createDefaultDescription 이 만드는 객체, 팩터 + 이미지, GL 무관)
 ///
 /// # 예제
 /// 기본 서술에 색과 거칠기를 바꾸고 노멀 맵 이미지 넣기
@@ -540,7 +540,7 @@ impl Material {
 	}
 
 	//==============================================================================
-	/// 바이트로 이미지 서술 생성. (원본 load_image_description 의 fetch 뒤 부분, 웹은 BlobAsset 바이트를 넘긴다)
+	/// 바이트로 이미지 서술 생성. (원본 loadImageDescription 의 fetch 뒤 부분, 웹은 BlobAsset 바이트를 넘긴다)
 	///
 	/// # 인자
 	/// - `bytes`: 이미지 파일 내용. (png, jpeg, webp, gif, bmp, ico)
@@ -950,7 +950,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 기본 서술. (원본 create_default_description 값)
+	/// 기본 서술. (원본 createDefaultDescription 값)
 	//==============================================================================
 	#[test]
 	fn default_description_matches_original() {

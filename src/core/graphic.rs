@@ -69,7 +69,7 @@ void main() {
 
 /// 프래그먼트 셰이더. (프리멀티플라이드 알파 출력)
 /// - 단색 도형은 1x1 흰색 텍스처를 바인드해 같은 경로로 처리한다.
-/// - tint_color 는 이미지 실루엣(알파) 안쪽에만 색을 덮는 틴트. (alpha 0 이면 비활성)
+/// - tintColor 는 이미지 실루엣(알파) 안쪽에만 색을 덮는 틴트. (alpha 0 이면 비활성)
 const FRAGMENTSHADER_SOURCE: &str = "#version 300 es
 precision highp float;
 in vec2 fragmentTextureCoordinate;
@@ -1709,7 +1709,7 @@ impl Graphic {
 	}
 
 	//==============================================================================
-	/// 변환 행렬 직접 설정. (Canvas2D set_transform(a, b, c, d, e, f) 대응)
+	/// 변환 행렬 직접 설정. (Canvas2D setTransform(a, b, c, d, e, f) 대응)
 	/// - 지금 행렬에 곱하지 않고 바꿔 넣는다. 점 (x, y) 는 (a x + c y + e, b x + d y + f) 로 옮겨진다.
 	///
 	/// # 인자
@@ -3481,7 +3481,7 @@ impl Graphic {
 	}
 
 	//==============================================================================
-	/// 이미지의 소스 영역을 지정 영역에 출력. (Canvas2D draw_image 9인자 대응)
+	/// 이미지의 소스 영역을 지정 영역에 출력. (Canvas2D drawImage 9인자 대응)
 	/// - 이미지의 텍스처를 얻지 못하면 그리지 않는다.
 	///
 	/// # 인자
@@ -4181,7 +4181,7 @@ impl Graphic {
 
 	//==============================================================================
 	/// 셰이더 프로그램 바꿔 끼우기. (None 이면 기본 프로그램으로 복귀)
-	/// - 기본 프로그램과 같은 어트리뷰트 위치 / 유니폼 이름(projectionMatrix, model_matrix, mainColor, tint_color, global_alpha, mainTexture)을 갖춰야 한다.
+	/// - 기본 프로그램과 같은 어트리뷰트 위치 / 유니폼 이름(projectionMatrix, modelMatrix, mainColor, tintColor, globalAlpha, mainTexture)을 갖춰야 한다.
 	/// - 바꿔 끼운 프로그램이 쓰이는 동안 그 프로그램이 사용 중이다. 효과 유니폼은 바꿔 끼운 바로 뒤에 GL 로 직접 올린다.
 	///
 	/// # 인자
@@ -4312,7 +4312,7 @@ impl Graphic {
 	}
 
 	//==============================================================================
-	/// 드로잉 버퍼 너비 반환. (픽셀, 원본 webGL2RenderingContext.drawing_buffer_width)
+	/// 드로잉 버퍼 너비 반환. (픽셀, 원본 webGL2RenderingContext.drawingBufferWidth)
 	///
 	/// # 돌려줌
 	/// 마지막 apply_settings 의 드로잉 버퍼 너비. (픽셀)
@@ -4322,7 +4322,7 @@ impl Graphic {
 	}
 
 	//==============================================================================
-	/// 드로잉 버퍼 높이 반환. (픽셀, 원본 webGL2RenderingContext.drawing_buffer_height)
+	/// 드로잉 버퍼 높이 반환. (픽셀, 원본 webGL2RenderingContext.drawingBufferHeight)
 	///
 	/// # 돌려줌
 	/// 마지막 apply_settings 의 드로잉 버퍼 높이. (픽셀)

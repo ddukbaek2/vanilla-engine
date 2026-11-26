@@ -290,7 +290,7 @@ impl Component for HeatHazeEffect {
 		// 앞서 그린 것이 화면에 다 나가야 떠 올 수 있다.
 		graphic.flush_batch();
 
-		// 노드 영역의 화면 바운딩 박스. (드로잉 버퍼 픽셀, 왼쪽 위 원점. 원본 get_world_bounds)
+		// 노드 영역의 화면 바운딩 박스. (드로잉 버퍼 픽셀, 왼쪽 위 원점. 원본 getWorldBounds)
 		let transform_matrix = graphic.get_transform_matrix();
 		let corners = [
 			transform_matrix.transform_point(0.0, 0.0),

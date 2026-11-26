@@ -347,7 +347,7 @@ pub fn bake_shadow_image(source_pixels: &[u8], source_width: u32, source_height:
 }
 
 //==============================================================================
-/// 문자열 재기. (원본 measure_text)
+/// 문자열 재기. (원본 measureText)
 //==============================================================================
 pub fn measure_text(font_description: &FontDescription, text: &str) -> TextMetrics {
 	let font_string = build_css_font_string(font_description, 1.0);
@@ -482,7 +482,7 @@ pub fn resolve_font_size(font_string: &str) -> Option<f32> {
 }
 
 //==============================================================================
-/// 문자열 굽기. (원본 bake_entry. 크기와 펜 자리 계산이 원본과 같다, direction 은 캔버스의 direction)
+/// 문자열 굽기. (원본 bakeEntry. 크기와 펜 자리 계산이 원본과 같다, direction 은 캔버스의 direction)
 //==============================================================================
 pub fn bake_text(text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f32, bake_scale: f32, direction: ShapingDirection) -> Option<SystemFontBitmap> {
 	let font_string = build_css_font_string(font_description, bake_scale);

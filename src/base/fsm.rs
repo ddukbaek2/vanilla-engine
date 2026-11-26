@@ -29,7 +29,7 @@ pub type TransitionGuard<StateName> = Box<dyn FnMut(Option<&StateName>, &StateNa
 pub type TransitionEvent<StateName> = Box<dyn FnMut(Option<&StateName>, &StateName)>;
 
 //==============================================================================
-/// 상태 처리 함수 묶음. (원본 add_state 의 handlers: { enter?, tick?, exit? })
+/// 상태 처리 함수 묶음. (원본 addState 의 handlers: { enter?, tick?, exit? })
 ///
 /// # 예제
 /// tick 처리 함수만 두고 나머지는 기본값

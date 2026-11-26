@@ -118,7 +118,7 @@ impl BeepTone {
 }
 
 //==============================================================================
-/// 톤 하나의 엔벨로프. (원본 play_tone 이 계산하는 값들. 시간은 톤 시작 기준 초)
+/// 톤 하나의 엔벨로프. (원본 playTone 이 계산하는 값들. 시간은 톤 시작 기준 초)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BeepEnvelope {
@@ -138,7 +138,7 @@ pub(crate) const BEEP_STOP_MARGIN_SECONDS: f64 = 0.01;
 
 impl BeepEnvelope {
 	//==============================================================================
-	/// 생성. (원본 play_tone 의 attack, release, peak 계산)
+	/// 생성. (원본 playTone 의 attack, release, peak 계산)
 	//==============================================================================
 	pub(crate) fn create(frequency: f32, duration_seconds: f64, waveform: BeepWaveform, delay_seconds: f64, volume: f32, volume_scale: f32) -> BeepEnvelope {
 		BeepEnvelope {
@@ -153,7 +153,7 @@ impl BeepEnvelope {
 	}
 
 	//==============================================================================
-	/// 컨텍스트 시계로 본 자동화 시각들. (current_time: 부른 때의 currentTime. 원본 play_tone 과 같은 차례로 더한다)
+	/// 컨텍스트 시계로 본 자동화 시각들. (current_time: 부른 때의 currentTime. 원본 playTone 과 같은 차례로 더한다)
 	//==============================================================================
 	pub(crate) fn get_schedule(&self, current_time: f64) -> BeepSchedule {
 		let start_time = current_time + self.delay_seconds;
@@ -180,7 +180,7 @@ pub(crate) struct BeepSchedule {
 	/// 최고 음량을 유지하다가 줄어들기 시작하는 시각. (원본 max(start_time + attack, end_time - release))
 	pub(crate) release_start_time: f64,
 	pub(crate) end_time: f64,
-	/// 오실레이터를 멈추는 시각. (원본 end_time + 0.01)
+	/// 오실레이터를 멈추는 시각. (원본 endTime + 0.01)
 	pub(crate) stop_time: f64,
 }
 
@@ -417,7 +417,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	/// 엔벨로프 값은 원본 play_tone 의 계산과 같다.
+	/// 엔벨로프 값은 원본 playTone 의 계산과 같다.
 	//==============================================================================
 	#[test]
 	fn envelope_matches_original_formula() {

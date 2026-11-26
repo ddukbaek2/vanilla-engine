@@ -294,7 +294,7 @@ pub(crate) fn read_renderbuffer_sample_counts(internal_format: u32) -> Vec<i32> 
 }
 
 //==============================================================================
-/// CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (원본 view_manager.readSafeAreaFromEnvironment, CSS 픽셀 [위, 오른쪽, 아래, 왼쪽])
+/// CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (원본 viewManager.readSafeAreaFromEnvironment, CSS 픽셀 [위, 오른쪽, 아래, 왼쪽])
 /// - 숨은 요소의 padding 에 env() 를 걸고 계산된 값을 parseFloat 로 읽는다. 문서나 body 가 없으면 0.
 ///
 /// # 돌려줌

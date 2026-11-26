@@ -5,7 +5,7 @@
 //!   품은 Sprite 는 원본처럼 get_sprite / get_sprite_mut 로 꺼낸다. 이미지 뷰 노드의 `get_component::<Sprite>()` 는 None 이다.
 //!   UI 문서는 원본처럼 품은 Sprite 를 UIImageView 다음 Sprite 로 쓰고 읽는다. (uidocument.rs)
 //! - 그림 경로(get_image_path)는 원본 imageView.imagePath 처럼 품은 Sprite 의 경로(원본 Sprite 의 imagePath)와 따로 든다.
-//! - 원본 set_image 는 이미지 요소와 ImageAsset 을 함께 받는다. 러스트 판은 set_image(`Option<Rc<Image>>`) 와 set_image_asset 으로 나눴다.
+//! - 원본 setImage 는 이미지 요소와 ImageAsset 을 함께 받는다. 러스트 판은 set_image(`Option<Rc<Image>>`) 와 set_image_asset 으로 나눴다.
 //! - 배경색(UIView)은 스프라이트보다 먼저 그린다. (원본도 UIImageView 가 먼저 붙고 attach 에서 Sprite 를 뒤에 붙여 같은 차례다)
 //==============================================================================
 use crate::base::color::Color;

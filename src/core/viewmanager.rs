@@ -194,7 +194,7 @@ impl ViewManager {
 	/// # 인자
 	/// - `physical_width`: 창 안쪽 너비. (물리 픽셀)
 	/// - `physical_height`: 창 안쪽 높이. (물리 픽셀)
-	/// - `scale_factor`: 창의 배율. (원본 device_pixel_ratio, 0 이하면 1)
+	/// - `scale_factor`: 창의 배율. (원본 devicePixelRatio, 0 이하면 1)
 	///
 	/// # 예제
 	/// 배율 2 창에서 가로를 맞추고 세로를 늘리는 모드
@@ -355,7 +355,7 @@ impl ViewManager {
 	}
 
 	//==============================================================================
-	/// 배율. (원본 device_pixel_ratio)
+	/// 배율. (원본 devicePixelRatio)
 	///
 	/// # 돌려줌
 	/// 창의 배율. (calculate_view_rect 에 넘긴 값, 0 이하였으면 1, 처음 1)

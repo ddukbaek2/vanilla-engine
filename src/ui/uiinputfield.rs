@@ -198,7 +198,7 @@ impl TextEditBuffer {
 	}
 
 	//==============================================================================
-	/// 값 설정. (max_length 로 자르고 커서는 끝에. 원본 set_text)
+	/// 값 설정. (max_length 로 자르고 커서는 끝에. 원본 setText)
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
 		self.value = text.to_string();
@@ -434,7 +434,7 @@ impl TextEditBuffer {
 	}
 
 	//==============================================================================
-	/// 선택을 글로 바꾸기. (선택이 없으면 커서 자리에 끼운다. 원본 replace_selection)
+	/// 선택을 글로 바꾸기. (선택이 없으면 커서 자리에 끼운다. 원본 replaceSelection)
 	/// - max_length 가 있으면 블링크 입력 칸(text_field_input_type.cc 의 FilterBeforeTextInserted)처럼 넣는 글을 남은 UTF-16 길이까지만 넣는다. (글자는 쪼개지 않는다)
 	//==============================================================================
 	pub fn replace_selection(&mut self, text: &str) {
@@ -524,7 +524,7 @@ impl TextEditBuffer {
 	}
 
 	//==============================================================================
-	/// 커서 옮기기. (글 안으로 자른다. 선택을 늘리지 않으면 선택을 접는다. 원본 move_cursor)
+	/// 커서 옮기기. (글 안으로 자른다. 선택을 늘리지 않으면 선택을 접는다. 원본 moveCursor)
 	//==============================================================================
 	pub fn move_cursor(&mut self, new_index: usize, is_selection_extended: bool) {
 		self.cursor_index = new_index.min(count_characters(&self.value));
@@ -535,7 +535,7 @@ impl TextEditBuffer {
 	}
 
 	//==============================================================================
-	/// 모두 선택. (원본 select_all)
+	/// 모두 선택. (원본 selectAll)
 	//==============================================================================
 	pub fn select_all(&mut self) {
 		self.selection_start = 0;
@@ -565,7 +565,7 @@ impl TextEditBuffer {
 }
 
 //==============================================================================
-/// 글자 경계 x 목록에서 누른 x 에 가까운 글자 자리 찾기. (원본 measure_index_at_local_x 의 비교)
+/// 글자 경계 x 목록에서 누른 x 에 가까운 글자 자리 찾기. (원본 measureIndexAtLocalX 의 비교)
 /// - `character_offsets[i]` 는 앞 i 글자의 폭이다. (0 번은 0)
 //==============================================================================
 pub fn find_character_index_at_offset(character_offsets: &[f32], target_x: f32) -> usize {
@@ -1128,7 +1128,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 값 설정. (max_length 로 자르고 커서는 끝에. 바뀜 이벤트는 부르지 않는다. 원본 set_text)
+	/// 값 설정. (max_length 로 자르고 커서는 끝에. 바뀜 이벤트는 부르지 않는다. 원본 setText)
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
 		self.edit_buffer.set_text(text);
@@ -1332,14 +1332,14 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 바뀜 이벤트 설정. (사용자 입력으로 값이 바뀔 때. 원본 set_on_change)
+	/// 바뀜 이벤트 설정. (사용자 입력으로 값이 바뀔 때. 원본 setOnChange)
 	//==============================================================================
 	pub fn set_on_change(&mut self, change_event: UIInputFieldEvent) {
 		self.change_event = Some(change_event);
 	}
 
 	//==============================================================================
-	/// 제출 이벤트 설정. (Enter. 원본 set_on_submit)
+	/// 제출 이벤트 설정. (Enter. 원본 setOnSubmit)
 	//==============================================================================
 	pub fn set_on_submit(&mut self, submit_event: UIInputFieldEvent) {
 		self.submit_event = Some(submit_event);
@@ -1439,7 +1439,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 커서 옮기기. (원본 move_cursor, 자리는 UTF-16 단위)
+	/// 커서 옮기기. (원본 moveCursor, 자리는 UTF-16 단위)
 	//==============================================================================
 	pub fn move_cursor(&mut self, new_index: usize, is_selection_extended: bool) {
 		let character_index = convert_utf16_index_to_character_index(self.edit_buffer.get_text(), new_index);
@@ -1462,7 +1462,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 선택을 글로 바꾸고 바뀜 이벤트 부르기. (원본 replace_selection)
+	/// 선택을 글로 바꾸고 바뀜 이벤트 부르기. (원본 replaceSelection)
 	//==============================================================================
 	pub fn replace_selection(&mut self, context: &mut ComponentContext, text: &str) {
 		self.replace_selection_with_edit(context, text, TextEditKind::InsertText);
@@ -1576,7 +1576,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 포커스 얻음. (원본 handle_focus)
+	/// 포커스 얻음. (원본 handleFocus)
 	//==============================================================================
 	fn handle_focus(&mut self) {
 		self.is_focused = true;
@@ -1585,7 +1585,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 포커스 잃음. (조합 글을 확정했으면 그 글을 돌려준다. 원본 handle_blur)
+	/// 포커스 잃음. (조합 글을 확정했으면 그 글을 돌려준다. 원본 handleBlur)
 	/// - 웹 DOM 입력은 브라우저가 확정해 값으로 보내므로 조합 글만 비운다.
 	//==============================================================================
 	fn apply_blur(&mut self) -> Option<String> {
@@ -2019,7 +2019,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 문맥 메뉴 열기. (루트의 마지막 자식 노드로 만들어 위에 그린다. 원본 show_context_menu)
+	/// 문맥 메뉴 열기. (루트의 마지막 자식 노드로 만들어 위에 그린다. 원본 showContextMenu)
 	//==============================================================================
 	fn show_context_menu(&mut self, context: &mut ComponentContext, view_position: Vector2) {
 		self.hide_context_menu(context);
@@ -2077,7 +2077,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 문맥 메뉴 닫기. (원본 hide_context_menu)
+	/// 문맥 메뉴 닫기. (원본 hideContextMenu)
 	//==============================================================================
 	fn hide_context_menu(&mut self, context: &mut ComponentContext) {
 		if let Some(context_menu_node_id) = self.context_menu_node_id.take() {
@@ -3468,7 +3468,7 @@ const CONTEXT_MENU_ITEM_LIST: [(&str, UIInputFieldMenuAction); 3] = [
 ];
 
 //==============================================================================
-/// 캔버스 문맥 메뉴. (데스크탑. 원본 show_context_menu 의 DOM 메뉴를 같은 모양으로 그린다)
+/// 캔버스 문맥 메뉴. (데스크탑. 원본 showContextMenu 의 DOM 메뉴를 같은 모양으로 그린다)
 /// - 루트의 자식 노드에 붙는다. 항목을 누르면 주인 필드에 항목을 부탁하고(다음 tick 에 한다) 스스로 지운다.
 /// - 메뉴 밖을 누르거나, 다른 자리에 문맥 메뉴를 부르거나, 주인 필드가 포커스를 잃거나 없어지면 스스로 지운다.
 //==============================================================================

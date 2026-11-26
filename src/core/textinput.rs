@@ -194,7 +194,7 @@ pub struct TextInputFieldState {
 	pub is_focused: bool,
 	/// attach() 로 입력을 받기로 했는지.
 	pub is_attached: bool,
-	/// 플랫폼 글 입력(IME, 시스템 키보드, 웹 숨긴 <input>)을 쓰는지. (원본 set_use_dominput)
+	/// 플랫폼 글 입력(IME, 시스템 키보드, 웹 숨긴 <input>)을 쓰는지. (원본 setUseDOMInput)
 	pub use_dominput: bool,
 	/// 손을 뗄 때도 포커스를 줄지. (웹 DOM 입력 전용)
 	pub use_touch_end_focus: bool,
