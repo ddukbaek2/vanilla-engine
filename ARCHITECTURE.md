@@ -205,7 +205,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
   - 죽은 코드 5: deprecated/aabb.js, deprecated/transform2d.js(파일 전체가 주석), deprecated/gl2d.js(내보내는 것 없음), deprecated/webgl2.js(내보내지 않아 쓰이지 않음), deprecated/anchoredworldmnode.js(폐기, import.js 에서도 막아 둠)
   - 러스트 언어와 표준이 맡는 것 8: base/object.js, base/reflection.js(createGUID 만 base/identifier.rs 의 create_guid 로 옮겼다), base/singleton.js, base/collection 의 dictionary.js, list.js, queue.js, set.js, stack.js. 트레이트, Any, enum, Vec, HashMap 이 같은 일을 한다.
   - 다른 기능이 덮는 것 1: deprecated/camera.js. (원본도 폐기 예정) 회전과 begin/end 를 Camera2D(misc/camera2d.rs)에 넣어 그 기능을 모두 덮는다.
-- 러스트에만 있는 파일은 플랫폼 층(platform/ 아래 23 파일, mod.rs 빼고), 글자 모양 짓기와 색 글리프(core/textshaping.rs, core/colorglyph.rs), 그림 풀기(core/image.rs, core/avifimage.rs), 글 입력 줄(core/textinput.rs), 노드 저장소(core/node/nodetree.rs), async 실행기(core/task.rs), 브라우저 자리(core/canvas2d.rs 와 그 아래 둘, core/modaldialog.rs, core/browseruitext.rs, misc/storagetext.rs, ui/uiinputfieldmenu.rs)다. 원본에서는 브라우저가 하는 일이다. (web/pane.js 는 web/pane.rs 와 그 아래 dompane.rs, nodepane.rs 로 나눴다)
+- 러스트에만 있는 파일은 플랫폼 층(platform/ 아래 23 파일, mod.rs 빼고), 글자 모양 짓기와 색 글리프(core/textshaping.rs, core/colorglyph.rs), 그림 풀기(core/image.rs, core/avifimage.rs), 글 입력 줄(core/textinput.rs), 노드 저장소(core/node/nodetree.rs), async 실행기(core/task.rs), 브라우저 자리(core/canvas2d.rs 와 그 아래 셋, core/modaldialog.rs, core/browseruitext.rs, misc/storagetext.rs, ui/uiinputfieldmenu.rs)다. 원본에서는 브라우저가 하는 일이다. (web/pane.js 는 web/pane.rs 와 그 아래 dompane.rs, nodepane.rs 로 나눴다)
 - 옮기며 바꾼 쓰임새:
   - GameScene, UIScene 의 덮어쓰기는 GameScene, UIScene 트레이트와 game_scene!, ui_scene! 매크로다. 바탕이 resize, layout, post_draw 를 스스로 부른다. (game/gamescene.rs)
   - UINode 는 노드에 붙는 컴포넌트이고, 솔버 값을 노드의 자리와 content_size 로 옮긴다. (ui/uinode.rs, ui/uiscene.rs)
@@ -223,7 +223,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
   - rustybuzz 는 글리프 위치를 글꼴 단위 정수로 들어 GPOS 가변 델타를 반올림한다. HarfBuzz 15 는 소수로 든다. 맥 SFNS 18, 20, 21, 24px 의 "Hello World Wifi" 너비가 크롬과 0.002 ~ 0.004px 다르다.
   - 윈도우와 리눅스의 글꼴 갈래(DirectWrite, 메뉴 글꼴, fontconfig, 부모 글꼴 치수)는 그 대상으로 컴파일해 보았고 실행해 크롬과 견주지는 못했다.
   - 데스크탑 AVIF 는 색 프로필 변환과 움직이는 AVIF 를 하지 않는다.
-  - 데스크탑 Canvas2D 의 그림자 흐림은 상자 흐림 세 번이다. 경로의 arc, ellipse, arcTo, roundRect 는 크롬과 같은 스키아 원뿔 곡선 점과 무게이고(블링크 canvas_path.cc, 스키아 SkPathBuilder 의 셈), 칠할 때는 스키아 CPU 래스터처럼 기기 픽셀 0.25 안의 2 차 곡선으로 나눈다. 크롬이 GPU 로 칠하는 캔버스의 곡선 나누기와는 가장자리 픽셀이 다를 수 있다.
+  - 데스크탑 Canvas2D 의 그림자 흐림은 상자 흐림 세 번이다. 경로의 arc, ellipse, arcTo, roundRect 는 크롬과 같은 스키아 원뿔 곡선 점과 무게이고(블링크 canvas_path.cc, 스키아 SkPathBuilder 의 셈), 칠할 때는 스키아 CPU 래스터처럼 기기 픽셀 0.25 안의 2 차 곡선으로 나눈다. 크롬이 GPU 로 칠하는 캔버스의 곡선 나누기와는 가장자리 픽셀이 다를 수 있다. font 는 블링크 Font::ParseShorthand 와 font 게터대로 읽고 직렬화하는데(desktop_font.rs), 윈도우 크롬의 small-caption, menu, status-bar 는 운영체제 글꼴이라 다를 수 있다. getImageData 의 프리멀티플라이 풀기는 크롬 CPU 캔버스의 스키아 셈이라 크롬 GPU 캔버스의 되읽기와는 반이 딱 떨어지는 값에서 1 다를 수 있다.
   - 데스크탑 PaneStyle 은 프리셋과 원본 도구가 쓰는 CSS(블록과 flex 배치, flex 비율과 세로 flex, min, max, 쪽마다 여백과 테두리, overflow 자르기와 휠, 썸 끌기 스크롤)를 읽는다. flex-wrap 줄넘김과 말줄임(white-space, text-overflow)은 읽지 않고, 스크롤 막대는 자리를 차지하지 않는 얹는 썸이다. (여러 줄 입력 필드도 같다) textarea 는 엔진 여러 줄 입력 필드가 받는다.
   - 데스크탑 질문 창과 브라우저 문맥 메뉴의 치수와 색은 크롬 main 의 값(MessageBoxView 폭 400, 여백 20, 제목 16px, 기본 밝은 팔레트 같은 것)이고, 흐린 그림자는 겹친 둥근 사각형으로 갈음한다. 단추와 입력 칸 높이는 크롬 셈을 기본 글꼴로 갈음한 값이다.
   - 직접 누르는 입력 필드는 데스크탑에서 크롬 데스크탑 터치처럼 손가락으로 650ms 길게 누르면(15 DIP 안) 낱말을 고르고 손잡이와 빠른 메뉴(잘라내기, 복사, 붙여넣기, ...)를 띄운다. 고른 것도 붙여 넣을 것도 없으면 크롬 편집 칸 메뉴다. (윈도우는 뗄 때 정한다) 손잡이 그림의 자리(크롬 그림 창의 6 여백 다루기)와 빠른 메뉴의 흐린 그림자는 갈음한 값이다. 크롬 안드로이드의 떠 있는 빠른 메뉴(안드로이드 ActionMode)는 데스크탑 대상이 없어 넣지 않았다.

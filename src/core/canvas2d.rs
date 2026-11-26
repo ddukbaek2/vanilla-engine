@@ -2047,20 +2047,25 @@ impl CanvasImageSource<'_> {
 }
 
 //==============================================================================
-/// 프리멀티플라이드 → 곧은 RGBA. (원본 getImageData 처럼 반올림)
+/// 프리멀티플라이드 → 곧은 RGBA. (크롬 CPU 캔버스의 getImageData 처럼 스키아 셈)
+/// - 색과 알파를 0 ~ 1 의 f32 로 바꿔 알파의 역수를 곱하고 255 배 해 짝수 쪽으로 반올림한다. (SkSwizzler_opts.inc 의 unpremul_simulating_RP, 래스터 파이프라인과 같다)
+///   그래서 반이 딱 떨어지는 값(1 / 6 의 42.5 같은)은 f32 오차에 따라 내려가기도 한다.
 //==============================================================================
 pub(crate) fn unpremultiply_pixels(premultiplied_pixels: &[u8]) -> Vec<u8> {
+	const NORMALIZE_SCALE: f32 = 1.0 / 255.0;
 	let mut straight_pixels = premultiplied_pixels.to_vec();
 	for pixel in straight_pixels.chunks_exact_mut(4) {
-		let alpha = pixel[3] as u32;
+		let alpha = pixel[3];
 		if alpha == 0 {
 			pixel[0] = 0;
 			pixel[1] = 0;
 			pixel[2] = 0;
 		}
 		else if alpha < 255 {
+			let reciprocal_alpha = 1.0 / (alpha as f32 * NORMALIZE_SCALE);
 			for channel_index in 0..3 {
-				pixel[channel_index] = ((pixel[channel_index] as u32 * 255 + alpha / 2) / alpha).min(255) as u8;
+				let straight_value = (pixel[channel_index] as f32 * NORMALIZE_SCALE * reciprocal_alpha * 255.0).min(255.0);
+				pixel[channel_index] = straight_value.round_ties_even() as u8;
 			}
 		}
 	}
@@ -2068,7 +2073,7 @@ pub(crate) fn unpremultiply_pixels(premultiplied_pixels: &[u8]) -> Vec<u8> {
 }
 
 //==============================================================================
-/// 곧은 → 프리멀티플라이드 RGBA.
+/// 곧은 → 프리멀티플라이드 RGBA. (크롬 putImageData 처럼 스키아 RGBA_to_rgbA 의 (색 x 알파 + 127) / 255)
 //==============================================================================
 pub(crate) fn premultiply_pixels(straight_pixels: &[u8]) -> Vec<u8> {
 	let mut premultiplied_pixels = straight_pixels.to_vec();
@@ -2106,6 +2111,8 @@ pub(crate) fn normalize_line_dash(dash_list: &[f32]) -> Option<Vec<f32>> {
 
 #[cfg(not(target_arch = "wasm32"))]
 mod desktop_canvas;
+#[cfg(not(target_arch = "wasm32"))]
+mod desktop_font;
 #[cfg(not(target_arch = "wasm32"))]
 pub use desktop_canvas::Canvas2D;
 #[cfg(target_arch = "wasm32")]

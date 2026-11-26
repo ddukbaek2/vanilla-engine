@@ -3014,6 +3014,7 @@ fn parse_css_font_size(size_text: &str, is_monospace_only: bool, font_size_conte
 			text: size_text,
 			position: 0,
 			font_size_context,
+			is_angle: false,
 		};
 		let math_value = math_parser.parse_function()?;
 		if math_parser.position != size_text.len() {
@@ -3059,6 +3060,66 @@ fn parse_css_font_size(size_text: &str, is_monospace_only: bool, font_size_conte
 }
 
 //==============================================================================
+/// 캔버스 font 의 글자 크기 셈. (픽셀, parse_css_font_size 를 데스크탑의 지금 기준으로 부른다. 크기가 아니거나 음수면 None)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn compute_canvas_font_size(size_text: &str, is_monospace_only: bool) -> Option<f32> {
+	parse_css_font_size(size_text, is_monospace_only, &FontSizeContext::create())
+}
+
+//==============================================================================
+/// CSS 수학 함수 하나를 수로 셈. ("calc(300 + 400)" 은 700, 수가 아니거나 틀리면 None. NaN 은 그대로 돌려준다)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn evaluate_css_math_number(function_text: &str) -> Option<f64> {
+	match evaluate_css_math_function(function_text, false)? {
+		CssMathValue::Number(number) => {
+			Some(number)
+		}
+		CssMathValue::Length { .. } => {
+			None
+		}
+	}
+}
+
+//==============================================================================
+/// CSS 수학 함수 하나를 각도로 셈. (도, "calc(7deg * 2)" 는 14. 각도가 아니거나 틀리면 None)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn evaluate_css_math_angle(function_text: &str) -> Option<f64> {
+	match evaluate_css_math_function(function_text, true)? {
+		CssMathValue::Length { pixels, .. } => {
+			Some(pixels)
+		}
+		CssMathValue::Number(_) => {
+			None
+		}
+	}
+}
+
+//==============================================================================
+/// CSS 수학 함수 하나 셈. (글 전체가 함수 하나여야 한다, 틀리면 None)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn evaluate_css_math_function(function_text: &str, is_angle: bool) -> Option<CssMathValue> {
+	if find_css_function_end(function_text) != Some(function_text.len()) {
+		return None;
+	}
+	let font_size_context = FontSizeContext::create();
+	let mut math_parser = CssMathParser {
+		text: function_text,
+		position: 0,
+		font_size_context: &font_size_context,
+		is_angle,
+	};
+	let math_value = math_parser.parse_function()?;
+	if math_parser.position != function_text.len() {
+		return None;
+	}
+	Some(math_value)
+}
+
+//==============================================================================
 /// CSS 수학 함수의 값. (수, 또는 길이(픽셀로 푼 값과 퍼센트로만 된 값인지))
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
@@ -3073,11 +3134,14 @@ enum CssMathValue {
 //==============================================================================
 /// CSS 수학 함수 해석기. (CSS Values 4 의 calc 문법: 더하기와 빼기는 앞뒤에 빈칸이 있어야 하고, 곱하기와 나누기는 없어도 된다)
 /// - 퍼센트는 부모 글자 크기에 댄다. 형이 맞지 않으면(길이 + 수, 길이 x 길이) 틀린 값이다.
+/// - 각도 셈이면 deg, grad, rad, turn 을 도로 풀어 Length 칸에 담고, 길이 단위와 퍼센트는 틀린 값이다. (캔버스 font 의 oblique 각도)
 //==============================================================================
 struct CssMathParser<'text> {
 	text: &'text str,
 	position: usize,
 	font_size_context: &'text FontSizeContext,
+	/// 각도 셈인지.
+	is_angle: bool,
 }
 
 impl CssMathParser<'_> {
@@ -3427,6 +3491,29 @@ impl CssMathParser<'_> {
 			self.position += remainder.len() - unit_remainder.len() + unit_length;
 			if unit_text.is_empty() {
 				return Some(CssMathValue::Number(number));
+			}
+			if self.is_angle {
+				let unit_degree = match unit_text.to_ascii_lowercase().as_str() {
+					"deg" => {
+						1.0
+					}
+					"grad" => {
+						0.9
+					}
+					"rad" => {
+						180.0 / std::f64::consts::PI
+					}
+					"turn" => {
+						360.0
+					}
+					_ => {
+						return None;
+					}
+				};
+				return Some(CssMathValue::Length {
+					pixels: number * unit_degree,
+					is_pure_percent: false,
+				});
 			}
 			if unit_text == "%" {
 				return Some(CssMathValue::Length {
