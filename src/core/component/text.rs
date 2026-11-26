@@ -220,7 +220,51 @@ fn find_word_boundaries(text: &str) -> Vec<(usize, usize, bool)> {
 		boundary_list.push((previous_index, break_index, break_iterator.is_word_like()));
 		previous_index = break_index;
 	}
+	let boundary_list = split_chromium_word_punctuation(text, boundary_list);
 	split_cjk_dictionary_runs(text, boundary_list)
+}
+
+//==============================================================================
+/// 낱말 조각을 크롬의 ICU 처럼 마침표와 쌍점에서 나누기. (나머지 경계는 그대로)
+/// - 크로미엄은 ICU 낱말 나누기 규칙을 고쳐(wordbrk.patch) 마침표는 숫자 사이에서만 낱말을 잇고 쌍점은 잇지 않는다.
+///   ICU4X 는 고치지 않은 UAX #29 라 "www.example.com" 이 한 낱말이다. 크롬에서 원본 splitWords 가 "www.", "example.", "com" 으로 나누는 것과 맞춘다.
+/// - 나눈 마침표와 쌍점은 낱말이 아닌 조각이다.
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn split_chromium_word_punctuation(text: &str, boundary_list: Vec<(usize, usize, bool)>) -> Vec<(usize, usize, bool)> {
+	let mut result_list: Vec<(usize, usize, bool)> = Vec::with_capacity(boundary_list.len());
+	for (segment_start, segment_end, is_word_like) in boundary_list {
+		if !is_word_like {
+			result_list.push((segment_start, segment_end, is_word_like));
+			continue;
+		}
+		let segment = &text[segment_start..segment_end];
+		let character_list: Vec<(usize, char)> = segment.char_indices().collect();
+		let is_decimal_digit = |list_index: Option<usize>| -> bool {
+			list_index.and_then(|list_index| character_list.get(list_index)).map(|(_, character)| unicode_properties::UnicodeGeneralCategory::general_category(*character) == unicode_properties::GeneralCategory::DecimalNumber).unwrap_or(false)
+		};
+		let mut piece_start = 0;
+		for (list_index, (byte_index, character)) in character_list.iter().enumerate() {
+			let is_full_stop = matches!(*character, '\u{2E}' | '\u{FF0E}');
+			let is_colon = matches!(*character, '\u{3A}' | '\u{FE55}' | '\u{FF1A}');
+			if !is_full_stop && !is_colon {
+				continue;
+			}
+			if is_full_stop && is_decimal_digit(list_index.checked_sub(1)) && is_decimal_digit(Some(list_index + 1)) {
+				continue;
+			}
+			if *byte_index > piece_start {
+				result_list.push((segment_start + piece_start, segment_start + byte_index, true));
+			}
+			let punctuation_end = byte_index + character.len_utf8();
+			result_list.push((segment_start + byte_index, segment_start + punctuation_end, false));
+			piece_start = punctuation_end;
+		}
+		if piece_start < segment.len() {
+			result_list.push((segment_start + piece_start, segment_end, true));
+		}
+	}
+	result_list
 }
 
 //==============================================================================
@@ -1930,6 +1974,27 @@ impl Component for Text {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	//==============================================================================
+	/// 줄바꿈 낱말 조각은 크롬의 원본 splitWords 처럼 마침표(숫자 사이 빼고)와 쌍점에서 나뉜다. (크롬 158 에서 원본 splitWords 로 잰 값)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	#[test]
+	fn split_words_breaks_at_full_stop_and_colon_like_chrome() {
+		let case_list: [(&str, &[&str]); 8] = [
+			("see www.example.com now", &["see ", "www.", "example.", "com ", "now"]),
+			("3.14 pi", &["3.14 ", "pi"]),
+			("a:b c", &["a:", "b ", "c"]),
+			("x.y", &["x.", "y"]),
+			("end. Next", &["end. ", "Next"]),
+			("time 12:30 ok", &["time ", "12:", "30 ", "ok"]),
+			("v1.2.3", &["v1.2.3"]),
+			("\u{D55C}\u{AE00}.\u{D14C}\u{C2A4}\u{D2B8} abc", &["\u{D55C}\u{AE00}.", "\u{D14C}\u{C2A4}\u{D2B8} ", "abc"]),
+		];
+		for (text, expected_list) in case_list {
+			assert_eq!(split_words(text), expected_list.iter().map(|piece| piece.to_string()).collect::<Vec<String>>(), "{}", text);
+		}
+	}
 
 	//==============================================================================
 	/// 글자 묶음과 낱말 나누기: 브라우저 Intl.Segmenter 와 같은 결과. (한글 덩어리는 따로 한 낱말, 문장 부호는 앞 낱말에)
