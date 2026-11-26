@@ -1156,7 +1156,7 @@ fn run(arguments: &Arguments) -> Result<bool, String> {
 	package_list.sort_by(|left, right| {
 		let left_name = left["name"].as_str().unwrap_or_default();
 		let right_name = right["name"].as_str().unwrap_or_default();
-		left_name.cmp(right_name).then_with(|| compare_versions(left["version"].as_str().unwrap_or_default(), right["version"].as_str().unwrap_or_default()))
+		left_name.cmp(right_name).then_with(|| compare_versions(left["version"].as_str().unwrap_or_default(), right["version"].as_str().unwrap_or_default())).then_with(|| left["id"].as_str().unwrap_or_default().cmp(right["id"].as_str().unwrap_or_default()))
 	});
 	let crate_list: Vec<CrateEntry> = package_list.iter().map(|package| build_crate_entry(package, &mut warnings)).collect();
 
