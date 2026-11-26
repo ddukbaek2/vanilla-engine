@@ -1,6 +1,8 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- 초안 experimental::spatialaudio (SpatialAudioPlayer, SpatialAudioListener, AudioSource2D, AudioListener2D, 0.4.0 뒤 기능, API 가 바뀔 수 있음, vanilla.js 와 같은 API): WebAudio PannerNode 와 AudioListener 그대로의 공간 소리. 웹은 브라우저 PannerNode, 데스크탑은 엔진 믹서에 크롬 panner_handler.cc, audio_listener_handler.cc, distance_effect.cc, cone_effect.cc, equal_power_panner.cc 를 옮긴 PannerNode(platform/audio/panner.rs, pannermath.rs)를 GainNode 뒤에 끼운다. 자리와 방향, 리스너는 a-rate AudioParam, 자동화가 있는 퀀텀은 표본마다, 침묵 넘기기와 바뀐 때만 다시 셈하기까지 크롬 158 OfflineAudioContext 와 아홉 그래프 모든 표본에서 차이 2.8e-17 안(tests/assets/spatialaudio). 데스크탑의 HRTF 는 아직 등력으로 셈한다. 도플러는 WebAudio 가 명세에서 빼서 없다
+- 초안 experimental::savegame (SaveGameManager, SaveStorage, LocalSaveStorage, MemorySaveStorage, SaveCloudProvider, calculate_crc32): 여러 칸 저장, 판 옮기기 함수 사슬, 두 키 번갈아 쓰는 원자적 쓰기와 순번(데스크탑 LocalStorage 파일은 임시 파일 뒤 이름 바꾸기), CRC-32, 자동 저장, JSON 내보내기와 들여오기, 클라우드 자리(인터페이스만). 기록 꼴과 키가 vanilla.js 와 글자까지 같아 두 엔진이 서로의 세이브를 읽는다
 - 폴더: 원본 vanilla.js 가 src/experimental 에 있던 다 자란 기능을 제자리로 옮겨, 두 엔진의 폴더가 같아졌다. 러스트 판은 이미 이 자리였고 모듈 경로(vanilla::graphics3d 같은)는 그대로다. 원본에서 import.js 로 쓰던 게임은 그대로, 파일 경로로 직접 import 하던 게임은 새 경로로 바꾼다. 파일 머리 주석과 ARCHITECTURE 9장의 원본 경로를 새 경로로 고쳤다. (원본의 옛 경로 → 새 경로)
   - src/experimental/graphics/*.js (3D) → src/graphics3d/*.js (러스트 graphics3d/)
   - src/experimental/graphics/toon/*.js (툰 3D) → src/graphics3d/toon/*.js (러스트 graphics3d/toon/)

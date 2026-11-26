@@ -20,7 +20,8 @@
 use super::audioparam::ParamAutomation;
 use super::mixer::{AudioBufferData, MixerCommand, MixerRenderer, MixerShared};
 use super::oscillator::{OscillatorType, PeriodicWave};
-use super::GainAutomation;
+use super::pannermath::PannerSettings;
+use super::{GainAutomation, ListenerParam, PannerParam};
 use crate::core::audiomanager::AudioManagerState;
 use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME};
 use crate::resource::audioasset::AudioAsset;
@@ -523,6 +524,15 @@ pub fn get_audio_context_time(state: &AudioManagerState) -> f64 {
 }
 
 //==============================================================================
+/// 리스너 값 대입. (원본 audioContext.listener.positionX.value = 값 들, 컨텍스트가 없으면 아무것도 하지 않는다, 초안)
+//==============================================================================
+pub fn set_listener_param_value(state: &mut AudioManagerState, param: ListenerParam, value: f32) {
+	if let Some(mixer_link) = &state.platform_state.mixer_link {
+		mixer_link.send(MixerCommand::ListenerAutomation { param, automation: ParamAutomation::SetValue { value } });
+	}
+}
+
+//==============================================================================
 /// 플레이어 하나의 소리 내는 부분. (믹서의 플레이어 노드, 지금 소스의 세대)
 //==============================================================================
 pub struct AudioPlayerBackend {
@@ -693,6 +703,20 @@ impl AudioPlayerBackend {
 	//==============================================================================
 	pub fn set_pan(&mut self, pan: f32) {
 		self.send(MixerCommand::SetPlayerPan { player_id: self.player_id, pan });
+	}
+
+	//==============================================================================
+	/// 공간 소리 설정. (처음이면 GainNode(와 StereoPannerNode) 뒤에 PannerNode 를 끼운다, 초안)
+	//==============================================================================
+	pub fn set_panner_settings(&mut self, settings: PannerSettings) {
+		self.send(MixerCommand::SetPlayerPanner { player_id: self.player_id, settings });
+	}
+
+	//==============================================================================
+	/// PannerNode 의 자리나 방향 값 대입. (원본 panner.positionX.value = 값, 초안)
+	//==============================================================================
+	pub fn set_panner_param_value(&mut self, param: PannerParam, value: f32) {
+		self.send(MixerCommand::PlayerPannerAutomation { player_id: self.player_id, param, automation: ParamAutomation::SetValue { value } });
 	}
 
 	//==============================================================================

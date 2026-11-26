@@ -35,7 +35,8 @@
 //! });
 //! ```
 //==============================================================================
-use super::GainAutomation;
+use super::pannermath::{DistanceModel, PannerSettings, PanningModel};
+use super::{GainAutomation, ListenerParam, PannerParam};
 use crate::core::audiomanager::{resume_audio_manager_state, AudioManagerState};
 use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME};
 use crate::resource::audioasset::AudioAsset;
@@ -68,6 +69,8 @@ const CONTEXT_CLOCK_MINIMUM_RATIO: f64 = 0.25;
 /// 매니저가 드는 백엔드 상태.
 //==============================================================================
 pub struct AudioPlatformState {
+	/// 리스너 값 아홉. (자리, 앞, 위, 옛 브라우저의 setPosition, setOrientation 에 쓴다, 초안)
+	listener_value_list: [f32; 9],
 	/// iOS(iPadOS 포함) 인지.
 	is_ios: bool,
 	/// 시계 확인이 돌고 있는지. (한 번에 하나만)
@@ -79,6 +82,7 @@ pub struct AudioPlatformState {
 //==============================================================================
 pub fn create_audio_platform_state() -> AudioPlatformState {
 	AudioPlatformState {
+		listener_value_list: [0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0],
 		is_ios: detect_ios(),
 		is_verifying_context_clock: false,
 	}
@@ -424,6 +428,34 @@ impl PlaybackState {
 }
 
 //==============================================================================
+/// 리스너 값 대입. (audioContext.listener.positionX.value = 값 들, 초안)
+/// - positionX 같은 AudioParam 이 없는 옛 브라우저는 setPosition, setOrientation 으로 세 값을 한꺼번에 건다. (state 의 리스너 값을 기억해 둔다)
+//==============================================================================
+pub fn set_listener_param_value(state: &mut AudioManagerState, param: ListenerParam, value: f32) {
+	state.platform_state.listener_value_list[param as usize] = value;
+	let Some(audio_context) = &state.audio_context else {
+		return;
+	};
+	let listener = audio_context.listener();
+	let name = ["positionX", "positionY", "positionZ", "forwardX", "forwardY", "forwardZ", "upX", "upY", "upZ"][param as usize];
+	let audio_param = js_sys::Reflect::get(&listener, &JsValue::from_str(name)).ok().and_then(|value| value.dyn_into::<web_sys::AudioParam>().ok());
+	match audio_param {
+		Some(audio_param) => {
+			audio_param.set_value(value);
+		}
+		None => {
+			let value_list = state.platform_state.listener_value_list;
+			if (param as usize) < 3 {
+				listener.set_position(value_list[0] as f64, value_list[1] as f64, value_list[2] as f64);
+			}
+			else {
+				listener.set_orientation(value_list[3] as f64, value_list[4] as f64, value_list[5] as f64, value_list[6] as f64, value_list[7] as f64, value_list[8] as f64);
+			}
+		}
+	}
+}
+
+//==============================================================================
 /// 플레이어 하나의 소리 내는 부분. (원본 AudioPlayer 의 audio_context, gain_node, audio_source)
 //==============================================================================
 pub struct AudioPlayerBackend {
@@ -433,6 +465,8 @@ pub struct AudioPlayerBackend {
 	output_node: Option<web_sys::AudioNode>,
 	/// 좌우 노드. (StereoPannerNode, 0 이 아닌 좌우를 처음 걸 때 만든다)
 	panner_node: Option<web_sys::AudioNode>,
+	/// 공간 소리 노드. (PannerNode, 공간 소리를 처음 걸 때 좌우 노드나 GainNode 와 내보낼 곳 사이에 끼운다, 초안)
+	spatial_panner_node: Option<web_sys::PannerNode>,
 	playback_state: Rc<RefCell<PlaybackState>>,
 	playback_rate: f64,
 }
@@ -481,6 +515,7 @@ impl AudioPlayerBackend {
 			gain_node,
 			output_node,
 			panner_node: None,
+			spatial_panner_node: None,
 			playback_state: Rc::new(RefCell::new(PlaybackState {
 				pending_stop_time: None,
 				audio_source: None,
@@ -584,8 +619,82 @@ impl AudioPlayerBackend {
 		let panner_node: web_sys::AudioNode = create_function.call0(audio_context).ok()?.dyn_into().ok()?;
 		let _ = gain_node.disconnect();
 		let _ = gain_node.connect_with_audio_node(&panner_node);
-		let _ = panner_node.connect_with_audio_node(output_node);
+		// 공간 소리 노드가 있으면 그 앞에 끼운다. (GainNode → StereoPannerNode → PannerNode → 내보낼 곳)
+		match &self.spatial_panner_node {
+			Some(spatial_panner_node) => {
+				let _ = panner_node.connect_with_audio_node(spatial_panner_node);
+			}
+			None => {
+				let _ = panner_node.connect_with_audio_node(output_node);
+			}
+		}
 		Some(panner_node)
+	}
+
+	//==============================================================================
+	/// 공간 소리 설정. (처음이면 PannerNode 를 만들어 좌우 노드(없으면 GainNode)와 내보낼 곳 사이에 끼운다, 초안)
+	//==============================================================================
+	pub fn set_panner_settings(&mut self, settings: PannerSettings) {
+		if self.spatial_panner_node.is_none() {
+			self.spatial_panner_node = self.create_spatial_panner_node();
+		}
+		let Some(spatial_panner_node) = &self.spatial_panner_node else {
+			return;
+		};
+		spatial_panner_node.set_panning_model(match settings.panning_model {
+			PanningModel::EqualPower => web_sys::PanningModelType::Equalpower,
+			PanningModel::Hrtf => web_sys::PanningModelType::Hrtf,
+		});
+		spatial_panner_node.set_distance_model(match settings.distance_model {
+			DistanceModel::Linear => web_sys::DistanceModelType::Linear,
+			DistanceModel::Inverse => web_sys::DistanceModelType::Inverse,
+			DistanceModel::Exponential => web_sys::DistanceModelType::Exponential,
+		});
+		spatial_panner_node.set_ref_distance(settings.reference_distance);
+		spatial_panner_node.set_max_distance(settings.maximum_distance);
+		spatial_panner_node.set_rolloff_factor(settings.rolloff_factor);
+		spatial_panner_node.set_cone_inner_angle(settings.cone_inner_angle);
+		spatial_panner_node.set_cone_outer_angle(settings.cone_outer_angle);
+		spatial_panner_node.set_cone_outer_gain(settings.cone_outer_gain);
+	}
+
+	//==============================================================================
+	/// PannerNode 를 만들어 끼운다. (컨텍스트가 없으면 None)
+	//==============================================================================
+	fn create_spatial_panner_node(&self) -> Option<web_sys::PannerNode> {
+		let audio_context = self.audio_context.as_ref()?;
+		let output_node = self.output_node.as_ref()?;
+		let spatial_panner_node = audio_context.create_panner().ok()?;
+		let previous_node: web_sys::AudioNode = match &self.panner_node {
+			Some(panner_node) => {
+				panner_node.clone()
+			}
+			None => {
+				self.gain_node.as_ref()?.clone().into()
+			}
+		};
+		let _ = previous_node.disconnect();
+		let _ = previous_node.connect_with_audio_node(&spatial_panner_node);
+		let _ = spatial_panner_node.connect_with_audio_node(output_node);
+		Some(spatial_panner_node)
+	}
+
+	//==============================================================================
+	/// PannerNode 의 자리나 방향 값 대입. (panner.positionX.value = 값, 초안)
+	//==============================================================================
+	pub fn set_panner_param_value(&mut self, param: PannerParam, value: f32) {
+		let Some(spatial_panner_node) = &self.spatial_panner_node else {
+			return;
+		};
+		let audio_param = match param {
+			PannerParam::PositionX => spatial_panner_node.position_x(),
+			PannerParam::PositionY => spatial_panner_node.position_y(),
+			PannerParam::PositionZ => spatial_panner_node.position_z(),
+			PannerParam::OrientationX => spatial_panner_node.orientation_x(),
+			PannerParam::OrientationY => spatial_panner_node.orientation_y(),
+			PannerParam::OrientationZ => spatial_panner_node.orientation_z(),
+		};
+		audio_param.set_value(value);
 	}
 
 	//==============================================================================
