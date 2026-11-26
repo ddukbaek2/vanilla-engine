@@ -248,6 +248,8 @@ fn read_clipboard_promise(engine: &Engine) -> Promise<String> {
 
 원본 `this.fadeScreen(async () => { ... })` 는 `GameScene` 의 `fade_screen_async` 입니다. 화면이 다 어두워진 `tick` 에서 `game_scene!` (또는 `ui_scene!`) 이 넘긴 함수를 씬 작업으로 맡겨 그 자리에서 첫 `await` 까지 돌리고, 퓨처가 끝나면 다시 밝아집니다. 이미 페이드 중이면 `false` 를 돌려주고 아무것도 하지 않습니다.
 
+![asyncawait 예제에서 fade_screen_async 페이드가 반쯤 걸린 화면](../images/async-await.webp)
+
 ```rust,no_run
 use vanilla::{wait, Engine, GameScene, GameSceneBase};
 

@@ -6,6 +6,10 @@ This chapter covers features for showing information on screen, inspecting nodes
 
 When `EngineConfiguration.use_dev_tools` is on (initial value `true`), `GameSceneBase` creates the developer tools panel when it initializes. `UIScene` holds a `GameSceneBase` too, so it behaves the same. Pressing F2 in the game opens the panel docked to the bottom right of the window, and pressing it again closes it. The panel is drawn in the window's inner logical coordinates (canvas native) regardless of the view scale mode, so it always has the same size.
 
+![The Node Hierarchy tab of the developer tools: picking card in the node tree shows its values and components in the inspector and draws node outlines in the scene](../images/dev-tools.webp)
+
+![The Statistics tab of the developer tools: engine version, platform, screen size and view scale, time and FPS](../images/dev-tools-statistics.webp)
+
 ```rust,no_run
 use vanilla::{Color, Engine, EngineConfiguration, GameScene, GameSceneBase, Paint, Pivot, Text, TextAlign, Vector2};
 

@@ -837,6 +837,7 @@ fn resolve_effect_program(graphic: &mut Graphic, effect: ShaderSpriteEffect) -> 
 /// assert_eq!(shader_sprite.get_effect_progress(), 0.5);
 /// assert!(shader_sprite.get_image().is_some());
 /// ```
+/// <!-- image: shader-sprite.webp -->
 //==============================================================================
 pub struct ShaderSprite {
 	sprite: Sprite,

@@ -6,6 +6,8 @@
 
 바닐라엔진(vanilla-engine)은 웹게임 엔진 [vanilla.js](https://github.com/ddukbaek2/vanilla.js) 를 러스트로 옮긴 엔진입니다. 원본의 공개 API 와 씬 구조를 그대로 가져오고, 이름은 러스트 규칙으로 바꿨습니다. (원본 `setFillColor` 는 `set_fill_color`, `Colors.white` 는 `Colors::WHITE`) 크레이트 이름은 `vanilla-engine` 이고, 코드에서는 `vanilla` 로 씁니다.
 
+![툰 3D 예제(toonshowcase): 바깥선을 두른 기본 도형과 걷는 모형, 인스턴싱한 바위, 그림자와 블룸](../images/toon-showcase.webp)
+
 - 같은 게임 코드로 데스크탑 실행 파일(윈도우, macOS, OpenGL 3.3 코어)과 브라우저용 wasm(WebGL2)을 만듭니다. 창, GL, 입력, 애셋 읽기, 소리, 클립보드, 한글 입력(IME), 시스템 글꼴의 차이는 엔진의 플랫폼 층이 맡습니다
 - 노드는 씬의 `NodeTree` 가 들고, 게임 코드는 `NodeId` 핸들로 가리킵니다. 지운 노드의 핸들은 `None` 이 되어 댕글링 참조가 생기지 않고, `Rc<RefCell>` 없이 노드를 만들고 지웁니다
 - ECS 가 아니라 원본처럼 노드에 컴포넌트를 붙이는 구조입니다. 원본과 이름과 흐름이 같아 자바스크립트 게임을 옮기기 쉽습니다

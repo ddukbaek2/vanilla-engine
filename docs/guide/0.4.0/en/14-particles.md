@@ -2,9 +2,13 @@
 
 This chapter covers particles such as flames, snow and explosions, along with other 2D effects. It goes through `ParticleSystem` and `TrailRenderer`, which attach to nodes; `ShaderSprite`, a sprite with shader effects; `ScreenEffect`, which applies post-processing to the whole screen; and the heat haze `HeatHazeEffect`. Nodes and components are covered in the "Nodes and Components" chapter, draw order and blending in the "Drawing" chapter, 3D effects (`ToonVfx`) in the "3D" chapter, and the Particle Editor itself in the "Authoring Tools and Files Shared by Both Engines" chapter.
 
+![effectgallery example: 50 ShaderSprite effect cells on the left, a stage with ScreenEffect on the right, TrailRenderer and ParticleSystem cells below](../images/effect-gallery.webp)
+
 ## ParticleSystem
 
 `ParticleSystem` is a component that ports the commonly used parts of Unity's ParticleSystem to 2D. Once attached to a node it starts emitting right away (playing, looping, 20 per second by default), moves particles on every node update, and draws them batched as vertex colored quads. Coordinates are component coordinates (the top left of the node's content size area is the origin); for a node whose content size is 0, the node's position is the origin.
+
+![Eight ParticleSystem cells: circle fountain, rect confetti, streak sparks, image stars, attractor, wobble, edge, world space](../images/particle-effects.webp)
 
 ```rust,no_run
 use vanilla::{Color, Engine, EngineConfiguration, ParticleEmitterShape, ParticleSystem, Scene, SceneBase, Vector2};
@@ -310,6 +314,8 @@ assert_eq!(first_system.get_random_seed(), Some(42));
 
 Records the spots a node passes through as points and draws them as a band whose width and color fade out (a 2D counterpart of Unity's TrailRenderer). On every node update it records the node's local position (in parent coordinates), and points past their lifetime are removed.
 
+![Two TrailRenderers: a blue trail with normal blending and a gold trail with additive blending](../images/trail.webp)
+
 - `set_time(seconds)`: how long a point stays, that is, the band's length (default 0.5).
 - `set_width(start_width, end_width)`: the width from the newest point to the end (default 10, 0).
 - `set_colors(start_color, end_color)`: default `(1, 1, 1, 0.9)` to `(1, 1, 1, 0)`. When drawing, RGB is rounded to integers from 0 to 255 as in the original.
@@ -380,6 +386,8 @@ fn main() {
 ## ShaderSprite
 
 A sprite that applies fragment shader effects. `ShaderSpriteEffect` has 49 effects besides `None` (flash `Flash`, outline `Outline`, shine `Shine`, dissolve `Dissolve`, hologram `Hologram`, wave `Wave`, mosaic `Pixelate`, glitch `Glitch`, wipe `Wipe` and so on). Each effect has default parameters and a color, and the `ShaderSpriteEffect` comments in the source describe what progress, color and parameters mean for each effect. Original names (camelCase such as `"dissolve"` and `"heatHaze"`) convert with `get_name()` and `ShaderSpriteEffect::from_name(name)`, and `ShaderSpriteEffect::get_effect_list()` returns all 50 including `None`.
+
+![A grid of 50 ShaderSprite effects, one per cell on the same image](../images/shader-sprite.webp)
 
 - The original inherits from `Sprite`, but the Rust version wraps a `Sprite` and calls `Sprite` functions (`set_image`, `set_image_rect`, `set_color` and so on) directly through `Deref`. So on a node you find it with `get_component::<ShaderSprite>()`, not `get_component::<Sprite>()`. `get_sprite()` and `get_sprite_mut()` also give the wrapped `Sprite`.
 - Create one with `ShaderSprite::new()` or `ShaderSprite::create_with_image(image)`.
@@ -508,6 +516,8 @@ fn main() {
 ## ScreenEffect
 
 A post-processing chain applied to the whole scene. The scene draws to the screen as usual, and `end` grabs the screen (or a given region), applies the enabled effects in order, and puts the result back in the same place. `ScreenEffectType` has 58 effects (vignette `Vignette`, shockwave `Shockwave`, bloom `Bloom`, color grading `ColorGrade`, chromatic aberration `Chromatic`, grain `Grain`, fog `Fog`, fade `Fade` and so on). Original names convert with `get_name()` and `ScreenEffectType::from_name(name)`.
+
+![ScreenEffect applied only to a rounded stage: bloom, chromatic aberration, vignette and color grading](../images/screen-effect.webp)
 
 - Create one with `ScreenEffect::new()`. The original takes a `Graphic` in its constructor, but the Rust version takes nothing and creates its GL resources on the first `end`. Call `begin(graphic)` at the start of the scene's `pre_draw`, `end(graphic)` at the end of `post_draw`, and `tick(time_delta)` in `tick`.
 - `set_enabled(effect_type, is_enabled)`, `set_strength(effect_type, strength)` (0 is the same as off, default 1), `set_parameters(effect_type, x, y, z, w)`, `set_parameter(effect_type, name, value)` (names come from `SCREEN_EFFECT_PARAMETER_NAMES` or `effect_type.get_parameter_names()`; unknown names are ignored), `set_color(effect_type, color)`, `disable_all()`, `reset_all()`, `has_active_effect()`.

@@ -323,6 +323,7 @@ void main() {
 /// 	graphic.restore_render_state();
 /// }
 /// ```
+/// <!-- image: model-viewer.webp -->
 //==============================================================================
 pub struct SkinnedModelRenderer {
 	shader_program: Rc<ShaderProgram>,

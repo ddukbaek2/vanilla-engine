@@ -2,9 +2,13 @@
 
 불꽃, 눈, 폭발 같은 파티클과 그 밖의 2D 효과를 다룹니다. 노드에 붙이는 `ParticleSystem` 과 `TrailRenderer`, 셰이더 효과를 거는 스프라이트 `ShaderSprite`, 화면 전체에 후처리를 거는 `ScreenEffect`, 아지랑이 `HeatHazeEffect` 차례입니다. 노드와 컴포넌트는 "노드와 컴포넌트" 장, 그리기 차례와 블렌드는 "그리기" 장, 3D 의 효과(`ToonVfx`)는 "3D" 장, 파티클 편집기 자체는 "저작 도구와 두 엔진이 같이 쓰는 파일" 장에서 다룹니다.
 
+![effectgallery 예제: 왼쪽 ShaderSprite 효과 50 칸, 오른쪽 ScreenEffect 를 건 무대, 아래 TrailRenderer 와 ParticleSystem 칸](../images/effect-gallery.webp)
+
 ## ParticleSystem
 
 `ParticleSystem` 은 유니티 ParticleSystem 의 자주 쓰는 부분을 2D 로 옮긴 컴포넌트입니다. 노드에 붙이면 바로 방출을 시작하고(기본 재생, 반복, 초당 20 개), 노드 갱신마다 입자를 움직여 정점 색 쿼드로 묶어 그립니다. 좌표는 컴포넌트 좌표(노드 내용 크기 영역의 왼쪽 위가 원점)이고, 내용 크기가 0 인 노드면 노드 자리가 원점입니다.
+
+![ParticleSystem 칸 여덟: circle 분수, rect 색종이, streak 불티, image 별, 끌개, 흔들림, edge, 월드 공간](../images/particle-effects.webp)
 
 ```rust,no_run
 use vanilla::{Color, Engine, EngineConfiguration, ParticleEmitterShape, ParticleSystem, Scene, SceneBase, Vector2};
@@ -310,6 +314,8 @@ assert_eq!(first_system.get_random_seed(), Some(42));
 
 노드가 지나간 자리를 점으로 기록해, 굵기와 색이 잦아드는 띠로 그립니다(유니티 TrailRenderer 의 2D 대응). 점은 노드 갱신마다 노드의 로컬 위치(부모 좌표)로 기록하고, 수명이 지난 점은 지웁니다.
 
+![TrailRenderer 둘: 보통 합성의 푸른 자국과 더하기 합성의 금빛 자국](../images/trail.webp)
+
 - `set_time(seconds)`: 점이 남는 시간, 곧 띠의 길이(기본 0.5).
 - `set_width(start_width, end_width)`: 갓 생긴 점에서 끝으로 가며 바뀌는 굵기(기본 10, 0).
 - `set_colors(start_color, end_color)`: 기본 `(1, 1, 1, 0.9)` 에서 `(1, 1, 1, 0)`. 그릴 때 RGB 는 원본처럼 0 ~ 255 정수로 반올림합니다.
@@ -380,6 +386,8 @@ fn main() {
 ## ShaderSprite
 
 프래그먼트 셰이더 효과를 거는 스프라이트입니다. `ShaderSpriteEffect` 에 `None` 을 빼고 49 가지 효과가 있습니다(섬광 `Flash`, 외곽선 `Outline`, 광택 `Shine`, 디졸브 `Dissolve`, 홀로그램 `Hologram`, 물결 `Wave`, 모자이크 `Pixelate`, 글리치 `Glitch`, 와이프 `Wipe` 같은 것). 효과마다 기본 파라미터와 색이 있고, 소스의 `ShaderSpriteEffect` 주석에 효과마다 진행도, 색, 파라미터의 뜻이 적혀 있습니다. 원본 이름(`"dissolve"`, `"heatHaze"` 같은 camelCase)은 `get_name()` 과 `ShaderSpriteEffect::from_name(name)` 으로 오가고, `ShaderSpriteEffect::get_effect_list()` 는 `None` 을 포함한 50 개를 돌려줍니다.
+
+![ShaderSprite 효과 50 가지를 같은 그림에 칸마다 하나씩 건 격자](../images/shader-sprite.webp)
 
 - 원본은 `Sprite` 를 이어받지만 러스트 판은 `Sprite` 를 품고 `Deref` 로 `Sprite` 의 함수(`set_image`, `set_image_rect`, `set_color` 같은)를 그대로 부릅니다. 그래서 노드에서는 `get_component::<Sprite>()` 가 아니라 `get_component::<ShaderSprite>()` 로 찾습니다. `get_sprite()`, `get_sprite_mut()` 로 품은 `Sprite` 를 꺼낼 수도 있습니다.
 - `ShaderSprite::new()` 나 `ShaderSprite::create_with_image(image)` 로 만듭니다.
@@ -508,6 +516,8 @@ fn main() {
 ## ScreenEffect
 
 씬 전체에 거는 후처리 사슬입니다. 씬은 화면에 그대로 그리고, `end` 에서 화면(또는 정한 영역)을 떠 와 켜진 효과를 차례로 건 뒤 같은 자리에 되돌려 놓습니다. `ScreenEffectType` 에 58 가지 효과가 있습니다(비네트 `Vignette`, 충격파 `Shockwave`, 번짐 `Bloom`, 색 보정 `ColorGrade`, 색수차 `Chromatic`, 그레인 `Grain`, 안개 `Fog`, 페이드 `Fade` 같은 것). 원본 이름은 `get_name()` 과 `ScreenEffectType::from_name(name)` 으로 오갑니다.
+
+![둥근 무대에만 건 ScreenEffect: 블룸, 색수차, 비네트, 색 보정](../images/screen-effect.webp)
 
 - `ScreenEffect::new()` 로 만듭니다. 원본은 생성자에서 `Graphic` 을 받지만 러스트 판은 아무것도 받지 않고, GL 자원은 처음 `end` 에서 만듭니다. 씬의 `pre_draw` 첫머리에서 `begin(graphic)`, `post_draw` 끝에서 `end(graphic)`, `tick` 에서 `tick(time_delta)` 를 부릅니다.
 - `set_enabled(effect_type, is_enabled)`, `set_strength(effect_type, strength)`(0 이면 꺼진 것과 같음, 기본 1), `set_parameters(effect_type, x, y, z, w)`, `set_parameter(effect_type, name, value)`(이름은 `SCREEN_EFFECT_PARAMETER_NAMES` 나 `effect_type.get_parameter_names()`, 모르는 이름은 무시), `set_color(effect_type, color)`, `disable_all()`, `reset_all()`, `has_active_effect()`.

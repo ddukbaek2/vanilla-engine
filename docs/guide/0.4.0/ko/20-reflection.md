@@ -601,6 +601,8 @@ assert_eq!(loaded_spin.get_degrees_per_second(), 45.0);
 
 인스펙터는 원본 `getComponentProperties` 처럼 고른 노드의 컴포넌트마다 게터를 모두 불러 보입니다.
 
+![개발자 도구 인스펙터가 반사로 읽은 노드 값과 Paint 컴포넌트 값](../images/reflect-inspector.webp)
+
 - 이름은 원본 `formatMethodName` 꼴입니다. `getDegreesPerSecond` 는 `degreesPerSecond`, `is` 로 시작하면 `isBlinking` 그대로입니다.
 - 값은 원본 `formatPropertyValue` 꼴입니다. 수는 소수 둘째 자리, `Vector2` 는 `(x, y)`, `Rect` 는 `(x, y, 너비, 높이)` 소수 첫째 자리, `Color` 는 `rgba(...)`, `Null` 은 `null`, 노드는 `[WorldNode]`, 배열은 `[Array]`, 그 밖은 `[종류 이름]` 입니다.
 - 트리를 받는 게터는 그릴 때 트리를 넘겨 부르고, `&mut self` 게터가 있는 컴포넌트는 `tick` 이 트리를 쥐고 읽어 둔 값을 보입니다.

@@ -6,6 +6,8 @@
 
 Vanilla Engine (vanilla-engine) is a Rust port of the web game engine [vanilla.js](https://github.com/ddukbaek2/vanilla.js). It keeps the original public API and scene structure, with names changed to Rust conventions. (The original `setFillColor` is `set_fill_color`, `Colors.white` is `Colors::WHITE`) The crate name is `vanilla-engine`, and in code it is used as `vanilla`.
 
+![Toon 3D example (toonshowcase): outlined primitives, a walking model, instanced rocks, shadows and bloom](../images/toon-showcase.webp)
+
 - The same game code builds a desktop executable (Windows, macOS, OpenGL 3.3 core) and a browser wasm module (WebGL2). Differences in windows, GL, input, asset loading, sound, clipboard, Korean input (IME) and system fonts are handled by the engine's platform layer
 - Nodes are held by the scene's `NodeTree`, and game code points to them with `NodeId` handles. The handle of a destroyed node becomes `None`, so no dangling references occur, and nodes are created and destroyed without `Rc<RefCell>`
 - It is not an ECS; like the original, components are attached to nodes. Names and flow match the original, which makes porting JavaScript games easy

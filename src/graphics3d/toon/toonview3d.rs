@@ -84,6 +84,7 @@ impl Drop for ScreenRectGuard<'_> {
 /// assert!(view.get_renderer().is_none());
 /// assert!(view.is_depth_cleared());
 /// ```
+/// <!-- image: toon-view.webp -->
 //==============================================================================
 pub struct ToonView3D {
 	component_base: ComponentBase,

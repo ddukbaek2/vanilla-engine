@@ -401,6 +401,8 @@ assert!(!missing_asset.is_loaded());
 
 씬에 맡길 때는 `asset_loader.get_completion_handle()` 을 `track_load_handle` 로 맡깁니다. 이 손잡이는 다 받으면 끝나므로 엔진이 그때까지 `initialize` 를 미룹니다. 그동안 `draw_on_load` 에서 `update` 를 부르고 로딩 막대를 그립니다.
 
+![loadingshowcase 예제의 바꾼 로딩 화면: 도는 점 셋과 둥근 진행 막대](../images/loading-screen.webp)
+
 `LoadingProgress` 는 알려 준 정도(`set_progress`, 0 ~ 1 로 자르고 줄어들지 않음)를 보이는 정도(`get_shown_progress`)가 부드럽게 따라가게 합니다. 매 프레임 `update(time_delta)` 를 부르고, 따라가는 빠르기는 `set_follow_rate`(초당 남은 거리의 비율, 기본 6)로 줍니다. 받기가 몰려 진행률이 한 번에 뛰어도 막대가 미끄러집니다.
 
 ```rust,no_run

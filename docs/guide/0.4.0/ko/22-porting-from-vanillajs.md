@@ -445,9 +445,9 @@ assert!(shaker.is_shaking());
 | `core/scenemanager.js` | `Engine` 의 `load_scene`, `unload_scene`, `get_all_loaded_scenes` (씬 객체 대신 `SceneId`) |
 | `core/touchraycaster.js` | `SceneBase::tick_touch`, `NodeTree` 의 누름 판정, `TouchRecognizer` 에 합침 |
 | `resource/jsonasset.js` | `TextAsset` 과 같은 파일의 `JsonAsset` |
-| `base/object.js`, `base/singleton.js`, `experimental/collection` 의 `Dictionary`, `List`, `Queue`, `Set`, `Stack` | 러스트 언어와 표준(트레이트, `Any`, `enum`, `Vec`, `HashMap` 같은 것)이 같은 일을 합니다 |
+| `base/object.js`, `base/singleton.js`, `base/collection` 의 `Dictionary`, `List`, `Queue`, `Set`, `Stack` | 러스트 언어와 표준(트레이트, `Any`, `enum`, `Vec`, `HashMap` 같은 것)이 같은 일을 합니다 |
 | `base/reflection.js` | 실행 중 반사는 `#[vanilla::reflect]`, `createGUID` 는 `create_guid` |
-| `experimental/camera.js` | 회전과 `begin`/`end` 까지 `Camera2D` 가 덮습니다 |
+| `deprecated/camera.js` | 회전과 `begin`/`end` 까지 `Camera2D` 가 덮습니다 |
 | 브라우저가 하던 일 (캔버스 2D, `window.alert`, `confirm`, `prompt`, html lang 과 meta) | `Canvas2D`, `Engine::alert`, `confirm`, `prompt` (와 `_async`), `Document` |
 
 ## 관련 타입

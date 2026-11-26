@@ -63,6 +63,8 @@ fn main() {
 cargo run
 ```
 
+![The first scene running: one white rectangle on a black background](../images/quickstart.webp)
+
 Inside the engine repository the same code is in `examples/quickstart.rs`. (`cargo run --example quickstart`, only the window title differs)
 
 - A scene implements the `Scene` trait. The only required functions are `get_scene_base` and `get_scene_base_mut`, which hand out the shared scene state (`SceneBase`); override only the other hooks you need (`create`, `initialize`, `tick`, `pre_draw`, `draw` and so on).

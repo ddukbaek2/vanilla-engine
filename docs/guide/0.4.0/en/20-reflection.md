@@ -601,6 +601,8 @@ assert_eq!(loaded_spin.get_degrees_per_second(), 45.0);
 
 Like the original `getComponentProperties`, the inspector calls every getter of each component on the selected node and shows the results.
 
+![Node values and Paint component values read through reflection in the developer tools inspector](../images/reflect-inspector.webp)
+
 - Names follow the original `formatMethodName`: `getDegreesPerSecond` becomes `degreesPerSecond`, and names starting with `is` stay as they are, such as `isBlinking`.
 - Values follow the original `formatPropertyValue`: numbers with two decimal places, `Vector2` as `(x, y)`, `Rect` as `(x, y, width, height)` with one decimal place, `Color` as `rgba(...)`, `Null` as `null`, nodes as `[WorldNode]`, arrays as `[Array]`, and anything else as `[type name]`.
 - Getters that take the tree are called with the tree while drawing, and for components with `&mut self` getters the inspector shows the values that `tick` read while holding the tree.

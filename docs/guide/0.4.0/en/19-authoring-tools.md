@@ -19,6 +19,8 @@ This chapter covers how the Rust version loads files made by the authoring tools
 
 A `.uiasset.json` is a UI document that writes out a node tree as is. It consists of a version number and one root node, and each node lists its type, name, active state, position, scale, rotation, opacity, pivot, anchor, content size, touch handling, components, and children.
 
+![UI Editor with the UI Showcase components document open: component list and hierarchy on the left, the document in the middle, the inspector on the right](../images/tool-ui-editor.webp)
+
 ```json
 {
 	"version": 1,
@@ -160,6 +162,8 @@ assert!(node_tree[field_id].get_component::<UIInputField>().is_some());
 
 A `.timeline.json` is a document made of a list of stage nodes, tracks (target name, property, keys), and markers. At the top level it has `name`, `duration` (seconds), `frameRate`, `loop`, `stage` (`width`, `height`, `backgroundColor`, `nodes`), `tracks`, and `markers`.
 
+![Timeline Editor with a cutscene document open: the stage with letterbox and dialogue box, tracks and keys below, the inspector on the right](../images/tool-timeline-editor.webp)
+
 ```rust
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -214,6 +218,8 @@ The detailed rules for tracks, easing, and keys are covered in the "Tweens, Anim
 ## Using Particle Editor assets
 
 A `.vfx.json` is a list of particle system descriptions. Each system lists its name together with the description fields that `ParticleSystem::apply_description` accepts. The fields use the same names as the original (`looping`, `emissionRate`, `shape`, `lifetime`, `renderShape`, `blendMode`, and so on), and shapes and blend modes written as the original's strings are read into enums. Unknown shape and blend mode names are ignored.
+
+![Particle Editor at start: the view running the Fire preset, the preset list on the left, emission and shape settings on the right](../images/tool-particle-editor.webp)
 
 ```json
 {
@@ -302,6 +308,8 @@ The desktop decodes `data:` URLs on the spot. On the web they load later, so set
 ## Loading Visual Editor scenes
 
 The Visual Editor saves scenes in the same form as UI documents. The default save path is `scenes/untitled.scene.json`, and the editor-only frame size (`frameSize`) sits in the same JSON. `UIDocument` skips unknown keys, so the game reads the file as is with `from_json_text`. The scene root is a node named `sceneRoot` with its pivot at the top left. The Visual Editor's `Sprite` writes the image's project-relative path into `imagePath`, so if the asset folder is the same project folder, `load_images` reads the images by those paths.
+
+![Visual Editor with the UI Showcase components document open as a scene: hierarchy on the left, the scene view with move handles in the middle, the inspector on the right](../images/tool-visual-editor.webp)
 
 The example below reads `examples/assets/scenedocument.scene.json` from the repository (a scene made in the Visual Editor save format). The scene requests the scene file as a `TextAsset` in `create` and tracks it, requests the images and builds the tree in `initialize`, and attaches late images in `tick`. The function given to `set_clicked_event` cannot borrow the scene, so the button press is signaled through an `Rc<Cell>` and picked up in `tick`. Some images in this scene file are not in the repository, so they print a warning and stay without an image.
 

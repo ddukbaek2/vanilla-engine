@@ -248,6 +248,8 @@ fn read_clipboard_promise(engine: &Engine) -> Promise<String> {
 
 The original `this.fadeScreen(async () => { ... })` is `GameScene`'s `fade_screen_async`. On the `tick` where the screen is fully dark, `game_scene!` (or `ui_scene!`) spawns the given function as a scene task and runs it on the spot up to its first `await`; when the future finishes, the screen brightens again. If a fade is already running, it returns `false` and does nothing.
 
+![The asyncawait example halfway through a fade_screen_async fade](../images/async-await.webp)
+
 ```rust,no_run
 use vanilla::{wait, Engine, GameScene, GameSceneBase};
 

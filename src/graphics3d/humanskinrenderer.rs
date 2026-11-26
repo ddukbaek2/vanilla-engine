@@ -754,6 +754,7 @@ pub fn create_cutout_depth_vertex_shader_source() -> String {
 /// 	}
 /// }
 /// ```
+/// <!-- image: old-face.webp -->
 //==============================================================================
 pub struct HumanSkinRenderer {
 	skinned_model_renderer: SkinnedModelRenderer,

@@ -186,6 +186,7 @@ struct Particle {
 /// assert_eq!(particle_system.get_particle_count(), 0);
 /// assert!(particle_system.is_finished());
 /// ```
+/// <!-- image: particle-effects.webp -->
 //==============================================================================
 pub struct ParticleSystem {
 	component_base: ComponentBase,

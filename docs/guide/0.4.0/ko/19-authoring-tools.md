@@ -19,6 +19,8 @@
 
 `.uiasset.json` 은 노드 트리를 그대로 적은 UI 문서입니다. 판 번호와 뿌리 노드 하나로 되어 있고, 노드마다 종류, 이름, 켜짐, 위치, 배율, 회전, 투명도, 피벗, 앵커, 내용 크기, 터치 받기, 컴포넌트, 자식을 적습니다.
 
+![UI Editor 에 UI 쇼케이스의 컴포넌트 문서를 연 화면: 왼쪽 컴포넌트 목록과 하이어라키, 가운데 문서, 오른쪽 인스펙터](../images/tool-ui-editor.webp)
+
 ```json
 {
 	"version": 1,
@@ -160,6 +162,8 @@ assert!(node_tree[field_id].get_component::<UIInputField>().is_some());
 
 `.timeline.json` 은 무대 노드 목록, 트랙(대상 이름, 속성, 키), 마커로 이루어진 문서입니다. 맨 위에 `name`, `duration`(초), `frameRate`, `loop`, `stage`(`width`, `height`, `backgroundColor`, `nodes`), `tracks`, `markers` 가 있습니다.
 
+![Timeline Editor 에 컷신 문서를 연 화면: 레터박스와 대화 상자가 걸린 무대, 아래 트랙과 키, 오른쪽 인스펙터](../images/tool-timeline-editor.webp)
+
 ```rust
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -214,6 +218,8 @@ assert!(!timeline.is_playing());
 ## Particle Editor 애셋 쓰기
 
 `.vfx.json` 은 파티클 시스템 서술의 목록입니다. 시스템마다 이름과 `ParticleSystem::apply_description` 이 받는 서술 칸을 함께 적습니다. 서술 칸은 원본과 같은 이름(`looping`, `emissionRate`, `shape`, `lifetime`, `renderShape`, `blendMode` 같은)이고, 모양과 합성은 원본의 글로 적힌 것을 읽어 열거형으로 바꿉니다. 모르는 이름의 모양과 합성은 무시합니다.
+
+![Particle Editor 처음 화면: Fire 프리셋이 도는 뷰, 왼쪽 프리셋 목록, 오른쪽 방출과 모양 설정](../images/tool-particle-editor.webp)
 
 ```json
 {
@@ -302,6 +308,8 @@ assert!(image_asset.get_image().is_some());
 ## Visual Editor 씬 불러오기
 
 Visual Editor 는 씬을 UI 문서와 같은 꼴로 저장합니다. 처음 저장 경로는 `scenes/untitled.scene.json` 이고, 편집기만 쓰는 틀 크기(`frameSize`)를 같은 JSON 에 함께 둡니다. `UIDocument` 는 모르는 키를 건너뛰므로 게임은 `from_json_text` 로 그대로 읽습니다. 씬 뿌리는 이름이 `sceneRoot` 이고 피벗이 왼쪽 위인 노드입니다. Visual Editor 의 `Sprite` 는 그림의 프로젝트 기준 경로를 `imagePath` 에 적으므로, 애셋 폴더를 같은 프로젝트 폴더로 두면 `load_images` 가 그 경로로 읽습니다.
+
+![Visual Editor 에 UI 쇼케이스의 컴포넌트 문서를 씬으로 연 화면: 왼쪽 하이어라키, 가운데 씬 뷰와 이동 핸들, 오른쪽 인스펙터](../images/tool-visual-editor.webp)
 
 아래 예제는 저장소의 `examples/assets/scenedocument.scene.json`(Visual Editor 저장 꼴로 만든 씬)을 읽습니다. 씬 파일은 `create` 에서 `TextAsset` 으로 요청해 맡기고, `initialize` 에서 그림을 요청한 뒤 트리를 짓고, `tick` 에서 늦게 읽힌 그림을 붙입니다. 단추 누름은 `set_clicked_event` 의 함수가 씬을 빌릴 수 없으므로 `Rc<Cell>` 로 알리고 `tick` 에서 받습니다. 이 씬 파일의 그림 몇 장은 저장소에 없어 경고를 찍고 그림 없이 남습니다.
 

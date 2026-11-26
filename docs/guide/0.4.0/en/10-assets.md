@@ -401,6 +401,8 @@ assert!(!missing_asset.is_loaded());
 
 To have the scene wait, track `asset_loader.get_completion_handle()` with `track_load_handle`. This handle finishes when everything is loaded, so the engine holds back `initialize` until then. Meanwhile, call `update` and draw a loading bar in `draw_on_load`.
 
+![The custom loading screen of the loadingshowcase example: three spinning dots and a rounded progress bar](../images/loading-screen.webp)
+
 `LoadingProgress` makes the shown amount (`get_shown_progress`) follow the reported amount (`set_progress`, clamped to 0 to 1 and never decreasing) smoothly. Call `update(time_delta)` every frame; the follow speed is set with `set_follow_rate` (the fraction of the remaining distance per second, default 6). Even when progress jumps because many loads finish at once, the bar glides.
 
 ```rust,no_run

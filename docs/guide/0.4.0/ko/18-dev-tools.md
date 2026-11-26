@@ -6,6 +6,10 @@
 
 `EngineConfiguration.use_dev_tools` 가 켜져 있으면(처음 값 `true`) `GameSceneBase` 가 초기화할 때 개발자 도구 패널을 만듭니다. `UIScene` 도 `GameSceneBase` 를 품고 있어 같습니다. 게임 화면에서 F2 를 누르면 패널이 창 오른쪽 아래에 붙어 열리고, 다시 누르면 닫힙니다. 패널은 뷰 배율 모드와 상관없이 창 안쪽 논리 좌표(canvas native)로 그려져 늘 같은 크기입니다.
 
+![개발자 도구의 Node Hierarchy 탭: 노드 트리에서 card 를 고르면 인스펙터에 노드 값과 컴포넌트가 나오고 장면에 노드 테두리가 그려진다](../images/dev-tools.webp)
+
+![개발자 도구의 Statistics 탭: 엔진 판, 플랫폼, 화면 크기와 뷰 배율, 시간과 FPS](../images/dev-tools-statistics.webp)
+
 ```rust,no_run
 use vanilla::{Color, Engine, EngineConfiguration, GameScene, GameSceneBase, Paint, Pivot, Text, TextAlign, Vector2};
 
