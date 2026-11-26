@@ -252,7 +252,7 @@ enum PendingFontOperation {
 
 //==============================================================================
 /// 엔진.
-/// - 설정으로 만들고 run 에 첫 씬을 넘겨 돌린다. 씬의 훅은 &mut Engine 을 받아 매니저(시간, 뷰, 입력, 오디오, 커서)와 그래픽(get_graphic, run 이 창을 연 뒤)을 꺼내 쓴다.
+/// - 설정으로 만들고 run 에 첫 씬을 넘겨 돌린다. 씬의 훅은 &mut Engine 을 받아 매니저(시간, 뷰, 입력, 오디오, 커서)와 그래픽(get_graphic, 데스크탑 주 스레드는 Engine::new 직후부터)을 꺼내 쓴다.
 ///
 /// # 예제
 /// 첫 씬으로 엔진 돌리기 (examples/quickstart.rs)
@@ -286,7 +286,7 @@ enum PendingFontOperation {
 /// }
 /// ```
 ///
-/// 창 없이 엔진을 만들어 매니저와 설정 다루기
+/// run 전에 엔진을 만들어 매니저와 설정 다루기 (데스크탑 주 스레드는 숨긴 창과 그래픽이 이미 있다)
 /// ```rust
 /// use vanilla::{Engine, EngineConfiguration};
 ///
@@ -297,7 +297,7 @@ enum PendingFontOperation {
 /// assert_eq!(engine.get_time_manager().get_time_scale(), 0.5);
 /// engine.set_maximum_frame_per_second(30.0);
 /// assert_eq!(engine.get_maximum_frame_per_second(), 30.0);
-/// assert!(engine.get_canvas().is_none());
+/// assert_eq!(engine.get_canvas().is_some(), engine.get_graphic().is_some());
 /// ```
 //==============================================================================
 pub struct Engine {
@@ -344,7 +344,8 @@ pub struct Engine {
 impl Engine {
 	//==============================================================================
 	/// 생성.
-	/// - 매니저(시간, 뷰, 입력, 커서, 오디오)를 만들고 문서 언어와 meta 를 설정대로 둔다. 창과 GL 은 run 에서 플랫폼이 만든다.
+	/// - 매니저(시간, 뷰, 입력, 커서, 오디오)를 만들고 문서 언어와 meta 를 설정대로 둔다.
+	/// - 데스크탑 주 스레드에서는 원본 생성자처럼 그래픽도 짓는다. (이벤트 루프와 숨긴 창, GL 컨텍스트를 만들고 run 이 그 창을 보인다. GL 을 지을 수 없거나 주 스레드가 아니면 run 이 창을 열 때 짓는다) 웹은 run 이 캔버스를 잡을 때 짓는다.
 	///
 	/// # 인자
 	/// - `engine_configuration`: 엔진 설정. (엔진이 소유한다, get_engine_configuration 으로 읽는다)
@@ -356,7 +357,7 @@ impl Engine {
 		let reference_resolution_size = engine_configuration.reference_resolution_size;
 		let view_scale_mode = engine_configuration.view_scale_mode;
 		crate::platform::document::apply_engine_configuration(&engine_configuration.document_language, &engine_configuration.document_meta_list);
-		Engine {
+		let engine = Engine {
 			engine_configuration,
 			time_manager: TimeManager::new(),
 			view_manager: ViewManager::new(reference_resolution_size, view_scale_mode),
@@ -386,7 +387,17 @@ impl Engine {
 			dev_tools_inspect_request: std::cell::Cell::new(None),
 			task_executor: TaskExecutor::new(),
 			pending_unload_resolver_list: Vec::new(),
-		}
+		};
+		// 데스크탑: 원본 생성자처럼 지금 그래픽을 짓는다. (주 스레드면 이벤트 루프와 숨긴 창, GL 컨텍스트를 만들고 run 은 그 창을 보인다. 못 지으면 지금처럼 run 이 짓는다)
+		#[cfg(not(target_arch = "wasm32"))]
+		let engine = {
+			let mut engine = engine;
+			if let Some(graphic) = crate::platform::prepare_graphic(&mut engine) {
+				engine.attach_graphic(graphic);
+			}
+			engine
+		};
+		engine
 	}
 
 	//==============================================================================
@@ -1219,15 +1230,100 @@ impl Engine {
 	/// 캔버스. (원본 getCanvas, 웹은 그리는 캔버스 요소, 데스크탑은 창, 플랫폼이 붙이기 전에는 None)
 	///
 	/// # 돌려줌
-	/// 플랫폼 창 손잡이. (run 으로 창을 만들기 전에는 None)
+	/// 플랫폼 창 손잡이. (데스크탑 주 스레드는 Engine::new 가 숨긴 채 지은 창, 그 밖에는 run 이 창이나 캔버스를 잡기 전에는 None)
 	//==============================================================================
 	pub fn get_canvas(&self) -> Option<&PlatformWindow> {
 		self.platform_window.as_ref()
 	}
 
 	//==============================================================================
+	/// 그래픽 넘겨받기. (데스크탑 Engine::new 나 플랫폼이 GL 컨텍스트를 만든 뒤 한 번. 기본 폰트를 읽고 엔진에 넣는다)
+	//==============================================================================
+	pub(crate) fn attach_graphic(&mut self, mut graphic: Graphic) {
+		let is_rebake_text_on_font_load = self.engine_configuration.rebake_text_on_font_load;
+		graphic.get_text_string_texture_cache().set_rebake_text_on_font_load(is_rebake_text_on_font_load);
+		self.load_default_fonts(&mut graphic);
+
+		// 웹: 기본 폰트가 아직 없고 default_font_url 이 있으면 거기서 받는다. (받는 동안은 시스템 글꼴로 그린다)
+		#[cfg(target_arch = "wasm32")]
+		{
+			let default_font_url = self.engine_configuration.default_font_url.clone();
+			let has_default_font = graphic.get_text_string_texture_cache().has_default_font();
+			if !has_default_font && !default_font_url.is_empty() {
+				let load_handle = AssetLoadHandle::create_pending(&default_font_url);
+				platform::request_asset_bytes(default_font_url, load_handle.clone(), false);
+				self.pending_default_font_handle = Some(load_handle);
+			}
+		}
+		self.graphic = Some(graphic);
+	}
+
+	//==============================================================================
+	/// 기본 폰트 읽기. (미리 받은 바이트, 그다음 데스크탑 시스템 글꼴 사슬과 대체 글꼴)
+	/// - 데스크탑 사슬: default_font_paths 가 비었으면 원본 SYSTEM_FONT_STRING 의 이름 차례로 운영체제 글꼴에서 찾는다. (맥은 크롬처럼 -apple-system 을 모르는 이름으로 넘겨 Apple SD Gothic Neo, 윈도우 Segoe UI 와 맑은 고딕)
+	///   얼굴은 그 굵기와 기울기의 글자를 처음 쓸 때 읽는다.
+	/// - 대체 글꼴: fallback_font_paths 가 비었으면 운영체제가 고른다.
+	//==============================================================================
+	fn load_default_fonts(&self, graphic: &mut Graphic) {
+		let engine_configuration = self.get_engine_configuration();
+		let text_string_texture_cache = graphic.get_text_string_texture_cache();
+		let font_source_list = [
+			(false, &engine_configuration.default_font_bytes),
+			(true, &engine_configuration.default_bold_font_bytes),
+		];
+		for (is_bold, font_bytes) in font_source_list {
+			if let Some(font_bytes) = font_bytes {
+				if let Err(error) = text_string_texture_cache.set_default_font(is_bold, font_bytes.clone()) {
+					eprintln!("Engine: {} (미리 받은 폰트)", error);
+				}
+			}
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			use crate::core::textstringtexturecache::{parse_font_string, FontFileSource};
+			if engine_configuration.default_font_paths.is_empty() && engine_configuration.default_bold_font_paths.is_empty() {
+				let system_font_description = parse_font_string(&format!("10px {}", crate::base::platform::SYSTEM_FONT_STRING));
+				text_string_texture_cache.set_system_font_chain(system_font_description.family_name_list);
+			}
+			else {
+				let path_font_list = [
+					(400, &engine_configuration.default_font_paths),
+					(700, &engine_configuration.default_bold_font_paths),
+				];
+				for (weight, font_paths) in path_font_list {
+					for (path_index, font_path) in font_paths.iter().enumerate() {
+						if !font_path.exists() {
+							continue;
+						}
+						let source = FontFileSource {
+							path: font_path.clone(),
+							face_index: None,
+							post_script_name: None,
+						};
+						text_string_texture_cache.add_system_font_candidate(&format!("default font path {}", path_index), weight, false, source);
+					}
+				}
+			}
+			if engine_configuration.fallback_font_paths.is_empty() {
+				text_string_texture_cache.set_system_font_fallback_enabled(true);
+			}
+			else {
+				for font_path in engine_configuration.fallback_font_paths.iter() {
+					if font_path.exists() {
+						text_string_texture_cache.add_fallback_font_candidate(font_path.clone());
+					}
+				}
+			}
+			if !text_string_texture_cache.has_default_font() && !text_string_texture_cache.has_system_font() {
+				eprintln!("Engine: 기본 폰트를 찾지 못했습니다. 글자가 보이지 않습니다.");
+			}
+		}
+	}
+
+	//==============================================================================
 	/// 그래픽. (원본 getGraphic, 씬의 create, initialize, tick 이나 컴포넌트의 tick 에서 GL 자원(텍스처, 렌더 타겟, 셰이더 프로그램, 툰 렌더러 같은)을 짓는다)
-	/// - 플랫폼이 GL 컨텍스트를 만들기 전(run 전, 창 없는 시험)에는 None 이다.
+	/// - 원본 생성자처럼 데스크탑은 Engine::new 가 주 스레드에서 숨긴 창과 GL 컨텍스트를 지어 바로 있다. (run 은 그 창을 보인다)
+	///   GL 을 지을 수 없는 기계(화면 없는 CI 같은)나 주 스레드가 아닌 곳(단위 시험)에서는 run 이 창을 열 때까지 None 이다. 웹은 run 이 캔버스를 잡을 때까지 None 이다.
 	/// - 그리기 함수(pre_draw, draw, post_draw, draw_on_load, draw_gizmos)와 with_graphic 의 클로저 안에서는 그래픽을 인자로 내어 주어 None 이다. (그 자리에서는 인자로 받은 graphic 이 이 그래픽이다)
 	///
 	/// # 돌려줌
@@ -1275,12 +1371,15 @@ impl Engine {
 	/// }
 	/// ```
 	///
-	/// 창 없이 만든 엔진에는 그래픽이 없다
+	/// 엔진을 만든 직후 run 전에 텍스처를 짓는다 (데스크탑, GL 을 지을 수 없는 기계에서는 None)
 	/// ```rust
-	/// use vanilla::{Engine, EngineConfiguration};
+	/// use vanilla::{Engine, EngineConfiguration, RenderTarget};
 	///
 	/// let engine = Engine::new(EngineConfiguration::new());
-	/// assert!(engine.get_graphic().is_none());
+	/// if let Some(graphic) = engine.get_graphic() {
+	/// 	let render_target = RenderTarget::new(graphic.get_gl(), 64, 64, false, None);
+	/// 	assert!(render_target.is_ok());
+	/// }
 	/// ```
 	//==============================================================================
 	pub fn get_graphic(&self) -> Option<&Graphic> {
@@ -1338,13 +1437,14 @@ impl Engine {
 	/// 클로저가 돌려준 값. (그래픽이 없거나 이미 내어 준 동안이면 클로저를 부르지 않고 None)
 	///
 	/// # 예제
-	/// 그래픽이 없으면 클로저를 부르지 않는다
+	/// 그래픽이 있을 때만 클로저를 부른다 (데스크탑은 Engine::new 직후부터, GL 을 지을 수 없는 기계에서는 None)
 	/// ```rust
 	/// use vanilla::{Engine, EngineConfiguration};
 	///
 	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let has_graphic = engine.get_graphic().is_some();
 	/// let result = engine.with_graphic(|_engine, graphic| graphic.get_global_alpha());
-	/// assert!(result.is_none());
+	/// assert_eq!(result.is_some(), has_graphic);
 	/// ```
 	///
 	/// 씬의 initialize 에서 엔진의 시계와 그래픽을 함께 쓰기
@@ -1897,23 +1997,8 @@ impl EngineRunner {
 	//==============================================================================
 	/// 그래픽 넘겨받기. (플랫폼이 GL 컨텍스트를 만든 뒤 한 번. 기본 폰트를 읽고 엔진에 넣는다)
 	//==============================================================================
-	pub(crate) fn attach_graphic(&mut self, mut graphic: Graphic) {
-		let is_rebake_text_on_font_load = self.engine.engine_configuration.rebake_text_on_font_load;
-		graphic.get_text_string_texture_cache().set_rebake_text_on_font_load(is_rebake_text_on_font_load);
-		self.load_default_fonts(&mut graphic);
-
-		// 웹: 기본 폰트가 아직 없고 default_font_url 이 있으면 거기서 받는다. (받는 동안은 시스템 글꼴로 그린다)
-		#[cfg(target_arch = "wasm32")]
-		{
-			let default_font_url = self.engine.engine_configuration.default_font_url.clone();
-			let has_default_font = graphic.get_text_string_texture_cache().has_default_font();
-			if !has_default_font && !default_font_url.is_empty() {
-				let load_handle = AssetLoadHandle::create_pending(&default_font_url);
-				platform::request_asset_bytes(default_font_url, load_handle.clone(), false);
-				self.engine.pending_default_font_handle = Some(load_handle);
-			}
-		}
-		self.engine.graphic = Some(graphic);
+	pub(crate) fn attach_graphic(&mut self, graphic: Graphic) {
+		self.engine.attach_graphic(graphic);
 	}
 
 	//==============================================================================
@@ -1995,67 +2080,6 @@ impl EngineRunner {
 		}
 	}
 
-	//==============================================================================
-	/// 기본 폰트 읽기. (미리 받은 바이트, 그다음 데스크탑 시스템 글꼴 사슬과 대체 글꼴)
-	/// - 데스크탑 사슬: default_font_paths 가 비었으면 원본 SYSTEM_FONT_STRING 의 이름 차례로 운영체제 글꼴에서 찾는다. (맥은 크롬처럼 -apple-system 을 모르는 이름으로 넘겨 Apple SD Gothic Neo, 윈도우 Segoe UI 와 맑은 고딕)
-	///   얼굴은 그 굵기와 기울기의 글자를 처음 쓸 때 읽는다.
-	/// - 대체 글꼴: fallback_font_paths 가 비었으면 운영체제가 고른다.
-	//==============================================================================
-	fn load_default_fonts(&self, graphic: &mut Graphic) {
-		let engine_configuration = self.engine.get_engine_configuration();
-		let text_string_texture_cache = graphic.get_text_string_texture_cache();
-		let font_source_list = [
-			(false, &engine_configuration.default_font_bytes),
-			(true, &engine_configuration.default_bold_font_bytes),
-		];
-		for (is_bold, font_bytes) in font_source_list {
-			if let Some(font_bytes) = font_bytes {
-				if let Err(error) = text_string_texture_cache.set_default_font(is_bold, font_bytes.clone()) {
-					eprintln!("Engine: {} (미리 받은 폰트)", error);
-				}
-			}
-		}
-		#[cfg(not(target_arch = "wasm32"))]
-		{
-			use crate::core::textstringtexturecache::{parse_font_string, FontFileSource};
-			if engine_configuration.default_font_paths.is_empty() && engine_configuration.default_bold_font_paths.is_empty() {
-				let system_font_description = parse_font_string(&format!("10px {}", crate::base::platform::SYSTEM_FONT_STRING));
-				text_string_texture_cache.set_system_font_chain(system_font_description.family_name_list);
-			}
-			else {
-				let path_font_list = [
-					(400, &engine_configuration.default_font_paths),
-					(700, &engine_configuration.default_bold_font_paths),
-				];
-				for (weight, font_paths) in path_font_list {
-					for (path_index, font_path) in font_paths.iter().enumerate() {
-						if !font_path.exists() {
-							continue;
-						}
-						let source = FontFileSource {
-							path: font_path.clone(),
-							face_index: None,
-							post_script_name: None,
-						};
-						text_string_texture_cache.add_system_font_candidate(&format!("default font path {}", path_index), weight, false, source);
-					}
-				}
-			}
-			if engine_configuration.fallback_font_paths.is_empty() {
-				text_string_texture_cache.set_system_font_fallback_enabled(true);
-			}
-			else {
-				for font_path in engine_configuration.fallback_font_paths.iter() {
-					if font_path.exists() {
-						text_string_texture_cache.add_fallback_font_candidate(font_path.clone());
-					}
-				}
-			}
-			if !text_string_texture_cache.has_default_font() && !text_string_texture_cache.has_system_font() {
-				eprintln!("Engine: 기본 폰트를 찾지 못했습니다. 글자가 보이지 않습니다.");
-			}
-		}
-	}
 
 	//==============================================================================
 	/// 씬마다 해상도 변경 알림.

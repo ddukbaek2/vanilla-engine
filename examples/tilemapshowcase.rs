@@ -67,27 +67,29 @@ impl Component for CollisionOverlay {
 	fn draw(&mut self, _transform: &NodeTransform, graphic: &mut Graphic) {
 		graphic.set_stroke_color(Color::create(1.0, 0.85, 0.2, 1.0));
 		for shape in self.shape_list.iter() {
-			let radian = shape.rotation.to_radians();
-			let rotate_point = |local_x: f32, local_y: f32| Vector2::create(shape.x + local_x * radian.cos() - local_y * radian.sin(), shape.y + local_x * radian.sin() + local_y * radian.cos());
+			// 그리기는 엔진 Vector2(f32)로. (충돌 모양 값은 원본처럼 f64)
+			let (shape_x, shape_y, shape_width, shape_height) = (shape.x as f32, shape.y as f32, shape.width as f32, shape.height as f32);
+			let radian = (shape.rotation as f32).to_radians();
+			let rotate_point = |local_x: f32, local_y: f32| Vector2::create(shape_x + local_x * radian.cos() - local_y * radian.sin(), shape_y + local_x * radian.sin() + local_y * radian.cos());
 			let mut position_list: Vec<Vector2> = Vec::new();
 			match shape.kind {
 				TileCollisionShapeKind::Polygon | TileCollisionShapeKind::Polyline => {
 					for point in shape.points.iter() {
-						position_list.push(Vector2::create(shape.x + point.x, shape.y + point.y));
+						position_list.push(Vector2::create(shape_x + point.x as f32, shape_y + point.y as f32));
 					}
 				}
 				TileCollisionShapeKind::Ellipse => {
 					for step_index in 0..16 {
 						let angle = step_index as f32 / 16.0 * std::f32::consts::PI * 2.0;
-						position_list.push(rotate_point(shape.width * 0.5 * (1.0 + angle.cos()), shape.height * 0.5 * (1.0 + angle.sin())));
+						position_list.push(rotate_point(shape_width * 0.5 * (1.0 + angle.cos()), shape_height * 0.5 * (1.0 + angle.sin())));
 					}
 				}
 				TileCollisionShapeKind::Point => {
-					position_list.push(Vector2::create(shape.x - 1.0, shape.y));
-					position_list.push(Vector2::create(shape.x + 1.0, shape.y));
+					position_list.push(Vector2::create(shape_x - 1.0, shape_y));
+					position_list.push(Vector2::create(shape_x + 1.0, shape_y));
 				}
 				TileCollisionShapeKind::Rectangle | TileCollisionShapeKind::Capsule => {
-					for (corner_x, corner_y) in [(0.0, 0.0), (shape.width, 0.0), (shape.width, shape.height), (0.0, shape.height)] {
+					for (corner_x, corner_y) in [(0.0, 0.0), (shape_width, 0.0), (shape_width, shape_height), (0.0, shape_height)] {
 						position_list.push(rotate_point(corner_x, corner_y));
 					}
 				}

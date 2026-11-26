@@ -9,11 +9,13 @@
 // - 모델은 tick 에서 update 한다. (update 는 GL 을 쓰지 않는다) GL 리소스는 모델을 다 받은 뒤 initialize 에서 엔진의 그래픽(engine.get_graphic)으로 만든다.
 // - 실행: cargo run --release --example modelviewer (갱신 600번 뒤 스스로 끝난다, 60fps 면 10초)
 //   화면 저장: VANILLA_CAPTURE_PATH=shots/model_{frame}.png VANILLA_CAPTURE_FRAMES=60,180 VANILLA_CAPTURE_EXIT=1
+// - 자산 캐시 재기: VANILLA_MEASURE_ASSET_CACHE=1 이면 모델을 짓기 전에 같은 모형 20 개를 캐시 없이와 캐시로 지어 걸린 시간과 GPU 바이트를 찍는다.
+//   (원본 examples/ancientmountain/assetcache_test.html 과 같은 셈, 바이트는 이미 받아 둔 것이라 읽는 시간은 빠진다)
 //==============================================================================
 
 use std::path::PathBuf;
 use vanilla::{
-	AmbientOcclusionEffect, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, Graphic, Matrix4, Rect, RenderTarget, Scene, SceneBase, ShadowMap, SkinnedModel, SkinnedModelLoadHandle, SkinnedModelRenderer, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector3,
+	AmbientOcclusionEffect, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, Graphic, Matrix4, Rect, RenderTarget, Scene, SceneBase, ShadowMap, SkinnedModel, SkinnedModelAsset, SkinnedModelLoadHandle, SkinnedModelRenderer, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector3,
 };
 use glow::HasContext;
 
@@ -136,6 +138,14 @@ impl ModelViewerScene {
 		skinned_model_renderer.set_sun_direction(sun_direction.x, sun_direction.y, sun_direction.z);
 		skinned_model_renderer.set_fog_color(0.62, 0.72, 0.86);
 		skinned_model_renderer.set_fog_range(25.0, 80.0);
+
+		if std::env::var("VANILLA_MEASURE_ASSET_CACHE").is_ok() {
+			for (load_handle, label) in [(&self.fox_load_handle, "fox.glb"), (&self.female_mannequin_load_handle, "mannequin_female.glb")] {
+				if let Some(load_handle) = load_handle {
+					println!("{}", measure_asset_cache(gl, load_handle, &skinned_model_renderer, label)?);
+				}
+			}
+		}
 
 		let create_model = |load_handle: &Option<SkinnedModelLoadHandle>, label: &str| -> Result<SkinnedModel, String> {
 			match load_handle.as_ref().and_then(|load_handle| load_handle.create_model(gl, &skinned_model_renderer)) {
@@ -441,6 +451,49 @@ fn measure_model_scale(skinned_model: &mut SkinnedModel, target_height: f32) -> 
 	else {
 		1.0
 	}
+}
+
+//==============================================================================
+// 자산 캐시 재기. (같은 모형 20 개를 캐시 없이(지을 때마다 캐시를 비움)와 캐시로 지어 걸린 밀리초와 서로 다른 자산의 GPU 바이트 합을 견준 한 줄)
+//==============================================================================
+fn measure_asset_cache(gl: &glow::Context, load_handle: &SkinnedModelLoadHandle, skinned_model_renderer: &SkinnedModelRenderer, label: &str) -> Result<String, String> {
+	const MODEL_COUNT: usize = 20;
+	let measure_load = |use_cache: bool| -> Result<(f64, usize, usize), String> {
+		SkinnedModelAsset::clear_cache();
+		let mut model_list = Vec::with_capacity(MODEL_COUNT);
+		let start_time = std::time::Instant::now();
+		for _ in 0..MODEL_COUNT {
+			if !use_cache {
+				SkinnedModelAsset::clear_cache();
+			}
+			model_list.push(load_handle.create_model(gl, skinned_model_renderer).ok_or("아직 받는 중")??);
+		}
+		unsafe {
+			gl.finish();
+		}
+		let elapsed_time = start_time.elapsed().as_secs_f64() * 1000.0;
+		let mut asset_list: Vec<std::rc::Rc<SkinnedModelAsset>> = Vec::new();
+		for model in model_list.iter() {
+			if let Some(asset) = model.get_asset() {
+				if !asset_list.iter().any(|known_asset| std::rc::Rc::ptr_eq(known_asset, asset)) {
+					asset_list.push(asset.clone());
+				}
+			}
+		}
+		let gpu_byte_count = asset_list.iter().map(|asset| asset.get_gpu_byte_count()).sum();
+		for model in model_list.iter_mut() {
+			model.destroy(gl);
+		}
+		Ok((elapsed_time, gpu_byte_count, asset_list.len()))
+	};
+	let (uncached_time, uncached_byte_count, uncached_asset_count) = measure_load(false)?;
+	let (cached_time, cached_byte_count, cached_asset_count) = measure_load(true)?;
+	SkinnedModelAsset::clear_cache();
+	Ok(format!(
+		"{} x{}: uncached {:.1} ms, {} B, {} assets / cached {:.1} ms, {} B, {} asset (time x{:.3}, GPU x{:.3})",
+		label, MODEL_COUNT, uncached_time, uncached_byte_count, uncached_asset_count, cached_time, cached_byte_count, cached_asset_count,
+		cached_time / uncached_time, cached_byte_count as f64 / uncached_byte_count as f64
+	))
 }
 
 //==============================================================================

@@ -4,14 +4,18 @@
 //! - 그림 한 장을 격자(타일 크기, 여백 margin, 간격 spacing)로 자르거나, 타일마다 그림을 따로 건다. (Tiled 의 그림 모음 타일셋)
 //! - 타일마다 속성, 종류(type), 애니메이션 프레임, 충돌 모양, 그림 영역을 둘 수 있다. 타일 번호는 타일셋 안의 번호(0 부터)다.
 //! - 모양과 정렬은 Tiled 를 따른다. (그리는 크기 tile / grid, 채우기 stretch / preserve-aspect-fit, 타일 오프셋은 아래가 +)
-//! - 원본과 다른 점: 속성 값은 serde_json::Value 다. (원본은 JSON 값 그대로) 그림은 `Rc<Image>` 이고, 크기와 번호는 u32 다.
+//! - 원본과 다른 점: 속성 값은 serde_json::Value 다. (원본은 JSON 값 그대로) 그림은 `Rc<Image>` 이다.
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::base::transformmatrix::TransformMatrix;
+use crate::base::trigonometry;
 use crate::base::vector2::Vector2;
 use crate::core::image::Image;
+use crate::experimental::jsmath::js_max;
+use crate::experimental::physics2d::PhysicsVector2;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::f64::consts::PI;
 use std::rc::Rc;
 
 //==============================================================================
@@ -105,9 +109,10 @@ impl TileAnimationFrame {
 /// 모양을 만들고 옮기기
 /// ```rust
 /// use vanilla::experimental::tilemap::{TileCollisionShape, TileCollisionShapeKind};
-/// use vanilla::{TransformMatrix, Vector2};
+/// use vanilla::experimental::physics2d::PhysicsVector2;
+/// use vanilla::TransformMatrix;
 ///
-/// let slope = TileCollisionShape::create_polygon(0.0, 16.0, &[Vector2::create(0.0, 0.0), Vector2::create(16.0, -16.0), Vector2::create(16.0, 0.0)]);
+/// let slope = TileCollisionShape::create_polygon(0.0, 16.0, &[PhysicsVector2::create(0.0, 0.0), PhysicsVector2::create(16.0, -16.0), PhysicsVector2::create(16.0, 0.0)]);
 /// let mut move_right = TransformMatrix::identity();
 /// move_right.translate(32.0, 0.0);
 /// let moved_slope = slope.create_transformed(&move_right);
@@ -121,17 +126,17 @@ pub struct TileCollisionShape {
 	/// 모양 종류.
 	pub kind: TileCollisionShapeKind,
 	/// 기준점 X. (픽셀)
-	pub x: f32,
+	pub x: f64,
 	/// 기준점 Y. (픽셀)
-	pub y: f32,
+	pub y: f64,
 	/// 너비. (사각형, 타원, 캡슐, 픽셀)
-	pub width: f32,
+	pub width: f64,
 	/// 높이. (사각형, 타원, 캡슐, 픽셀)
-	pub height: f32,
+	pub height: f64,
 	/// 기준점을 축으로 한 시계 방향 회전. (도)
-	pub rotation: f32,
+	pub rotation: f64,
 	/// 기준점에서 잰 꼭짓점. (다각형, 꺾은선)
-	pub points: Vec<Vector2>,
+	pub points: Vec<PhysicsVector2>,
 }
 
 impl TileCollisionShape {
@@ -168,7 +173,7 @@ impl TileCollisionShape {
 	/// # 돌려줌
 	/// 새 사각형 모양.
 	//==============================================================================
-	pub fn create_rectangle(x: f32, y: f32, width: f32, height: f32) -> TileCollisionShape {
+	pub fn create_rectangle(x: f64, y: f64, width: f64, height: f64) -> TileCollisionShape {
 		let mut shape = TileCollisionShape::new(TileCollisionShapeKind::Rectangle);
 		shape.x = x;
 		shape.y = y;
@@ -189,7 +194,7 @@ impl TileCollisionShape {
 	/// # 돌려줌
 	/// 새 타원 모양.
 	//==============================================================================
-	pub fn create_ellipse(x: f32, y: f32, width: f32, height: f32) -> TileCollisionShape {
+	pub fn create_ellipse(x: f64, y: f64, width: f64, height: f64) -> TileCollisionShape {
 		let mut shape = TileCollisionShape::create_rectangle(x, y, width, height);
 		shape.kind = TileCollisionShapeKind::Ellipse;
 		shape
@@ -206,7 +211,7 @@ impl TileCollisionShape {
 	/// # 돌려줌
 	/// 새 다각형 모양.
 	//==============================================================================
-	pub fn create_polygon(x: f32, y: f32, points: &[Vector2]) -> TileCollisionShape {
+	pub fn create_polygon(x: f64, y: f64, points: &[PhysicsVector2]) -> TileCollisionShape {
 		let mut shape = TileCollisionShape::new(TileCollisionShapeKind::Polygon);
 		shape.x = x;
 		shape.y = y;
@@ -225,7 +230,7 @@ impl TileCollisionShape {
 	/// # 돌려줌
 	/// 새 꺾은선 모양.
 	//==============================================================================
-	pub fn create_polyline(x: f32, y: f32, points: &[Vector2]) -> TileCollisionShape {
+	pub fn create_polyline(x: f64, y: f64, points: &[PhysicsVector2]) -> TileCollisionShape {
 		let mut shape = TileCollisionShape::create_polygon(x, y, points);
 		shape.kind = TileCollisionShapeKind::Polyline;
 		shape
@@ -241,7 +246,7 @@ impl TileCollisionShape {
 	/// # 돌려줌
 	/// 새 점 모양.
 	//==============================================================================
-	pub fn create_point(x: f32, y: f32) -> TileCollisionShape {
+	pub fn create_point(x: f64, y: f64) -> TileCollisionShape {
 		let mut shape = TileCollisionShape::new(TileCollisionShapeKind::Point);
 		shape.x = x;
 		shape.y = y;
@@ -269,33 +274,33 @@ impl TileCollisionShape {
 		let matrix_e = transform_matrix.e as f64;
 		let matrix_f = transform_matrix.f as f64;
 		let mut shape = TileCollisionShape::new(self.kind);
-		let radian = (self.rotation as f64).to_radians();
-		let cos_rotation = radian.cos();
-		let sin_rotation = radian.sin();
-		let source_x = self.x as f64;
-		let source_y = self.y as f64;
+		let radian = self.rotation * PI / 180.0;
+		let cos_rotation = trigonometry::cos(radian);
+		let sin_rotation = trigonometry::sin(radian);
+		let source_x = self.x;
+		let source_y = self.y;
 		let origin_x = matrix_a * source_x + matrix_c * source_y + matrix_e;
 		let origin_y = matrix_b * source_x + matrix_d * source_y + matrix_f;
 
 		// 점, 다각형, 꺾은선.
 		if self.kind == TileCollisionShapeKind::Point || self.kind == TileCollisionShapeKind::Polygon || self.kind == TileCollisionShapeKind::Polyline {
-			shape.x = origin_x as f32;
-			shape.y = origin_y as f32;
+			shape.x = origin_x;
+			shape.y = origin_y;
 			for point in self.points.iter() {
-				let point_x = point.x as f64;
-				let point_y = point.y as f64;
+				let point_x = point.x;
+				let point_y = point.y;
 				let rotated_x = point_x * cos_rotation - point_y * sin_rotation;
 				let rotated_y = point_x * sin_rotation + point_y * cos_rotation;
 				let transformed_x = matrix_a * rotated_x + matrix_c * rotated_y;
 				let transformed_y = matrix_b * rotated_x + matrix_d * rotated_y;
-				shape.points.push(Vector2::create(transformed_x as f32, transformed_y as f32));
+				shape.points.push(PhysicsVector2::create(transformed_x, transformed_y));
 			}
 			return shape;
 		}
 
 		// 사각형, 타원, 캡슐. (두 축을 옮긴다)
-		let width = self.width as f64;
-		let height = self.height as f64;
+		let width = self.width;
+		let height = self.height;
 		let mut axis_x_x = matrix_a * cos_rotation * width + matrix_c * sin_rotation * width;
 		let mut axis_x_y = matrix_b * cos_rotation * width + matrix_d * sin_rotation * width;
 		let axis_y_x = matrix_a * -sin_rotation * height + matrix_c * cos_rotation * height;
@@ -315,16 +320,16 @@ impl TileCollisionShape {
 		let is_sheared = axis_dot.abs() > 0.0001 * (axis_x_length * axis_y_length).max(1.0);
 		if is_sheared && self.kind == TileCollisionShapeKind::Rectangle {
 			shape.kind = TileCollisionShapeKind::Polygon;
-			shape.x = corner_x as f32;
-			shape.y = corner_y as f32;
-			shape.points.push(Vector2::create(0.0, 0.0));
-			shape.points.push(Vector2::create(axis_x_x as f32, axis_x_y as f32));
-			shape.points.push(Vector2::create((axis_x_x + axis_y_x) as f32, (axis_x_y + axis_y_y) as f32));
-			shape.points.push(Vector2::create(axis_y_x as f32, axis_y_y as f32));
+			shape.x = corner_x;
+			shape.y = corner_y;
+			shape.points.push(PhysicsVector2::create(0.0, 0.0));
+			shape.points.push(PhysicsVector2::create(axis_x_x, axis_x_y));
+			shape.points.push(PhysicsVector2::create(axis_x_x + axis_y_x, axis_x_y + axis_y_y));
+			shape.points.push(PhysicsVector2::create(axis_y_x, axis_y_y));
 			return shape;
 		}
 		let rotation = if axis_x_length > 0.0 {
-			axis_x_y.atan2(axis_x_x).to_degrees()
+			trigonometry::atan2(axis_x_y, axis_x_x) * 180.0 / PI
 		}
 		else {
 			0.0
@@ -338,18 +343,18 @@ impl TileCollisionShape {
 			let minimum_y = corner_y_list.iter().cloned().fold(f64::INFINITY, f64::min);
 			let maximum_x = corner_x_list.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 			let maximum_y = corner_y_list.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-			shape.x = minimum_x as f32;
-			shape.y = minimum_y as f32;
-			shape.width = (maximum_x - minimum_x) as f32;
-			shape.height = (maximum_y - minimum_y) as f32;
+			shape.x = minimum_x;
+			shape.y = minimum_y;
+			shape.width = maximum_x - minimum_x;
+			shape.height = maximum_y - minimum_y;
 			shape.rotation = 0.0;
 			return shape;
 		}
-		shape.x = corner_x as f32;
-		shape.y = corner_y as f32;
-		shape.width = axis_x_length as f32;
-		shape.height = axis_y_length as f32;
-		shape.rotation = rotation as f32;
+		shape.x = corner_x;
+		shape.y = corner_y;
+		shape.width = axis_x_length;
+		shape.height = axis_y_length;
+		shape.rotation = rotation;
 		shape
 	}
 }
@@ -377,9 +382,9 @@ struct TileData {
 /// use vanilla::experimental::tilemap::{TileAnimationFrame, TileCollisionShape, Tileset};
 ///
 /// let mut tileset = Tileset::new();
-/// tileset.set_tile_size(16, 16);
-/// tileset.set_margin(1);
-/// tileset.set_spacing(2);
+/// tileset.set_tile_size(16.0, 16.0);
+/// tileset.set_margin(1.0);
+/// tileset.set_spacing(2.0);
 /// tileset.fit_grid_to_image_size(127, 37);
 /// assert_eq!((tileset.get_columns(), tileset.get_tile_count()), (7, 14));
 /// let image_rect = tileset.read_tile_image_rect(8);
@@ -399,10 +404,10 @@ pub struct Tileset {
 	name: String,
 	image: Option<Rc<Image>>,
 	image_path: String,
-	tile_width: u32,
-	tile_height: u32,
-	margin: u32,
-	spacing: u32,
+	tile_width: f64,
+	tile_height: f64,
+	margin: f64,
+	spacing: f64,
 	columns: u32,
 	tile_count: u32,
 	tile_offset: Vector2,
@@ -424,10 +429,10 @@ impl Tileset {
 			name: String::new(),
 			image: None,
 			image_path: String::new(),
-			tile_width: 32,
-			tile_height: 32,
-			margin: 0,
-			spacing: 0,
+			tile_width: 32.0,
+			tile_height: 32.0,
+			margin: 0.0,
+			spacing: 0.0,
 			columns: 0,
 			tile_count: 0,
 			tile_offset: Vector2::zero(),
@@ -458,11 +463,11 @@ impl Tileset {
 	/// use vanilla::Image;
 	///
 	/// let image = Image::create_from_pixels(144, 54, vec![0; 144 * 54 * 4]);
-	/// let tileset = Tileset::create_grid(image, 16, 16, 1, 2);
+	/// let tileset = Tileset::create_grid(image, 16.0, 16.0, 1.0, 2.0);
 	/// assert_eq!((tileset.get_columns(), tileset.get_tile_count()), (8, 24));
 	/// ```
 	//==============================================================================
-	pub fn create_grid(image: Rc<Image>, tile_width: u32, tile_height: u32, margin: u32, spacing: u32) -> Tileset {
+	pub fn create_grid(image: Rc<Image>, tile_width: f64, tile_height: f64, margin: f64, spacing: f64) -> Tileset {
 		let mut tileset = Tileset::new();
 		let image_width = image.get_width();
 		let image_height = image.get_height();
@@ -482,15 +487,14 @@ impl Tileset {
 	/// - `image_height`: 그림 높이. (픽셀)
 	//==============================================================================
 	pub fn fit_grid_to_image_size(&mut self, image_width: u32, image_height: u32) {
-		if self.tile_width == 0 || self.tile_height == 0 {
+		if self.tile_width <= 0.0 || self.tile_height <= 0.0 {
 			self.columns = 0;
 			self.tile_count = 0;
 			return;
 		}
-		let usable_width = image_width as i64 - self.margin as i64 * 2 + self.spacing as i64;
-		let usable_height = image_height as i64 - self.margin as i64 * 2 + self.spacing as i64;
-		let columns = (usable_width.max(0) / (self.tile_width + self.spacing) as i64) as u32;
-		let rows = (usable_height.max(0) / (self.tile_height + self.spacing) as i64) as u32;
+		// 원본처럼 f64 로 나눠 내림한다. (Math.max(0, Math.floor(..)))
+		let columns = js_max(0.0, ((image_width as f64 - self.margin * 2.0 + self.spacing) / (self.tile_width + self.spacing)).floor()) as u32;
+		let rows = js_max(0.0, ((image_height as f64 - self.margin * 2.0 + self.spacing) / (self.tile_height + self.spacing)).floor()) as u32;
 		self.columns = columns;
 		self.tile_count = columns * rows;
 	}
@@ -562,7 +566,7 @@ impl Tileset {
 	/// - `tile_width`: 타일 너비. (픽셀)
 	/// - `tile_height`: 타일 높이. (픽셀)
 	//==============================================================================
-	pub fn set_tile_size(&mut self, tile_width: u32, tile_height: u32) {
+	pub fn set_tile_size(&mut self, tile_width: f64, tile_height: f64) {
 		self.tile_width = tile_width;
 		self.tile_height = tile_height;
 	}
@@ -573,7 +577,7 @@ impl Tileset {
 	/// # 돌려줌
 	/// 타일 너비. (픽셀, 처음은 32)
 	//==============================================================================
-	pub fn get_tile_width(&self) -> u32 {
+	pub fn get_tile_width(&self) -> f64 {
 		self.tile_width
 	}
 
@@ -583,7 +587,7 @@ impl Tileset {
 	/// # 돌려줌
 	/// 타일 높이. (픽셀, 처음은 32)
 	//==============================================================================
-	pub fn get_tile_height(&self) -> u32 {
+	pub fn get_tile_height(&self) -> f64 {
 		self.tile_height
 	}
 
@@ -593,7 +597,7 @@ impl Tileset {
 	/// # 인자
 	/// - `margin`: 여백. (픽셀)
 	//==============================================================================
-	pub fn set_margin(&mut self, margin: u32) {
+	pub fn set_margin(&mut self, margin: f64) {
 		self.margin = margin;
 	}
 
@@ -603,7 +607,7 @@ impl Tileset {
 	/// # 돌려줌
 	/// 여백. (픽셀, 처음은 0)
 	//==============================================================================
-	pub fn get_margin(&self) -> u32 {
+	pub fn get_margin(&self) -> f64 {
 		self.margin
 	}
 
@@ -613,7 +617,7 @@ impl Tileset {
 	/// # 인자
 	/// - `spacing`: 간격. (픽셀)
 	//==============================================================================
-	pub fn set_spacing(&mut self, spacing: u32) {
+	pub fn set_spacing(&mut self, spacing: f64) {
 		self.spacing = spacing;
 	}
 
@@ -623,7 +627,7 @@ impl Tileset {
 	/// # 돌려줌
 	/// 간격. (픽셀, 처음은 0)
 	//==============================================================================
-	pub fn get_spacing(&self) -> u32 {
+	pub fn get_spacing(&self) -> f64 {
 		self.spacing
 	}
 
@@ -895,8 +899,8 @@ impl Tileset {
 		if !self.has_own_tile_image(tile_id) && self.columns > 0 {
 			let column = tile_id % self.columns;
 			let row = tile_id / self.columns;
-			let left = self.margin + column * (self.tile_width + self.spacing);
-			let top = self.margin + row * (self.tile_height + self.spacing);
+			let left = self.margin + column as f64 * (self.tile_width + self.spacing);
+			let top = self.margin + row as f64 * (self.tile_height + self.spacing);
 			return Rect::create(left as f32, top as f32, self.tile_width as f32, self.tile_height as f32);
 		}
 		match self.get_tile_image(tile_id) {
@@ -1083,17 +1087,17 @@ impl Tileset {
 	/// # 돌려줌
 	/// 가장 큰 크기. (픽셀)
 	//==============================================================================
-	pub fn read_maximum_tile_extent(&self) -> f32 {
-		let mut maximum_extent = self.tile_width.max(self.tile_height) as f32;
+	pub fn read_maximum_tile_extent(&self) -> f64 {
+		let mut maximum_extent = js_max(self.tile_width, self.tile_height);
 		for tile_data in self.tile_data_table.values() {
 			if let Some(image_rect) = tile_data.image_rect {
-				maximum_extent = maximum_extent.max(image_rect.size.x).max(image_rect.size.y);
+				maximum_extent = js_max(js_max(maximum_extent, image_rect.size.x as f64), image_rect.size.y as f64);
 			}
 			else if let Some(image) = &tile_data.image {
-				maximum_extent = maximum_extent.max(image.get_width() as f32).max(image.get_height() as f32);
+				maximum_extent = js_max(js_max(maximum_extent, image.get_width() as f64), image.get_height() as f64);
 			}
 		}
-		maximum_extent + self.tile_offset.x.abs() + self.tile_offset.y.abs()
+		maximum_extent + (self.tile_offset.x as f64).abs() + (self.tile_offset.y as f64).abs()
 	}
 }
 
