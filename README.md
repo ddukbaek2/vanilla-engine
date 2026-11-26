@@ -517,7 +517,10 @@ cargo run --release --example modelviewer
 ## 링크
 
 - 원본 엔진: <https://github.com/ddukbaek2/vanilla.js>
-- 배포 페이지: <https://ddukbaek2.com>
+- 엔진 소개: <https://vanillapunch.com/tools/#vanilla-engine>
+- 문서: <https://vanillapunch.com/docs/vanilla-engine/>
+- 업데이트 소식: <https://vanillapunch.com/news/?kind=patch>
+- 문의: <https://vanillapunch.com/support/>
 
 ## 라이선스
 

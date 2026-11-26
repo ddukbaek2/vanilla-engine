@@ -73,7 +73,10 @@ It has not yet been run on real mobile devices.
 
 - Repository: <https://github.com/ddukbaek2/vanilla-engine>
 - Original engine: <https://github.com/ddukbaek2/vanilla.js>
-- Website: <https://ddukbaek2.com>
+- Engine page: <https://vanillapunch.com/tools/#vanilla-engine>
+- Documentation: <https://vanillapunch.com/docs/vanilla-engine/>
+- Update news: <https://vanillapunch.com/news/?kind=patch>
+- Contact: <https://vanillapunch.com/support/>
 
 ## License
 
