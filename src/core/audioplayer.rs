@@ -186,6 +186,20 @@ impl AudioPlayer {
 	}
 
 	//==============================================================================
+	/// 공간 소리 설정. (처음이면 GainNode 뒤에 PannerNode 를 끼운다, experimental::spatialaudio 의 SpatialAudioPlayer 가 쓴다, 초안)
+	//==============================================================================
+	pub(crate) fn set_panner_settings(&mut self, settings: crate::platform::audio::pannermath::PannerSettings) {
+		self.audio_player_backend.set_panner_settings(settings);
+	}
+
+	//==============================================================================
+	/// PannerNode 의 자리나 방향 값 대입. (원본 panner.positionX.value = 값, 초안)
+	//==============================================================================
+	pub(crate) fn set_panner_param_value(&mut self, param: crate::platform::audio::PannerParam, value: f32) {
+		self.audio_player_backend.set_panner_param_value(param, value);
+	}
+
+	//==============================================================================
 	/// 정지.
 	//==============================================================================
 	pub fn stop(&mut self) {

@@ -13,9 +13,14 @@
 //!   스테레오는 pan <= 0 이면 L = L + R cos((pan + 1) π/2), R = R sin((pan + 1) π/2), 아니면 L = L cos(pan π/2), R = R + L sin(pan π/2). 이득은 f64 로 셈해 f32 로 곱한다.
 //! - 섞기: 모노를 스테레오 입력에 섞을 때는 스피커 규칙으로 양쪽에 같게 올린다. 출력에 내보낼 때 크롬처럼 -1 ~ 1 로 자른다.
 //! - 컨텍스트 멈춤(suspend) 동안은 그리지 않고 시계도 서며, 장치에는 0 을 낸다.
+//! - PannerNode(초안): 플레이어에 공간 소리를 걸면 GainNode(와 StereoPannerNode) 뒤에 크롬 PannerHandler 를 옮긴 노드를 끼운다. (panner.rs)
+//!   리스너는 컨텍스트에 하나이고, 퀀텀마다 그리기 전에 상태를 읽는다.
 //==============================================================================
 use super::audioparam::{AudioParam, ParamAutomation};
 use super::oscillator::{OscillatorNode, PeriodicWave};
+use super::panner::{ListenerState, PannerNode};
+use super::pannermath::PannerSettings;
+use super::{ListenerParam, PannerParam};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
@@ -72,6 +77,22 @@ pub(crate) enum MixerCommand {
 	SetPlayerPan {
 		player_id: u64,
 		pan: f32,
+	},
+	/// 공간 소리 설정. (처음이면 PannerNode 를 끼운다, 초안)
+	SetPlayerPanner {
+		player_id: u64,
+		settings: PannerSettings,
+	},
+	/// PannerNode 의 자리와 방향 자동화. (초안)
+	PlayerPannerAutomation {
+		player_id: u64,
+		param: PannerParam,
+		automation: ParamAutomation,
+	},
+	/// 리스너의 자리, 앞, 위 자동화. (초안)
+	ListenerAutomation {
+		param: ListenerParam,
+		automation: ParamAutomation,
 	},
 	StartSource {
 		player_id: u64,
@@ -381,6 +402,8 @@ struct PlayerNode {
 	gain_value: Arc<AtomicU32>,
 	/// StereoPannerNode 의 값. (0 이 아닌 좌우를 처음 걸 때 생기고 그 뒤로 남는다)
 	pan: Option<f32>,
+	/// PannerNode. (공간 소리를 처음 걸 때 생기고 그 뒤로 남는다, 초안)
+	panner: Option<Box<PannerNode>>,
 	output_bus_id: Option<u64>,
 	source: Option<(BufferSource, u64)>,
 	ended_generation: Arc<AtomicU64>,
@@ -451,6 +474,8 @@ pub(crate) struct MixerRenderer {
 	player_list: Vec<PlayerNode>,
 	bus_list: Vec<BusNode>,
 	beep_list: Vec<BeepVoice>,
+	//// 리스너. (컨텍스트에 하나, 초안)
+	listener: ListenerState,
 	/// 그린 퀀텀. (출력 L, R 과 다음에 낼 자리)
 	output_quantum: [[f32; RENDER_QUANTUM_FRAMES]; 2],
 	output_position: usize,
@@ -472,6 +497,7 @@ impl MixerRenderer {
 			player_list: Vec::with_capacity(256),
 			bus_list: Vec::with_capacity(16),
 			beep_list: Vec::with_capacity(16),
+			listener: ListenerState::new(),
 			output_quantum: [[0.0; RENDER_QUANTUM_FRAMES]; 2],
 			output_position: RENDER_QUANTUM_FRAMES,
 			source_quantum: [[0.0; RENDER_QUANTUM_FRAMES]; 2],
@@ -498,7 +524,7 @@ impl MixerRenderer {
 					}
 				}
 				MixerCommand::AddPlayer { player_id, output_bus_id, ended_generation, gain_value } => {
-					self.player_list.push(PlayerNode { player_id, gain: create_gain_param(), gain_value, pan: None, output_bus_id, source: None, ended_generation });
+					self.player_list.push(PlayerNode { player_id, gain: create_gain_param(), gain_value, pan: None, panner: None, output_bus_id, source: None, ended_generation });
 				}
 				MixerCommand::RemovePlayer { player_id } => {
 					self.player_list.retain(|player| player.player_id != player_id);
@@ -516,6 +542,30 @@ impl MixerRenderer {
 							player.pan = Some(pan);
 						}
 					}
+				}
+				MixerCommand::SetPlayerPanner { player_id, settings } => {
+					if let Some(player) = self.find_player(player_id) {
+						match player.panner.as_mut() {
+							Some(panner) => {
+								panner.set_settings(settings);
+							}
+							None => {
+								player.panner = Some(Box::new(PannerNode::new(settings)));
+							}
+						}
+					}
+				}
+				MixerCommand::PlayerPannerAutomation { player_id, param, automation } => {
+					let (current_frame, sample_rate) = (self.current_frame, self.sample_rate);
+					if let Some(player) = self.find_player(player_id) {
+						if let Some(panner) = player.panner.as_mut() {
+							panner.apply_automation(param, automation, current_frame, sample_rate);
+						}
+					}
+				}
+				MixerCommand::ListenerAutomation { param, automation } => {
+					let (current_frame, sample_rate) = (self.current_frame, self.sample_rate);
+					self.listener.apply_automation(param, automation, current_frame, sample_rate);
 				}
 				MixerCommand::StartSource { player_id, audio_buffer, is_loop, offset_seconds, playback_rate, generation } => {
 					let sample_rate = self.sample_rate;
@@ -583,6 +633,8 @@ impl MixerRenderer {
 		}
 		let (current_frame, sample_rate) = (self.current_frame, self.sample_rate);
 		let quantum_end_frame = current_frame + RENDER_QUANTUM_FRAMES as u64;
+		// 리스너 상태. (그리기 전, 크롬 HandlePreRenderTasks)
+		self.listener.update_state(current_frame, sample_rate);
 		for player in self.player_list.iter_mut() {
 			// 소스: 예약 정지 시각까지 그리고, 그 퀀텀에 끝낸다.
 			let mut channel_count = 0;
@@ -610,11 +662,18 @@ impl MixerRenderer {
 			if channel_count == 0 {
 				player.gain.calculate_sample_accurate_values(&mut self.gain_value_list, current_frame, sample_rate);
 				player.gain_value.store(player.gain.get_intrinsic_value().to_bits(), Ordering::Release);
+				// PannerNode 는 조용한 입력으로 돈다. (AudioParam 은 흐른다)
+				if let Some(panner) = player.panner.as_mut() {
+					panner.process(&mut self.source_quantum, 1, true, &mut self.listener, current_frame, sample_rate);
+				}
 				continue;
 			}
 			let has_sound = apply_gain_param(&mut player.gain, &mut self.source_quantum, channel_count, &mut self.gain_value_list, current_frame, sample_rate);
 			player.gain_value.store(player.gain.get_intrinsic_value().to_bits(), Ordering::Release);
 			if !has_sound {
+				if let Some(panner) = player.panner.as_mut() {
+					panner.process(&mut self.source_quantum, channel_count, true, &mut self.listener, current_frame, sample_rate);
+				}
 				continue;
 			}
 			// StereoPannerNode. (모노도 두 채널이 된다)
@@ -647,6 +706,16 @@ impl MixerRenderer {
 				}
 				None => {
 					channel_count
+				}
+			};
+			// PannerNode. (모노도 두 채널이 된다)
+			let output_channel_count = match player.panner.as_mut() {
+				Some(panner) => {
+					panner.process(&mut self.source_quantum, output_channel_count, false, &mut self.listener, current_frame, sample_rate);
+					2
+				}
+				None => {
+					output_channel_count
 				}
 			};
 			// 내보낼 곳에 섞기. (모노는 양쪽에 같게)
