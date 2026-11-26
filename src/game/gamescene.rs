@@ -86,21 +86,21 @@ use std::future::Future;
 use std::rc::Rc;
 
 /// 로딩 화면 최소 노출 시간 기본값. (밀리초)
-const DEFAULT_LOAD_MIN_DURATION_MS: f32 = 3000.0;
+const DEFAULT_LOAD_MIN_DURATION_MS: f64 = 3000.0;
 
 /// 로딩 게이지 높이. (뷰 좌표)
-const LOADING_BAR_HEIGHT: f32 = 24.0;
+const LOADING_BAR_HEIGHT: f64 = 24.0;
 
 /// 로딩 문 손잡이 경로. (애셋이 아닌 대기 표시)
 const LOADING_GATE_PATH: &str = "GameSceneBase.loadingGate";
 
 /// 로딩 화면 그리기 함수. (graphic, 뷰 크기, 보이는 진행률 0 ~ 1, 로딩을 시작한 뒤의 초. 뷰 좌표계가 걸려 있다)
-pub type LoadingDrawer = Box<dyn FnMut(&mut Graphic, Vector2, f32, f32)>;
+pub type LoadingDrawer = Box<dyn FnMut(&mut Graphic, Vector2, f64, f64)>;
 /// 화면 페이드의 어두워지는 시간과 밝아지는 시간 기본값. (초)
-const DEFAULT_SCREEN_FADE_SECONDS: f32 = 0.35;
+const DEFAULT_SCREEN_FADE_SECONDS: f64 = 0.35;
 
 /// 화면 페이드가 한 프레임에 쓰는 가장 긴 시간. (초)
-const SCREEN_FADE_MAXIMUM_STEP_SECONDS: f32 = 0.1;
+const SCREEN_FADE_MAXIMUM_STEP_SECONDS: f64 = 0.1;
 
 //==============================================================================
 /// 화면 페이드를 어둡게 붙잡는 손잡이. (원본 onDark 가 돌려주는 Promise 자리, 복제한 손잡이 어느 것이든 release 하면 밝아진다)
@@ -213,7 +213,7 @@ enum ScreenFadeDarkStartPlace<'a> {
 /// 		self.game_scene_base.get_scene_base_mut()
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 /// 		self.game_scene_base.tick(engine, time_delta);
 /// 		if let Some(screen_fade_dark_starter) = self.game_scene_base.take_screen_fade_dark_starter() {
 /// 			screen_fade_dark_starter.start(self, engine);
@@ -341,7 +341,7 @@ pub enum PlayInput {
 /// 		self.layout(engine);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 /// 		if self.game_scene_base.tick(engine, time_delta) {
 /// 			self.layout(engine);
 /// 		}
@@ -381,13 +381,13 @@ pub struct GameSceneBase {
 	touch_recognizer: Option<TouchRecognizer>,
 	safe_area_node_id: Option<NodeId>,
 	last_safe_area_rect: Rect,
-	last_view_size_x: f32,
-	last_view_size_y: f32,
+	last_view_size_x: f64,
+	last_view_size_y: f64,
 	loading_image_asset: Option<ImageAsset>,
 	loading_image_url: String,
 	/// 로딩 시작 시각. (엔진 시작 뒤 초)
 	load_start_time: f64,
-	load_min_duration_ms: f32,
+	load_min_duration_ms: f64,
 	load_touched_to_skip: bool,
 	/// 첫 프레임 전에 로딩을 시작해 시작 시각을 첫 로딩 화면 프레임에서 잡을지.
 	is_load_start_time_pending: bool,
@@ -406,7 +406,7 @@ pub struct GameSceneBase {
 	is_loading_progress_reported: bool,
 	tracked_asset_loader_list: Vec<AssetLoader>,
 	/// 어두워지는 막의 진하기. (0 ~ 1)
-	screen_fade_alpha: f32,
+	screen_fade_alpha: f64,
 	/// 1 이면 어두워지는 중, -1 이면 밝아지는 중, 0 이면 멈춤.
 	screen_fade_direction: i32,
 	screen_fade_event: Option<ScreenFadeEvent>,
@@ -416,14 +416,14 @@ pub struct GameSceneBase {
 	screen_fade_dark_starter: Option<ScreenFadeDarkStarter>,
 	is_screen_fade_dark_starter_ready: bool,
 	screen_fade_color: Color,
-	screen_fade_seconds: f32,
+	screen_fade_seconds: f64,
 	is_play_input_enabled: bool,
 	play_inputs: Vec<PlayInput>,
 	play_input_handler: Option<PlayInputHandler>,
 	/// 지금 누름이 놀이로 갔는지.
 	is_play_press_active: bool,
 	/// 게임 영역의 고정 쪽 길이. (0 이면 쓰지 않음)
-	play_area_fixed_length: f32,
+	play_area_fixed_length: f64,
 	is_play_area_landscape: bool,
 	/// initialize 에서 세이프 에어리어 노드를 만드는지. (UISceneBase 는 노드 대신 가이드 UINode 를 쓴다)
 	is_safe_area_node_enabled: bool,
@@ -621,7 +621,7 @@ impl GameSceneBase {
 	/// # 인자
 	/// - `milliseconds`: 최소 노출 시간. (밀리초, 기본 3000, 0 이하이면 기다리지 않는다)
 	//==============================================================================
-	pub fn set_loading_min_duration_ms(&mut self, milliseconds: f32) {
+	pub fn set_loading_min_duration_ms(&mut self, milliseconds: f64) {
 		self.load_min_duration_ms = milliseconds;
 	}
 
@@ -639,7 +639,7 @@ impl GameSceneBase {
 	/// use vanilla::{Colors, GameSceneBase, Graphic, Rect, Vector2};
 	///
 	/// let mut game_scene_base = GameSceneBase::new();
-	/// game_scene_base.set_loading_drawer(Some(Box::new(|graphic: &mut Graphic, view_size: Vector2, progress: f32, _elapsed_seconds: f32| {
+	/// game_scene_base.set_loading_drawer(Some(Box::new(|graphic: &mut Graphic, view_size: Vector2, progress: f64, _elapsed_seconds: f64| {
 	/// 	graphic.set_fill_color(Colors::WHITE);
 	/// 	graphic.draw_rect(Rect::create(0.0, view_size.y - 8.0, view_size.x * progress, 8.0));
 	/// })));
@@ -702,7 +702,7 @@ impl GameSceneBase {
 	/// # 인자
 	/// - `progress`: 알릴 진행률. (0 ~ 1)
 	//==============================================================================
-	pub fn set_loading_progress(&mut self, progress: f32) {
+	pub fn set_loading_progress(&mut self, progress: f64) {
 		self.is_loading_progress_reported = true;
 		self.loading_progress.set_progress(progress);
 	}
@@ -787,7 +787,7 @@ impl GameSceneBase {
 			1.0
 		}
 		else {
-			finished_count as f32 / total_count as f32
+			finished_count as f64 / total_count as f64
 		};
 		self.loading_progress.set_progress(progress);
 	}
@@ -953,7 +953,7 @@ impl GameSceneBase {
 			return;
 		}
 		let elapsed_milliseconds = (current_time - self.load_start_time) * 1000.0;
-		if elapsed_milliseconds >= self.load_min_duration_ms as f64 || self.load_touched_to_skip {
+		if elapsed_milliseconds >= self.load_min_duration_ms || self.load_touched_to_skip {
 			load_gate_handle.finish(Ok(Vec::new()));
 		}
 	}
@@ -967,11 +967,11 @@ impl GameSceneBase {
 	/// # 돌려줌
 	/// 경과 시간 비율. (0 ~ 1, 최소 노출 시간이 0 이하이면 1)
 	//==============================================================================
-	pub fn get_loading_progress(&self, current_time: f64) -> f32 {
+	pub fn get_loading_progress(&self, current_time: f64) -> f64 {
 		if self.load_min_duration_ms <= 0.0 {
 			return 1.0;
 		}
-		let elapsed_milliseconds = ((current_time - self.load_start_time) * 1000.0) as f32;
+		let elapsed_milliseconds = (current_time - self.load_start_time) * 1000.0;
 		(elapsed_milliseconds / self.load_min_duration_ms).clamp(0.0, 1.0)
 	}
 
@@ -1013,7 +1013,7 @@ impl GameSceneBase {
 		else {
 			self.get_loading_progress(current_time)
 		};
-		let elapsed_seconds = (current_time - self.load_start_time).max(0.0) as f32;
+		let elapsed_seconds = (current_time - self.load_start_time).max(0.0);
 
 		let view_manager = engine.get_view_manager();
 		let canvas_native_size = view_manager.get_canvas_native_size();
@@ -1048,7 +1048,7 @@ impl GameSceneBase {
 		};
 		if let Some(image) = loading_image {
 			let target_width = view_size.x * 0.7;
-			let ratio = image.get_height() as f32 / (image.get_width() as f32).max(1.0);
+			let ratio = image.get_height() as f64 / (image.get_width() as f64).max(1.0);
 			let target_height = target_width * ratio;
 			let position_x = (view_size.x - target_width) * 0.5;
 			let position_y = (view_size.y - target_height) * 0.5;
@@ -1205,7 +1205,7 @@ impl GameSceneBase {
 	/// assert_eq!(collapsed_rect, Rect::create(20.0, 20.0, 0.0, 0.0));
 	/// ```
 	//==============================================================================
-	pub fn calculate_safe_area_rect(view_size: Vector2, target_resolution_scale: f32, insets: SafeAreaInsets) -> Rect {
+	pub fn calculate_safe_area_rect(view_size: Vector2, target_resolution_scale: f64, insets: SafeAreaInsets) -> Rect {
 		let scale = if target_resolution_scale > 0.0 {
 			target_resolution_scale
 		}
@@ -1271,7 +1271,7 @@ impl GameSceneBase {
 	/// assert_eq!(game_scene_base.get_safe_area_rect(), Rect::create(5.0, 10.0, 1019.0, 738.0));
 	/// ```
 	//==============================================================================
-	pub fn tick(&mut self, engine: &mut Engine, time_delta: f32) -> bool {
+	pub fn tick(&mut self, engine: &mut Engine, time_delta: f64) -> bool {
 		self.start_left_screen_fade_dark_starter(engine);
 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 		self.tick_touch(engine);
@@ -1590,7 +1590,7 @@ impl GameSceneBase {
 	/// 		});
 	/// 	}
 	///
-	/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 	/// 		self.game_scene_base.tick(engine, time_delta);
 	/// 		if let Some(screen_fade_dark_starter) = self.game_scene_base.take_screen_fade_dark_starter() {
 	/// 			screen_fade_dark_starter.start(self, engine);
@@ -1688,7 +1688,7 @@ impl GameSceneBase {
 	/// # 인자
 	/// - `seconds`: 어두워지는 시간이자 밝아지는 시간. (초, 음수는 0)
 	//==============================================================================
-	pub fn set_screen_fade_seconds(&mut self, seconds: f32) {
+	pub fn set_screen_fade_seconds(&mut self, seconds: f64) {
 		self.screen_fade_seconds = seconds.max(0.0);
 	}
 
@@ -1698,7 +1698,7 @@ impl GameSceneBase {
 	/// # 돌려줌
 	/// 막의 진하기. (0 이면 막 없음, 1 이면 다 어두움)
 	//==============================================================================
-	pub fn get_screen_fade_alpha(&self) -> f32 {
+	pub fn get_screen_fade_alpha(&self) -> f64 {
 		self.screen_fade_alpha
 	}
 
@@ -1897,7 +1897,7 @@ impl GameSceneBase {
 	/// assert!((game_scene_base.get_safe_area_rect().size.y - 720.0).abs() < 0.01);
 	/// ```
 	//==============================================================================
-	pub fn set_play_area_reference(&mut self, fixed_length: f32, is_landscape: bool, engine: Option<&mut Engine>) {
+	pub fn set_play_area_reference(&mut self, fixed_length: f64, is_landscape: bool, engine: Option<&mut Engine>) {
 		self.play_area_fixed_length = fixed_length.max(0.0);
 		self.is_play_area_landscape = is_landscape;
 		if self.play_area_fixed_length <= 0.0 {
@@ -1926,7 +1926,7 @@ impl GameSceneBase {
 	/// # 돌려줌
 	/// 고정 쪽 길이. (뷰 좌표, 0 이면 게임 영역 기준을 쓰지 않는다)
 	//==============================================================================
-	pub fn get_play_area_fixed_length(&self) -> f32 {
+	pub fn get_play_area_fixed_length(&self) -> f64 {
 		self.play_area_fixed_length
 	}
 
@@ -2014,7 +2014,7 @@ impl GameSceneBase {
 	/// assert_eq!(GameSceneBase::calculate_play_area_reference_length(720.0, false, Vector2::create(800.0, 0.0), SafeAreaInsets::create(0.0, 0.0, 0.0, 0.0), 1.0), 0.0);
 	/// ```
 	//==============================================================================
-	pub fn calculate_play_area_reference_length(fixed_length: f32, is_landscape: bool, canvas_native_size: Vector2, safe_area_insets: SafeAreaInsets, inset_scale: f32) -> f32 {
+	pub fn calculate_play_area_reference_length(fixed_length: f64, is_landscape: bool, canvas_native_size: Vector2, safe_area_insets: SafeAreaInsets, inset_scale: f64) -> f64 {
 		let (canvas_length, inset_sum) = if is_landscape {
 			(canvas_native_size.x, safe_area_insets.left + safe_area_insets.right)
 		}
@@ -2253,7 +2253,7 @@ pub trait GameScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_time_delta`: 배율을 곱한 프레임 간격. (초)
 	//==============================================================================
-	fn tick(&mut self, _engine: &mut Engine, _time_delta: f32) {
+	fn tick(&mut self, _engine: &mut Engine, _time_delta: f64) {
 	}
 
 	//==============================================================================
@@ -2451,7 +2451,7 @@ macro_rules! game_scene {
 				$crate::game::gamescene::GameScene::layout(self, engine);
 			}
 
-			fn tick(&mut self, engine: &mut $crate::core::engine::Engine, time_delta: f32) {
+			fn tick(&mut self, engine: &mut $crate::core::engine::Engine, time_delta: f64) {
 				if $crate::game::gamescene::GameScene::get_game_scene_base_mut(self).tick(engine, time_delta) {
 					$crate::game::gamescene::GameScene::layout(self, engine);
 				}
@@ -2579,7 +2579,7 @@ mod tests {
 	fn step_frame(engine: &mut Engine, game_scene_base: &mut GameSceneBase, current_seconds: &mut f64, seconds: f64) {
 		*current_seconds += seconds;
 		engine.get_time_manager_mut().update(*current_seconds);
-		game_scene_base.tick(engine, seconds as f32);
+		game_scene_base.tick(engine, seconds);
 	}
 
 	//==============================================================================
@@ -2787,7 +2787,7 @@ mod tests {
 		//==============================================================================
 		/// 갱신 수 세기.
 		//==============================================================================
-		fn tick(&mut self, _engine: &mut Engine, _time_delta: f32) {
+		fn tick(&mut self, _engine: &mut Engine, _time_delta: f64) {
 			self.tick_count += 1;
 		}
 	}
@@ -2893,7 +2893,7 @@ mod tests {
 		let mut scene_list: Vec<Box<dyn Scene>> = vec![Box::new(scene)];
 		let mut current_seconds = 1.0;
 		engine.get_time_manager_mut().update(current_seconds);
-		let mut step_scene_frame = |engine: &mut Engine, scene_list: &mut Vec<Box<dyn Scene>>| -> (f32, u32) {
+		let mut step_scene_frame = |engine: &mut Engine, scene_list: &mut Vec<Box<dyn Scene>>| -> (f64, u32) {
 			current_seconds += 0.06;
 			engine.get_time_manager_mut().update(current_seconds);
 			task::poll_tasks(engine, scene_list, &mut Vec::new());

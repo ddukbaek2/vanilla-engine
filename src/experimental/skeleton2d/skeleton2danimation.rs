@@ -451,10 +451,10 @@ impl Skeleton2DPose {
 	pub fn reset_slot_to_setup(&mut self, slot_data: &Skeleton2DSlotData) {
 		let slot_index = slot_data.get_index();
 		let color = slot_data.get_color();
-		self.slot_colors[slot_index * 4] = color.red as f64;
-		self.slot_colors[slot_index * 4 + 1] = color.green as f64;
-		self.slot_colors[slot_index * 4 + 2] = color.blue as f64;
-		self.slot_colors[slot_index * 4 + 3] = color.alpha as f64;
+		self.slot_colors[slot_index * 4] = color.red;
+		self.slot_colors[slot_index * 4 + 1] = color.green;
+		self.slot_colors[slot_index * 4 + 2] = color.blue;
+		self.slot_colors[slot_index * 4 + 3] = color.alpha;
 		self.slot_attachment_names[slot_index] = slot_data.get_attachment_name().map(|name| name.to_string());
 	}
 }
@@ -870,7 +870,7 @@ impl Skeleton2DTimeline {
 					return;
 				};
 				let color = skeleton_data.get_slots()[target_index].get_color();
-				pose.get_slot_colors_mut()[target_index * 4..target_index * 4 + 4].copy_from_slice(&[color.red as f64, color.green as f64, color.blue as f64, color.alpha as f64]);
+				pose.get_slot_colors_mut()[target_index * 4..target_index * 4 + 4].copy_from_slice(&[color.red, color.green, color.blue, color.alpha]);
 			}
 			Skeleton2DTimelineType::Attachment => {
 				let Some(target_index) = self.target_index else {

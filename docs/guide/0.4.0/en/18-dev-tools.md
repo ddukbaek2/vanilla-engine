@@ -113,7 +113,7 @@ impl Scene for MainScene {
 		self.dev_tools.set_root_nodes(vec![self.scene_base.get_root_id()]);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		let is_capturing_input = self.dev_tools.is_visible() && self.dev_tools.is_pointer_inside_panel(engine);
 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 		if !is_capturing_input {
@@ -201,7 +201,7 @@ use vanilla::{Color, Component, ComponentBase, Engine, EngineConfiguration, Grap
 
 struct SightGizmo {
 	component_base: ComponentBase,
-	radius: f32,
+	radius: f64,
 }
 
 #[vanilla::reflect]
@@ -301,7 +301,7 @@ use vanilla::{Color, Engine, EngineConfiguration, Graphic, Paint, Scene, SceneBa
 
 struct ProfileScene {
 	scene_base: SceneBase,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 }
 
 impl Scene for ProfileScene {
@@ -320,12 +320,12 @@ impl Scene for ProfileScene {
 			let box_id = node_tree.create_child(root_id, "Box");
 			let box_node = &mut node_tree[box_id];
 			box_node.set_content_size(Vector2::create(20.0, 20.0));
-			box_node.set_local_position(Vector2::create((index % 10) as f32 * 120.0 + 60.0, (index / 10) as f32 * 70.0 + 40.0));
+			box_node.set_local_position(Vector2::create((index % 10) as f64 * 120.0 + 60.0, (index / 10) as f64 * 70.0 + 40.0));
 			box_node.add_component(Paint::create_with_color(Color::create(0.9, 0.6, 0.2, 1.0)));
 		}
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.elapsed_seconds += time_delta;
 	}

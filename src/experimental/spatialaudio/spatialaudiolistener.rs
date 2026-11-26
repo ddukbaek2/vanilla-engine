@@ -30,7 +30,7 @@ use std::rc::Rc;
 pub struct SpatialAudioListener {
 	audio_manager_state: Rc<RefCell<AudioManagerState>>,
 	// 자리, 앞, 위. (리스너에 건 값)
-	value_list: [f32; 9],
+	value_list: [f64; 9],
 }
 
 impl SpatialAudioListener {
@@ -133,7 +133,7 @@ impl SpatialAudioListener {
 				continue;
 			}
 			self.value_list[index] = value;
-			audio_backend::set_listener_param_value(&mut state, PARAM_LIST[index], value);
+			audio_backend::set_listener_param_value(&mut state, PARAM_LIST[index], value as f32);
 		}
 	}
 }

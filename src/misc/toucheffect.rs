@@ -41,15 +41,15 @@ fn get_particle_gradient_image() -> Rc<Image> {
 	PARTICLE_GRADIENT_IMAGE.with(|image_cell| {
 		let mut image_option = image_cell.borrow_mut();
 		let gradient_image = image_option.get_or_insert_with(|| {
-			let canvas_size = PARTICLE_GRADIENT_IMAGE_SIZE as f32;
+			let canvas_size = PARTICLE_GRADIENT_IMAGE_SIZE as f64;
 			let half_size = canvas_size * 0.5;
 			let mut canvas = Canvas2D::new(PARTICLE_GRADIENT_IMAGE_SIZE, PARTICLE_GRADIENT_IMAGE_SIZE);
-			if let Some(mut radial_gradient) = canvas.create_radial_gradient(half_size, half_size, 0.0, half_size, half_size, half_size) {
+			if let Some(mut radial_gradient) = canvas.create_radial_gradient(half_size as f32, half_size as f32, 0.0, half_size as f32, half_size as f32, half_size as f32) {
 				radial_gradient.add_color_stop(0.0, Color::create(1.0, 1.0, 1.0, 1.0));
 				radial_gradient.add_color_stop(1.0, Color::create(1.0, 1.0, 1.0, 0.0));
 				canvas.set_fill_style(radial_gradient);
 			}
-			canvas.fill_rect(0.0, 0.0, canvas_size, canvas_size);
+			canvas.fill_rect(0.0, 0.0, canvas_size as f32, canvas_size as f32);
 			canvas.to_image()
 		});
 		gradient_image.clone()
@@ -79,11 +79,11 @@ pub struct TouchParticle {
 	/// 속도. (픽셀/초)
 	pub velocity: Vector2,
 	/// 남은 수명. (TouchEffect 에서 1 로 시작해 초당 2.5 씩 줄고, 0 이하면 빠진다)
-	pub life: f32,
+	pub life: f64,
 	/// 처음 수명. (그릴 때 투명도는 life / max_life)
-	pub max_life: f32,
+	pub max_life: f64,
 	/// 반지름. (픽셀)
-	pub radius: f32,
+	pub radius: f64,
 }
 
 impl TouchParticle {
@@ -165,7 +165,7 @@ impl TouchEffect {
 	/// - `x`: 누른 자리 x. (노드 영역 좌표, 픽셀)
 	/// - `y`: 누른 자리 y. (노드 영역 좌표, 픽셀)
 	//==============================================================================
-	pub fn create_touch_particle(&mut self, x: f32, y: f32) {
+	pub fn create_touch_particle(&mut self, x: f64, y: f64) {
 		let mut particle = TouchParticle::new();
 		particle.position = Vector2::create(x + (math::random() - 0.5) * 10.0, y + (math::random() - 0.5) * 10.0);
 		particle.velocity = Vector2::create((math::random() - 0.5) * 120.0, (math::random() - 0.5) * 120.0);
@@ -181,7 +181,7 @@ impl TouchEffect {
 	/// # 인자
 	/// - `time_delta`: 지난 시간. (초, 위치는 속도 * time_delta 만큼 움직인다)
 	//==============================================================================
-	pub fn update_touch_particles(&mut self, time_delta: f32) {
+	pub fn update_touch_particles(&mut self, time_delta: f64) {
 		let mut particle_index = self.touch_particles.len();
 		while particle_index > 0 {
 			particle_index -= 1;
@@ -267,7 +267,7 @@ impl Component for TouchEffect {
 	//==============================================================================
 	/// 갱신.
 	//==============================================================================
-	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f64) {
 		self.update_touch_particles(time_delta);
 	}
 

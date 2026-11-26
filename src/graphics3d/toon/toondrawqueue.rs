@@ -67,14 +67,14 @@ struct ToonDrawItem<'a> {
 	instance_list: Option<&'a [ToonInstance]>,
 	options: ToonDrawOptions<'a>,
 	is_transparent: bool,
-	depth_position: [f32; 3],
+	depth_position: [f64; 3],
 }
 
 //==============================================================================
 /// 비치는 것의 한 덩어리. (묶음이거나 하나, 깊이 합과 담은 차례)
 //==============================================================================
 struct ToonTransparentEntry {
-	depth_sum: f32,
+	depth_sum: f64,
 	item_index_list: Vec<usize>,
 	is_depth_prepassed: bool,
 }
@@ -208,14 +208,14 @@ impl<'a> ToonDrawQueue<'a> {
 		if instance_list.is_empty() {
 			return;
 		}
-		let mut depth_position = [0.0f32; 3];
+		let mut depth_position = [0.0f64; 3];
 		for instance in instance_list {
 			for (axis, value) in depth_position.iter_mut().enumerate() {
-				*value += instance.model_matrix.elements[12 + axis];
+				*value += (instance.model_matrix.elements[12 + axis]) as f64;
 			}
 		}
 		for value in depth_position.iter_mut() {
-			*value /= instance_list.len() as f32;
+			*value /= instance_list.len() as f64;
 		}
 		self.item_list.push(ToonDrawItem { mesh, model_matrix: Matrix4::create_identity(), instance_list: Some(instance_list), options, is_transparent: is_transparent_options(&options), depth_position });
 	}
@@ -272,7 +272,7 @@ impl<'a> ToonDrawQueue<'a> {
 	pub fn draw(&self, gl: &glow::Context, renderer: &mut ToonRenderer, camera: &Camera3D) {
 		self.draw_line_ids(gl, renderer, &camera.get_view_matrix(), &camera.get_projection_matrix());
 		renderer.begin_frame_with_camera(gl, camera);
-		self.draw_stages(gl, renderer, &|position: [f32; 3]| camera.read_view_depth(position[0], position[1], position[2]));
+		self.draw_stages(gl, renderer, &|position: [f64; 3]| camera.read_view_depth(position[0], position[1], position[2]));
 		renderer.end_frame(gl);
 	}
 
@@ -288,8 +288,8 @@ impl<'a> ToonDrawQueue<'a> {
 	pub fn draw_with_matrices(&self, gl: &glow::Context, renderer: &mut ToonRenderer, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
 		self.draw_line_ids(gl, renderer, view_matrix, projection_matrix);
 		renderer.begin_frame_with_matrices(gl, view_matrix, projection_matrix);
-		let elements = view_matrix.elements;
-		self.draw_stages(gl, renderer, &|position: [f32; 3]| -(elements[2] * position[0] + elements[6] * position[1] + elements[10] * position[2] + elements[14]));
+		let elements = view_matrix.read_elements();
+		self.draw_stages(gl, renderer, &|position: [f64; 3]| -(elements[2] * position[0] + elements[6] * position[1] + elements[10] * position[2] + elements[14]));
 		renderer.end_frame(gl);
 	}
 
@@ -311,7 +311,7 @@ impl<'a> ToonDrawQueue<'a> {
 			gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
 			if let Some(screen_rect) = renderer.get_screen_rect() {
 				let left = screen_rect.position.x.floor() as i32;
-				let bottom = (viewport[3] as f32 - screen_rect.position.y - screen_rect.size.y).floor() as i32;
+				let bottom = (viewport[3] as f64 - screen_rect.position.y - screen_rect.size.y).floor() as i32;
 				gl.viewport(viewport[0] + left, viewport[1] + bottom, (screen_rect.size.x.round() as i32).max(1), (screen_rect.size.y.round() as i32).max(1));
 			}
 		}
@@ -366,7 +366,7 @@ impl<'a> ToonDrawQueue<'a> {
 	//==============================================================================
 	/// 단계마다 그리기. (begin_frame 과 end_frame 사이, read_depth(자리) 는 카메라에서의 보기 깊이)
 	//==============================================================================
-	fn draw_stages(&self, gl: &glow::Context, renderer: &mut ToonRenderer, read_depth: &dyn Fn([f32; 3]) -> f32) {
+	fn draw_stages(&self, gl: &glow::Context, renderer: &mut ToonRenderer, read_depth: &dyn Fn([f64; 3]) -> f64) {
 		self.run_passes(gl, renderer, ToonDrawStage::BeforeOpaque);
 
 		// 1. 불투명한 몸. (인스턴스 묶음은 바깥선까지 한 번에, 화면 밖이면 draw_mesh 가 걸러 센다)
@@ -422,7 +422,7 @@ impl<'a> ToonDrawQueue<'a> {
 			}
 		}
 		if !entry_list.is_empty() {
-			let read_entry_depth = |entry: &ToonTransparentEntry| entry.depth_sum / entry.item_index_list.len() as f32;
+			let read_entry_depth = |entry: &ToonTransparentEntry| entry.depth_sum / entry.item_index_list.len() as f64;
 			entry_list.sort_by(|first, second| read_entry_depth(second).total_cmp(&read_entry_depth(first)));
 			unsafe {
 				gl.depth_mask(false);

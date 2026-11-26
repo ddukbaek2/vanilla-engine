@@ -151,7 +151,7 @@ impl ImageAsset {
 	pub fn get_image_size(&mut self) -> Vector2 {
 		match self.get_image() {
 			Some(image) => {
-				Vector2::create(image.get_width() as f32, image.get_height() as f32)
+				Vector2::create(image.get_width() as f64, image.get_height() as f64)
 			}
 			None => {
 				Vector2::zero()

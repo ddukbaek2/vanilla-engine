@@ -2,7 +2,7 @@
 //! 선형 식. (원본 ui/autolayout/layoutexpression.js 의 LayoutExpression, 항 목록 + 상수항)
 //! - 산술 함수는 모두 새 식을 돌려준다. (바뀌지 않는 값)
 //! - equal_to, less_than_or_equal_to, greater_than_or_equal_to 는 LayoutConstraint 를 돌려준다. (required 강도)
-//! - 인자는 숫자(f64, f32, i32), LayoutVariable, LayoutTerm, LayoutExpression 을 받는다. (impl `Into<LayoutExpression>`)
+//! - 인자는 숫자(f64, i32), LayoutVariable, LayoutTerm, LayoutExpression 을 받는다. (impl `Into<LayoutExpression>`)
 //! - 원본과 다른 것:
 //!   - 원본 toExpression 의 실행 중 타입 검사는 From 구현으로 옮겼다. 받지 않는 타입은 컴파일이 막는다.
 //!   - multiply, divide 는 원본도 숫자만 받으므로 f64 만 받는다. (원본의 '스칼라만 지원' 예외는 생기지 않는다)
@@ -92,7 +92,7 @@ impl LayoutExpression {
 	/// 받을 수 있는 입력을 식으로 바꾼다.
 	///
 	/// # 인자
-	/// - `input`: 바꿀 것. (숫자 f64, f32, i32, LayoutVariable, LayoutTerm, LayoutExpression 과 그 참조)
+	/// - `input`: 바꿀 것. (숫자 f64, i32, LayoutVariable, LayoutTerm, LayoutExpression 과 그 참조)
 	///
 	/// # 돌려줌
 	/// 바꾼 식. (숫자는 상수 식, 변수는 1 * variable, 항은 그 항 하나, 식은 사본)
@@ -104,7 +104,7 @@ impl LayoutExpression {
 	///
 	/// let x = LayoutVariable::new("x");
 	/// assert!(LayoutExpression::to_expression(12).is_constant());
-	/// assert_eq!(LayoutExpression::to_expression(2.5f32).get_constant(), 2.5);
+	/// assert_eq!(LayoutExpression::to_expression(2.5f64).get_constant(), 2.5);
 	/// assert_eq!(LayoutExpression::to_expression(&x).get_terms()[0].get_coefficient(), 1.0);
 	/// assert_eq!(LayoutExpression::to_expression(LayoutTerm::new(x.clone(), 3.0)).get_terms()[0].get_coefficient(), 3.0);
 	/// ```
@@ -294,15 +294,6 @@ impl From<f64> for LayoutExpression {
 	}
 }
 
-impl From<f32> for LayoutExpression {
-	//==============================================================================
-	/// 숫자는 상수 식이 된다.
-	//==============================================================================
-	fn from(value: f32) -> LayoutExpression {
-		LayoutExpression::from_constant(value as f64)
-	}
-}
-
 impl From<i32> for LayoutExpression {
 	//==============================================================================
 	/// 숫자는 상수 식이 된다.
@@ -377,7 +368,7 @@ mod tests {
 		assert_eq!(expression.get_constant(), 3.75);
 		assert_eq!(expression.get_value(), 0.5 * 3.0 + 0.5 * 5.0 + 3.75);
 		assert!(!expression.is_constant());
-		assert!(LayoutExpression::to_expression(7.0f32).is_constant());
+		assert!(LayoutExpression::to_expression(7.0f64).is_constant());
 		let difference = LayoutExpression::from_variable(&x).subtract(&LayoutExpression::from_variable(&y).multiply(3.0));
 		assert_eq!(difference.get_terms()[1].get_coefficient(), -3.0);
 		assert_eq!(difference.get_value(), 3.0 - 15.0);

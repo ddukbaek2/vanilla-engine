@@ -18,8 +18,8 @@ use vanilla::{
 //==============================================================================
 // 전역 상수 목록.
 //==============================================================================
-const VIEW_WIDTH: f32 = 1280.0;
-const VIEW_HEIGHT: f32 = 720.0;
+const VIEW_WIDTH: f64 = 1280.0;
+const VIEW_HEIGHT: f64 = 720.0;
 const BACKGROUND_COLOR: &str = "#1d1814";
 const PANEL_COLOR: &str = "#2c241e";
 const ACCENT_COLOR: &str = "#f3e5ab";
@@ -27,8 +27,8 @@ const DARK_TEXT_COLOR: &str = "#2b2118";
 const LIGHT_TEXT_COLOR: &str = "#f1e9d8";
 const CAPTION_TEXT_COLOR: &str = "#b8a690";
 const SCROLL_ROW_COUNT: usize = 14;
-const SCROLL_ROW_HEIGHT: f32 = 52.0;
-const SCROLL_ROW_GAP: f32 = 8.0;
+const SCROLL_ROW_HEIGHT: f64 = 52.0;
+const SCROLL_ROW_GAP: f64 = 8.0;
 const EXIT_FRAME_COUNT: u32 = 240;
 
 //==============================================================================
@@ -36,11 +36,11 @@ const EXIT_FRAME_COUNT: u32 = 240;
 //==============================================================================
 fn create_disc_image(image_size: u32, inner_color: Color, outer_color: Color) -> Rc<Image> {
 	let mut pixels = vec![0u8; (image_size * image_size * 4) as usize];
-	let half_size = image_size as f32 * 0.5;
+	let half_size = image_size as f64 * 0.5;
 	for pixel_y in 0..image_size {
 		for pixel_x in 0..image_size {
-			let delta_x = (pixel_x as f32 + 0.5 - half_size) / half_size;
-			let delta_y = (pixel_y as f32 + 0.5 - half_size) / half_size;
+			let delta_x = (pixel_x as f64 + 0.5 - half_size) / half_size;
+			let delta_y = (pixel_y as f64 + 0.5 - half_size) / half_size;
 			let distance = (delta_x * delta_x + delta_y * delta_y).sqrt();
 			let coverage = ((1.0 - distance) * half_size).clamp(0.0, 1.0);
 			if coverage <= 0.0 {
@@ -78,7 +78,7 @@ fn create_box_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, posi
 //==============================================================================
 // 글자 노드 만들기. (UILabel)
 //==============================================================================
-fn create_label_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, position: Vector2, size: Vector2, text: &str, font_size: f32, color: &str, text_align: TextAlign) -> NodeId {
+fn create_label_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, position: Vector2, size: Vector2, text: &str, font_size: f64, color: &str, text_align: TextAlign) -> NodeId {
 	let label_id = create_box_node(node_tree, parent_id, name, position, size);
 	let label = node_tree.add_component(label_id, UILabel::create_with_text(text, font_size)).expect("label");
 	label.set_text_color(color);
@@ -116,7 +116,7 @@ struct UIGalleryScene {
 	scene_base: SceneBase,
 	touch_recognizer: TouchRecognizer,
 	frame_count: u32,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 	click_count: Rc<Cell<u32>>,
 	click_button_id: Option<NodeId>,
 	hold_button_id: Option<NodeId>,
@@ -211,7 +211,7 @@ impl UIGalleryScene {
 		let panel_id = UIGalleryScene::create_section_panel(node_tree, root_id, "toggleSection", Vector2::create(40.0, 360.0), Vector2::create(380.0, 130.0), "UIToggleButton");
 		let mut toggle_ids: Vec<NodeId> = Vec::new();
 		for (toggle_index, toggle_text) in ["켜 둠", "클릭으로 켬", "꺼짐"].iter().enumerate() {
-			let toggle_id = create_box_node(node_tree, panel_id, "toggle", Vector2::create(20.0 + toggle_index as f32 * 118.0, 50.0), Vector2::create(106.0, 56.0));
+			let toggle_id = create_box_node(node_tree, panel_id, "toggle", Vector2::create(20.0 + toggle_index as f64 * 118.0, 50.0), Vector2::create(106.0, 56.0));
 			let toggle_paint = node_tree[toggle_id].add_component(Paint::create_with_color("#e8d9c4"));
 			toggle_paint.set_round_size(12.0);
 			let label = node_tree.add_component(toggle_id, UILabel::create_with_text(toggle_text, 18.0)).expect("label");
@@ -275,7 +275,7 @@ impl UIGalleryScene {
 		// 세로 진행률 셋.
 		let mut vertical_progress_id: Option<NodeId> = None;
 		for (progress_index, progress_value) in [0.25, 0.6, 0.9].iter().enumerate() {
-			let bar_id = create_box_node(node_tree, panel_id, "verticalProgress", Vector2::create(40.0 + progress_index as f32 * 50.0, 190.0), Vector2::create(28.0, 180.0));
+			let bar_id = create_box_node(node_tree, panel_id, "verticalProgress", Vector2::create(40.0 + progress_index as f64 * 50.0, 190.0), Vector2::create(28.0, 180.0));
 			let bar_view = node_tree.add_component(bar_id, UIProgressView::new()).expect("progress");
 			bar_view.set_direction(ProgressDirection::Vertical);
 			bar_view.set_corner_radius(6.0);
@@ -310,7 +310,7 @@ impl UIGalleryScene {
 		let scroll_width = 400.0;
 		let scroll_height = 470.0;
 		let scroll_id = create_box_node(node_tree, root_id, "scroll", Vector2::create(840.0, 120.0), Vector2::create(scroll_width, scroll_height));
-		let scroll_content_height = SCROLL_ROW_GAP + SCROLL_ROW_COUNT as f32 * (SCROLL_ROW_HEIGHT + SCROLL_ROW_GAP);
+		let scroll_content_height = SCROLL_ROW_GAP + SCROLL_ROW_COUNT as f64 * (SCROLL_ROW_HEIGHT + SCROLL_ROW_GAP);
 		let content_id = {
 			let scroll_view = node_tree.add_component(scroll_id, UIScrollView::new()).expect("scroll view");
 			scroll_view.set_background_color(PANEL_COLOR);
@@ -328,7 +328,7 @@ impl UIGalleryScene {
 			else {
 				"#5a4a3c"
 			};
-			let row_position = Vector2::create(SCROLL_ROW_GAP, SCROLL_ROW_GAP + row_index as f32 * (SCROLL_ROW_HEIGHT + SCROLL_ROW_GAP));
+			let row_position = Vector2::create(SCROLL_ROW_GAP, SCROLL_ROW_GAP + row_index as f64 * (SCROLL_ROW_HEIGHT + SCROLL_ROW_GAP));
 			let row_id = create_box_node(node_tree, content_id, "row", row_position, Vector2::create(row_width, SCROLL_ROW_HEIGHT));
 			let row_paint = node_tree[row_id].add_component(Paint::create_with_color(row_color));
 			row_paint.set_round_size(8.0);
@@ -382,7 +382,7 @@ impl UIGalleryScene {
 		}
 		else if (58..75).contains(&frame_count) {
 			// 줄 버튼을 누르고 10 프레임 동안 60 픽셀 위로 끈다. (임계를 넘으면 스크롤 뷰가 가져간다)
-			let drag_frame_count = frame_count.saturating_sub(59).min(10) as f32;
+			let drag_frame_count = frame_count.saturating_sub(59).min(10) as f64;
 			input_position = drag_start_position.map(|drag_start_position| Vector2::create(drag_start_position.x, drag_start_position.y - drag_frame_count * 6.0));
 		}
 		else if frame_count >= 75 {
@@ -458,7 +458,7 @@ impl Scene for UIGalleryScene {
 	//==============================================================================
 	// 주기적 갱신. (흉내 낸 입력 → 노드 갱신 → TouchRecognizer)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.frame_count += 1;
 		self.elapsed_seconds += time_delta;
 		if self.frame_count >= EXIT_FRAME_COUNT {

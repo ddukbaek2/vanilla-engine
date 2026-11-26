@@ -5,7 +5,7 @@
 //! - 원본과 다른 점:
 //!   원본의 { column, row } 객체는 GridCell, to_world_center 의 { x, y } 는 Vector2 로 돌려준다.
 //!   칸 번호는 음수 칸(월드 왼쪽 위 바깥)도 나타내도록 i32 다.
-//!   좌표는 f32 로 받지만 칸 계산은 원본(JS number)처럼 f64 로 한다. (test_rect_overlap 의 0.000001 빼기가 f32 에서는 사라진다)
+//!   좌표와 칸 계산은 원본(JS number)처럼 f64 다. (test_rect_overlap 의 0.000001 빼기가 원본과 같다)
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
@@ -169,13 +169,13 @@ impl Grid {
 	/// assert_eq!(hero_position, Vector2::create(40.0, 0.0));
 	/// ```
 	//==============================================================================
-	pub fn test_rect_overlap(world_rect: Rect, tile_size: f32, mut is_blocked_handler: impl FnMut(i32, i32) -> bool) -> bool {
+	pub fn test_rect_overlap(world_rect: Rect, tile_size: f64, mut is_blocked_handler: impl FnMut(i32, i32) -> bool) -> bool {
 		// 원본(JS number)처럼 f64 로 셈한다. (f32 로는 큰 좌표에서 0.000001 을 빼도 값이 그대로라 다음 칸까지 걸친다)
-		let rect_x = world_rect.position.x as f64;
-		let rect_y = world_rect.position.y as f64;
-		let rect_width = world_rect.size.x as f64;
-		let rect_height = world_rect.size.y as f64;
-		let tile_size = tile_size as f64;
+		let rect_x = world_rect.position.x;
+		let rect_y = world_rect.position.y;
+		let rect_width = world_rect.size.x;
+		let rect_height = world_rect.size.y;
+		let tile_size = tile_size;
 		let start_column = (rect_x / tile_size).floor() as i32;
 		let end_column = ((rect_x + rect_width - 0.000001) / tile_size).floor() as i32;
 		let start_row = (rect_y / tile_size).floor() as i32;
@@ -201,9 +201,9 @@ impl Grid {
 	/// # 돌려줌
 	/// 그 점이 든 칸. (내림하므로 음수 좌표는 음수 칸)
 	//==============================================================================
-	pub fn to_cell(world_x: f32, world_y: f32, tile_size: f32) -> GridCell {
-		let column = (world_x as f64 / tile_size as f64).floor() as i32;
-		let row = (world_y as f64 / tile_size as f64).floor() as i32;
+	pub fn to_cell(world_x: f64, world_y: f64, tile_size: f64) -> GridCell {
+		let column = (world_x / tile_size).floor() as i32;
+		let row = (world_y / tile_size).floor() as i32;
 		GridCell::create(column, row)
 	}
 
@@ -218,9 +218,9 @@ impl Grid {
 	/// # 돌려줌
 	/// 그 칸 가운데의 월드 좌표.
 	//==============================================================================
-	pub fn to_world_center(column: i32, row: i32, tile_size: f32) -> Vector2 {
-		let world_x = (column as f32 + 0.5) * tile_size;
-		let world_y = (row as f32 + 0.5) * tile_size;
+	pub fn to_world_center(column: i32, row: i32, tile_size: f64) -> Vector2 {
+		let world_x = (column as f64 + 0.5) * tile_size;
+		let world_y = (row as f64 + 0.5) * tile_size;
 		Vector2::create(world_x, world_y)
 	}
 }

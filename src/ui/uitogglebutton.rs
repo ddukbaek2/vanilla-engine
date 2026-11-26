@@ -123,7 +123,7 @@ impl UIToggleButton {
 	//==============================================================================
 	/// 틴트 트랜지션 갱신. (켜져 있으면 끝까지 건 채로 둔다)
 	//==============================================================================
-	fn update_tint_transition(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn update_tint_transition(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		if self.get_is_on() {
 			self.ui_button.apply_tint_progress(context, 1.0);
 			return;
@@ -349,7 +349,7 @@ impl Component for UIToggleButton {
 	//==============================================================================
 	/// 갱신. (누름 추적과 미룬 뗌, 미룬 뗌이 클릭이면 켜짐을 뒤집고, 마우스 오버, 틴트)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let is_clicked = self.ui_button.tick_press(context, time_delta);
 		if is_clicked {
 			self.on_clicked(context);

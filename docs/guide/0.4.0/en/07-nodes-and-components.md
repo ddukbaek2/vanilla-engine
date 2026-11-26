@@ -374,7 +374,7 @@ use vanilla::{Color, Component, ComponentBase, ComponentContext, Engine, EngineC
 
 struct Spin {
 	component_base: ComponentBase,
-	degrees_per_second: f32,
+	degrees_per_second: f64,
 }
 
 #[vanilla::reflect]
@@ -394,7 +394,7 @@ impl Component for Spin {
 		"Spin"
 	}
 
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let transform = context.get_transform_mut();
 		let local_rotation = transform.get_local_rotation();
 		transform.set_local_rotation(local_rotation + self.degrees_per_second * time_delta);
@@ -470,7 +470,7 @@ use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineConfigur
 
 struct Lifetime {
 	component_base: ComponentBase,
-	remaining_seconds: f32,
+	remaining_seconds: f64,
 }
 
 #[vanilla::reflect]
@@ -490,7 +490,7 @@ impl Component for Lifetime {
 		"Lifetime"
 	}
 
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		self.remaining_seconds -= time_delta;
 		if self.remaining_seconds <= 0.0 {
 			let node_id = context.get_node_id();

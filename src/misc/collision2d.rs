@@ -89,7 +89,7 @@ impl Collision2D {
 	/// # 돌려줌
 	/// 두 중심 거리가 반지름 합보다 작으면 true.
 	//==============================================================================
-	pub fn test_circle_overlap(position_a: Vector2, radius_a: f32, position_b: Vector2, radius_b: f32) -> bool {
+	pub fn test_circle_overlap(position_a: Vector2, radius_a: f64, position_b: Vector2, radius_b: f64) -> bool {
 		let difference_x = position_b.x - position_a.x;
 		let difference_y = position_b.y - position_a.y;
 		let radius_sum = radius_a + radius_b;
@@ -111,7 +111,7 @@ impl Collision2D {
 	/// # 돌려줌
 	/// 겹쳐 있으면 A, B 에 더할 이동량. 닿기만 했거나 떨어져 있으면 None.
 	//==============================================================================
-	pub fn resolve_circle_overlap(position_a: Vector2, radius_a: f32, position_b: Vector2, radius_b: f32, is_static_b: bool) -> Option<CircleOverlapPush> {
+	pub fn resolve_circle_overlap(position_a: Vector2, radius_a: f64, position_b: Vector2, radius_b: f64, is_static_b: bool) -> Option<CircleOverlapPush> {
 		let difference_x = position_b.x - position_a.x;
 		let difference_y = position_b.y - position_a.y;
 		let radius_sum = radius_a + radius_b;
@@ -153,7 +153,7 @@ impl Collision2D {
 	/// # 돌려줌
 	/// 가장 가까운 대상의 번호. 반경 안에 하나도 없으면 None.
 	//==============================================================================
-	pub fn find_nearest_index_in_radius<T>(target_list: &[T], get_position_handler: impl Fn(&T) -> Vector2, center: Vector2, radius: f32) -> Option<usize> {
+	pub fn find_nearest_index_in_radius<T>(target_list: &[T], get_position_handler: impl Fn(&T) -> Vector2, center: Vector2, radius: f64) -> Option<usize> {
 		let mut nearest_index: Option<usize> = None;
 		let mut nearest_distance_squared = radius * radius;
 		for (target_index, target) in target_list.iter().enumerate() {
@@ -193,7 +193,7 @@ impl Collision2D {
 	/// assert!(Collision2D::find_nearest_in_radius(&target_list, |target| *target, Vector2::create(100.0, 100.0), 5.0).is_none());
 	/// ```
 	//==============================================================================
-	pub fn find_nearest_in_radius<T>(target_list: &[T], get_position_handler: impl Fn(&T) -> Vector2, center: Vector2, radius: f32) -> Option<&T> {
+	pub fn find_nearest_in_radius<T>(target_list: &[T], get_position_handler: impl Fn(&T) -> Vector2, center: Vector2, radius: f64) -> Option<&T> {
 		let nearest_index = Collision2D::find_nearest_index_in_radius(target_list, get_position_handler, center, radius)?;
 		target_list.get(nearest_index)
 	}
@@ -209,7 +209,7 @@ impl Collision2D {
 	/// # 돌려줌
 	/// 점이 원 안이나 경계 위면 true.
 	//==============================================================================
-	pub fn test_point_in_circle(point: Vector2, center: Vector2, radius: f32) -> bool {
+	pub fn test_point_in_circle(point: Vector2, center: Vector2, radius: f64) -> bool {
 		let difference_x = point.x - center.x;
 		let difference_y = point.y - center.y;
 		difference_x * difference_x + difference_y * difference_y <= radius * radius

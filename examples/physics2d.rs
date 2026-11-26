@@ -16,8 +16,8 @@ use vanilla::experimental::physics2d::{
 use vanilla::{Color, Engine, EngineConfiguration, Graphic, Paint, Pivot, Rect, Scene, SceneBase, Vector2};
 
 // 화면 크기. (기준 해상도)
-const VIEW_WIDTH: f32 = 1280.0;
-const VIEW_HEIGHT: f32 = 720.0;
+const VIEW_WIDTH: f64 = 1280.0;
+const VIEW_HEIGHT: f64 = 720.0;
 // 1 미터의 화소 수.
 const PIXELS_PER_METER: f64 = 50.0;
 // 한 걸음의 시간과 하위 걸음 수. (프레임마다 한 걸음, 두 엔진의 같은 프레임이 같은 걸음이 되게)
@@ -265,7 +265,7 @@ impl Scene for Physics2DScene {
 	//==============================================================================
 	// 갱신. (멈추지 않았으면 프레임마다 한 걸음)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		if self.prestep_count == 0 {
 			self.step_world();
 		}
@@ -290,7 +290,7 @@ impl Scene for Physics2DScene {
 	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
 		if self.sensor_visitor_count > 0 {
 			graphic.set_fill_color(SENSOR_ACTIVE_COLOR);
-			graphic.draw_rect(Rect::create((SENSOR_CENTER.x - SENSOR_HALF_SIZE.x) as f32, (SENSOR_CENTER.y - SENSOR_HALF_SIZE.y) as f32, (SENSOR_HALF_SIZE.x * 2.0) as f32, (SENSOR_HALF_SIZE.y * 2.0) as f32));
+			graphic.draw_rect(Rect::create(SENSOR_CENTER.x - SENSOR_HALF_SIZE.x, SENSOR_CENTER.y - SENSOR_HALF_SIZE.y, SENSOR_HALF_SIZE.x * 2.0, SENSOR_HALF_SIZE.y * 2.0));
 		}
 		let hit = {
 			let mut world = self.world.borrow_mut();

@@ -1136,7 +1136,7 @@ pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelop
 	let oscillator_type = to_oscillator_type(beep_envelope.waveform);
 	oscillator_node.set_type(oscillator_type);
 	let frequency_parameter = oscillator_node.frequency();
-	let _ = frequency_parameter.set_value_at_time(beep_envelope.frequency, start_time);
+	let _ = frequency_parameter.set_value_at_time(beep_envelope.frequency as f32, start_time);
 
 	let gain_node = match audio_context.create_gain() {
 		Ok(gain_node) => {
@@ -1147,10 +1147,10 @@ pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelop
 		}
 	};
 	let gain_parameter = gain_node.gain();
-	let _ = gain_parameter.set_value_at_time(BEEP_FLOOR_VOLUME, start_time);
-	let _ = gain_parameter.linear_ramp_to_value_at_time(beep_envelope.peak_volume, beep_schedule.attack_end_time);
-	let _ = gain_parameter.set_value_at_time(beep_envelope.peak_volume, beep_schedule.release_start_time);
-	let _ = gain_parameter.exponential_ramp_to_value_at_time(BEEP_FLOOR_VOLUME, beep_schedule.end_time);
+	let _ = gain_parameter.set_value_at_time(BEEP_FLOOR_VOLUME as f32, start_time);
+	let _ = gain_parameter.linear_ramp_to_value_at_time(beep_envelope.peak_volume as f32, beep_schedule.attack_end_time);
+	let _ = gain_parameter.set_value_at_time(beep_envelope.peak_volume as f32, beep_schedule.release_start_time);
+	let _ = gain_parameter.exponential_ramp_to_value_at_time(BEEP_FLOOR_VOLUME as f32, beep_schedule.end_time);
 
 	let destination = audio_context.destination();
 	let _ = oscillator_node.connect_with_audio_node(&gain_node);

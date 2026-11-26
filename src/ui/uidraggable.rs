@@ -69,7 +69,7 @@ pub struct UIDraggable {
 	home_position: Option<Vector2>,
 	is_snap_back_enabled: bool,
 	is_returning: bool,
-	snap_back_speed: f32,
+	snap_back_speed: f64,
 	drag_start_event: Option<UIDraggableEvent>,
 	drag_move_event: Option<UIDraggablePositionEvent>,
 	drag_end_event: Option<UIDraggablePositionEvent>,
@@ -261,7 +261,7 @@ impl UIDraggable {
 	/// assert!((node_tree[card_id].get_local_position().x - 150.0).abs() < 0.001);
 	/// ```
 	//==============================================================================
-	pub fn set_snap_back_speed(&mut self, snap_back_speed: f32) {
+	pub fn set_snap_back_speed(&mut self, snap_back_speed: f64) {
 		self.snap_back_speed = snap_back_speed;
 	}
 
@@ -385,7 +385,7 @@ impl Component for UIDraggable {
 	//==============================================================================
 	/// 갱신. (제자리로 미끄러지기. 0.5 픽셀 안으로 들어오면 딱 맞춘다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		self.node_id = Some(context.get_node_id());
 		let home_position = match self.home_position {
 			Some(home_position) => {

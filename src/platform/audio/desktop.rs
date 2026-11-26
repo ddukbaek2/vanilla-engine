@@ -928,12 +928,12 @@ fn create_beep_command(beep_envelope: &BeepEnvelope, periodic_wave: Arc<Periodic
 	}
 	Some(MixerCommand::PlayBeep {
 		periodic_wave,
-		frequency: beep_envelope.frequency,
+		frequency: beep_envelope.frequency as f32,
 		gain_automation_list: [
-			ParamAutomation::SetValueAtTime { value: BEEP_FLOOR_VOLUME, time: beep_schedule.start_time },
-			ParamAutomation::LinearRampToValueAtTime { value: beep_envelope.peak_volume, time: beep_schedule.attack_end_time },
-			ParamAutomation::SetValueAtTime { value: beep_envelope.peak_volume, time: beep_schedule.release_start_time },
-			ParamAutomation::ExponentialRampToValueAtTime { value: BEEP_FLOOR_VOLUME, time: beep_schedule.end_time },
+			ParamAutomation::SetValueAtTime { value: BEEP_FLOOR_VOLUME as f32, time: beep_schedule.start_time },
+			ParamAutomation::LinearRampToValueAtTime { value: beep_envelope.peak_volume as f32, time: beep_schedule.attack_end_time },
+			ParamAutomation::SetValueAtTime { value: beep_envelope.peak_volume as f32, time: beep_schedule.release_start_time },
+			ParamAutomation::ExponentialRampToValueAtTime { value: BEEP_FLOOR_VOLUME as f32, time: beep_schedule.end_time },
 		],
 		call_time: current_time,
 		start_time: beep_schedule.start_time.max(current_time),
@@ -1050,7 +1050,7 @@ mod tests {
 						"triangle" => BeepWaveform::Triangle,
 						_ => BeepWaveform::Sine,
 					};
-					let beep_envelope = BeepEnvelope::create(tone["frequency"].as_f64().unwrap() as f32, tone["duration"].as_f64().unwrap(), beep_waveform, tone["delay"].as_f64().unwrap(), volume, tone["volumeScale"].as_f64().unwrap() as f32);
+					let beep_envelope = BeepEnvelope::create((tone["frequency"].as_f64().unwrap() as f32) as f64, tone["duration"].as_f64().unwrap(), beep_waveform, tone["delay"].as_f64().unwrap(), volume as f64, (tone["volumeScale"].as_f64().unwrap() as f32) as f64);
 					let periodic_wave = get_periodic_wave(&mut periodic_wave_list, to_oscillator_type(beep_waveform), context_rate as f32);
 					command_sender.send(create_beep_command(&beep_envelope, periodic_wave, call_time).unwrap()).unwrap();
 				}

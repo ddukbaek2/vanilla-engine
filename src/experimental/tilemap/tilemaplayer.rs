@@ -392,7 +392,7 @@ impl TilemapLayer {
 		if minimum_column == i32::MAX {
 			return Rect::zero();
 		}
-		Rect::create(minimum_column as f32, minimum_row as f32, (maximum_column - minimum_column + 1) as f32, (maximum_row - minimum_row + 1) as f32)
+		Rect::create(minimum_column as f64, minimum_row as f64, (maximum_column - minimum_column + 1) as f64, (maximum_row - minimum_row + 1) as f64)
 	}
 
 	//==============================================================================

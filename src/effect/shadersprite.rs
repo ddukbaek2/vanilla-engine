@@ -28,7 +28,7 @@ use crate::core::image::Image;
 use crate::core::node::nodetree::ComponentContext;
 use crate::core::node::worldnode::NodeTransform;
 use crate::core::shaderprogram::ShaderProgram;
-use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
@@ -216,7 +216,7 @@ const EFFECT_NAME_TABLE: [(ShaderSpriteEffect, &str); 50] = [
 crate::core::reflection::impl_reflect_names!(ShaderSpriteEffect, EFFECT_NAME_TABLE);
 
 /// 효과별 기본 파라미터.
-const DEFAULT_PARAMETER_TABLE: [(ShaderSpriteEffect, [f32; 4]); 50] = [
+const DEFAULT_PARAMETER_TABLE: [(ShaderSpriteEffect, [f64; 4]); 50] = [
 	(ShaderSpriteEffect::None, [0.0, 0.0, 0.0, 0.0]),
 	(ShaderSpriteEffect::Flash, [0.0, 0.0, 0.0, 0.0]),
 	(ShaderSpriteEffect::Silhouette, [0.0, 0.0, 0.0, 0.0]),
@@ -270,7 +270,7 @@ const DEFAULT_PARAMETER_TABLE: [(ShaderSpriteEffect, [f32; 4]); 50] = [
 ];
 
 /// 효과별 기본 색.
-const DEFAULT_COLOR_TABLE: [(ShaderSpriteEffect, [f32; 4]); 50] = [
+const DEFAULT_COLOR_TABLE: [(ShaderSpriteEffect, [f64; 4]); 50] = [
 	(ShaderSpriteEffect::None, [1.0, 1.0, 1.0, 1.0]),
 	(ShaderSpriteEffect::Flash, [1.0, 1.0, 1.0, 1.0]),
 	(ShaderSpriteEffect::Silhouette, [0.0, 0.0, 0.0, 1.0]),
@@ -852,11 +852,11 @@ fn resolve_effect_program(graphic: &mut Graphic, effect: ShaderSpriteEffect) -> 
 pub struct ShaderSprite {
 	sprite: Sprite,
 	effect: ShaderSpriteEffect,
-	effect_progress: f32,
-	effect_time: f32,
-	effect_seed: f32,
+	effect_progress: f64,
+	effect_time: f64,
+	effect_seed: f64,
 	effect_color: Color,
-	effect_parameters: [f32; 4],
+	effect_parameters: [f64; 4],
 }
 
 #[crate::reflect(base = sprite)]
@@ -960,7 +960,7 @@ impl ShaderSprite {
 	/// # 인자
 	/// - `effect_progress`: 효과 진행도. (0 ~ 1 로 자른다, 뜻은 효과마다 다르다. 세기나 사라진 정도)
 	//==============================================================================
-	pub fn set_effect_progress(&mut self, effect_progress: f32) {
+	pub fn set_effect_progress(&mut self, effect_progress: f64) {
 		self.effect_progress = effect_progress.clamp(0.0, 1.0);
 	}
 
@@ -970,7 +970,7 @@ impl ShaderSprite {
 	/// # 돌려줌
 	/// 효과 진행도. (0 ~ 1)
 	//==============================================================================
-	pub fn get_effect_progress(&self) -> f32 {
+	pub fn get_effect_progress(&self) -> f64 {
 		self.effect_progress
 	}
 
@@ -980,7 +980,7 @@ impl ShaderSprite {
 	/// # 인자
 	/// - `effect_time`: 효과 시간. (초, 물결이나 깜빡임처럼 움직이는 효과가 쓴다. tick 마다 time_delta 만큼 는다)
 	//==============================================================================
-	pub fn set_effect_time(&mut self, effect_time: f32) {
+	pub fn set_effect_time(&mut self, effect_time: f64) {
 		self.effect_time = effect_time;
 	}
 
@@ -990,7 +990,7 @@ impl ShaderSprite {
 	/// # 돌려줌
 	/// 효과 시간. (초)
 	//==============================================================================
-	pub fn get_effect_time(&self) -> f32 {
+	pub fn get_effect_time(&self) -> f64 {
 		self.effect_time
 	}
 
@@ -1000,7 +1000,7 @@ impl ShaderSprite {
 	/// # 인자
 	/// - `effect_seed`: 노이즈 씨앗 값. (기본은 생성 때 0 ~ 100 무작위)
 	//==============================================================================
-	pub fn set_effect_seed(&mut self, effect_seed: f32) {
+	pub fn set_effect_seed(&mut self, effect_seed: f64) {
 		self.effect_seed = effect_seed;
 	}
 
@@ -1010,7 +1010,7 @@ impl ShaderSprite {
 	/// # 돌려줌
 	/// 노이즈 씨앗 값.
 	//==============================================================================
-	pub fn get_effect_seed(&self) -> f32 {
+	pub fn get_effect_seed(&self) -> f64 {
 		self.effect_seed
 	}
 
@@ -1043,7 +1043,7 @@ impl ShaderSprite {
 	/// - `z`: 셋째 파라미터. (쓰지 않는 효과는 0)
 	/// - `w`: 넷째 파라미터. (쓰지 않는 효과는 0)
 	//==============================================================================
-	pub fn set_effect_parameters(&mut self, x: f32, y: f32, z: f32, w: f32) {
+	pub fn set_effect_parameters(&mut self, x: f64, y: f64, z: f64, w: f64) {
 		self.effect_parameters = [x, y, z, w];
 	}
 
@@ -1053,7 +1053,7 @@ impl ShaderSprite {
 	/// # 돌려줌
 	/// 파라미터 [x, y, z, w].
 	//==============================================================================
-	pub fn get_effect_parameters(&self) -> [f32; 4] {
+	pub fn get_effect_parameters(&self) -> [f64; 4] {
 		self.effect_parameters
 	}
 
@@ -1066,7 +1066,7 @@ impl ShaderSprite {
 	/// # 돌려줌
 	/// 그 효과의 원본 기본 파라미터 [x, y, z, w]. (Glow 는 [6, 0, 0, 0])
 	//==============================================================================
-	pub fn get_default_parameters(effect: ShaderSpriteEffect) -> [f32; 4] {
+	pub fn get_default_parameters(effect: ShaderSpriteEffect) -> [f64; 4] {
 		DEFAULT_PARAMETER_TABLE[effect as usize].1
 	}
 
@@ -1165,7 +1165,7 @@ impl Component for ShaderSprite {
 	//==============================================================================
 	/// 갱신. (효과 시간 누적)
 	//==============================================================================
-	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f64) {
 		self.effect_time += time_delta;
 	}
 
@@ -1201,27 +1201,27 @@ impl Component for ShaderSprite {
 		// 효과 유니폼. (바꿔 끼운 프로그램이 사용 중이다)
 		let mut image_rect = self.sprite.get_image_rect();
 		if image_rect.is_zero() {
-			image_rect = Rect::create(0.0, 0.0, image.get_width() as f32, image.get_height() as f32);
+			image_rect = Rect::create(0.0, 0.0, image.get_width() as f64, image.get_height() as f64);
 		}
-		let image_width = image.get_width().max(1) as f32;
-		let image_height = image.get_height().max(1) as f32;
+		let image_width = image.get_width().max(1) as f64;
+		let image_height = image.get_height().max(1) as f64;
 		let effect_color = self.get_effect_color();
 		let effect_parameters = self.get_effect_parameters();
 		let gl = graphic.get_gl();
 		unsafe {
-			gl.uniform_1_f32(shader_program.get_uniform_location(gl, "effectTime").as_ref(), self.get_effect_time());
-			gl.uniform_1_f32(shader_program.get_uniform_location(gl, "effectProgress").as_ref(), self.get_effect_progress());
-			gl.uniform_1_f32(shader_program.get_uniform_location(gl, "effectSeed").as_ref(), self.get_effect_seed());
-			gl.uniform_4_f32(shader_program.get_uniform_location(gl, "effectColor").as_ref(), effect_color.red, effect_color.green, effect_color.blue, effect_color.alpha);
-			gl.uniform_4_f32(shader_program.get_uniform_location(gl, "effectParameters").as_ref(), effect_parameters[0], effect_parameters[1], effect_parameters[2], effect_parameters[3]);
-			gl.uniform_4_f32(
+			gl.uniform_1_f64(shader_program.get_uniform_location(gl, "effectTime").as_ref(), self.get_effect_time());
+			gl.uniform_1_f64(shader_program.get_uniform_location(gl, "effectProgress").as_ref(), self.get_effect_progress());
+			gl.uniform_1_f64(shader_program.get_uniform_location(gl, "effectSeed").as_ref(), self.get_effect_seed());
+			gl.uniform_4_f64(shader_program.get_uniform_location(gl, "effectColor").as_ref(), effect_color.red, effect_color.green, effect_color.blue, effect_color.alpha);
+			gl.uniform_4_f64(shader_program.get_uniform_location(gl, "effectParameters").as_ref(), effect_parameters[0], effect_parameters[1], effect_parameters[2], effect_parameters[3]);
+			gl.uniform_4_f64(
 				shader_program.get_uniform_location(gl, "textureRect").as_ref(),
 				image_rect.position.x / image_width,
 				image_rect.position.y / image_height,
 				(image_rect.position.x + image_rect.size.x) / image_width,
 				(image_rect.position.y + image_rect.size.y) / image_height,
 			);
-			gl.uniform_2_f32(shader_program.get_uniform_location(gl, "texelSize").as_ref(), 1.0 / image_width, 1.0 / image_height);
+			gl.uniform_2_f64(shader_program.get_uniform_location(gl, "texelSize").as_ref(), 1.0 / image_width, 1.0 / image_height);
 		}
 
 		self.sprite.draw(transform, graphic);

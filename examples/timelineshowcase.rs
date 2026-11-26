@@ -23,13 +23,13 @@ use vanilla::{Color, HeatHazeEffect, Indicator, Engine, EngineConfiguration, Gam
 // 전역 상수 목록.
 //==============================================================================
 const EXAMPLE_ASSET_DIRECTORY: &str = "../vanilla.js/examples/timelineshowcase/assets";
-const VIEW_WIDTH: f32 = 1280.0;
-const VIEW_HEIGHT: f32 = 720.0;
-const DOCUMENT_WIDTH: f32 = 960.0;
-const DOCUMENT_HEIGHT: f32 = 540.0;
-const HEADER_HEIGHT: f32 = 64.0;
+const VIEW_WIDTH: f64 = 1280.0;
+const VIEW_HEIGHT: f64 = 720.0;
+const DOCUMENT_WIDTH: f64 = 960.0;
+const DOCUMENT_HEIGHT: f64 = 540.0;
+const HEADER_HEIGHT: f64 = 64.0;
 const MODE_FRAME_COUNT: u64 = 150;
-const TIMELINE_FRAME_STEP: f32 = 1.0 / 60.0;
+const TIMELINE_FRAME_STEP: f64 = 1.0 / 60.0;
 const IMAGE_NAME_LIST: [&str; 7] = ["emblem.png", "slime.png", "star.png", "coin.png", "bat.png", "gem.png", "cover.png"];
 // (문서 파일, 제목) 목록. (원본 MODE_DEFINITIONS 차례)
 const MODE_DEFINITIONS: [(&str, &str); 8] = [
@@ -95,7 +95,7 @@ impl TimelineShowcaseScene {
 	//==============================================================================
 	// 라벨 노드 만들기. (왼쪽 정렬 글)
 	//==============================================================================
-	fn create_label(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, position: Vector2, font_size: f32, color: Color) -> NodeId {
+	fn create_label(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, position: Vector2, font_size: f64, color: Color) -> NodeId {
 		let label_id = node_tree.create_child(parent_id, name);
 		let label = &mut node_tree[label_id];
 		label.set_pivot(Pivot::TOP_LEFT);
@@ -296,7 +296,7 @@ impl Scene for TimelineShowcaseScene {
 	//==============================================================================
 	// 갱신. (노드 / 터치 / 레이아웃 → 타임라인 → 화면 효과, 150 프레임마다 또는 누르면 다음 문서)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, _time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, _time_delta: f64) {
 		if self.game_scene_base.tick(engine, TIMELINE_FRAME_STEP) {
 			self.layout();
 		}

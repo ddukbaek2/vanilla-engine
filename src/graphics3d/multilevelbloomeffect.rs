@@ -11,6 +11,7 @@ use crate::core::graphic::GlTexture;
 use crate::graphics3d::fullscreenpass::FullscreenPass;
 use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 
 /// 밝은 몫 뽑기. (반 크기로 줄이며 원본 네 점을 고르게, 밝기는 세 채널 가운데 가장 큰 값, 문턱 둘레는 부드러운 무릎)
 const EXTRACT_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
@@ -103,9 +104,9 @@ pub struct MultiLevelBloomEffect {
 	level_count: usize,
 	use_float_color: bool,
 	/// 뽑는 문턱. (밝기)
-	threshold: f32,
+	threshold: f64,
 	/// 문턱 둘레의 부드러운 폭.
-	knee: f32,
+	knee: f64,
 	scene_width: i32,
 	scene_height: i32,
 }
@@ -235,7 +236,7 @@ impl MultiLevelBloomEffect {
 	/// - `threshold`: 뽑는 문턱. (세 채널 가운데 가장 큰 값으로 잰 밝기, 0 밑은 0, 기본 1)
 	/// - `knee`: 문턱 둘레의 부드러운 폭. (0 밑은 0, 기본 0.25)
 	//==============================================================================
-	pub fn set_threshold(&mut self, threshold: f32, knee: f32) {
+	pub fn set_threshold(&mut self, threshold: f64, knee: f64) {
 		self.threshold = threshold.max(0.0);
 		self.knee = knee.max(0.0);
 	}
@@ -266,9 +267,9 @@ impl MultiLevelBloomEffect {
 		extract_pass.use_program(gl);
 		unsafe {
 			gl.uniform_1_i32(extract_pass.get_uniform_location(gl, "sourceTexture").as_ref(), 0);
-			gl.uniform_2_f32(extract_pass.get_uniform_location(gl, "sourceTexel").as_ref(), 1.0 / self.scene_width as f32, 1.0 / self.scene_height as f32);
-			gl.uniform_1_f32(extract_pass.get_uniform_location(gl, "threshold").as_ref(), self.threshold);
-			gl.uniform_1_f32(extract_pass.get_uniform_location(gl, "knee").as_ref(), self.knee);
+			gl.uniform_2_f64(extract_pass.get_uniform_location(gl, "sourceTexel").as_ref(), 1.0 / self.scene_width as f64, 1.0 / self.scene_height as f64);
+			gl.uniform_1_f64(extract_pass.get_uniform_location(gl, "threshold").as_ref(), self.threshold);
+			gl.uniform_1_f64(extract_pass.get_uniform_location(gl, "knee").as_ref(), self.knee);
 			gl.bind_texture(glow::TEXTURE_2D, scene_color_texture);
 		}
 		extract_pass.draw(gl);
@@ -284,7 +285,7 @@ impl MultiLevelBloomEffect {
 			let source_render_target = &level_render_target_list[level_index - 1];
 			level_render_target_list[level_index].bind(gl);
 			unsafe {
-				gl.uniform_2_f32(downsample_texel_location.as_ref(), 1.0 / source_render_target.get_width() as f32, 1.0 / source_render_target.get_height() as f32);
+				gl.uniform_2_f64(downsample_texel_location.as_ref(), 1.0 / source_render_target.get_width() as f64, 1.0 / source_render_target.get_height() as f64);
 				gl.bind_texture(glow::TEXTURE_2D, source_render_target.get_color_texture(0));
 			}
 			downsample_pass.draw(gl);
@@ -306,7 +307,7 @@ impl MultiLevelBloomEffect {
 			let source_render_target = &level_render_target_list[level_index];
 			level_render_target_list[level_index - 1].bind(gl);
 			unsafe {
-				gl.uniform_2_f32(upsample_texel_location.as_ref(), 1.0 / source_render_target.get_width() as f32, 1.0 / source_render_target.get_height() as f32);
+				gl.uniform_2_f64(upsample_texel_location.as_ref(), 1.0 / source_render_target.get_width() as f64, 1.0 / source_render_target.get_height() as f64);
 				gl.bind_texture(glow::TEXTURE_2D, source_render_target.get_color_texture(0));
 			}
 			upsample_pass.draw(gl);

@@ -30,9 +30,9 @@ use crate::base::vector2::Vector2;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ShakerOptions {
 	/// 감쇠율. (클수록 빨리 잦아든다)
-	pub decay_rate: f32,
+	pub decay_rate: f64,
 	/// 진동 주파수. (라디안 / 초)
-	pub frequency: f32,
+	pub frequency: f64,
 }
 
 impl Default for ShakerOptions {
@@ -73,10 +73,10 @@ impl Default for ShakerOptions {
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct Shaker {
-	strength: f32,
-	elapsed_seconds: f32,
-	decay_rate: f32,
-	frequency: f32,
+	strength: f64,
+	elapsed_seconds: f64,
+	decay_rate: f64,
+	frequency: f64,
 }
 
 impl Shaker {
@@ -104,7 +104,7 @@ impl Shaker {
 	/// # 인자
 	/// - `strength`: 흔들림 세기. (최대 오프셋, 픽셀) 지금 세기보다 작으면 무시한다.
 	//==============================================================================
-	pub fn add_shake(&mut self, strength: f32) {
+	pub fn add_shake(&mut self, strength: f64) {
 		self.strength = self.strength.max(strength);
 	}
 
@@ -114,7 +114,7 @@ impl Shaker {
 	/// # 인자
 	/// - `time_delta`: 지난 시간. (초, 세기에 exp(-decay_rate * time_delta) 를 곱한다)
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 		if self.strength > 0.0 {
 			self.strength *= (-self.decay_rate * time_delta).exp();
@@ -163,7 +163,7 @@ impl Shaker {
 	/// # 인자
 	/// - `decay_rate`: 새 감쇠율. (초당 지수 감쇠 계수)
 	//==============================================================================
-	pub fn set_decay_rate(&mut self, decay_rate: f32) {
+	pub fn set_decay_rate(&mut self, decay_rate: f64) {
 		self.decay_rate = decay_rate;
 	}
 
@@ -173,7 +173,7 @@ impl Shaker {
 	/// # 인자
 	/// - `frequency`: 새 진동 주파수. (라디안/초, y 축은 이것의 1.37 배)
 	//==============================================================================
-	pub fn set_frequency(&mut self, frequency: f32) {
+	pub fn set_frequency(&mut self, frequency: f64) {
 		self.frequency = frequency;
 	}
 }
@@ -209,10 +209,10 @@ mod tests {
 		shaker.add_shake(8.0);
 		shaker.add_shake(3.0);
 		shaker.tick(0.1);
-		let expected_strength = 8.0 * (-1.0f32).exp();
+		let expected_strength = 8.0 * (-1.0f64).exp();
 		let offset = shaker.get_offset();
-		let expected_offset_x = (0.1f32 * 42.0).sin() * expected_strength;
-		let expected_offset_y = (0.1f32 * 42.0 * 1.37).cos() * expected_strength;
+		let expected_offset_x = (0.1f64 * 42.0).sin() * expected_strength;
+		let expected_offset_y = (0.1f64 * 42.0 * 1.37).cos() * expected_strength;
 		assert!((offset.x - expected_offset_x).abs() < 0.0001);
 		assert!((offset.y - expected_offset_y).abs() < 0.0001);
 

@@ -8,7 +8,7 @@
 //! - 원본과 다른 점: 월드는 씬과 컴포넌트가 함께 쓰도록 `Rc<RefCell<PhysicsWorld2D>>` 로 받는다.
 //!   원본 setBody 처럼 붙은 노드를 바로 몸 자리에 두려면 RigidBody2D::set_body_on_node(node, ..) 를 부른다. (컴포넌트의 set_body 는 노드를 몰라 붙을 때와 tick 에서 둔다)
 //!   원본 getBody 자리는 with_body, with_body_mut 이다. (월드를 빌린 동안 몸을 넘긴다)
-//!   노드 자리는 엔진 Vector2(f32)라 몸의 f64 자리를 f32 로 반올림해 넣는다. (몸 셈은 f64 그대로)
+//!   노드 자리(엔진 Vector2)에 몸의 자리를 그대로 넣는다. (두 쪽 다 f64)
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use std::cell::RefCell;
@@ -244,7 +244,7 @@ fn synchronize_transform(world: &Rc<RefCell<PhysicsWorld2D>>, body_id: BodyId2D,
 	let position = body.get_interpolated_position(alpha);
 	let angle = body.get_interpolated_angle(alpha);
 	transform.set_local_position(position.to_vector2());
-	transform.set_local_rotation((angle * 180.0 / std::f64::consts::PI) as f32);
+	transform.set_local_rotation(angle * 180.0 / std::f64::consts::PI);
 }
 
 #[crate::reflect]
@@ -280,7 +280,7 @@ impl Component for RigidBody2D {
 	//==============================================================================
 	/// 갱신. (몸의 자리와 돌림을 노드에 넣는다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		let Some(world) = self.world.as_ref() else {
 			return;
 		};

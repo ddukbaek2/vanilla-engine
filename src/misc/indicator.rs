@@ -43,7 +43,7 @@ const TEETH_COUNT: usize = 8;
 /// 	indicator
 /// }
 ///
-/// fn draw_loading(indicator: &mut Indicator, graphic: &mut Graphic, time_delta: f32) {
+/// fn draw_loading(indicator: &mut Indicator, graphic: &mut Graphic, time_delta: f64) {
 /// 	indicator.tick(time_delta);
 /// 	indicator.draw(graphic);
 /// }
@@ -54,12 +54,12 @@ pub struct Indicator {
 	/// 화면 위 출력 위치. (가운데)
 	position: Vector2,
 	/// 톱니바퀴 기본 반지름.
-	radius: f32,
+	radius: f64,
 	color: Color,
 	/// 지금 회전 각도. (라디안)
-	rotation: f32,
+	rotation: f64,
 	/// 회전 속도. (라디안 / 초)
-	speed: f32,
+	speed: f64,
 	is_visible: bool,
 }
 
@@ -87,7 +87,7 @@ impl Indicator {
 	/// # 인자
 	/// - `time_delta`: 지난 프레임부터 흐른 시간. (초)
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		if !self.is_visible {
 			return;
 		}
@@ -104,7 +104,7 @@ impl Indicator {
 		let inner_radius = self.radius * 0.5;
 		let outer_radius = self.radius;
 		(0..TEETH_COUNT).map(|tooth_index| {
-			let angle = (tooth_index as f32 / TEETH_COUNT as f32) * math::PI * 2.0;
+			let angle = (tooth_index as f64 / TEETH_COUNT as f64) * math::PI * 2.0;
 			let cosine = angle.cos();
 			let sine = angle.sin();
 			(Vector2::create(cosine * inner_radius * 0.8, sine * inner_radius * 0.8), Vector2::create(cosine * outer_radius, sine * outer_radius))
@@ -146,7 +146,7 @@ impl Indicator {
 	/// - `x`: 가운데 x. (그릴 때의 좌표계)
 	/// - `y`: 가운데 y. (그릴 때의 좌표계)
 	//==============================================================================
-	pub fn set_position(&mut self, x: f32, y: f32) {
+	pub fn set_position(&mut self, x: f64, y: f64) {
 		self.position = Vector2::create(x, y);
 	}
 
@@ -166,7 +166,7 @@ impl Indicator {
 	/// # 인자
 	/// - `radius`: 톱니 바깥 끝까지의 반지름. (1 보다 작으면 1)
 	//==============================================================================
-	pub fn set_radius(&mut self, radius: f32) {
+	pub fn set_radius(&mut self, radius: f64) {
 		self.radius = radius.max(1.0);
 	}
 
@@ -176,7 +176,7 @@ impl Indicator {
 	/// # 돌려줌
 	/// 반지름. (처음 20)
 	//==============================================================================
-	pub fn get_radius(&self) -> f32 {
+	pub fn get_radius(&self) -> f64 {
 		self.radius
 	}
 
@@ -196,7 +196,7 @@ impl Indicator {
 	/// # 인자
 	/// - `speed_radians_per_second`: 회전 속도. (라디안 / 초, 처음 1.5π, 음수면 거꾸로 돈다)
 	//==============================================================================
-	pub fn set_speed(&mut self, speed_radians_per_second: f32) {
+	pub fn set_speed(&mut self, speed_radians_per_second: f64) {
 		self.speed = speed_radians_per_second;
 	}
 
@@ -206,7 +206,7 @@ impl Indicator {
 	/// # 돌려줌
 	/// 지금까지 쌓인 회전 각도. (라디안, 한 바퀴마다 되감지 않는다)
 	//==============================================================================
-	pub fn get_rotation(&self) -> f32 {
+	pub fn get_rotation(&self) -> f64 {
 		self.rotation
 	}
 

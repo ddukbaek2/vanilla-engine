@@ -32,8 +32,8 @@ pub const DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION: i32 = 1024;
 pub const SHADOW_ATLAS_MAXIMUM_LIGHTS: usize = 4;
 
 /// 점광 큐브 여섯 면의 앞쪽과 위쪽. (+x, -x, +y, -y, +z, -z 차례, 오른쪽은 앞쪽 x 위쪽, 셰이더의 면 고르기와 같다)
-const CUBE_FACE_FORWARDS: [[f32; 3]; 6] = [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0]];
-const CUBE_FACE_UPS: [[f32; 3]; 6] = [[0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0]];
+const CUBE_FACE_FORWARDS: [[f64; 3]; 6] = [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0]];
+const CUBE_FACE_UPS: [[f64; 3]; 6] = [[0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0]];
 
 //==============================================================================
 /// 깊이 판 짓기. (하드웨어 비교 샘플링 sampler2DShadow 의 DEPTH_COMPONENT24 텍스처와 컬러 없는 프레임버퍼, 앞의 텍스처와 프레임버퍼 묶음은 돌린다)
@@ -66,24 +66,24 @@ fn create_depth_target(gl: &glow::Context, resolution: i32) -> Result<(GlFramebu
 //==============================================================================
 /// 앞쪽, 위쪽, 자리로 보기 행렬 짓기. (오른쪽은 앞쪽 x 위쪽, 카메라는 앞쪽을 본다, 셰이더가 같은 바탕으로 칸 자리를 셈한다)
 //==============================================================================
-fn create_basis_view_matrix(position: [f32; 3], forward: [f32; 3], up: [f32; 3]) -> Matrix4 {
+fn create_basis_view_matrix(position: [f64; 3], forward: [f64; 3], up: [f64; 3]) -> Matrix4 {
 	let right = [forward[1] * up[2] - forward[2] * up[1], forward[2] * up[0] - forward[0] * up[2], forward[0] * up[1] - forward[1] * up[0]];
 	let back = [-forward[0], -forward[1], -forward[2]];
-	let dot = |axis: [f32; 3]| axis[0] * position[0] + axis[1] * position[1] + axis[2] * position[2];
+	let dot = |axis: [f64; 3]| axis[0] * position[0] + axis[1] * position[1] + axis[2] * position[2];
 	let mut matrix = Matrix4::create_identity();
 	let elements = &mut matrix.elements;
-	elements[0] = right[0];
-	elements[4] = right[1];
-	elements[8] = right[2];
-	elements[12] = -dot(right);
-	elements[1] = up[0];
-	elements[5] = up[1];
-	elements[9] = up[2];
-	elements[13] = -dot(up);
-	elements[2] = back[0];
-	elements[6] = back[1];
-	elements[10] = back[2];
-	elements[14] = -dot(back);
+	elements[0] = (right[0]) as f32;
+	elements[4] = (right[1]) as f32;
+	elements[8] = (right[2]) as f32;
+	elements[12] = (-dot(right)) as f32;
+	elements[1] = (up[0]) as f32;
+	elements[5] = (up[1]) as f32;
+	elements[9] = (up[2]) as f32;
+	elements[13] = (-dot(up)) as f32;
+	elements[2] = (back[0]) as f32;
+	elements[6] = (back[1]) as f32;
+	elements[10] = (back[2]) as f32;
+	elements[14] = (-dot(back)) as f32;
 	elements[3] = 0.0;
 	elements[7] = 0.0;
 	elements[11] = 0.0;
@@ -94,7 +94,7 @@ fn create_basis_view_matrix(position: [f32; 3], forward: [f32; 3], up: [f32; 3])
 //==============================================================================
 /// 3 수 벡터 길이를 1 로. (길이 0 이면 아래쪽)
 //==============================================================================
-fn normalize_direction(direction: [f32; 3]) -> [f32; 3] {
+fn normalize_direction(direction: [f64; 3]) -> [f64; 3] {
 	let length = (direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]).sqrt();
 	if length <= 0.0 {
 		return [0.0, -1.0, 0.0];
@@ -123,7 +123,7 @@ fn normalize_direction(direction: [f32; 3]) -> [f32; 3] {
 /// 	let model_matrix = Matrix4::create_identity();
 /// 	shadow_map.begin_render(gl);
 /// 	skinned_model_renderer.draw_depth(gl, skinned_model, &light_view_projection_elements, model_matrix.get_elements());
-/// 	let texel_size = 1.0 / shadow_map.get_resolution() as f32;
+/// 	let texel_size = 1.0 / shadow_map.get_resolution() as f64;
 /// 	skinned_model_renderer.set_shadow_map(Some(shadow_map.get_depth_texture()), Some(&light_view_projection_elements), texel_size);
 /// }
 /// ```
@@ -177,7 +177,7 @@ impl ShadowMap {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn update_light_matrix(&mut self, focus_position: Vector3, light_direction: Vector3, extent: f32, near_distance: f32, far_distance: f32) {
+	pub fn update_light_matrix(&mut self, focus_position: Vector3, light_direction: Vector3, extent: f64, near_distance: f64, far_distance: f64) {
 		let normalized_direction = light_direction.normalize();
 		let eye_distance = (near_distance + far_distance) * 0.5;
 		let eye_offset = normalized_direction.multiply_scalar(-eye_distance);
@@ -186,10 +186,10 @@ impl ShadowMap {
 		let mut view_matrix = Matrix4::create_look_at(eye_position, focus_position, up_direction);
 
 		// 텍셀 스냅. (광원 공간 이동 성분을 텍셀 크기로 양자화, 떨림 방지)
-		let world_units_per_texel = (extent * 2.0) / self.resolution as f32;
+		let world_units_per_texel = (extent * 2.0) / self.resolution as f64;
 		let view_elements = &mut view_matrix.elements;
-		view_elements[12] = round_half_up(view_elements[12] / world_units_per_texel) * world_units_per_texel;
-		view_elements[13] = round_half_up(view_elements[13] / world_units_per_texel) * world_units_per_texel;
+		view_elements[12] = (round_half_up(view_elements[12] as f64 / world_units_per_texel) * world_units_per_texel) as f32;
+		view_elements[13] = (round_half_up(view_elements[13] as f64 / world_units_per_texel) * world_units_per_texel) as f32;
 
 		let orthographic_matrix = Matrix4::create_orthographic(-extent, extent, -extent, extent, near_distance, far_distance);
 		let mut light_view_projection_matrix = orthographic_matrix;
@@ -294,17 +294,17 @@ pub struct ShadowAtlasLight {
 	/// 빛 목록에서의 차례. (ToonRenderer 가 그 점광에 이 그림자를 붙인다)
 	pub light_index: usize,
 	/// 빛의 자리.
-	pub position: [f32; 3],
+	pub position: [f64; 3],
 	/// 보는 쪽. (스포트라이트만)
-	pub forward: [f32; 3],
+	pub forward: [f64; 3],
 	/// 위쪽. (스포트라이트만)
-	pub up: [f32; 3],
+	pub up: [f64; 3],
 	/// 반각의 탄젠트. (0 이면 점광)
-	pub tangent: f32,
+	pub tangent: f64,
 	/// 가까운 거리.
-	pub near: f32,
+	pub near: f64,
 	/// 먼 거리.
-	pub far: f32,
+	pub far: f64,
 	/// 첫 칸 번호.
 	pub first_tile: usize,
 }
@@ -356,7 +356,7 @@ pub struct ShadowAtlasTile {
 /// let spot_light = ShadowAtlasLightSource {
 /// 	position: [3.0, 4.0, 0.0],
 /// 	direction: Some([0.0, -1.0, 0.0]),
-/// 	outer_cone_angle: std::f32::consts::FRAC_PI_4,
+/// 	outer_cone_angle: std::f64::consts::FRAC_PI_4,
 /// 	..point_light
 /// };
 /// assert!(point_light.direction.is_none());
@@ -366,15 +366,15 @@ pub struct ShadowAtlasTile {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ShadowAtlasLightSource {
 	/// 빛의 자리.
-	pub position: [f32; 3],
+	pub position: [f64; 3],
 	/// 빛이 나아가는 쪽. (Some 이면 스포트라이트)
-	pub direction: Option<[f32; 3]>,
+	pub direction: Option<[f64; 3]>,
 	/// 스포트라이트 바깥 원뿔 반각. (라디안)
-	pub outer_cone_angle: f32,
+	pub outer_cone_angle: f64,
 	/// 먼 거리. (0 이면 30)
-	pub range: f32,
+	pub range: f64,
 	/// 가까운 거리.
-	pub shadow_near: f32,
+	pub shadow_near: f64,
 	/// 그림자를 드리울지.
 	pub casts_shadow: bool,
 }
@@ -486,7 +486,7 @@ impl ShadowAtlas {
 	//==============================================================================
 	/// 칸 하나 짓기. (지금까지 지은 칸 수로 격자 자리를 정하고, 바탕 보기 행렬과 원근 투영을 곱한다)
 	//==============================================================================
-	fn create_tile(&self, position: [f32; 3], forward: [f32; 3], up: [f32; 3], tangent: f32, near: f32, far: f32) -> ShadowAtlasTile {
+	fn create_tile(&self, position: [f64; 3], forward: [f64; 3], up: [f64; 3], tangent: f64, near: f64, far: f64) -> ShadowAtlasTile {
 		let tile_index = self.tile_list.len() as i32;
 		let mut view_projection_matrix = Matrix4::create_perspective(2.0 * tangent.atan(), 1.0, near, far);
 		view_projection_matrix.multiply(&create_basis_view_matrix(position, forward, up));
@@ -658,7 +658,7 @@ fn read_light_up_direction(normalized_direction: Vector3) -> Vector3 {
 //==============================================================================
 /// 반올림. (원본 Math.round 와 같이 x.5 는 위쪽 정수로)
 //==============================================================================
-fn round_half_up(value: f32) -> f32 {
+fn round_half_up(value: f64) -> f64 {
 	(value + 0.5).floor()
 }
 

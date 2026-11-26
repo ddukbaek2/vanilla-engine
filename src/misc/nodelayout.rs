@@ -55,15 +55,15 @@ type NodeLayoutAction = Box<dyn FnOnce(&mut NodeTree, NodeId)>;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NodeLayoutFanOptions {
 	/// 호의 중심.
-	pub center_x: f32,
+	pub center_x: f64,
 	/// 호의 중심 y. (center_x 와 짝, 부모 영역 기준 로컬 좌표)
-	pub center_y: f32,
+	pub center_y: f64,
 	/// 호의 반지름.
-	pub radius: f32,
+	pub radius: f64,
 	/// 이웃한 항목 사이 각도. (라디안)
-	pub angle_step_radian: f32,
+	pub angle_step_radian: f64,
 	/// 가운데 항목이 바라보는 방향. (라디안, 기본 위쪽)
-	pub base_angle_radian: f32,
+	pub base_angle_radian: f64,
 	/// 항목 회전도 호의 접선에 맞출지.
 	pub rotate_nodes: bool,
 }
@@ -184,7 +184,7 @@ impl NodeLayout {
 		if count == 0 {
 			return;
 		}
-		let middle_index = (count as f32 - 1.0) / 2.0;
+		let middle_index = (count as f64 - 1.0) / 2.0;
 		for (index, node_id) in node_ids.iter().enumerate() {
 			let node = match node_tree.get_node_mut(*node_id) {
 				Some(node) => {
@@ -194,7 +194,7 @@ impl NodeLayout {
 					continue;
 				}
 			};
-			let angle_radian = options.base_angle_radian + (index as f32 - middle_index) * options.angle_step_radian;
+			let angle_radian = options.base_angle_radian + (index as f64 - middle_index) * options.angle_step_radian;
 			let position_x = options.center_x + angle_radian.cos() * options.radius;
 			let position_y = options.center_y + angle_radian.sin() * options.radius;
 			node.set_local_position(Vector2::create(position_x, position_y));
@@ -332,7 +332,7 @@ impl NodeLayout {
 	/// # 돌려줌
 	/// 설정을 하나 더 붙인 레이아웃.
 	//==============================================================================
-	pub fn local_position(self, x: f32, y: f32) -> NodeLayout {
+	pub fn local_position(self, x: f64, y: f64) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
 			node_tree[node_id].set_local_position(Vector2::create(x, y));
 		}))
@@ -363,7 +363,7 @@ impl NodeLayout {
 	/// # 돌려줌
 	/// 설정을 하나 더 붙인 레이아웃.
 	//==============================================================================
-	pub fn content_size(self, x: f32, y: f32) -> NodeLayout {
+	pub fn content_size(self, x: f64, y: f64) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
 			node_tree[node_id].set_content_size(Vector2::create(x, y));
 		}))
@@ -379,7 +379,7 @@ impl NodeLayout {
 	/// # 돌려줌
 	/// 설정을 하나 더 붙인 레이아웃.
 	//==============================================================================
-	pub fn local_scale(self, x: f32, y: f32) -> NodeLayout {
+	pub fn local_scale(self, x: f64, y: f64) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
 			node_tree[node_id].set_local_scale(Vector2::create(x, y));
 		}))
@@ -409,7 +409,7 @@ impl NodeLayout {
 	/// # 돌려줌
 	/// 설정을 하나 더 붙인 레이아웃.
 	//==============================================================================
-	pub fn anchor(self, x: f32, y: f32) -> NodeLayout {
+	pub fn anchor(self, x: f64, y: f64) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
 			node_tree[node_id].set_anchor(Vector2::create(x, y));
 		}))
@@ -443,7 +443,7 @@ impl NodeLayout {
 	/// assert_eq!(node_tree[corner_id].get_local_position(), Vector2::create(670.0, 880.0));
 	/// ```
 	//==============================================================================
-	pub fn anchored_position(self, x: f32, y: f32) -> NodeLayout {
+	pub fn anchored_position(self, x: f64, y: f64) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
 			let anchored_position = Vector2::create(x, y);
 			let parent_content_size = match node_tree.get_parent_id(node_id) {

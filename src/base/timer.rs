@@ -1,6 +1,6 @@
 //==============================================================================
 //! 쿨다운과 반복 타이머. (원본 base/timer.js 의 Cooldown, RepeatTimer)
-//! - 시간은 초 단위 f32 다. (엔진 TimeManager::get_time_delta 와 같은 타입)
+//! - 시간은 초 단위 f64 다. (엔진 TimeManager::get_time_delta 와 같은 타입)
 //! - 원본 Cooldown.use() 는 러스트 예약어(use)라 r#use() 로 부른다. (이름은 원본 그대로, r#loop, r#move 와 같다) 원본처럼 activate() 도 같은 일을 한다.
 //! - 원본 기본 인자(duration = 1, interval = 1, elapsed_event = null)는 Default 와 new 의 인자로 옮겼다.
 //! - RepeatTimer 의 콜백은 `Box<dyn FnMut()>` 다. (씬의 set_first_touch_callback 과 같은 꼴) 게임 상태를 바꾸려면
@@ -8,7 +8,7 @@
 //==============================================================================
 
 /// RepeatTimer 간격의 하한. (원본 0.000001)
-const MINIMUM_INTERVAL: f32 = 0.000001;
+const MINIMUM_INTERVAL: f64 = 0.000001;
 
 //==============================================================================
 /// 쿨다운.
@@ -33,8 +33,8 @@ const MINIMUM_INTERVAL: f32 = 0.000001;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cooldown {
-	duration: f32,
-	remain_seconds: f32,
+	duration: f64,
+	remain_seconds: f64,
 }
 
 impl Default for Cooldown {
@@ -56,7 +56,7 @@ impl Cooldown {
 	/// # 돌려줌
 	/// 준비된 상태의 쿨다운. (남은 시간 0)
 	//==============================================================================
-	pub fn new(duration: f32) -> Cooldown {
+	pub fn new(duration: f64) -> Cooldown {
 		Cooldown { duration: duration.max(0.0), remain_seconds: 0.0 }
 	}
 
@@ -66,7 +66,7 @@ impl Cooldown {
 	/// # 인자
 	/// - `time_delta`: 지난 프레임과의 간격. (초, 남은 시간에서 빼고 0 아래로는 내려가지 않는다)
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		if self.remain_seconds > 0.0 {
 			self.remain_seconds = (self.remain_seconds - time_delta).max(0.0);
 		}
@@ -119,7 +119,7 @@ impl Cooldown {
 	/// # 인자
 	/// - `duration`: 쿨다운 시간. (초, 지금 남은 시간은 바꾸지 않고 다음 발동부터 쓴다)
 	//==============================================================================
-	pub fn set_duration(&mut self, duration: f32) {
+	pub fn set_duration(&mut self, duration: f64) {
 		self.duration = duration.max(0.0);
 	}
 
@@ -129,7 +129,7 @@ impl Cooldown {
 	/// # 돌려줌
 	/// 쿨다운 시간. (초)
 	//==============================================================================
-	pub fn get_duration(&self) -> f32 {
+	pub fn get_duration(&self) -> f64 {
 		self.duration
 	}
 
@@ -139,7 +139,7 @@ impl Cooldown {
 	/// # 돌려줌
 	/// 다시 준비될 때까지 남은 시간. (초, 준비되어 있으면 0)
 	//==============================================================================
-	pub fn get_remain_seconds(&self) -> f32 {
+	pub fn get_remain_seconds(&self) -> f64 {
 		self.remain_seconds
 	}
 
@@ -149,7 +149,7 @@ impl Cooldown {
 	/// # 돌려줌
 	/// 1 - 남은 시간 / 쿨다운 시간. (쿨다운 시간이 0 이면 1, 발동 뒤 set_duration 으로 남은 시간보다 짧게 바꾸면 0 보다 작을 수 있다)
 	//==============================================================================
-	pub fn get_progress(&self) -> f32 {
+	pub fn get_progress(&self) -> f64 {
 		if self.duration <= 0.0 {
 			return 1.0;
 		}
@@ -183,8 +183,8 @@ impl Cooldown {
 /// ```
 //==============================================================================
 pub struct RepeatTimer {
-	interval: f32,
-	elapsed_seconds: f32,
+	interval: f64,
+	elapsed_seconds: f64,
 	elapsed_event: Option<Box<dyn FnMut()>>,
 	is_running: bool,
 }
@@ -209,7 +209,7 @@ impl RepeatTimer {
 	/// # 돌려줌
 	/// 돌아가는 상태의 반복 타이머. (누적 시간 0)
 	//==============================================================================
-	pub fn new(interval: f32, elapsed_event: Option<Box<dyn FnMut()>>) -> RepeatTimer {
+	pub fn new(interval: f64, elapsed_event: Option<Box<dyn FnMut()>>) -> RepeatTimer {
 		RepeatTimer {
 			interval: interval.max(MINIMUM_INTERVAL),
 			elapsed_seconds: 0.0,
@@ -224,7 +224,7 @@ impl RepeatTimer {
 	/// # 인자
 	/// - `time_delta`: 지난 프레임과의 간격. (초, 멈춰 있으면 무시한다)
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		if !self.is_running {
 			return;
 		}
@@ -265,7 +265,7 @@ impl RepeatTimer {
 	/// # 인자
 	/// - `interval`: 간격. (초, 쌓아 둔 누적 시간은 그대로 둔다)
 	//==============================================================================
-	pub fn set_interval(&mut self, interval: f32) {
+	pub fn set_interval(&mut self, interval: f64) {
 		self.interval = interval.max(MINIMUM_INTERVAL);
 	}
 
@@ -275,7 +275,7 @@ impl RepeatTimer {
 	/// # 돌려줌
 	/// 간격. (초)
 	//==============================================================================
-	pub fn get_interval(&self) -> f32 {
+	pub fn get_interval(&self) -> f64 {
 		self.interval
 	}
 

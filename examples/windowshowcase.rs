@@ -14,11 +14,11 @@ use std::rc::Rc;
 use vanilla::{Color, ComponentContext, Engine, EngineConfiguration, GameScene, GameSceneBase, NodeId, NodeTree, Paint, Pivot, PlayInput, SafeAreaInsets, ScreenFadeHold, Text, TextAlign, UIButton, UIConfirmWindow, UIConfirmWindowOptions, UILabel, UIWindow, UIWindowDefaultBehavior, UIWindowLayer, Vector2};
 
 // 저절로 둘러보는 때. (초)
-const TOUR_CLOSE_CONFIRM_SECONDS: f32 = 2.5;
-const TOUR_CLOSE_ALL_SECONDS: f32 = 4.0;
-const TOUR_FADE_SECONDS: f32 = 4.6;
+const TOUR_CLOSE_CONFIRM_SECONDS: f64 = 2.5;
+const TOUR_CLOSE_ALL_SECONDS: f64 = 4.0;
+const TOUR_FADE_SECONDS: f64 = 4.6;
 // 페이드를 어둡게 붙잡는 시간. (초)
-const FADE_HOLD_SECONDS: f32 = 0.6;
+const FADE_HOLD_SECONDS: f64 = 0.6;
 
 //==============================================================================
 // 첫 씬.
@@ -30,7 +30,7 @@ struct MainScene {
 	status_id: Option<NodeId>,
 	marker_id: Option<NodeId>,
 	confirm_window_id: Option<NodeId>,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 	tour_step: u32,
 	// 단추가 페이드를 부탁했는지.
 	fade_requested: Rc<Cell<bool>>,
@@ -38,7 +38,7 @@ struct MainScene {
 	dark_count: Rc<Cell<u32>>,
 	// 다 어두워졌을 때 받은 손잡이. (on_dark 가 넣는다)
 	screen_fade_hold: Rc<RefCell<Option<ScreenFadeHold>>>,
-	hold_remain_seconds: f32,
+	hold_remain_seconds: f64,
 	press_count: Rc<Cell<u32>>,
 	// 놀이 입력 처리기가 정한 표시 자리.
 	marker_position: Rc<Cell<Option<Vector2>>>,
@@ -297,7 +297,7 @@ impl GameScene for MainScene {
 	//==============================================================================
 	// 갱신. (둘러보기, 놀이 입력으로 표시 옮기기, 페이드 손잡이 놓기)
 	//==============================================================================
-	fn tick(&mut self, _engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, _engine: &mut Engine, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 		self.update_tour();
 		if self.fade_requested.replace(false) {

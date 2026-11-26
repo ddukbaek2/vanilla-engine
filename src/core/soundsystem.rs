@@ -139,9 +139,9 @@ const CONTEXT_RESUME_RETRY_INTERVAL: f64 = 0.5;
 /// 크기를 바꿀 때 따라가는 시간. (초, 툭 끊기지 않게)
 const VOLUME_SMOOTHING_SECONDS: f64 = 0.05;
 /// 효과음을 좌우로 나누는 가장 큰 값. (-1 ~ 1)
-const MAXIMUM_PAN: f32 = 1.0;
+const MAXIMUM_PAN: f64 = 1.0;
 /// 이 크기 이하의 효과음은 내지 않는다.
-const MINIMUM_EFFECT_VOLUME: f32 = 0.001;
+const MINIMUM_EFFECT_VOLUME: f64 = 0.001;
 /// 줄여 끈 효과음을 다 줄어든 뒤 멈추기까지 남기는 틈. (초)
 const EFFECT_STOP_MARGIN_SECONDS: f64 = 0.02;
 
@@ -179,19 +179,19 @@ pub struct SoundRow {
 	/// 같은 소리를 여러 번 녹음한 무리의 파일 경로. (애셋 폴더 기준, 효과음은 낼 때마다 받아 둔 것 가운데 바로 앞과 다른 것을 고르고, 배경음악은 첫 파일만 튼다)
 	pub paths: Vec<String>,
 	/// 소리의 크기. (0 ~ 1, 효과음은 부를 때의 크기와 곱한 뒤 0 ~ 1 로 다듬는다)
-	pub volume: f32,
+	pub volume: f64,
 	/// 같은 효과음을 다시 낼 수 있는 간격. (초, 0 이면 막지 않는다)
-	pub minimum_interval: f32,
+	pub minimum_interval: f64,
 	/// 배경음악 줄인지. (load_sounds 가 효과음을 먼저, 배경음악을 나중에 받는다)
 	pub is_music: bool,
 	/// 같은 효과음이 한꺼번에 날 수 있는 수. (넘으면 가장 오래된 것을 끊는다, None 이면 효과음 전체의 수 12 까지, 0 이면 하나)
 	pub maximum_voices: Option<usize>,
 	/// 낼 때마다 음 높이를 흔드는 비. (0.05 면 ±5%, 0 이면 흔들지 않는다)
-	pub pitch_variation: f32,
+	pub pitch_variation: f64,
 	/// 효과음을 앞에서부터 틀 시간. (초, 0 이면 끝까지)
-	pub play_seconds: f32,
+	pub play_seconds: f64,
 	/// play_seconds 뒤에 줄여 끄는 시간. (초, play_seconds 가 0 이면 쓰지 않는다)
-	pub fade_out_seconds: f32,
+	pub fade_out_seconds: f64,
 }
 
 impl SoundRow {
@@ -206,7 +206,7 @@ impl SoundRow {
 	/// # 돌려줌
 	/// 효과음 줄. (minimum_interval, pitch_variation, play_seconds, fade_out_seconds 는 0, maximum_voices 는 None)
 	//==============================================================================
-	pub fn create_effect(id: &str, paths: &[&str], volume: f32) -> SoundRow {
+	pub fn create_effect(id: &str, paths: &[&str], volume: f64) -> SoundRow {
 		SoundRow {
 			id: String::from(id),
 			paths: paths.iter().map(|path| String::from(*path)).collect(),
@@ -231,7 +231,7 @@ impl SoundRow {
 	/// # 돌려줌
 	/// 배경음악 줄. (is_music 이 true, 경로 하나, 나머지 칸은 create_effect 와 같다)
 	//==============================================================================
-	pub fn create_music(id: &str, path: &str, volume: f32) -> SoundRow {
+	pub fn create_music(id: &str, path: &str, volume: f64) -> SoundRow {
 		let mut sound_row = SoundRow::create_effect(id, &[path], volume);
 		sound_row.is_music = true;
 		sound_row
@@ -397,7 +397,7 @@ impl SoundMuteState {
 /// 		self.sound_system = Some(sound_system);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 /// 		self.scene_base.tick(engine, time_delta);
 /// 		if let Some(sound_system) = &mut self.sound_system {
 /// 			sound_system.update();
@@ -436,15 +436,15 @@ pub struct SoundSystem {
 	releasing_voice_list: Vec<EffectVoice>,
 	/// 틀어 달라고 한 배경음악. (없으면 "")
 	music_id: String,
-	music_fade_seconds: f32,
+	music_fade_seconds: f64,
 	is_music_resumed: bool,
 	playing_music: Option<MusicVoice>,
 	/// 줄여 끄는 중인 배경음악. (끝날 때까지 든다)
 	fading_music_list: Vec<MusicVoice>,
 	music_position_by_id: HashMap<String, f64>,
-	music_volume: f32,
-	music_scale: f32,
-	sound_effect_volume: f32,
+	music_volume: f64,
+	music_scale: f64,
+	sound_effect_volume: f64,
 	/// 소리의 길에 건 음소거.
 	is_muted: bool,
 	is_autoplay_tried: bool,
@@ -679,7 +679,7 @@ impl SoundSystem {
 	/// # 돌려줌
 	/// 설정의 음악 크기. (0 ~ 1, 처음은 1)
 	//==============================================================================
-	pub fn get_music_volume(&self) -> f32 {
+	pub fn get_music_volume(&self) -> f64 {
 		self.music_volume
 	}
 
@@ -689,7 +689,7 @@ impl SoundSystem {
 	/// # 돌려줌
 	/// 음악의 비. (0 ~ 1, 처음은 1)
 	//==============================================================================
-	pub fn get_music_scale(&self) -> f32 {
+	pub fn get_music_scale(&self) -> f64 {
 		self.music_scale
 	}
 
@@ -699,7 +699,7 @@ impl SoundSystem {
 	/// # 돌려줌
 	/// 설정의 효과음 크기. (0 ~ 1, 처음은 1)
 	//==============================================================================
-	pub fn get_sound_effect_volume(&self) -> f32 {
+	pub fn get_sound_effect_volume(&self) -> f64 {
 		self.sound_effect_volume
 	}
 
@@ -917,7 +917,7 @@ impl SoundSystem {
 	/// # 인자
 	/// - `music_volume`: 음악 크기. (0 ~ 1 로 자르고, 유한한 수가 아니면 0)
 	//==============================================================================
-	pub fn set_music_volume(&mut self, music_volume: f32) {
+	pub fn set_music_volume(&mut self, music_volume: f64) {
 		self.music_volume = clamp_sound_volume(music_volume);
 		self.apply_volumes();
 	}
@@ -941,7 +941,7 @@ impl SoundSystem {
 	/// assert_eq!(sound_system.get_music_volume() * sound_system.get_music_scale(), 0.4);
 	/// ```
 	//==============================================================================
-	pub fn set_music_scale(&mut self, music_scale: f32) {
+	pub fn set_music_scale(&mut self, music_scale: f64) {
 		self.music_scale = clamp_sound_volume(music_scale);
 		self.apply_volumes();
 	}
@@ -952,7 +952,7 @@ impl SoundSystem {
 	/// # 인자
 	/// - `sound_effect_volume`: 효과음 크기. (0 ~ 1 로 자르고, 유한한 수가 아니면 0)
 	//==============================================================================
-	pub fn set_sound_effect_volume(&mut self, sound_effect_volume: f32) {
+	pub fn set_sound_effect_volume(&mut self, sound_effect_volume: f64) {
 		self.sound_effect_volume = clamp_sound_volume(sound_effect_volume);
 		self.apply_volumes();
 	}
@@ -993,7 +993,7 @@ impl SoundSystem {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn play_music(&mut self, sound_id: &str, fade_seconds: f32, is_resumed: bool) {
+	pub fn play_music(&mut self, sound_id: &str, fade_seconds: f64, is_resumed: bool) {
 		if sound_id == self.music_id {
 			return;
 		}
@@ -1022,7 +1022,7 @@ impl SoundSystem {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn play_effect(&mut self, sound_id: &str, volume: f32, pan: f32) {
+	pub fn play_effect(&mut self, sound_id: &str, volume: f64, pan: f64) {
 		let effect_bus = match &self.effect_bus {
 			Some(effect_bus) => {
 				effect_bus.clone()
@@ -1056,7 +1056,7 @@ impl SoundSystem {
 		}
 		let now = self.read_now();
 		let last_play_time = self.last_play_time_by_id.get(sound_id).copied().unwrap_or(f64::NEG_INFINITY);
-		if now - last_play_time < sound_row.minimum_interval as f64 {
+		if now - last_play_time < sound_row.minimum_interval {
 			return;
 		}
 		let audio_asset = match self.pick_variant(sound_id, &asset_list) {
@@ -1076,7 +1076,7 @@ impl SoundSystem {
 		audio_player.set_audio_asset(audio_asset);
 		if sound_row.pitch_variation > 0.0 {
 			let pitch_ratio = 1.0 + (math::random() * 2.0 - 1.0) * sound_row.pitch_variation;
-			audio_player.set_playback_rate(pitch_ratio as f64);
+			audio_player.set_playback_rate(pitch_ratio);
 		}
 		let clamped_pan = if pan.is_finite() {
 			pan.clamp(-MAXIMUM_PAN, MAXIMUM_PAN)
@@ -1092,9 +1092,9 @@ impl SoundSystem {
 		audio_player.play(false);
 		// 앞만 틀고 줄여 끄는 소리. (원본 setValueAtTime, linearRampToValueAtTime, source.stop(when))
 		if sound_row.play_seconds > 0.0 {
-			let fade_out_seconds = sound_row.fade_out_seconds.max(0.0) as f64;
-			let fade_start_time = self.read_context_time() + sound_row.play_seconds as f64;
-			audio_player.apply_gain_automation(GainAutomation::SetValueAtTime { value: effect_volume, time: fade_start_time });
+			let fade_out_seconds = sound_row.fade_out_seconds.max(0.0);
+			let fade_start_time = self.read_context_time() + sound_row.play_seconds;
+			audio_player.apply_gain_automation(GainAutomation::SetValueAtTime { value: effect_volume as f32, time: fade_start_time });
 			audio_player.apply_gain_automation(GainAutomation::LinearRampToValueAtTime { value: 0.0, time: fade_start_time + fade_out_seconds });
 			audio_player.stop_at_time(fade_start_time + fade_out_seconds + EFFECT_STOP_MARGIN_SECONDS);
 		}
@@ -1125,7 +1125,7 @@ impl SoundSystem {
 			loaded_index_list
 		};
 		let candidate_count = candidate_index_list.len();
-		let picked_index = candidate_index_list[((math::random() as f64 * candidate_count as f64) as usize).min(candidate_count - 1)];
+		let picked_index = candidate_index_list[((math::random() * candidate_count as f64) as usize).min(candidate_count - 1)];
 		self.last_variant_by_id.insert(String::from(sound_id), picked_index);
 		asset_list[picked_index].clone()
 	}
@@ -1165,8 +1165,8 @@ impl SoundSystem {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn fade_out_effects(&mut self, sound_id: &str, fade_seconds: f32) {
-		let clamped_fade_seconds = fade_seconds.max(0.0) as f64;
+	pub fn fade_out_effects(&mut self, sound_id: &str, fade_seconds: f64) {
+		let clamped_fade_seconds = fade_seconds.max(0.0);
 		let has_audio_context = self.audio_manager.has_audio_context();
 		let context_time = self.read_context_time();
 		let mut voice_index = 0;
@@ -1184,7 +1184,7 @@ impl SoundSystem {
 			// 원본: 지금 gain.value 에서 cancelScheduledValues, setValueAtTime, linearRampToValueAtTime(0), source.stop(when).
 			let current_gain = voice.audio_player.get_gain_value();
 			voice.audio_player.apply_gain_automation(GainAutomation::CancelScheduledValues { time: context_time });
-			voice.audio_player.apply_gain_automation(GainAutomation::SetValueAtTime { value: current_gain, time: context_time });
+			voice.audio_player.apply_gain_automation(GainAutomation::SetValueAtTime { value: current_gain as f32, time: context_time });
 			voice.audio_player.apply_gain_automation(GainAutomation::LinearRampToValueAtTime { value: 0.0, time: context_time + clamped_fade_seconds });
 			voice.audio_player.stop_at_time(context_time + clamped_fade_seconds + EFFECT_STOP_MARGIN_SECONDS);
 			self.releasing_voice_list.push(voice);
@@ -1291,8 +1291,8 @@ impl SoundSystem {
 		};
 		let mute_scale = if self.is_muted { 0.0 } else { 1.0 };
 		let context_time = self.read_context_time();
-		music_bus.apply_gain_automation(GainAutomation::SetTargetAtTime { target: self.music_volume * self.music_scale * mute_scale, time: context_time, time_constant: VOLUME_SMOOTHING_SECONDS });
-		effect_bus.apply_gain_automation(GainAutomation::SetTargetAtTime { target: self.sound_effect_volume * mute_scale, time: context_time, time_constant: VOLUME_SMOOTHING_SECONDS });
+		music_bus.apply_gain_automation(GainAutomation::SetTargetAtTime { target: (self.music_volume * self.music_scale * mute_scale) as f32, time: context_time, time_constant: VOLUME_SMOOTHING_SECONDS });
+		effect_bus.apply_gain_automation(GainAutomation::SetTargetAtTime { target: (self.sound_effect_volume * mute_scale) as f32, time: context_time, time_constant: VOLUME_SMOOTHING_SECONDS });
 	}
 
 	//==============================================================================
@@ -1341,7 +1341,7 @@ impl SoundSystem {
 				return;
 			}
 		}
-		let fade_seconds = self.music_fade_seconds as f64;
+		let fade_seconds = self.music_fade_seconds;
 		if let Some(playing_music) = self.playing_music.take() {
 			self.fade_out_music(playing_music, fade_seconds);
 		}
@@ -1381,7 +1381,7 @@ impl SoundSystem {
 		// 원본: 겹쳐 바꾸면 setValueAtTime(0, 지금), linearRampToValueAtTime(크기, 지금 + 초), 아니면 gain.value = 크기.
 		if fade_seconds > 0.0 {
 			audio_player.apply_gain_automation(GainAutomation::SetValueAtTime { value: 0.0, time: context_time });
-			audio_player.apply_gain_automation(GainAutomation::LinearRampToValueAtTime { value: row_volume, time: context_time + fade_seconds });
+			audio_player.apply_gain_automation(GainAutomation::LinearRampToValueAtTime { value: row_volume as f32, time: context_time + fade_seconds });
 		}
 		else {
 			audio_player.set_volume(row_volume);
@@ -1410,7 +1410,7 @@ impl SoundSystem {
 		let audio_player = &mut playing_music.audio_player;
 		let current_gain = audio_player.get_gain_value();
 		audio_player.apply_gain_automation(GainAutomation::CancelScheduledValues { time: context_time });
-		audio_player.apply_gain_automation(GainAutomation::SetValueAtTime { value: current_gain, time: context_time });
+		audio_player.apply_gain_automation(GainAutomation::SetValueAtTime { value: current_gain as f32, time: context_time });
 		if fade_seconds > 0.0 {
 			audio_player.apply_gain_automation(GainAutomation::LinearRampToValueAtTime { value: 0.0, time: stop_time });
 		}
@@ -1434,7 +1434,7 @@ impl SoundSystem {
 //==============================================================================
 /// 0 ~ 1 로 다듬기. (유한한 수가 아니면 0, 원본 clampVolume)
 //==============================================================================
-fn clamp_sound_volume(volume: f32) -> f32 {
+fn clamp_sound_volume(volume: f64) -> f64 {
 	if !volume.is_finite() {
 		return 0.0;
 	}
@@ -1523,7 +1523,7 @@ mod tests {
 	//==============================================================================
 	/// 읽힌 무음 소리 애셋. (seconds 초)
 	//==============================================================================
-	fn create_silent_asset(seconds: f32) -> Rc<AudioAsset> {
+	fn create_silent_asset(seconds: f64) -> Rc<AudioAsset> {
 		let audio_asset = Rc::new(AudioAsset::new());
 		assert!(audio_asset.load_from_bytes(create_silent_wav((seconds * 8000.0) as u32)).get_load_error().is_none());
 		assert!(audio_asset.is_loaded());
@@ -1591,7 +1591,8 @@ mod tests {
 			return;
 		}
 		sound_system.play_effect("short", 0.8, 0.0);
-		assert_eq!(sound_system.voice_list[0].audio_player.get_gain_value(), 0.8);
+		// 이득은 WebAudio AudioParam 의 float 칸이라 0.8 의 f32 값을 읽는다. (원본 gain.value 도 같다)
+		assert_eq!(sound_system.voice_list[0].audio_player.get_gain_value(), 0.8f32 as f64);
 		let fade_start_time = sound_system.read_context_time();
 		sound_system.fade_out_effects("short", 0.05);
 		assert_eq!(sound_system.get_effect_voice_count(), 0);
@@ -1760,7 +1761,7 @@ mod tests {
 		let mut sound_system = SoundSystem::new(&engine, Vec::new());
 		sound_system.set_music_volume(2.0);
 		assert_eq!(sound_system.get_music_volume(), 1.0);
-		sound_system.set_music_scale(f32::NAN);
+		sound_system.set_music_scale(f64::NAN);
 		assert_eq!(sound_system.get_music_scale(), 0.0);
 		sound_system.set_sound_effect_volume(-1.0);
 		assert_eq!(sound_system.get_sound_effect_volume(), 0.0);

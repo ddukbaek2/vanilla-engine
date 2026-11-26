@@ -31,7 +31,7 @@
 //! 	builder.add_part(&create_box_geometry(1.0, 1.0, 1.0), &Matrix4::create_identity(), "#e0c8a8", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
 //! 	let mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("mesh failed")?;
 //! 	let view_matrix = Matrix4::create_look_at(Vector3::create(2.0, 2.0, 3.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
-//! 	let projection_matrix = Matrix4::create_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+//! 	let projection_matrix = Matrix4::create_perspective(std::f64::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
 //! 	let model_matrix = Matrix4::create_identity();
 //! 	if outline.begin_line_ids(gl, &view_matrix, &projection_matrix) {
 //! 		outline.draw_mesh(gl, &mesh, &model_matrix, 1, ToonLineDrawOptions::default());
@@ -47,6 +47,7 @@
 //! <!-- image: toon-style.webp -->
 //==============================================================================
 use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 
 use crate::base::matrix4::Matrix4;
 use crate::core::graphic::{GlProgram, GlTexture, GlVertexArray};
@@ -89,7 +90,7 @@ pub enum ToonOutlineWidthUnit {
 /// 	crystal_builder.add_part(&create_octahedron_geometry(0.5), &Matrix4::create_translation(0.0, 0.5, 0.0), "#90d0ff", part_options);
 /// 	let crystal_mesh = renderer.create_mesh(gl, &crystal_builder.read_arrays())?;
 /// 	let view_matrix = Matrix4::create_look_at(Vector3::create(3.0, 3.0, 4.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
-/// 	let projection_matrix = Matrix4::create_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+/// 	let projection_matrix = Matrix4::create_perspective(std::f64::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
 /// 	if outline.begin_line_ids(gl, &view_matrix, &projection_matrix) {
 /// 		outline.draw_mesh(gl, &floor_mesh, &Matrix4::create_identity(), 1, ToonLineDrawOptions { has_screen_outline: false, ..ToonLineDrawOptions::default() });
 /// 		outline.draw_mesh(gl, &crystal_mesh, &Matrix4::create_identity(), 2, ToonLineDrawOptions { has_crease_line: false, ..ToonLineDrawOptions::default() });
@@ -175,7 +176,7 @@ pub struct ToonLineTarget {
 struct LineFrame {
 	view_matrix: Matrix4,
 	projection_matrix: Matrix4,
-	frustum_planes: [[f32; 4]; 6],
+	frustum_planes: [[f64; 4]; 6],
 	is_perspective: bool,
 	viewport: [i32; 4],
 }
@@ -228,27 +229,27 @@ pub struct ToonScreenOutline {
 	composite_program: ShaderProgram,
 	empty_vertex_array: GlVertexArray,
 	line_target: Option<ToonLineTarget>,
-	color: [f32; 4],
-	width: f32,
+	color: [f64; 4],
+	width: f64,
 	width_unit: ToonOutlineWidthUnit,
-	focus_distance: f32,
-	depth_threshold: f32,
-	crease_cosine: f32,
-	crease_width: f32,
-	crease_opacity: f32,
-	resolution_scale: f32,
+	focus_distance: f64,
+	depth_threshold: f64,
+	crease_cosine: f64,
+	crease_width: f64,
+	crease_opacity: f64,
+	resolution_scale: f64,
 	is_hdr_output: bool,
 	frame: Option<LineFrame>,
 	saved_state: Option<SavedState>,
 	is_drawing_line_ids: bool,
 	instance_data: Vec<f32>,
-	drawn_distance_sum: f32,
+	drawn_distance_sum: f64,
 	drawn_distance_count: u32,
-	line_widths: [f32; 2],
+	line_widths: [f64; 2],
 }
 
 //==============================================================================
-/// f32 배열을 바이트로 본다. (GL 버퍼 업로드용)
+/// f64 배열을 바이트로 본다. (GL 버퍼 업로드용)
 //==============================================================================
 fn float_slice_to_bytes(values: &[f32]) -> &[u8] {
 	unsafe {
@@ -259,14 +260,14 @@ fn float_slice_to_bytes(values: &[f32]) -> &[u8] {
 //==============================================================================
 /// 보기와 투영 행렬에서 절두체의 면 여섯. (ToonRenderer 와 같은 셈, ax + by + cz + d >= 0 이 안쪽)
 //==============================================================================
-fn extract_frustum_planes(matrix: &Matrix4) -> [[f32; 4]; 6] {
-	let elements = &matrix.elements;
+fn extract_frustum_planes(matrix: &Matrix4) -> [[f64; 4]; 6] {
+	let elements = matrix.read_elements();
 	let row = |row_index: usize| [elements[row_index], elements[4 + row_index], elements[8 + row_index], elements[12 + row_index]];
 	let row0 = row(0);
 	let row1 = row(1);
 	let row2 = row(2);
 	let row3 = row(3);
-	let combine = |first: [f32; 4], second: [f32; 4], sign: f32| [first[0] + second[0] * sign, first[1] + second[1] * sign, first[2] + second[2] * sign, first[3] + second[3] * sign];
+	let combine = |first: [f64; 4], second: [f64; 4], sign: f64| [first[0] + second[0] * sign, first[1] + second[1] * sign, first[2] + second[2] * sign, first[3] + second[3] * sign];
 	let mut planes = [combine(row3, row0, 1.0), combine(row3, row0, -1.0), combine(row3, row1, 1.0), combine(row3, row1, -1.0), combine(row3, row2, 1.0), combine(row3, row2, -1.0)];
 	for plane in planes.iter_mut() {
 		let length = (plane[0] * plane[0] + plane[1] * plane[1] + plane[2] * plane[2]).sqrt();
@@ -297,7 +298,7 @@ fn extract_frustum_planes(matrix: &Matrix4) -> [[f32; 4]; 6] {
 /// assert_eq!(read_jump_flood_steps(4.0), vec![4, 2, 1]);
 /// ```
 //==============================================================================
-pub fn read_jump_flood_steps(reach: f32) -> Vec<i32> {
+pub fn read_jump_flood_steps(reach: f64) -> Vec<i32> {
 	let distance = (reach.ceil() as i32).max(1);
 	let mut step = 1;
 	while step * 2 - 1 < distance {
@@ -314,15 +315,15 @@ pub fn read_jump_flood_steps(reach: f32) -> Vec<i32> {
 //==============================================================================
 /// 선 굵기 셈. ([바깥 선, 꺾임 선] 의 그리는 영역 픽셀, 0 이 아니면 한 픽셀 밑으로 내리지 않음, 원근의 월드 굵기는 초점 거리에서)
 //==============================================================================
-fn compute_line_widths(widths: [f32; 2], width_unit: ToonOutlineWidthUnit, viewport_height: i32, projection_scale: f32, is_perspective: bool, focus_distance: f32) -> [f32; 2] {
+fn compute_line_widths(widths: [f64; 2], width_unit: ToonOutlineWidthUnit, viewport_height: i32, projection_scale: f64, is_perspective: bool, focus_distance: f64) -> [f64; 2] {
 	let mut pixels_per_unit = 1.0;
 	if width_unit == ToonOutlineWidthUnit::World {
-		pixels_per_unit = viewport_height as f32 * 0.5 * projection_scale;
+		pixels_per_unit = viewport_height as f64 * 0.5 * projection_scale;
 		if is_perspective {
 			pixels_per_unit /= focus_distance.max(0.001);
 		}
 	}
-	let to_pixels = |width: f32| if width > 0.0 { (width * pixels_per_unit).max(1.0) } else { 0.0 };
+	let to_pixels = |width: f64| if width > 0.0 { (width * pixels_per_unit).max(1.0) } else { 0.0 };
 	[to_pixels(widths[0]), to_pixels(widths[1])]
 }
 
@@ -366,7 +367,7 @@ impl ToonScreenOutline {
 			width_unit: ToonOutlineWidthUnit::Pixel,
 			focus_distance: 0.0,
 			depth_threshold: 0.05,
-			crease_cosine: (std::f32::consts::PI / 3.0).cos(),
+			crease_cosine: (std::f64::consts::PI / 3.0).cos(),
 			crease_width: 1.0,
 			crease_opacity: 1.0,
 			resolution_scale: 1.0,
@@ -387,7 +388,7 @@ impl ToonScreenOutline {
 	/// # 인자
 	/// - `color`: [r, g, b, a] 의 sRGB.
 	//==============================================================================
-	pub fn set_color(&mut self, color: [f32; 4]) {
+	pub fn set_color(&mut self, color: [f64; 4]) {
 		self.color = color;
 	}
 
@@ -398,7 +399,7 @@ impl ToonScreenOutline {
 	/// - `width`: 선 하나의 굵기. (경계를 가운데로 양쪽에 반씩)
 	/// - `unit`: 굵기의 단위. (원본 기본 Pixel)
 	//==============================================================================
-	pub fn set_width(&mut self, width: f32, unit: ToonOutlineWidthUnit) {
+	pub fn set_width(&mut self, width: f64, unit: ToonOutlineWidthUnit) {
 		self.width = width.max(0.0);
 		self.width_unit = unit;
 	}
@@ -411,7 +412,7 @@ impl ToonScreenOutline {
 	/// - `width`: 꺾임 선 하나의 굵기. (원본 기본 1, 0 이면 긋지 않는다)
 	/// - `opacity`: 꺾임 선의 진하기. (원본 기본 1, 선 색의 알파에 곱한다)
 	//==============================================================================
-	pub fn set_crease(&mut self, angle_degrees: f32, width: f32, opacity: f32) {
+	pub fn set_crease(&mut self, angle_degrees: f64, width: f64, opacity: f64) {
 		self.crease_cosine = angle_degrees.clamp(0.0, 180.0).to_radians().cos();
 		self.crease_width = width.max(0.0);
 		self.crease_opacity = opacity.clamp(0.0, 1.0);
@@ -423,7 +424,7 @@ impl ToonScreenOutline {
 	/// # 인자
 	/// - `focus_distance`: 카메라에서의 거리. (월드 길이)
 	//==============================================================================
-	pub fn set_focus_distance(&mut self, focus_distance: f32) {
+	pub fn set_focus_distance(&mut self, focus_distance: f64) {
 		self.focus_distance = focus_distance.max(0.0);
 	}
 
@@ -433,7 +434,7 @@ impl ToonScreenOutline {
 	/// # 인자
 	/// - `depth_threshold`: 접평면 거리 문턱. (월드 길이)
 	//==============================================================================
-	pub fn set_depth_threshold(&mut self, depth_threshold: f32) {
+	pub fn set_depth_threshold(&mut self, depth_threshold: f64) {
 		self.depth_threshold = depth_threshold.max(0.0);
 	}
 
@@ -443,7 +444,7 @@ impl ToonScreenOutline {
 	/// # 인자
 	/// - `resolution_scale`: 0.25 ~ 1.
 	//==============================================================================
-	pub fn set_resolution_scale(&mut self, resolution_scale: f32) {
+	pub fn set_resolution_scale(&mut self, resolution_scale: f64) {
 		self.resolution_scale = resolution_scale.clamp(0.25, 1.0);
 	}
 
@@ -463,7 +464,7 @@ impl ToonScreenOutline {
 	/// # 돌려줌
 	/// [바깥 선 굵기, 꺾임 선 굵기]. (긋지 않으면 0)
 	//==============================================================================
-	pub fn get_line_widths(&self) -> [f32; 2] {
+	pub fn get_line_widths(&self) -> [f64; 2] {
 		self.line_widths
 	}
 
@@ -483,7 +484,7 @@ impl ToonScreenOutline {
 	/// # 돌려줌
 	/// [바깥 선 굵기, 꺾임 선 굵기].
 	//==============================================================================
-	pub fn read_line_widths(&self) -> [f32; 2] {
+	pub fn read_line_widths(&self) -> [f64; 2] {
 		let frame = match self.frame.as_ref() {
 			Some(frame) => {
 				frame
@@ -493,7 +494,7 @@ impl ToonScreenOutline {
 			}
 		};
 		let average_distance = if self.drawn_distance_count > 0 {
-			self.drawn_distance_sum / self.drawn_distance_count as f32
+			self.drawn_distance_sum / self.drawn_distance_count as f64
 		}
 		else {
 			1.0
@@ -504,7 +505,7 @@ impl ToonScreenOutline {
 		else {
 			average_distance
 		};
-		compute_line_widths([self.width, self.crease_width], self.width_unit, frame.viewport[3], frame.projection_matrix.elements[5].abs(), frame.is_perspective, focus_distance)
+		compute_line_widths([self.width, self.crease_width], self.width_unit, frame.viewport[3], (frame.projection_matrix.elements[5].abs()) as f64, frame.is_perspective, focus_distance)
 	}
 
 	//==============================================================================
@@ -536,8 +537,8 @@ impl ToonScreenOutline {
 		self.drawn_distance_count = 0;
 		let width = viewport[2].max(1);
 		let height = viewport[3].max(1);
-		let jump_flood_width = ((width as f32 * self.resolution_scale).ceil() as i32).max(1);
-		let jump_flood_height = ((height as f32 * self.resolution_scale).ceil() as i32).max(1);
+		let jump_flood_width = ((width as f64 * self.resolution_scale).ceil() as i32).max(1);
+		let jump_flood_height = ((height as f64 * self.resolution_scale).ceil() as i32).max(1);
 		let framebuffer = match self.read_line_target(gl, width, height, jump_flood_width, jump_flood_height) {
 			Some(line_target) => {
 				line_target.framebuffer
@@ -613,7 +614,7 @@ impl ToonScreenOutline {
 			self.add_drawn_distance(mesh, &instance.model_matrix);
 			let instance_line_id = instance.line_id.unwrap_or(line_id);
 			instance_data.extend_from_slice(&instance.model_matrix.elements);
-			instance_data.extend_from_slice(&[instance_line_id as f32, 0.0, 0.0, 1.0]);
+			instance_data.extend_from_slice(&[(instance_line_id as f64) as f32, 0.0, 0.0, 1.0]);
 			instance_count += 1;
 		}
 		if instance_count > 0 {
@@ -641,11 +642,11 @@ impl ToonScreenOutline {
 		let line_flags = if options.has_crease_line { 1.0 } else { 0.0 } + if options.has_screen_outline { 2.0 } else { 0.0 };
 		unsafe {
 			gl.uniform_matrix_4_f32_slice(line_program.get_uniform_location(gl, "modelMatrix").as_ref(), false, &model_matrix.elements);
-			gl.uniform_1_f32(line_program.get_uniform_location(gl, "instanced").as_ref(), if instance_count > 0 { 1.0 } else { 0.0 });
-			gl.uniform_1_f32(line_program.get_uniform_location(gl, "instanceLineIds").as_ref(), if is_instance_line_id { 1.0 } else { 0.0 });
-			gl.uniform_1_f32(line_program.get_uniform_location(gl, "skinned").as_ref(), if is_skinned { 1.0 } else { 0.0 });
-			gl.uniform_1_f32(line_program.get_uniform_location(gl, "lineId").as_ref(), line_id.min(TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID) as f32);
-			gl.uniform_1_f32(line_program.get_uniform_location(gl, "lineFlags").as_ref(), line_flags);
+			gl.uniform_1_f64(line_program.get_uniform_location(gl, "instanced").as_ref(), if instance_count > 0 { 1.0 } else { 0.0 });
+			gl.uniform_1_f64(line_program.get_uniform_location(gl, "instanceLineIds").as_ref(), if is_instance_line_id { 1.0 } else { 0.0 });
+			gl.uniform_1_f64(line_program.get_uniform_location(gl, "skinned").as_ref(), if is_skinned { 1.0 } else { 0.0 });
+			gl.uniform_1_f64(line_program.get_uniform_location(gl, "lineId").as_ref(), line_id.min(TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID) as f64);
+			gl.uniform_1_f64(line_program.get_uniform_location(gl, "lineFlags").as_ref(), line_flags);
 			if let (true, Some(joint_matrices)) = (is_skinned, options.joint_matrices) {
 				let joint_float_count = joint_matrices.len().min(TOON_MAXIMUM_JOINTS * 16) / 16 * 16;
 				gl.uniform_matrix_4_f32_slice(line_program.get_uniform_location(gl, "jointMatrices").as_ref(), false, &joint_matrices[..joint_float_count]);
@@ -694,8 +695,8 @@ impl ToonScreenOutline {
 		};
 		let seed_program = &self.seed_program;
 		let jump_flood_program = &self.jump_flood_program;
-		let projection = &frame.projection_matrix.elements;
-		let view = &frame.view_matrix.elements;
+		let projection = frame.projection_matrix.read_elements();
+		let view = frame.view_matrix.read_elements();
 		let mut seed_index = 0usize;
 		unsafe {
 			gl.bind_vertex_array(Some(self.empty_vertex_array));
@@ -715,19 +716,19 @@ impl ToonScreenOutline {
 			let location = |name: &str| seed_program.get_uniform_location(gl, name);
 			gl.uniform_1_i32(location("lineTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
 			gl.uniform_1_i32(location("depthTexture").as_ref(), DEPTH_TEXTURE_UNIT as i32);
-			gl.uniform_matrix_3_f32_slice(location("viewRotation").as_ref(), false, &[view[0], view[1], view[2], view[4], view[5], view[6], view[8], view[9], view[10]]);
-			gl.uniform_4_f32(location("projectionScale").as_ref(), projection[0], projection[5], projection[8], projection[9]);
-			gl.uniform_4_f32(location("projectionDepth").as_ref(), projection[10], projection[14], projection[12], projection[13]);
-			gl.uniform_1_f32(location("isPerspective").as_ref(), if frame.is_perspective { 1.0 } else { 0.0 });
-			gl.uniform_1_f32(location("depthThreshold").as_ref(), self.depth_threshold);
-			gl.uniform_1_f32(location("creaseCosine").as_ref(), if line_widths[1] > 0.0 { self.crease_cosine } else { -2.0 });
+			gl.uniform_matrix_3_f32_slice(location("viewRotation").as_ref(), false, &[(view[0]) as f32, (view[1]) as f32, (view[2]) as f32, (view[4]) as f32, (view[5]) as f32, (view[6]) as f32, (view[8]) as f32, (view[9]) as f32, (view[10]) as f32]);
+			gl.uniform_4_f64(location("projectionScale").as_ref(), projection[0], projection[5], projection[8], projection[9]);
+			gl.uniform_4_f64(location("projectionDepth").as_ref(), projection[10], projection[14], projection[12], projection[13]);
+			gl.uniform_1_f64(location("isPerspective").as_ref(), if frame.is_perspective { 1.0 } else { 0.0 });
+			gl.uniform_1_f64(location("depthThreshold").as_ref(), self.depth_threshold);
+			gl.uniform_1_f64(location("creaseCosine").as_ref(), if line_widths[1] > 0.0 { self.crease_cosine } else { -2.0 });
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
 			gl.active_texture(glow::TEXTURE0 + DEPTH_TEXTURE_UNIT);
 			gl.bind_texture(glow::TEXTURE_2D, None);
 
 			// 2. 넓히기 판으로 모으기. (줄인 판이면 칸마다 가장 가까운 씨앗)
-			let point_scale_x = line_target.width as f32 / line_target.jump_flood_width as f32;
-			let point_scale_y = line_target.height as f32 / line_target.jump_flood_height as f32;
+			let point_scale_x = line_target.width as f64 / line_target.jump_flood_width as f64;
+			let point_scale_y = line_target.height as f64 / line_target.jump_flood_height as f64;
 			let seed_gather_program = &self.seed_gather_program;
 			gl.viewport(0, 0, line_target.jump_flood_width, line_target.jump_flood_height);
 			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(line_target.jump_flood_framebuffers[0]));
@@ -735,13 +736,13 @@ impl ToonScreenOutline {
 			gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
 			gl.bind_texture(glow::TEXTURE_2D, Some(line_target.seed_texture));
 			gl.uniform_1_i32(seed_gather_program.get_uniform_location(gl, "seedTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
-			gl.uniform_2_f32(seed_gather_program.get_uniform_location(gl, "pointScale").as_ref(), point_scale_x, point_scale_y);
+			gl.uniform_2_f64(seed_gather_program.get_uniform_location(gl, "pointScale").as_ref(), point_scale_x, point_scale_y);
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
 			// 3. 점프 플러딩. (그리는 영역 굵기의 반과 덮는 몫의 반 픽셀을 넓히기 판 칸으로, 섞을 때 보는 2x2 칸만큼 더)
 			jump_flood_program.use_program(gl);
 			gl.uniform_1_i32(jump_flood_program.get_uniform_location(gl, "seedTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
-			gl.uniform_2_f32(jump_flood_program.get_uniform_location(gl, "pointScale").as_ref(), point_scale_x, point_scale_y);
+			gl.uniform_2_f64(jump_flood_program.get_uniform_location(gl, "pointScale").as_ref(), point_scale_x, point_scale_y);
 			let reach = (line_widths[0].max(line_widths[1]) * 0.5 + 0.5) / point_scale_x.min(point_scale_y) + 1.5;
 			for step_size in read_jump_flood_steps(reach) {
 				gl.bind_framebuffer(glow::FRAMEBUFFER, Some(line_target.jump_flood_framebuffers[1 - seed_index]));
@@ -769,7 +770,7 @@ impl ToonScreenOutline {
 	pub fn draw_outline(&mut self, gl: &glow::Context) {
 		let (frame, seed_texture, point_scale) = match (self.frame, self.line_target.as_ref()) {
 			(Some(frame), Some(line_target)) => {
-				(frame, line_target.jump_flood_textures[line_target.jump_flood_index], [line_target.width as f32 / line_target.jump_flood_width as f32, line_target.height as f32 / line_target.jump_flood_height as f32])
+				(frame, line_target.jump_flood_textures[line_target.jump_flood_index], [line_target.width as f64 / line_target.jump_flood_width as f64, line_target.height as f64 / line_target.jump_flood_height as f64])
 			}
 			_ => {
 				return;
@@ -793,12 +794,12 @@ impl ToonScreenOutline {
 			gl.active_texture(glow::TEXTURE0);
 			let location = |name: &str| composite_program.get_uniform_location(gl, name);
 			gl.uniform_1_i32(location("seedTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
-			gl.uniform_4_f32(location("viewportRect").as_ref(), viewport[0] as f32, viewport[1] as f32, viewport[2].max(1) as f32, viewport[3].max(1) as f32);
-			gl.uniform_2_f32(location("pointScale").as_ref(), point_scale[0], point_scale[1]);
-			gl.uniform_2_f32(location("lineWidths").as_ref(), line_widths[0], line_widths[1]);
-			gl.uniform_1_f32(location("creaseOpacity").as_ref(), self.crease_opacity);
-			gl.uniform_4_f32(location("outlineColor").as_ref(), color[0], color[1], color[2], color[3]);
-			gl.uniform_1_f32(location("hdrOutput").as_ref(), if self.is_hdr_output { 1.0 } else { 0.0 });
+			gl.uniform_4_f64(location("viewportRect").as_ref(), viewport[0] as f64, viewport[1] as f64, viewport[2].max(1) as f64, viewport[3].max(1) as f64);
+			gl.uniform_2_f64(location("pointScale").as_ref(), point_scale[0], point_scale[1]);
+			gl.uniform_2_f64(location("lineWidths").as_ref(), line_widths[0], line_widths[1]);
+			gl.uniform_1_f64(location("creaseOpacity").as_ref(), self.crease_opacity);
+			gl.uniform_4_f64(location("outlineColor").as_ref(), color[0], color[1], color[2], color[3]);
+			gl.uniform_1_f64(location("hdrOutput").as_ref(), if self.is_hdr_output { 1.0 } else { 0.0 });
 			gl.bind_vertex_array(Some(self.empty_vertex_array));
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
 			gl.bind_vertex_array(None);
@@ -844,11 +845,11 @@ impl ToonScreenOutline {
 		};
 		let (center, bounding_radius) = mesh.get_bounding_sphere();
 		let transformed_center = model_matrix.transform_point(center[0], center[1], center[2]);
-		let elements = &model_matrix.elements;
+		let elements = model_matrix.read_elements();
 		let scale_x = (elements[0] * elements[0] + elements[1] * elements[1] + elements[2] * elements[2]).sqrt();
 		let scale_y = (elements[4] * elements[4] + elements[5] * elements[5] + elements[6] * elements[6]).sqrt();
 		let scale_z = (elements[8] * elements[8] + elements[9] * elements[9] + elements[10] * elements[10]).sqrt();
-		let radius = bounding_radius * scale_x.max(scale_y).max(scale_z);
+		let radius = bounding_radius * (scale_x.max(scale_y).max(scale_z));
 		frame.frustum_planes.iter().all(|plane| plane[0] * transformed_center.x + plane[1] * transformed_center.y + plane[2] * transformed_center.z + plane[3] >= -radius)
 	}
 
@@ -1048,7 +1049,7 @@ mod tests {
 		assert_eq!(read_jump_flood_steps(4.0), vec![4, 2, 1]);
 		assert_eq!(read_jump_flood_steps(10.0), vec![8, 4, 2, 1]);
 		for reach in 1..200 {
-			let steps = read_jump_flood_steps(reach as f32);
+			let steps = read_jump_flood_steps(reach as f64);
 			let covered: i32 = steps.iter().sum();
 			assert!(covered >= reach);
 		}

@@ -32,10 +32,10 @@ use crate::ui::uiwindowlayer::UIWindowLayer;
 use std::any::Any;
 
 /// 기본 모양. (창의 가로 한계, 영역 가장자리와 띄우는 거리, 판의 처음 세로, 둥근 정도)
-const DEFAULT_MAXIMUM_WIDTH: f32 = 480.0;
-const DEFAULT_MARGIN: f32 = 16.0;
-const DEFAULT_PANEL_HEIGHT: f32 = 240.0;
-const DEFAULT_PANEL_ROUND_SIZE: f32 = 16.0;
+const DEFAULT_MAXIMUM_WIDTH: f64 = 480.0;
+const DEFAULT_MARGIN: f64 = 16.0;
+const DEFAULT_PANEL_HEIGHT: f64 = 240.0;
+const DEFAULT_PANEL_ROUND_SIZE: f64 = 16.0;
 
 //==============================================================================
 /// 알림. (인자 없음)
@@ -77,17 +77,17 @@ pub struct UIWindowParts {
 	/// 판 노드. (Paint 한 장, 내용을 여기에 붙인다)
 	pub panel_id: NodeId,
 	/// 마지막으로 받은 영역의 크기. (UI 층 단위)
-	pub view_width: f32,
+	pub view_width: f64,
 	/// 마지막으로 받은 영역의 세로. (UI 층 단위)
-	pub view_height: f32,
+	pub view_height: f64,
 	/// 영역 가장자리와 판 사이 거리. (UI 층 단위, 기본 16)
-	pub margin: f32,
+	pub margin: f64,
 	/// layout_content 기본값이 돌려주는 판의 세로.
-	pub panel_height: f32,
+	pub panel_height: f64,
 	/// 마지막으로 놓은 판의 자리. (창 좌표, 움직임 전, 줄인 배율을 곱한 크기)
 	pub panel_rect: Rect,
 	/// 판이 영역보다 커서 줄인 배율. (1 이하)
-	pub panel_scale: f32,
+	pub panel_scale: f64,
 }
 
 //==============================================================================
@@ -113,7 +113,7 @@ pub struct UIWindowParts {
 /// 		self
 /// 	}
 ///
-/// 	fn layout_content(&mut self, _node_tree: &mut NodeTree, _parts: &UIWindowParts, _panel_width: f32) -> f32 {
+/// 	fn layout_content(&mut self, _node_tree: &mut NodeTree, _parts: &UIWindowParts, _panel_width: f64) -> f64 {
 /// 		200.0
 /// 	}
 ///
@@ -174,7 +174,7 @@ pub trait UIWindowBehavior: Any {
 	/// # 돌려줌
 	/// 판의 세로. (UI 층 단위, 1 보다 작으면 1 로 올린다. 영역 세로 - margin x 2 보다 크면 창이 판을 통째로 줄인다)
 	//==============================================================================
-	fn layout_content(&mut self, _node_tree: &mut NodeTree, parts: &UIWindowParts, _panel_width: f32) -> f32 {
+	fn layout_content(&mut self, _node_tree: &mut NodeTree, parts: &UIWindowParts, _panel_width: f64) -> f64 {
 		parts.panel_height
 	}
 
@@ -187,7 +187,7 @@ pub trait UIWindowBehavior: Any {
 	/// - `panel_width`: 판의 가로. (줄이기 전, UI 층 단위)
 	/// - `panel_height`: layout_content 가 돌려준 판의 세로. (줄이기 전, 1 이상)
 	//==============================================================================
-	fn layout_panel(&mut self, node_tree: &mut NodeTree, parts: &UIWindowParts, panel_width: f32, panel_height: f32) {
+	fn layout_panel(&mut self, node_tree: &mut NodeTree, parts: &UIWindowParts, panel_width: f64, panel_height: f64) {
 		UIWindow::layout_panel_default(node_tree, parts, panel_width, panel_height);
 	}
 
@@ -343,15 +343,15 @@ pub struct UIWindow {
 	close_event: Option<UIWindowEvent>,
 	/// 띄운 창 층의 노드. (띄우기 전이나 내려간 뒤에는 None)
 	window_layer_id: Option<NodeId>,
-	view_width: f32,
-	view_height: f32,
+	view_width: f64,
+	view_height: f64,
 	/// 영역 밖으로 더 덮는 너비. (위, 오른쪽, 아래, 왼쪽)
-	view_bleed: [f32; 4],
-	maximum_width: f32,
-	margin: f32,
-	panel_height: f32,
+	view_bleed: [f64; 4],
+	maximum_width: f64,
+	margin: f64,
+	panel_height: f64,
 	panel_rect: Rect,
-	panel_scale: f32,
+	panel_scale: f64,
 	dim_color: Color,
 	panel_color: Color,
 }
@@ -664,7 +664,7 @@ impl UIWindow {
 	/// # 돌려줌
 	/// 영역의 가로. (1 이상, 받기 전에는 1)
 	//==============================================================================
-	pub fn get_view_width(&self) -> f32 {
+	pub fn get_view_width(&self) -> f64 {
 		self.view_width
 	}
 
@@ -674,7 +674,7 @@ impl UIWindow {
 	/// # 돌려줌
 	/// 영역의 세로. (1 이상, 받기 전에는 1)
 	//==============================================================================
-	pub fn get_view_height(&self) -> f32 {
+	pub fn get_view_height(&self) -> f64 {
 		self.view_height
 	}
 
@@ -684,7 +684,7 @@ impl UIWindow {
 	/// # 돌려줌
 	/// 거리. (UI 층 단위, 기본 16)
 	//==============================================================================
-	pub fn get_margin(&self) -> f32 {
+	pub fn get_margin(&self) -> f64 {
 		self.margin
 	}
 
@@ -694,7 +694,7 @@ impl UIWindow {
 	/// # 돌려줌
 	/// 판의 세로. (UI 층 단위, 기본 240)
 	//==============================================================================
-	pub fn get_panel_height(&self) -> f32 {
+	pub fn get_panel_height(&self) -> f64 {
 		self.panel_height
 	}
 
@@ -714,7 +714,7 @@ impl UIWindow {
 	/// # 돌려줌
 	/// 배율. (0 보다 크고 1 이하, 줄이지 않았으면 1)
 	//==============================================================================
-	pub fn get_panel_scale(&self) -> f32 {
+	pub fn get_panel_scale(&self) -> f64 {
 		self.panel_scale
 	}
 
@@ -796,7 +796,7 @@ impl UIWindow {
 	/// # 인자
 	/// - `maximum_width`: 판의 가로 한계. (UI 층 단위, 1 보다 작으면 1)
 	//==============================================================================
-	pub fn set_maximum_width(&mut self, maximum_width: f32) {
+	pub fn set_maximum_width(&mut self, maximum_width: f64) {
 		self.maximum_width = maximum_width.max(1.0);
 	}
 
@@ -806,7 +806,7 @@ impl UIWindow {
 	/// # 돌려줌
 	/// 판의 가로 한계. (UI 층 단위, 기본 480)
 	//==============================================================================
-	pub fn get_maximum_width(&self) -> f32 {
+	pub fn get_maximum_width(&self) -> f64 {
 		self.maximum_width
 	}
 
@@ -816,7 +816,7 @@ impl UIWindow {
 	/// # 인자
 	/// - `margin`: 거리. (UI 층 단위, 0 보다 작으면 0, 다음 놓을 때부터)
 	//==============================================================================
-	pub fn set_margin(&mut self, margin: f32) {
+	pub fn set_margin(&mut self, margin: f64) {
 		self.margin = margin.max(0.0);
 	}
 
@@ -826,7 +826,7 @@ impl UIWindow {
 	/// # 인자
 	/// - `panel_height`: 판의 세로. (UI 층 단위, 1 보다 작으면 1, 다음 놓을 때부터)
 	//==============================================================================
-	pub fn set_panel_height(&mut self, panel_height: f32) {
+	pub fn set_panel_height(&mut self, panel_height: f64) {
 		self.panel_height = panel_height.max(1.0);
 	}
 
@@ -876,7 +876,7 @@ impl UIWindow {
 	/// # 돌려줌
 	/// `[위, 오른쪽, 아래, 왼쪽]` 너비. (UI 층 단위, 처음은 모두 0)
 	//==============================================================================
-	pub fn get_view_bleed(&self) -> [f32; 4] {
+	pub fn get_view_bleed(&self) -> [f64; 4] {
 		self.view_bleed
 	}
 
@@ -890,7 +890,7 @@ impl UIWindow {
 	/// - `bottom`: 아래로 더 덮는 너비. (0 보다 작으면 0)
 	/// - `left`: 왼쪽으로 더 덮는 너비. (0 보다 작으면 0)
 	//==============================================================================
-	pub fn set_view_bleed(&mut self, node_tree: &mut NodeTree, top: f32, right: f32, bottom: f32, left: f32) {
+	pub fn set_view_bleed(&mut self, node_tree: &mut NodeTree, top: f64, right: f64, bottom: f64, left: f64) {
 		self.view_bleed = [top.max(0.0), right.max(0.0), bottom.max(0.0), left.max(0.0)];
 		self.place_dim_node(node_tree);
 	}
@@ -914,7 +914,7 @@ impl UIWindow {
 	/// - `view_width`: 영역의 가로. (UI 층 단위, 1 보다 작으면 1)
 	/// - `view_height`: 영역의 세로. (UI 층 단위, 1 보다 작으면 1)
 	//==============================================================================
-	pub fn set_view_size(&mut self, node_tree: &mut NodeTree, view_width: f32, view_height: f32) {
+	pub fn set_view_size(&mut self, node_tree: &mut NodeTree, view_width: f64, view_height: f64) {
 		self.view_width = view_width.max(1.0);
 		self.view_height = view_height.max(1.0);
 		self.refresh_layout(node_tree);
@@ -1010,7 +1010,7 @@ impl UIWindow {
 	/// 		self.shadow_id = Some(shadow_id);
 	/// 	}
 	///
-	/// 	fn layout_panel(&mut self, node_tree: &mut NodeTree, parts: &UIWindowParts, panel_width: f32, panel_height: f32) {
+	/// 	fn layout_panel(&mut self, node_tree: &mut NodeTree, parts: &UIWindowParts, panel_width: f64, panel_height: f64) {
 	/// 		UIWindow::layout_panel_default(node_tree, parts, panel_width, panel_height);
 	/// 		if let Some(shadow_node) = self.shadow_id.and_then(|shadow_id| node_tree.get_node_mut(shadow_id)) {
 	/// 			shadow_node.set_content_size(Vector2::create(panel_width + 8.0, panel_height + 8.0));
@@ -1020,7 +1020,7 @@ impl UIWindow {
 	/// # let _ = ShadowWindow { shadow_id: None };
 	/// ```
 	//==============================================================================
-	pub fn layout_panel_default(node_tree: &mut NodeTree, parts: &UIWindowParts, panel_width: f32, panel_height: f32) {
+	pub fn layout_panel_default(node_tree: &mut NodeTree, parts: &UIWindowParts, panel_width: f64, panel_height: f64) {
 		if let Some(panel_node) = node_tree.get_node_mut(parts.panel_id) {
 			panel_node.set_local_position(Vector2::zero());
 			panel_node.set_content_size(Vector2::create(panel_width, panel_height));
@@ -1231,7 +1231,7 @@ impl Component for UIWindow {
 	//==============================================================================
 	/// 갱신. (움직임 → 노드에 반영, 그린 뒤 알게 된 크기를 기다리던 창은 다시 놓는다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		self.node_id = Some(context.get_node_id());
 		self.popup_motion.tick(time_delta);
 		let node_tree = context.get_node_tree_mut();

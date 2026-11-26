@@ -441,12 +441,12 @@ impl SceneBase {
 	/// assert!(scene_base.are_tracked_assets_finished());
 	/// ```
 	//==============================================================================
-	pub fn get_tracked_asset_progress(&self) -> f32 {
+	pub fn get_tracked_asset_progress(&self) -> f64 {
 		if self.tracked_load_list.is_empty() {
 			return 1.0;
 		}
 		let finished_count = self.tracked_load_list.iter().filter(|tracked_load| tracked_load.is_finished()).count();
-		finished_count as f32 / self.tracked_load_list.len() as f32
+		finished_count as f64 / self.tracked_load_list.len() as f64
 	}
 
 	//==============================================================================
@@ -593,7 +593,7 @@ impl SceneBase {
 	/// - `engine`: 엔진. (입력과 매니저를 읽는다)
 	/// - `time_delta`: 배율을 곱한 프레임 간격. (초)
 	//==============================================================================
-	pub fn tick(&mut self, engine: &Engine, time_delta: f32) {
+	pub fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.node_tree.tick(engine, time_delta);
 		self.tick_touch(engine);
 		self.tick_tweens(time_delta);
@@ -606,7 +606,7 @@ impl SceneBase {
 	/// # 인자
 	/// - `time_delta`: 진행할 시간. (초)
 	//==============================================================================
-	pub fn tick_tweens(&mut self, time_delta: f32) {
+	pub fn tick_tweens(&mut self, time_delta: f64) {
 		let mut tween_index = self.tween_list.len();
 		while tween_index > 0 {
 			tween_index -= 1;
@@ -1102,7 +1102,7 @@ pub trait Scene: SceneAny {
 	/// - `engine`: 엔진.
 	/// - `time_delta`: 배율을 곱한 프레임 간격. (초, 시간 관리자의 get_time_delta)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.get_scene_base_mut().tick(engine, time_delta);
 	}
 

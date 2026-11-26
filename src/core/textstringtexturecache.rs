@@ -123,7 +123,7 @@ pub fn take_unresolved_family_characters(family_name: &str) -> String {
 /// # 돌려줌
 /// 줄 높이. (CSS 픽셀) 데스크탑은 글꼴을 등록한 글자 캐시가 없거나 고를 얼굴이 없으면, 웹은 문서가 없거나 잰 높이가 0 이하면 None.
 //==============================================================================
-pub fn measure_normal_line_height_without_graphic(font_string: &str) -> Option<f32> {
+pub fn measure_normal_line_height_without_graphic(font_string: &str) -> Option<f64> {
 	let font_description = parse_font_string(font_string);
 	#[cfg(target_arch = "wasm32")]
 	{
@@ -135,7 +135,7 @@ pub fn measure_normal_line_height_without_graphic(font_string: &str) -> Option<f
 			let shared_measure_cache = shared_measure_cache_cell.borrow();
 			let face_list = shared_measure_cache.as_ref()?.resolve_face_list(&font_description);
 			let primary_face = face_list.first()?;
-			Some(primary_face.font.calculate_normal_line_height(font_description.font_size))
+			Some(primary_face.font.calculate_normal_line_height(font_description.font_size) as f64)
 		})
 	}
 }
@@ -249,7 +249,7 @@ pub enum TextDrawKind {
 /// use vanilla::core::textstringtexturecache::{TextDrawKind, TextStringTextureCache};
 /// use vanilla::{Rect, ShapingDirection};
 ///
-/// fn calculate_quad(text_string_texture_cache: &mut TextStringTextureCache, gl: &glow::Context, pen_x: f32, baseline_y: f32) -> Option<Rect> {
+/// fn calculate_quad(text_string_texture_cache: &mut TextStringTextureCache, gl: &glow::Context, pen_x: f64, baseline_y: f64) -> Option<Rect> {
 /// 	let entry = text_string_texture_cache.get_entry(gl, TextDrawKind::Fill, "Score", "24px default", 0.0, 2.0, ShapingDirection::LeftToRight)?;
 /// 	Some(Rect::create(pen_x - entry.pen_offset_x, baseline_y - entry.baseline_offset_y, entry.quad_width, entry.quad_height))
 /// }
@@ -260,19 +260,19 @@ pub struct TextEntry {
 	/// 구운 텍스처. (흰 글자의 프리멀티플라이드 RGBA, 색 글리프는 제 색)
 	pub texture: crate::core::graphic::GlTexture,
 	/// 전진폭.
-	pub advance_width: f32,
+	pub advance_width: f64,
 	/// 글꼴의 기준선 위 길이. (양수)
-	pub font_ascent: f32,
+	pub font_ascent: f64,
 	/// 글꼴의 기준선 아래 길이. (양수)
-	pub font_descent: f32,
+	pub font_descent: f64,
 	/// 텍스처 왼쪽에서 펜 원점까지의 거리.
-	pub pen_offset_x: f32,
+	pub pen_offset_x: f64,
 	/// 텍스처 위에서 기준선까지의 거리.
-	pub baseline_offset_y: f32,
+	pub baseline_offset_y: f64,
 	/// 그릴 사각형 너비. (텍스처 너비를 굽는 배율로 나눈 값)
-	pub quad_width: f32,
+	pub quad_width: f64,
 	/// 그릴 사각형 높이. (텍스처 높이를 굽는 배율로 나눈 값)
-	pub quad_height: f32,
+	pub quad_height: f64,
 }
 
 //==============================================================================
@@ -308,15 +308,15 @@ pub struct TextRaster {
 	/// 래스터 높이. (픽셀)
 	pub height: i32,
 	/// 래스터 왼쪽에서 펜 원점까지의 거리. (픽셀)
-	pub origin_x: f32,
+	pub origin_x: f64,
 	/// 래스터 위에서 기준선까지의 거리. (픽셀)
-	pub baseline_y: f32,
+	pub baseline_y: f64,
 	/// 전진폭. (픽셀)
-	pub advance_width: f32,
+	pub advance_width: f64,
 	/// 글꼴의 기준선 위 길이. (픽셀, 양수)
-	pub font_ascent: f32,
+	pub font_ascent: f64,
 	/// 글꼴의 기준선 아래 길이. (픽셀, 양수)
-	pub font_descent: f32,
+	pub font_descent: f64,
 }
 
 //==============================================================================
@@ -344,19 +344,19 @@ pub struct TextRaster {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TextMetrics {
 	/// 전진폭. (픽셀)
-	pub width: f32,
+	pub width: f64,
 	/// 글꼴의 기준선 위 길이. (첫 얼굴의 줄 높이 값, 양수)
-	pub font_ascent: f32,
+	pub font_ascent: f64,
 	/// 글꼴의 기준선 아래 길이. (첫 얼굴의 줄 높이 값, 양수)
-	pub font_descent: f32,
+	pub font_descent: f64,
 	/// 펜 원점에서 글리프 왼쪽 끝까지. (왼쪽이 양수)
-	pub actual_bounding_box_left: f32,
+	pub actual_bounding_box_left: f64,
 	/// 펜 원점에서 글리프 오른쪽 끝까지. (오른쪽이 양수)
-	pub actual_bounding_box_right: f32,
+	pub actual_bounding_box_right: f64,
 	/// 기준선에서 글리프 위 끝까지. (위가 양수)
-	pub actual_bounding_box_ascent: f32,
+	pub actual_bounding_box_ascent: f64,
 	/// 기준선에서 글리프 아래 끝까지. (아래가 양수)
-	pub actual_bounding_box_descent: f32,
+	pub actual_bounding_box_descent: f64,
 }
 
 //==============================================================================
@@ -1528,9 +1528,9 @@ impl TextStringTextureCache {
 		let shaped_text = textshaping::shape_text(&face_list, text, font_size, ShapingDirection::LeftToRight, system_font_measure.as_deref());
 		let (font_ascent, font_descent) = read_line_metrics(&face_list[0].font, font_size);
 		let mut text_metrics = TextMetrics {
-			width: shaped_text.advance_width,
-			font_ascent,
-			font_descent,
+			width: shaped_text.advance_width as f64,
+			font_ascent: font_ascent as f64,
+			font_descent: font_descent as f64,
 			actual_bounding_box_left: 0.0,
 			actual_bounding_box_right: 0.0,
 			actual_bounding_box_ascent: 0.0,
@@ -1562,17 +1562,17 @@ impl TextStringTextureCache {
 				left_x += bottom_y.min(0.0) * textshaping::SYNTHETIC_ITALIC_SKEW;
 			}
 			if is_first_glyph {
-				text_metrics.actual_bounding_box_left = -left_x;
-				text_metrics.actual_bounding_box_right = right_x;
-				text_metrics.actual_bounding_box_ascent = top_y;
-				text_metrics.actual_bounding_box_descent = -bottom_y;
+				text_metrics.actual_bounding_box_left = (-left_x) as f64;
+				text_metrics.actual_bounding_box_right = right_x as f64;
+				text_metrics.actual_bounding_box_ascent = top_y as f64;
+				text_metrics.actual_bounding_box_descent = (-bottom_y) as f64;
 				is_first_glyph = false;
 			}
 			else {
-				text_metrics.actual_bounding_box_left = text_metrics.actual_bounding_box_left.max(-left_x);
-				text_metrics.actual_bounding_box_right = text_metrics.actual_bounding_box_right.max(right_x);
-				text_metrics.actual_bounding_box_ascent = text_metrics.actual_bounding_box_ascent.max(top_y);
-				text_metrics.actual_bounding_box_descent = text_metrics.actual_bounding_box_descent.max(-bottom_y);
+				text_metrics.actual_bounding_box_left = text_metrics.actual_bounding_box_left.max((-left_x) as f64);
+				text_metrics.actual_bounding_box_right = text_metrics.actual_bounding_box_right.max(right_x as f64);
+				text_metrics.actual_bounding_box_ascent = text_metrics.actual_bounding_box_ascent.max(top_y as f64);
+				text_metrics.actual_bounding_box_descent = text_metrics.actual_bounding_box_descent.max((-bottom_y) as f64);
 			}
 		}
 		text_metrics
@@ -1782,11 +1782,11 @@ impl TextStringTextureCache {
 			color_pixels: laid_out_text.color_pixels,
 			width: laid_out_text.width,
 			height: laid_out_text.height,
-			origin_x: laid_out_text.origin_x,
-			baseline_y: laid_out_text.baseline_y as f32,
-			advance_width: laid_out_text.advance_width,
-			font_ascent: laid_out_text.font_ascent,
-			font_descent: laid_out_text.font_descent,
+			origin_x: laid_out_text.origin_x as f64,
+			baseline_y: (laid_out_text.baseline_y as f32) as f64,
+			advance_width: laid_out_text.advance_width as f64,
+			font_ascent: laid_out_text.font_ascent as f64,
+			font_descent: laid_out_text.font_descent as f64,
 		})
 	}
 
@@ -1828,9 +1828,9 @@ impl TextStringTextureCache {
 			// 웹: 원본처럼 브라우저 Canvas2D 로 굽는다.
 			#[cfg(target_arch = "wasm32")]
 			{
-				let glyph_raster = crate::platform::web::systemfont::rasterize_piece(&font_description, font_size, character, false)?;
+				let glyph_raster = crate::platform::web::systemfont::rasterize_piece(&font_description, font_size as f64, character, false)?;
 				let text_metrics = crate::platform::web::systemfont::measure_text(&font_description, character);
-				return Some((glyph_raster, text_metrics.width, text_metrics.font_ascent, text_metrics.font_descent));
+				return Some((glyph_raster, text_metrics.width as f32, text_metrics.font_ascent as f32, text_metrics.font_descent as f32));
 			}
 			#[cfg(not(target_arch = "wasm32"))]
 			{
@@ -2149,13 +2149,13 @@ impl TextStringTextureCache {
 
 		Some(TextEntry {
 			texture,
-			advance_width: laid_out_text.advance_width / bake_scale,
-			font_ascent: laid_out_text.font_ascent / bake_scale,
-			font_descent: laid_out_text.font_descent / bake_scale,
-			pen_offset_x: laid_out_text.origin_x / bake_scale,
-			baseline_offset_y: laid_out_text.baseline_y as f32 / bake_scale,
-			quad_width: bitmap_width as f32 / bake_scale,
-			quad_height: bitmap_height as f32 / bake_scale,
+			advance_width: (laid_out_text.advance_width / bake_scale) as f64,
+			font_ascent: (laid_out_text.font_ascent / bake_scale) as f64,
+			font_descent: (laid_out_text.font_descent / bake_scale) as f64,
+			pen_offset_x: (laid_out_text.origin_x / bake_scale) as f64,
+			baseline_offset_y: (laid_out_text.baseline_y as f32 / bake_scale) as f64,
+			quad_width: (bitmap_width as f32 / bake_scale) as f64,
+			quad_height: (bitmap_height as f32 / bake_scale) as f64,
 		})
 	}
 }
@@ -2258,7 +2258,7 @@ fn lay_out_text(face_list: &[ResolvedFontFace], font_description: &FontDescripti
 #[cfg(target_arch = "wasm32")]
 fn rasterize_system_font_text(font_description: &FontDescription, text: &str, bake_scale: f32, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
 	let pixel_size = font_description.font_size * bake_scale;
-	let glyph_raster = crate::platform::web::systemfont::rasterize_piece(font_description, pixel_size, text, direction == ShapingDirection::RightToLeft)?;
+	let glyph_raster = crate::platform::web::systemfont::rasterize_piece(font_description, pixel_size as f64, text, direction == ShapingDirection::RightToLeft)?;
 	let mut scaled_description = font_description.clone();
 	scaled_description.font_size = pixel_size;
 	let text_metrics = crate::platform::web::systemfont::measure_text(&scaled_description, text);
@@ -2280,8 +2280,8 @@ fn rasterize_system_font_text(font_description: &FontDescription, text: &str, ba
 		color_pixels,
 		width,
 		height,
-		origin_x: (padding - glyph_raster.left_x) as f32,
-		baseline_y: (padding + glyph_raster.top_y) as f32,
+		origin_x: ((padding - glyph_raster.left_x) as f32) as f64,
+		baseline_y: ((padding + glyph_raster.top_y) as f32) as f64,
 		advance_width: text_metrics.width,
 		font_ascent: text_metrics.font_ascent,
 		font_descent: text_metrics.font_descent,
@@ -2296,7 +2296,7 @@ fn rasterize_shaped_glyph(face_list: &[ResolvedFontFace], font_description: &Fon
 	if shaped_glyph.face_index == textshaping::SYSTEM_FACE_INDEX {
 		#[cfg(target_arch = "wasm32")]
 		{
-			return crate::platform::web::systemfont::rasterize_piece(font_description, pixel_size, &text[shaped_glyph.text_start..shaped_glyph.text_end], shaped_glyph.is_right_to_left);
+			return crate::platform::web::systemfont::rasterize_piece(font_description, pixel_size as f64, &text[shaped_glyph.text_start..shaped_glyph.text_end], shaped_glyph.is_right_to_left);
 		}
 		#[cfg(not(target_arch = "wasm32"))]
 		{
@@ -2348,7 +2348,7 @@ fn create_system_font_measure(font_description: &FontDescription, pixel_size: f3
 	#[cfg(target_arch = "wasm32")]
 	{
 		let font_description = font_description.clone();
-		return Some(Box::new(move |piece_text: &str, is_right_to_left: bool| crate::platform::web::systemfont::measure_piece(&font_description, pixel_size, piece_text, is_right_to_left)));
+		return Some(Box::new(move |piece_text: &str, is_right_to_left: bool| crate::platform::web::systemfont::measure_piece(&font_description, pixel_size as f64, piece_text, is_right_to_left) as f32));
 	}
 	#[cfg(not(target_arch = "wasm32"))]
 	{
@@ -2362,7 +2362,7 @@ fn create_system_font_measure(font_description: &FontDescription, pixel_size: f3
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
 fn bake_system_font_entry(gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f32, bake_scale: f32, is_antialias: bool, direction: ShapingDirection) -> Option<TextEntry> {
-	let mut system_font_bitmap = crate::platform::web::systemfont::bake_text(text_draw_kind, text, font_description, line_width, bake_scale, direction)?;
+	let mut system_font_bitmap = crate::platform::web::systemfont::bake_text(text_draw_kind, text, font_description, line_width as f64, bake_scale as f64, direction)?;
 	if !is_antialias {
 		// 프리멀티플라이드라 알파로 가르고 색은 곧은 색으로 채운다. (흰 글자는 네 칸 모두 덮인 정도, 색 이모지는 제 색)
 		apply_premultiplied_alpha_threshold(&mut system_font_bitmap.pixels);
@@ -2370,13 +2370,13 @@ fn bake_system_font_entry(gl: &glow::Context, text_draw_kind: TextDrawKind, text
 	let texture = upload_text_texture(gl, system_font_bitmap.bitmap_width, system_font_bitmap.bitmap_height, &system_font_bitmap.pixels, is_antialias)?;
 	Some(TextEntry {
 		texture,
-		advance_width: system_font_bitmap.advance_width / bake_scale,
-		font_ascent: system_font_bitmap.font_ascent / bake_scale,
-		font_descent: system_font_bitmap.font_descent / bake_scale,
-		pen_offset_x: system_font_bitmap.pen_x / bake_scale,
-		baseline_offset_y: system_font_bitmap.baseline_y / bake_scale,
-		quad_width: system_font_bitmap.bitmap_width as f32 / bake_scale,
-		quad_height: system_font_bitmap.bitmap_height as f32 / bake_scale,
+		advance_width: (system_font_bitmap.advance_width / bake_scale as f64) as f64,
+		font_ascent: (system_font_bitmap.font_ascent / bake_scale as f64) as f64,
+		font_descent: (system_font_bitmap.font_descent / bake_scale as f64) as f64,
+		pen_offset_x: (system_font_bitmap.pen_x / bake_scale as f64) as f64,
+		baseline_offset_y: (system_font_bitmap.baseline_y / bake_scale as f64) as f64,
+		quad_width: (system_font_bitmap.bitmap_width as f32 / bake_scale) as f64,
+		quad_height: (system_font_bitmap.bitmap_height as f32 / bake_scale) as f64,
 	})
 }
 
@@ -2841,7 +2841,7 @@ fn parse_font_string_strict(font_string: &str) -> Option<FontDescription> {
 		parse_css_font_size(&size_text, is_monospace_only, &FontSizeContext::create_absolute())
 	}
 	else {
-		crate::platform::web::systemfont::resolve_font_size(font_string)
+		crate::platform::web::systemfont::resolve_font_size(font_string).map(|font_size| font_size as f32)
 	};
 	#[cfg(not(target_arch = "wasm32"))]
 	let font_size = parse_css_font_size(&size_text, is_monospace_only, &FontSizeContext::create());
@@ -4210,7 +4210,7 @@ mod tests {
 			return;
 		}
 		let measure_width = |font_string: &str, text: &str| -> f32 {
-			text_string_texture_cache.measure_text(font_string, text).width
+			(text_string_texture_cache.measure_text(font_string, text).width) as f32
 		};
 		assert!((measure_width("16px default", "가나다라") - 55.360).abs() < 0.01);
 		assert!((measure_width("bold 16px default", "가나다라") - 55.360).abs() < 0.01);
@@ -4252,11 +4252,11 @@ mod tests {
 			for (size_index, font_size) in size_list.iter().enumerate() {
 				let font_string = format!("{}{}px system-ui", style_prefix, font_size);
 				let width = text_string_texture_cache.measure_text(&font_string, text_list[text_index]).width;
-				assert!((width - chrome_width_list[size_index]).abs() < 0.0001, "{} {} {} {}", font_string, text_list[text_index], width, chrome_width_list[size_index]);
+				assert!((width - (chrome_width_list[size_index]) as f64).abs() < 0.0001, "{} {} {} {}", font_string, text_list[text_index], width, chrome_width_list[size_index]);
 			}
 		}
 		let measure_width = |font_string: &str| -> f32 {
-			text_string_texture_cache.measure_text(font_string, "Hello World Wifi").width
+			(text_string_texture_cache.measure_text(font_string, "Hello World Wifi").width) as f32
 		};
 		assert!((measure_width("16px BlinkMacSystemFont") - 115.867).abs() < 0.01);
 		// -apple-system 하나뿐이면 맞는 이름이 없어 화면 언어의 표준 글꼴이다. (한국어 Apple SD Gothic Neo, 영어 Times)
@@ -4322,7 +4322,7 @@ mod tests {
 		text_string_texture_cache.set_system_font_chain(system_font_description.family_name_list);
 		text_string_texture_cache.set_system_font_fallback_enabled(true);
 		let measure_width = |font_string: &str, text: &str| -> f32 {
-			text_string_texture_cache.measure_text(font_string, text).width
+			(text_string_texture_cache.measure_text(font_string, text).width) as f32
 		};
 		let chrome_width_list: [(&str, f32, f32); 9] = [("serif", 124.097, 63.938), ("sans-serif", 109.072, 55.36), ("monospace", 154.125, 55.36), ("cursive", 111.352, 55.36), ("fantasy", 109.156, 55.36), ("math", 115.472, 55.36), ("Times", 110.961, 55.36), ("Courier", 153.625, 55.36), ("NoSuchFamily", 109.072, 55.36)];
 		for (family_name, latin_width, korean_width) in chrome_width_list {
@@ -4364,7 +4364,7 @@ mod tests {
 		let before_width_list: [(&str, f32); 14] = [("16px monospace", 154.125), ("16px 'monospace'", 109.07187), ("16px \"MONOSPACE\"", 109.07187), ("16px 'monospace', monospace", 154.125), ("16px 'monospace', serif", 124.09744), ("16px 'serif'", 109.07187), ("16px 'cursive'", 109.07187), ("16px 'math'", 109.07187), ("16px 'system-ui'", 115.86719), ("16px -webkit-body", 109.07187), ("16px '-webkit-body'", 109.07187), ("16px Menlo, -webkit-body", 109.07187), ("16px serif, -webkit-body", 109.07187), ("16px -webkit-body, serif", 109.07187)];
 		for (font_string, chrome_width) in before_width_list {
 			let width = text_string_texture_cache.measure_text(font_string, "Hello World Wifi").width;
-			assert!((width - chrome_width).abs() < 0.001, "{} {} {}", font_string, width, chrome_width);
+			assert!((width - chrome_width as f64).abs() < 0.001, "{} {} {}", font_string, width, chrome_width);
 		}
 		let georgia_bytes = std::fs::read(georgia_path).expect("Georgia");
 		for family_name in ["monospace", "system-ui", "Menlo", "-webkit-body"] {
@@ -4373,7 +4373,7 @@ mod tests {
 		let after_width_list: [(&str, f32); 10] = [("16px monospace", 154.125), ("16px 'monospace'", 121.01563), ("16px 'monospace', monospace", 121.01563), ("16px system-ui", 115.86719), ("16px 'system-ui'", 121.01563), ("16px BlinkMacSystemFont", 121.01563), ("16px -webkit-body", 109.07187), ("16px '-webkit-body'", 121.01563), ("16px Menlo, -webkit-body", 121.01563), ("16px serif, -webkit-body", 109.07187)];
 		for (font_string, chrome_width) in after_width_list {
 			let width = text_string_texture_cache.measure_text(font_string, "Hello World Wifi").width;
-			assert!((width - chrome_width).abs() < 0.001, "{} {} {}", font_string, width, chrome_width);
+			assert!((width - chrome_width as f64).abs() < 0.001, "{} {} {}", font_string, width, chrome_width);
 		}
 	}
 
@@ -4409,10 +4409,10 @@ mod tests {
 				}
 			}
 		}
-		assert_eq!(bounds[0] as f32 - text_raster.origin_x, 0.0);
-		assert_eq!(bounds[2] as f32 + 1.0 - text_raster.origin_x, 20.0);
-		assert_eq!(text_raster.baseline_y - bounds[1] as f32, 16.0);
-		assert_eq!(bounds[3] as f32 + 1.0 - text_raster.baseline_y, 4.0);
+		assert_eq!(bounds[0] as f32 - text_raster.origin_x as f32, 0.0);
+		assert_eq!(bounds[2] as f32 + 1.0 - text_raster.origin_x as f32, 20.0);
+		assert_eq!(text_raster.baseline_y - (bounds[1] as f32) as f64, 16.0);
+		assert_eq!(bounds[3] as f32 + 1.0 - text_raster.baseline_y as f32, 4.0);
 		assert_eq!(alpha_sum, 66360);
 		let chinese_raster = text_string_texture_cache.rasterize_text("\u{4EEC}", "32px default", 1.0, 2, ShapingDirection::LeftToRight).expect("chinese raster");
 		assert!(chinese_raster.coverage.iter().any(|value| *value > 0));

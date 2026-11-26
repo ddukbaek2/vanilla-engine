@@ -362,16 +362,16 @@ impl Default for ComponentBase {
 ///
 /// struct Spin {
 /// 	component_base: ComponentBase,
-/// 	degrees_per_second: f32,
+/// 	degrees_per_second: f64,
 /// }
 ///
 /// #[reflect]
 /// impl Spin {
-/// 	pub fn get_degrees_per_second(&self) -> f32 {
+/// 	pub fn get_degrees_per_second(&self) -> f64 {
 /// 		self.degrees_per_second
 /// 	}
 ///
-/// 	pub fn set_degrees_per_second(&mut self, degrees_per_second: f32) {
+/// 	pub fn set_degrees_per_second(&mut self, degrees_per_second: f64) {
 /// 		self.degrees_per_second = degrees_per_second;
 /// 	}
 /// }
@@ -390,7 +390,7 @@ impl Default for ComponentBase {
 /// 		"Spin"
 /// 	}
 ///
-/// 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+/// 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 /// 		let transform = context.get_transform_mut();
 /// 		let local_rotation = transform.get_local_rotation();
 /// 		transform.set_local_rotation(local_rotation + self.degrees_per_second * time_delta);
@@ -524,7 +524,7 @@ pub trait Component: AsAny + Reflect {
 	/// - `_context`: 자기 노드, 트리 전체, 엔진을 꺼내는 문맥.
 	/// - `_time_delta`: 지난 tick 뒤로 흐른 시간. (초)
 	//==============================================================================
-	fn tick(&mut self, _context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, _context: &mut ComponentContext, _time_delta: f64) {
 	}
 
 	//==============================================================================
@@ -553,7 +553,7 @@ pub trait Component: AsAny + Reflect {
 	///
 	/// struct HalfFade {
 	/// 	component_base: ComponentBase,
-	/// 	saved_alpha: f32,
+	/// 	saved_alpha: f64,
 	/// }
 	///
 	/// #[vanilla::reflect]
@@ -624,7 +624,7 @@ pub trait Component: AsAny + Reflect {
 	/// # 돌려줌
 	/// 자를 영역의 귀퉁이 둥근 크기. (노드 좌표, 0 이면 곧은 사각형) 자르지 않으면 None.
 	//==============================================================================
-	fn get_clip_round_size(&self) -> Option<f32> {
+	fn get_clip_round_size(&self) -> Option<f64> {
 		None
 	}
 

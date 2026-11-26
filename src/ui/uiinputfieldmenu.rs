@@ -27,11 +27,11 @@ const COLOR_TEXT: &str = "#1f1f1f";
 //==============================================================================
 /// 터치 빠른 메뉴. (크롬 데스크탑 aura 의 TouchSelectionMenuViews, 손가락으로 길게 눌러 고른 뒤 뜬다)
 //==============================================================================
-const QUICK_MENU_BUTTON_MINIMUM_HEIGHT: f32 = 40.0;
-const QUICK_MENU_BUTTON_PADDING_X: f32 = 16.0;
-const QUICK_MENU_CORNER_RADIUS: f32 = 8.0;
-const QUICK_MENU_ANCHOR_PADDING: f32 = 8.0;
-const QUICK_MENU_SEPARATOR_WIDTH: f32 = 1.0;
+const QUICK_MENU_BUTTON_MINIMUM_HEIGHT: f64 = 40.0;
+const QUICK_MENU_BUTTON_PADDING_X: f64 = 16.0;
+const QUICK_MENU_CORNER_RADIUS: f64 = 8.0;
+const QUICK_MENU_ANCHOR_PADDING: f64 = 8.0;
+const QUICK_MENU_SEPARATOR_WIDTH: f64 = 1.0;
 const QUICK_MENU_FONT_STRING: &str = "14px system-ui";
 const COLOR_QUICK_MENU_SEPARATOR: &str = "#d3e3fd";
 const COLOR_QUICK_MENU_PRESSED_BACKGROUND: Color = Color::create(31.0 / 255.0, 31.0 / 255.0, 31.0 / 255.0, 0.08);
@@ -77,8 +77,8 @@ pub(crate) fn is_quick_menu_available(has_selection: bool, can_paste: bool) -> b
 struct QuickMenuButton {
 	command: QuickMenuCommand,
 	label: String,
-	left: f32,
-	width: f32,
+	left: f64,
+	width: f64,
 }
 
 //==============================================================================
@@ -122,7 +122,7 @@ impl UIInputFieldQuickMenu {
 					text_metrics.width
 				}
 				None => {
-					label.chars().count() as f32 * 8.0
+					label.chars().count() as f64 * 8.0
 				}
 			};
 			let width = (text_width + QUICK_MENU_BUTTON_PADDING_X * 2.0).ceil();
@@ -200,7 +200,7 @@ impl Component for UIInputFieldQuickMenu {
 	//==============================================================================
 	/// 갱신. (필드가 포커스를 잃으면 닫고, 누른 단추에서 떼면 닫은 뒤 필드에 그 명령을 부탁한다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		let is_owner_ready = match context.get_node_tree().get_node(self.owner_node_id).and_then(|owner_node| owner_node.get_component::<UIInputField>()) {
 			Some(owner_field) => {
 				owner_field.is_focused() && owner_field.is_attached()
@@ -243,7 +243,7 @@ impl Component for UIInputFieldQuickMenu {
 		let menu_rect = Rect::create(0.0, 0.0, self.size.x, self.size.y);
 		// 표준 그림자. (BubbleBorder STANDARD_SHADOW 에 높이를 주지 않은 두 겹, 질문 창과 같은 값을 views 시그마의 가우스로)
 		for (shadow_index, (shadow_blur, shadow_alpha)) in [(8, 0x33u8), (12, 0x1Au8)].iter().enumerate() {
-			let shadow_color = Color::create(60.0 / 255.0, 64.0 / 255.0, 67.0 / 255.0, *shadow_alpha as f32 / 255.0);
+			let shadow_color = Color::create(60.0 / 255.0, 64.0 / 255.0, 67.0 / 255.0, *shadow_alpha as f64 / 255.0);
 			self.shadow_list[shadow_index].draw(graphic, menu_rect, QUICK_MENU_CORNER_RADIUS, Vector2::create(0.0, 2.0), views_shadow_blur_to_sigma(*shadow_blur), shadow_color);
 		}
 		graphic.set_fill_color(COLOR_MENU_BACKGROUND);

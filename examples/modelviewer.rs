@@ -29,14 +29,14 @@ const EXAMPLE_ASSET_DIRECTORY: &str = "../vanilla.js/examples/ancientmountain/as
 const SHADOWMAP_RESOLUTION: i32 = 2048;
 
 // 스스로 끝내는 시각. (초)
-const EXIT_SECONDS: f32 = 10.0;
+const EXIT_SECONDS: f64 = 10.0;
 
 // 갱신 걸음. (화면 저장이 프레임 번호로 같은 장면을 잡도록 프레임마다 1/60초씩 고정으로 나아간다)
-const FIXED_TIME_STEP: f32 = 1.0 / 60.0;
+const FIXED_TIME_STEP: f64 = 1.0 / 60.0;
 
 // 여자 마네킹 클립 순서와 바꾸는 간격. (초)
 const FEMALE_MANNEQUIN_CLIP_NAMES: [&str; 4] = ["Idle", "Walk", "Run", "Dance"];
-const FEMALE_MANNEQUIN_CLIP_SECONDS: f32 = 2.5;
+const FEMALE_MANNEQUIN_CLIP_SECONDS: f64 = 2.5;
 
 // 합성 패스. (씬 + 블룸 가산 + 약한 비네트)
 const COMPOSITE_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
@@ -59,10 +59,10 @@ void main() {
 //==============================================================================
 struct PlacedModel {
 	skinned_model: SkinnedModel,
-	position_x: f32,
-	position_z: f32,
-	rotation_y: f32,
-	scale: f32,
+	position_x: f64,
+	position_z: f64,
+	rotation_y: f64,
+	scale: f64,
 	label: String,
 }
 
@@ -104,10 +104,10 @@ struct ModelViewerScene {
 	mannequin_load_handle: Option<SkinnedModelLoadHandle>,
 	resources: Option<ViewerResources>,
 	load_error_message: Option<String>,
-	elapsed_time: f32,
+	elapsed_time: f64,
 	female_mannequin_clip_index: usize,
 	mannequin_clip_name: String,
-	load_seconds: f32,
+	load_seconds: f64,
 }
 
 impl ModelViewerScene {
@@ -210,7 +210,7 @@ impl ModelViewerScene {
 	//==============================================================================
 	// 3D 그리기. (그림자 → 씬 → 블룸 → 합성, 2D 상태는 호출자가 되돌린다)
 	//==============================================================================
-	fn render_scene(resources: &mut ViewerResources, gl: &glow::Context, drawing_buffer_width: i32, drawing_buffer_height: i32, elapsed_time: f32) -> Result<(), String> {
+	fn render_scene(resources: &mut ViewerResources, gl: &glow::Context, drawing_buffer_width: i32, drawing_buffer_height: i32, elapsed_time: f64) -> Result<(), String> {
 		resources.scene_render_target.resize(gl, drawing_buffer_width, drawing_buffer_height)?;
 		resources.bloom_effect.resize(gl, drawing_buffer_width, drawing_buffer_height)?;
 
@@ -219,8 +219,8 @@ impl ModelViewerScene {
 		let camera_position = Vector3::create(orbit_angle.sin() * 4.6, 1.7, orbit_angle.cos() * 4.6);
 		let camera_target = Vector3::create(0.0, 0.8, 0.2);
 		let view_matrix = Matrix4::create_look_at(camera_position, camera_target, Vector3::up());
-		let aspect_ratio = drawing_buffer_width as f32 / drawing_buffer_height.max(1) as f32;
-		let mut view_projection_matrix = Matrix4::create_perspective(std::f32::consts::PI / 3.5, aspect_ratio, 0.1, 100.0);
+		let aspect_ratio = drawing_buffer_width as f64 / drawing_buffer_height.max(1) as f64;
+		let mut view_projection_matrix = Matrix4::create_perspective(std::f64::consts::PI / 3.5, aspect_ratio, 0.1, 100.0);
 		view_projection_matrix.multiply(&view_matrix);
 		let model_matrix_list: Vec<Matrix4> = resources.placed_model_list.iter().map(|placed_model| placed_model.create_model_matrix()).collect();
 		let identity_matrix = Matrix4::create_identity();
@@ -239,7 +239,7 @@ impl ModelViewerScene {
 			resources.skinned_model_renderer.draw_depth(gl, &mut placed_model.skinned_model, &light_view_projection_elements, model_matrix.get_elements());
 		}
 		let shadow_depth_texture = resources.shadow_map.get_depth_texture();
-		resources.skinned_model_renderer.set_shadow_map(Some(shadow_depth_texture), Some(&light_view_projection_elements), 1.0 / SHADOWMAP_RESOLUTION as f32);
+		resources.skinned_model_renderer.set_shadow_map(Some(shadow_depth_texture), Some(&light_view_projection_elements), 1.0 / SHADOWMAP_RESOLUTION as f64);
 		resources.skinned_model_renderer.set_shadow_strength(1.0);
 
 		// 2. 씬 패스. (렌더 타겟에 하늘색으로 비우고 땅과 모델)
@@ -338,7 +338,7 @@ impl Scene for ModelViewerScene {
 		let load_start_instant = std::time::Instant::now();
 		match self.create_resources(engine, graphic.get_gl()) {
 			Ok(resources) => {
-				self.load_seconds = load_start_instant.elapsed().as_secs_f32();
+				self.load_seconds = (load_start_instant.elapsed().as_secs_f32()) as f64;
 				println!("modelviewer: 모델 준비 {:.2}초", self.load_seconds);
 				for placed_model in resources.placed_model_list.iter() {
 					println!("modelviewer: {} 드로어블 {} 노드 {} 클립 {:?} 배율 {:.4}", placed_model.label, placed_model.skinned_model.get_drawable_list().len(), placed_model.skinned_model.get_node_list().len(), placed_model.skinned_model.get_animation_name_list(), placed_model.scale);
@@ -355,7 +355,7 @@ impl Scene for ModelViewerScene {
 	//==============================================================================
 	// 갱신. (클립 바꾸기 + 모델 포즈 계산, 정해진 시각에 끝내기)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, _time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, _time_delta: f64) {
 		let delta_time = FIXED_TIME_STEP;
 		self.elapsed_time += delta_time;
 		if self.elapsed_time >= EXIT_SECONDS {
@@ -422,7 +422,7 @@ impl Scene for ModelViewerScene {
 			}
 		}
 		graphic.set_fill_color(Color::create(0.0, 0.0, 0.0, 0.55));
-		graphic.draw_rect(Rect::create(12.0, 12.0, 430.0, 18.0 + line_list.len() as f32 * 22.0));
+		graphic.draw_rect(Rect::create(12.0, 12.0, 430.0, 18.0 + line_list.len() as f64 * 22.0));
 		graphic.set_font_string("16px default");
 		graphic.set_text_align(TextAlign::Left);
 		graphic.set_text_baseline(TextBaseline::Middle);
@@ -434,7 +434,7 @@ impl Scene for ModelViewerScene {
 				Color::white()
 			};
 			graphic.set_fill_color(text_color);
-			graphic.draw_fill_text(line, 24.0, 32.0 + line_index as f32 * 22.0);
+			graphic.draw_fill_text(line, 24.0, 32.0 + line_index as f64 * 22.0);
 		}
 	}
 }
@@ -442,9 +442,9 @@ impl Scene for ModelViewerScene {
 //==============================================================================
 // 모델 크기 배율 구하기. (바인드/첫 포즈에서 노드 월드 위치의 가장 높은 Y 를 target_height 로 맞춘다)
 //==============================================================================
-fn measure_model_scale(skinned_model: &mut SkinnedModel, target_height: f32) -> f32 {
+fn measure_model_scale(skinned_model: &mut SkinnedModel, target_height: f64) -> f64 {
 	skinned_model.update(0.0);
-	let maximum_height = skinned_model.get_node_list().iter().map(|node| node.world_matrix.elements[13]).fold(0.0f32, f32::max);
+	let maximum_height = skinned_model.get_node_list().iter().map(|node| node.world_matrix.elements[13] as f64).fold(0.0f64, f64::max);
 	if maximum_height > 0.0 {
 		target_height / maximum_height
 	}
@@ -499,12 +499,12 @@ fn measure_asset_cache(gl: &glow::Context, load_handle: &SkinnedModelLoadHandle,
 //==============================================================================
 // 땅 GLB 만들기. (가로세로 2 x half_size 사각형, 위쪽 노멀, 16비트 인덱스, 단색 머티리얼)
 //==============================================================================
-fn build_ground_glb(half_size: f32, base_color: [f32; 3]) -> Vec<u8> {
+fn build_ground_glb(half_size: f64, base_color: [f64; 3]) -> Vec<u8> {
 	let position_values = [-half_size, 0.0, -half_size, -half_size, 0.0, half_size, half_size, 0.0, half_size, half_size, 0.0, -half_size];
 	let normal_values = [0.0f32, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0];
 	let index_values = [0u16, 1, 2, 0, 2, 3];
 	let mut binary_bytes: Vec<u8> = Vec::new();
-	binary_bytes.extend(position_values.iter().flat_map(|value| value.to_le_bytes()));
+	binary_bytes.extend(position_values.iter().flat_map(|value| (*value as f32).to_le_bytes()));
 	binary_bytes.extend(normal_values.iter().flat_map(|value| value.to_le_bytes()));
 	binary_bytes.extend(index_values.iter().flat_map(|value| value.to_le_bytes()));
 	while !binary_bytes.len().is_multiple_of(4) {

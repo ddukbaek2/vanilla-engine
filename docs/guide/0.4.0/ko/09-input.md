@@ -289,7 +289,7 @@ impl Scene for KeyboardScene {
 		engine.get_input_manager_mut().set_prevented_keys(&[KeyCode::SPACE, KeyCode::UP, KeyCode::DOWN]);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		let input_manager = engine.get_input_manager();
 		let speed = 400.0 * time_delta;
@@ -422,7 +422,7 @@ impl Scene for ActionScene {
 		input_actions.set_repeat("next", 0.4, 0.12);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		let input_actions = engine.get_input_manager().get_input_actions();
 		let move_axis = input_actions.read_move_axis();
@@ -448,7 +448,7 @@ impl Scene for ActionScene {
 			else {
 				graphic.set_fill_color("#445566");
 			}
-			graphic.draw_rect(Rect::create(40.0 + index as f32 * 120.0, 40.0, 100.0, 40.0));
+			graphic.draw_rect(Rect::create(40.0 + index as f64 * 120.0, 40.0, 100.0, 40.0));
 		}
 		graphic.set_fill_color("#66ddaa");
 		graphic.draw_circle(self.position, 30.0);
@@ -532,7 +532,7 @@ impl Scene for GamepadScene {
 		&mut self.scene_base
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		let gamepad_manager = engine.get_input_manager_mut().get_gamepad_manager_mut();
 		let mut is_confirm_pressed = false;

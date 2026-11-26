@@ -425,10 +425,10 @@ impl Skeleton2DBone {
 	/// - `local_y`: 뼈 기준 y.
 	///
 	/// # 돌려줌
-	/// 월드 자리. (뼈대 기준, f64 로 셈해 엔진 Vector2 의 f32 로 담는다)
+	/// 월드 자리. (뼈대 기준, f64 셈)
 	//==============================================================================
 	pub fn local_to_world(&self, local_x: f64, local_y: f64) -> Vector2 {
-		Vector2::create((self.world_a * local_x + self.world_c * local_y + self.world_x) as f32, (self.world_b * local_x + self.world_d * local_y + self.world_y) as f32)
+		Vector2::create(self.world_a * local_x + self.world_c * local_y + self.world_x, self.world_b * local_x + self.world_d * local_y + self.world_y)
 	}
 
 	//==============================================================================
@@ -439,7 +439,7 @@ impl Skeleton2DBone {
 	/// - `world_y`: 월드 y. (뼈대 기준)
 	///
 	/// # 돌려줌
-	/// 뼈 기준 자리. (행렬을 되돌릴 수 없으면 0, 0, f64 로 셈해 엔진 Vector2 의 f32 로 담는다)
+	/// 뼈 기준 자리. (행렬을 되돌릴 수 없으면 0, 0, f64 셈)
 	//==============================================================================
 	pub fn world_to_local(&self, world_x: f64, world_y: f64) -> Vector2 {
 		let determinant = self.world_a * self.world_d - self.world_b * self.world_c;
@@ -448,7 +448,7 @@ impl Skeleton2DBone {
 		}
 		let difference_x = world_x - self.world_x;
 		let difference_y = world_y - self.world_y;
-		Vector2::create(((self.world_d * difference_x - self.world_c * difference_y) / determinant) as f32, ((self.world_a * difference_y - self.world_b * difference_x) / determinant) as f32)
+		Vector2::create((self.world_d * difference_x - self.world_c * difference_y) / determinant, (self.world_a * difference_y - self.world_b * difference_x) / determinant)
 	}
 }
 
@@ -1107,7 +1107,7 @@ impl Skeleton2D {
 		}
 		let slot_colors = pose.get_slot_colors_mut();
 		for (slot_index, slot) in self.slots.iter().enumerate() {
-			slot_colors[slot_index * 4..slot_index * 4 + 4].copy_from_slice(&[slot.color.red as f64, slot.color.green as f64, slot.color.blue as f64, slot.color.alpha as f64]);
+			slot_colors[slot_index * 4..slot_index * 4 + 4].copy_from_slice(&[slot.color.red, slot.color.green, slot.color.blue, slot.color.alpha]);
 		}
 		let slot_attachment_names = pose.get_slot_attachment_names_mut();
 		for (slot_index, slot) in self.slots.iter().enumerate() {
@@ -1137,7 +1137,7 @@ impl Skeleton2D {
 		let slot_colors = pose.get_slot_colors();
 		let slot_attachment_names = pose.get_slot_attachment_names();
 		for (slot_index, slot) in self.slots.iter_mut().enumerate() {
-			slot.color = Color::create(slot_colors[slot_index * 4] as f32, slot_colors[slot_index * 4 + 1] as f32, slot_colors[slot_index * 4 + 2] as f32, slot_colors[slot_index * 4 + 3] as f32);
+			slot.color = Color::create(slot_colors[slot_index * 4], slot_colors[slot_index * 4 + 1], slot_colors[slot_index * 4 + 2], slot_colors[slot_index * 4 + 3]);
 			slot.attachment_name.clone_from(&slot_attachment_names[slot_index]);
 		}
 		self.draw_order.copy_from_slice(pose.get_draw_order());
@@ -1474,8 +1474,8 @@ mod tests {
 		positive_skeleton.update_world_transform();
 		let lower = positive_skeleton.find_bone("lower").expect("lower");
 		let tip = lower.local_to_world(50.0, 0.0);
-		assert_near("IK 둘 끝 x", tip.x as f64, 60.0);
-		assert_near("IK 둘 끝 y", tip.y as f64, 40.0);
+		assert_near("IK 둘 끝 x", tip.x, 60.0);
+		assert_near("IK 둘 끝 y", tip.y, 40.0);
 		assert_near("IK 둘 팔꿈치 x", lower.get_world_x(), 49.2153785);
 		assert_near("IK 둘 팔꿈치 y", lower.get_world_y(), -8.8230677);
 		assert_near("IK 둘 걸린 회전", lower.get_applied_rotation(), 87.7075572);
@@ -1484,15 +1484,15 @@ mod tests {
 		negative_skeleton.update_world_transform();
 		let lower = negative_skeleton.find_bone("lower").expect("lower");
 		let tip = lower.local_to_world(50.0, 0.0);
-		assert_near("IK 반대 꺾임 끝 x", tip.x as f64, 60.0);
-		assert_near("IK 반대 꺾임 끝 y", tip.y as f64, 40.0);
+		assert_near("IK 반대 꺾임 끝 x", tip.x, 60.0);
+		assert_near("IK 반대 꺾임 끝 y", tip.y, 40.0);
 		assert_near("IK 반대 꺾임 팔꿈치 x", lower.get_world_x(), 10.7846215);
 		assert_near("IK 반대 꺾임 팔꿈치 y", lower.get_world_y(), 48.8230677);
 		let mut far_skeleton = create_arm(true, 0.0, 300.0);
 		far_skeleton.update_world_transform();
 		let tip = far_skeleton.find_bone("lower").expect("lower").local_to_world(50.0, 0.0);
-		assert_near("IK 닿지 않음 x", tip.x as f64, 0.0);
-		assert_near("IK 닿지 않음 y", tip.y as f64, 100.0);
+		assert_near("IK 닿지 않음 x", tip.x, 0.0);
+		assert_near("IK 닿지 않음 y", tip.y, 100.0);
 		let mut aim_skeleton = create_skeleton(serde_json::json!({
 			"bones": [{ "name": "root", "rotation": 30 }, { "name": "arm", "parent": "root", "length": 10 }, { "name": "target", "parent": "root", "x": 0, "y": 10 }],
 			"ik": [{ "name": "aim", "bones": ["arm"], "target": "target", "mix": 0.5 }]

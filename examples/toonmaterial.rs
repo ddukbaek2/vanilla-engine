@@ -10,7 +10,7 @@
 // - vanilla.js 시험 페이지와 같은 장면, 같은 값이다. TOON_MATERIAL_FRAME 에 프레임 번호를 주면 그 시각으로 멈춰 그린다. (데스크탑, 화면 견주기)
 // - 실행: cargo run --example toonmaterial
 //==============================================================================
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 
 use glow::HasContext;
 use vanilla::{
@@ -99,8 +99,8 @@ fn create_decal_pixels() -> Vec<u8> {
 	let mut data = vec![0u8; width * height * 4];
 	for y in 0..height {
 		for x in 0..width {
-			let local_x = ((x % 64) as f32 + 0.5) / 64.0 - 0.5;
-			let local_y = (y as f32 + 0.5) / 64.0 - 0.5;
+			let local_x = ((x % 64) as f64 + 0.5) / 64.0 - 0.5;
+			let local_y = (y as f64 + 0.5) / 64.0 - 0.5;
 			let is_covered = if x < 64 {
 				let radius = (local_x * local_x + local_y * local_y).sqrt();
 				radius > 0.2 && radius < 0.32
@@ -165,11 +165,11 @@ impl MaterialResources {
 		let mut rock_data: Vec<f32> = Vec::new();
 		for row in 0..3usize {
 			for column in 0..9usize {
-				let angle = (row * 9 + column) as f32 * 0.7;
-				let scale_across = 0.8 + ((row * 5 + column * 3) % 4) as f32 * 0.15;
-				let scale_up = 0.7 + ((row * 3 + column) % 3) as f32 * 0.3;
-				let shade = 0.75 + ((row + column * 2) % 3) as f32 * 0.12;
-				rock_data.extend_from_slice(&[angle.cos(), angle.sin(), scale_across, scale_up, -3.6 + column as f32 * 0.9, 0.2 * scale_up, -2.3 - row as f32 * 0.45, shade, shade * 0.95, shade * 0.9]);
+				let angle = (row * 9 + column) as f64 * 0.7;
+				let scale_across = 0.8 + ((row * 5 + column * 3) % 4) as f64 * 0.15;
+				let scale_up = 0.7 + ((row * 3 + column) % 3) as f64 * 0.3;
+				let shade = 0.75 + ((row + column * 2) % 3) as f64 * 0.12;
+				rock_data.extend_from_slice(&[angle.cos(), angle.sin(), scale_across, scale_up, -3.6 + column as f64 * 0.9, 0.2 * scale_up, -2.3 - row as f64 * 0.45, shade, shade * 0.95, shade * 0.9].map(|value| value as f32));
 			}
 		}
 		let rock_buffer = renderer.create_instance_buffer(gl, &rock_layout, &rock_data, ToonBufferUsage::Static)?;
@@ -211,11 +211,11 @@ impl ToonMaterialScene {
 	//==============================================================================
 	// 한 프레임 그리기. (time 초의 자리)
 	//==============================================================================
-	fn draw_scene(resources: &mut MaterialResources, camera: &Camera3D, gl: &glow::Context, time: f32) {
+	fn draw_scene(resources: &mut MaterialResources, camera: &Camera3D, gl: &glow::Context, time: f64) {
 		let mut point_light_list = Vec::new();
 		let light_color_list = [[1.0, 0.35, 0.3], [0.3, 1.0, 0.45], [0.35, 0.5, 1.0]];
 		for (index, color) in light_color_list.iter().enumerate() {
-			let angle = time * 0.8 + index as f32 * PI * 2.0 / 3.0;
+			let angle = time * 0.8 + index as f64 * PI * 2.0 / 3.0;
 			point_light_list.push(ToonPointLight { position: [2.6 + angle.cos() * 1.4, 1.1, -0.2 + angle.sin() * 1.4], color: *color, intensity: 2.2, range: 3.2, decay: 0.0, range_exponent: 1.0, ..ToonPointLight::default() });
 		}
 		resources.renderer.set_point_lights(&point_light_list);
@@ -230,7 +230,7 @@ impl ToonMaterialScene {
 		let segment_draw = move |program: &ShaderProgram, gl: &glow::Context, kind: ToonProgramKind| {
 			if kind == ToonProgramKind::Solid {
 				unsafe {
-					gl.uniform_1_f32(program.get_uniform_location(gl, "segmentMask").as_ref(), DIGIT_SEGMENT_MASKS[digit] as f32);
+					gl.uniform_1_f32(program.get_uniform_location(gl, "segmentMask").as_ref(), (DIGIT_SEGMENT_MASKS[digit] as f64) as f32);
 					gl.uniform_3_f32(program.get_uniform_location(gl, "segmentColor").as_ref(), 0.35, 1.0, 0.85);
 				}
 			}
@@ -263,8 +263,8 @@ impl ToonMaterialScene {
 		});
 		queue.add_mesh(&resources.floor, &Matrix4::create_identity(), ToonDrawOptions { alpha: 0.72, ..ToonDrawOptions::default() });
 		// 홀로그램 둘: 왼쪽은 깊이 선패스 없이(겹친 곳이 두 겹), 오른쪽은 한 덩어리.
-		for (group, offset_x, is_depth_prepassed) in [(1u32, -0.5f32, false), (2, 0.7, true)] {
-			let flicker = 0.85 + 0.15 * (time * 9.0 + group as f32).sin();
+		for (group, offset_x, is_depth_prepassed) in [(1u32, -0.5f64, false), (2, 0.7, true)] {
+			let flicker = 0.85 + 0.15 * (time * 9.0 + group as f64).sin();
 			let options = ToonDrawOptions { blend_mode: ToonBlendMode::Additive, soft_edge: 2.5, tint_color: [0.3, 0.9, 1.0, 0.7], tint_amount: Some(1.0), has_outline: false, group: Some(group), is_depth_prepassed, alpha: flicker, ..ToonDrawOptions::default() };
 			queue.add_mesh(&resources.hologram_ball, &Matrix4::create_translation(offset_x, 1.55, -1.3), options);
 			queue.add_mesh(&resources.hologram_body, &Matrix4::create_translation(offset_x, 1.0, -1.3), options);
@@ -314,7 +314,7 @@ impl Scene for ToonMaterialScene {
 				gl.clear_depth_f32(1.0);
 				gl.clear(glow::DEPTH_BUFFER_BIT);
 			}
-			ToonMaterialScene::draw_scene(resources, &self.camera, gl, frame as f32 / 60.0);
+			ToonMaterialScene::draw_scene(resources, &self.camera, gl, frame as f64 / 60.0);
 			if self.frame_index % 60 == 1 {
 				let frame_statistics = resources.renderer.get_frame_statistics();
 				println!("toonmaterial: 그린 것 {} 드로우콜 {}", frame_statistics.drawn_object_count, frame_statistics.draw_call_count);

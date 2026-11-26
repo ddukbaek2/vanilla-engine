@@ -11,7 +11,7 @@
 //!   ```
 //! - 원본과 다른 것:
 //!   - set_dot_color 는 색을 정해 두고 다음 tick 에 점 노드에 건다. (점 노드는 씬 코드가 이 위젯을 쥔 동안 닿을 수 없다)
-//!   - 위상(phase)은 0 ~ 1 로 접어 둔다. 꼬리 계산이 1 주기라 보이는 결과는 같고, 오래 돌아도 f32 정밀도가 떨어지지 않는다.
+//!   - 위상(phase)은 0 ~ 1 로 접어 둔다. 꼬리 계산이 1 주기라 보이는 결과는 같고, 오래 돌아도 정밀도가 떨어지지 않는다.
 //!   - 점 노드 이름은 원본처럼 "SpinnerDot{번호}" 다. options 객체는 UISpinnerOptions 구조체다.
 //==============================================================================
 use crate::base::color::Color;
@@ -43,15 +43,15 @@ use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UISpinnerOptions {
 	/// 점이 놓이는 원의 반지름.
-	pub radius: f32,
+	pub radius: f64,
 	/// 점 수. (기본 10)
 	pub dot_count: usize,
 	/// 점 하나의 반지름. (기본 2)
-	pub dot_radius: f32,
+	pub dot_radius: f64,
 	/// 점 색. (기본 흰색)
 	pub color: Color,
 	/// 초당 바퀴 수.
-	pub rotation_speed: f32,
+	pub rotation_speed: f64,
 }
 
 impl Default for UISpinnerOptions {
@@ -93,8 +93,8 @@ pub struct UISpinner {
 	component_base: ComponentBase,
 	options: UISpinnerOptions,
 	dot_node_ids: Vec<NodeId>,
-	rotation_speed: f32,
-	phase: f32,
+	rotation_speed: f64,
+	phase: f64,
 	dot_color: Color,
 	is_dot_color_pending: bool,
 }
@@ -169,9 +169,9 @@ impl UISpinner {
 	/// assert!((spinner.calculate_dot_opacity(5) - 0.575).abs() < 0.0001);
 	/// ```
 	//==============================================================================
-	pub fn calculate_dot_opacity(&self, dot_index: usize) -> f32 {
+	pub fn calculate_dot_opacity(&self, dot_index: usize) -> f64 {
 		let order_ratio = if self.options.dot_count > 0 {
-			dot_index as f32 / self.options.dot_count as f32
+			dot_index as f64 / self.options.dot_count as f64
 		}
 		else {
 			0.0
@@ -210,7 +210,7 @@ impl UISpinner {
 	/// # 인자
 	/// - `rotation_speed`: 초당 바퀴 수. (음수면 반대로 돈다)
 	//==============================================================================
-	pub fn set_rotation_speed(&mut self, rotation_speed: f32) {
+	pub fn set_rotation_speed(&mut self, rotation_speed: f64) {
 		self.rotation_speed = rotation_speed;
 	}
 
@@ -220,7 +220,7 @@ impl UISpinner {
 	/// # 돌려줌
 	/// 초당 바퀴 수. (처음은 설정의 rotation_speed, 기본 1)
 	//==============================================================================
-	pub fn get_rotation_speed(&self) -> f32 {
+	pub fn get_rotation_speed(&self) -> f64 {
 		self.rotation_speed
 	}
 
@@ -278,7 +278,7 @@ impl Component for UISpinner {
 		spinner_node.set_anchor(Pivot::TOP_LEFT);
 		spinner_node.set_content_size(Vector2::create(center * 2.0, center * 2.0));
 		for dot_index in 0..options.dot_count {
-			// 원본처럼 f64 로 셈하고 자리만 f32 로 담는다. (f32 삼각함수로 셈하면 끝자리가 원본과 다르다)
+			// 원본처럼 f64 로 셈한다.
 			let angle = (dot_index as f64 / options.dot_count as f64) * std::f64::consts::PI * 2.0;
 			let dot_name = format!("SpinnerDot{}", dot_index);
 			let dot_id = node_tree.create_child(node_id, &dot_name);
@@ -286,9 +286,9 @@ impl Component for UISpinner {
 			dot_node.set_pivot(Pivot::MIDDLE_CENTER);
 			dot_node.set_anchor(Pivot::TOP_LEFT);
 			dot_node.set_content_size(Vector2::create(options.dot_radius * 2.0, options.dot_radius * 2.0));
-			let dot_x = center as f64 + angle.cos() * options.radius as f64;
-			let dot_y = center as f64 + angle.sin() * options.radius as f64;
-			dot_node.set_local_position(Vector2::create(dot_x as f32, dot_y as f32));
+			let dot_x = center + angle.cos() * options.radius;
+			let dot_y = center + angle.sin() * options.radius;
+			dot_node.set_local_position(Vector2::create(dot_x, dot_y));
 			let paint = dot_node.add_component(Paint::create_with_color(self.dot_color));
 			paint.set_round_size(options.dot_radius);
 			self.dot_node_ids.push(dot_id);
@@ -298,7 +298,7 @@ impl Component for UISpinner {
 	//==============================================================================
 	/// 갱신. (위상을 돌리고 점마다 투명도를 건다. 미뤄 둔 점 색도 건다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		self.phase += time_delta * self.rotation_speed;
 		self.phase -= self.phase.floor();
 		let is_dot_color_pending = self.is_dot_color_pending;

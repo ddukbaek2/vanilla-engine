@@ -10,7 +10,7 @@
 //! - 원본과 다른 점:
 //!   - 원본 getStates / get_transitions 는 List 를, 러스트 판은 조각(&`[..]`)을 돌려준다. 원본 getParameters 의 사전은 get_parameters 가 이름과 AnimatorParameter 목록(넣은 차례)으로 돌려준다.
 //!   - 원본 조건은 { parameterName, mode, threshold } 객체이고 러스트 판은 같은 필드의 AnimationCondition 이다. 원본 AnimationConditionMode 의 글 값은 열거 값이다.
-//!   - 정수 매개변수는 i32, 실수와 기준 값은 f32 다. (원본은 모두 수) 정수를 기준 값과 견줄 때는 f32 로 바꿔 견준다.
+//!   - 정수 매개변수는 i32, 실수와 기준 값은 원본 수처럼 f64 다. 정수를 기준 값과 견줄 때는 f64 로 바꿔 견준다.
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::resource::animationclip::AnimationClip;
@@ -31,7 +31,7 @@ use std::collections::HashMap;
 /// animator.set_integer("combo", 3);
 /// animator.set_bool("isGrounded", false);
 /// animator.set_trigger("jump");
-/// let check = |parameter_name: &str, mode: AnimationConditionMode, threshold: f32| {
+/// let check = |parameter_name: &str, mode: AnimationConditionMode, threshold: f64| {
 /// 	animator.is_condition_satisfied(&AnimationCondition { parameter_name: parameter_name.to_string(), mode, threshold })
 /// };
 /// assert!(check("jump", AnimationConditionMode::If, 0.0));
@@ -91,7 +91,7 @@ pub struct AnimationCondition {
 	/// 견주는 법.
 	pub mode: AnimationConditionMode,
 	/// 기준 값. (Greater, Less, Equals, NotEqual 에서 쓴다)
-	pub threshold: f32,
+	pub threshold: f64,
 }
 
 //==============================================================================
@@ -110,7 +110,7 @@ pub struct AnimationCondition {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AnimatorParameter {
 	/// 실수. (원본 type "float")
-	Float(f32),
+	Float(f64),
 	/// 정수. (원본 type "int")
 	Int(i32),
 	/// 참 거짓. (원본 type "bool")
@@ -148,7 +148,7 @@ pub enum AnimatorParameter {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnimationState {
 	clip: Option<AnimationClip>,
-	speed: f32,
+	speed: f64,
 	is_loop: Option<bool>,
 }
 
@@ -193,7 +193,7 @@ impl AnimationState {
 	/// # 인자
 	/// - `speed`: 재생 속도. (기본 1, 2 면 두 배로 빠르고 0 이면 멈춘다)
 	//==============================================================================
-	pub fn set_speed(&mut self, speed: f32) {
+	pub fn set_speed(&mut self, speed: f64) {
 		self.speed = speed;
 	}
 
@@ -203,7 +203,7 @@ impl AnimationState {
 	/// # 돌려줌
 	/// 재생 속도. (기본 1)
 	//==============================================================================
-	pub fn get_speed(&self) -> f32 {
+	pub fn get_speed(&self) -> f64 {
 		self.speed
 	}
 
@@ -240,7 +240,7 @@ impl AnimationState {
 	/// # 돌려줌
 	/// 클립의 지속 시간. (초, 클립이 없으면 0)
 	//==============================================================================
-	pub fn get_duration(&self) -> f32 {
+	pub fn get_duration(&self) -> f64 {
 		match self.clip.as_ref() {
 			Some(clip) => {
 				clip.get_duration()
@@ -260,7 +260,7 @@ impl AnimationState {
 	/// # 돌려줌
 	/// 상태 시간을 한 바퀴 길이로 나눈 것. (1 이면 한 바퀴, 되풀이하면 1 을 넘어 쌓인다. 길이가 0 이면 시간이 흐르기 전 0, 흐른 뒤 1)
 	//==============================================================================
-	pub fn get_normalized_time(&self, time: f32) -> f32 {
+	pub fn get_normalized_time(&self, time: f64) -> f64 {
 		let duration = self.get_duration();
 		if duration <= 0.0 {
 			return if time > 0.0 {
@@ -302,7 +302,7 @@ impl AnimationState {
 	/// assert_eq!(state.get_frame_index(1.25), Some(3));
 	/// ```
 	//==============================================================================
-	pub fn get_frame_index(&self, time: f32) -> Option<usize> {
+	pub fn get_frame_index(&self, time: f64) -> Option<usize> {
 		let clip = self.clip.as_ref()?;
 		let frame_count = clip.get_frame_count();
 		if frame_count == 0 {
@@ -319,7 +319,7 @@ impl AnimationState {
 		else {
 			normalized_time.clamp(0.0, 1.0)
 		};
-		Some(((cycle_time * frame_count as f32).floor() as usize).min(frame_count - 1))
+		Some(((cycle_time * frame_count as f64).floor() as usize).min(frame_count - 1))
 	}
 }
 
@@ -370,8 +370,8 @@ impl Default for AnimationState {
 pub struct AnimationTransition {
 	from: Option<usize>,
 	to: Option<usize>,
-	exit_time: Option<f32>,
-	duration: f32,
+	exit_time: Option<f64>,
+	duration: f64,
 	can_transition_to_self: bool,
 	conditions: Vec<AnimationCondition>,
 }
@@ -440,7 +440,7 @@ impl AnimationTransition {
 	/// # 인자
 	/// - `exit_time`: 나가는 상태의 정규화 시간. (1 이면 한 바퀴 끝, None 이면 종료 시각 없이 조건만 본다, 기본 None)
 	//==============================================================================
-	pub fn set_exit_time(&mut self, exit_time: Option<f32>) {
+	pub fn set_exit_time(&mut self, exit_time: Option<f64>) {
 		self.exit_time = exit_time;
 	}
 
@@ -450,7 +450,7 @@ impl AnimationTransition {
 	/// # 돌려줌
 	/// 종료 시각. (정규화 시간, 없으면 None)
 	//==============================================================================
-	pub fn get_exit_time(&self) -> Option<f32> {
+	pub fn get_exit_time(&self) -> Option<f64> {
 		self.exit_time
 	}
 
@@ -460,7 +460,7 @@ impl AnimationTransition {
 	/// # 인자
 	/// - `duration`: 두 상태를 섞는 시간. (초, 0 이하이면 바로 넘어간다, 기본 0)
 	//==============================================================================
-	pub fn set_duration(&mut self, duration: f32) {
+	pub fn set_duration(&mut self, duration: f64) {
 		self.duration = duration;
 	}
 
@@ -470,7 +470,7 @@ impl AnimationTransition {
 	/// # 돌려줌
 	/// 섞는 시간. (초)
 	//==============================================================================
-	pub fn get_duration(&self) -> f32 {
+	pub fn get_duration(&self) -> f64 {
 		self.duration
 	}
 
@@ -502,7 +502,7 @@ impl AnimationTransition {
 	/// - `mode`: 견주는 법.
 	/// - `threshold`: 기준 값. (Greater, Less, Equals, NotEqual 에서 쓴다, 원본 기본 0)
 	//==============================================================================
-	pub fn add_condition(&mut self, parameter_name: &str, mode: AnimationConditionMode, threshold: f32) {
+	pub fn add_condition(&mut self, parameter_name: &str, mode: AnimationConditionMode, threshold: f64) {
 		self.conditions.push(AnimationCondition {
 			parameter_name: parameter_name.to_string(),
 			mode,
@@ -554,7 +554,7 @@ impl AnimationTransition {
 	/// assert!(!transition.is_exit_time_reached(&state, 2.5, 3.5));
 	/// ```
 	//==============================================================================
-	pub fn is_exit_time_reached(&self, state: &AnimationState, previous_time: f32, current_time: f32) -> bool {
+	pub fn is_exit_time_reached(&self, state: &AnimationState, previous_time: f64, current_time: f64) -> bool {
 		let exit_time = match self.exit_time {
 			Some(exit_time) => {
 				exit_time
@@ -652,7 +652,7 @@ impl Default for AnimationTransition {
 /// use vanilla::{AnimationConditionMode, AnimationState, AnimationTransition, Animator, Rect};
 /// use vanilla::resource::animationclip::AnimationClip;
 ///
-/// fn create_state(duration: f32, is_loop: bool) -> AnimationState {
+/// fn create_state(duration: f64, is_loop: bool) -> AnimationState {
 /// 	let mut clip = AnimationClip::new();
 /// 	clip.set_frames(vec![Rect::create(0.0, 0.0, 32.0, 32.0), Rect::create(32.0, 0.0, 32.0, 32.0)]);
 /// 	clip.set_duration(duration);
@@ -707,14 +707,14 @@ pub struct Animator {
 	parameter_names: Vec<String>,
 	current_state_index: Option<usize>,
 	/// 지금 상태 시간. (초, 속도를 곱해 쌓은 것)
-	current_time: f32,
+	current_time: f64,
 	next_state_index: Option<usize>,
 	/// 들어가는 상태 시간. (초)
-	next_time: f32,
+	next_time: f64,
 	/// 섞은 시간. (초)
-	transition_elapsed: f32,
+	transition_elapsed: f64,
 	/// 섞는 시간. (초)
-	transition_duration: f32,
+	transition_duration: f64,
 }
 
 impl Animator {
@@ -745,7 +745,7 @@ impl Animator {
 	/// # 인자
 	/// - `time_delta`: 지난 프레임부터의 시간. (초, 상태마다 속도를 곱해 흘린다)
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		let current_state_index = match self.current_state_index {
 			Some(current_state_index) => {
 				current_state_index
@@ -838,7 +838,7 @@ impl Animator {
 	/// 처음 맞는 전이의 번호. (어느 상태에서나 넘어가는 전이를 먼저, 그다음 지금 상태에서 나가는 전이를 넣은 순서대로 본다)
 	/// 섞는 중이거나 없으면 None.
 	//==============================================================================
-	pub fn find_transition(&self, previous_time: f32) -> Option<usize> {
+	pub fn find_transition(&self, previous_time: f64) -> Option<usize> {
 		let current_state_index = self.current_state_index?;
 		if self.next_state_index.is_some() {
 			return None;
@@ -947,7 +947,7 @@ impl Animator {
 				Some(value)
 			}
 			AnimatorParameter::Int(value) => {
-				Some(value as f32)
+				Some(value as f64)
 			}
 			_ => {
 				None
@@ -1005,7 +1005,7 @@ impl Animator {
 	/// assert!(!animator.get_trigger("jump"));
 	/// ```
 	//==============================================================================
-	pub fn set_float(&mut self, name: &str, value: f32) {
+	pub fn set_float(&mut self, name: &str, value: f64) {
 		self.insert_parameter(name, AnimatorParameter::Float(value));
 	}
 
@@ -1018,7 +1018,7 @@ impl Animator {
 	/// # 돌려줌
 	/// 값. (없거나 실수가 아니면 0)
 	//==============================================================================
-	pub fn get_float(&self, name: &str) -> f32 {
+	pub fn get_float(&self, name: &str) -> f64 {
 		match self.parameters.get(name) {
 			Some(AnimatorParameter::Float(value)) => {
 				*value
@@ -1216,7 +1216,7 @@ impl Animator {
 	/// # 돌려줌
 	/// 지금 상태 시간을 한 바퀴 길이로 나눈 것. (상태가 없으면 0)
 	//==============================================================================
-	pub fn get_current_normalized_time(&self) -> f32 {
+	pub fn get_current_normalized_time(&self) -> f64 {
 		match self.current_state_index {
 			Some(current_state_index) => {
 				self.states[current_state_index].get_normalized_time(self.current_time)
@@ -1265,7 +1265,7 @@ impl Animator {
 	/// # 돌려줌
 	/// 들어가는 상태 시간을 한 바퀴 길이로 나눈 것. (섞는 중이 아니면 0)
 	//==============================================================================
-	pub fn get_next_normalized_time(&self) -> f32 {
+	pub fn get_next_normalized_time(&self) -> f64 {
 		match self.next_state_index {
 			Some(next_state_index) => {
 				self.states[next_state_index].get_normalized_time(self.next_time)
@@ -1332,7 +1332,7 @@ impl Animator {
 	/// assert_eq!(animator.get_current_frame().map(|frame| frame.position.x), Some(32.0));
 	/// ```
 	//==============================================================================
-	pub fn get_transition_weight(&self) -> f32 {
+	pub fn get_transition_weight(&self) -> f64 {
 		if self.next_state_index.is_none() || self.transition_duration <= 0.0 {
 			return 0.0;
 		}
@@ -1356,9 +1356,9 @@ mod tests {
 	//==============================================================================
 	/// 시험용 클립. (프레임 수만큼 가로로 늘어선 32 칸, 길이, 되풀이)
 	//==============================================================================
-	fn create_clip(frame_count: usize, duration: f32, is_loop: bool) -> AnimationClip {
+	fn create_clip(frame_count: usize, duration: f64, is_loop: bool) -> AnimationClip {
 		let mut clip = AnimationClip::new();
-		clip.set_frames((0..frame_count).map(|frame_index| Rect::create(frame_index as f32 * 32.0, 0.0, 32.0, 32.0)).collect());
+		clip.set_frames((0..frame_count).map(|frame_index| Rect::create(frame_index as f64 * 32.0, 0.0, 32.0, 32.0)).collect());
 		clip.set_duration(duration);
 		clip.set_loop(is_loop);
 		clip
@@ -1367,7 +1367,7 @@ mod tests {
 	//==============================================================================
 	/// 시험용 상태. (클립 하나)
 	//==============================================================================
-	fn create_state(frame_count: usize, duration: f32, is_loop: bool) -> AnimationState {
+	fn create_state(frame_count: usize, duration: f64, is_loop: bool) -> AnimationState {
 		let mut state = AnimationState::new();
 		state.set_clip(Some(create_clip(frame_count, duration, is_loop)));
 		state
@@ -1376,7 +1376,7 @@ mod tests {
 	//==============================================================================
 	/// 시험용 전이.
 	//==============================================================================
-	fn create_transition(from: Option<usize>, to: usize, exit_time: Option<f32>, duration: f32) -> AnimationTransition {
+	fn create_transition(from: Option<usize>, to: usize, exit_time: Option<f64>, duration: f64) -> AnimationTransition {
 		let mut transition = AnimationTransition::new();
 		transition.set_from(from);
 		transition.set_to(Some(to));
@@ -1611,7 +1611,7 @@ mod tests {
 		walk_state.set_speed(2.0);
 		for (state_index, mut state) in [create_state(4, 1.0, true), walk_state, create_state(4, 0.5, false), create_state(2, 0.25, false)].into_iter().enumerate() {
 			let mut clip = state.get_clip().expect("clip").clone();
-			let frames = clip.get_frames().iter().map(|frame| Rect::create(frame.position.x, state_index as f32 * 32.0, frame.size.x, frame.size.y)).collect();
+			let frames = clip.get_frames().iter().map(|frame| Rect::create(frame.position.x, state_index as f64 * 32.0, frame.size.x, frame.size.y)).collect();
 			clip.set_frames(frames);
 			state.set_clip(Some(clip));
 			animator.add_state(state);

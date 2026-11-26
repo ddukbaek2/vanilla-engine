@@ -24,15 +24,15 @@ use vanilla::{Engine, EngineConfiguration, GamepadButtonCode, GamepadKind, Graph
 //==============================================================================
 // 전역 상수 목록.
 //==============================================================================
-const VIEW_WIDTH: f32 = 1280.0;
-const VIEW_HEIGHT: f32 = 720.0;
+const VIEW_WIDTH: f64 = 1280.0;
+const VIEW_HEIGHT: f64 = 720.0;
 const BACKGROUND_COLOR: &str = "#e9edf3";
 const PANEL_COLOR: &str = "#ffffff";
 const TITLE_COLOR: &str = "#1f2937";
 const CAPTION_COLOR: &str = "#6b7280";
 const ACCENT_COLOR: &str = "#2563eb";
-const FIELD_WIDTH: f32 = 520.0;
-const FIELD_HEIGHT: f32 = 64.0;
+const FIELD_WIDTH: f64 = 520.0;
+const FIELD_HEIGHT: f64 = 64.0;
 const EXIT_FRAME_COUNT: u32 = 200;
 
 //==============================================================================
@@ -50,7 +50,7 @@ fn create_box_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, posi
 //==============================================================================
 // 글자 노드 만들기. (UILabel)
 //==============================================================================
-fn create_label_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, position: Vector2, size: Vector2, text: &str, font_size: f32, color: &str) -> NodeId {
+fn create_label_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, position: Vector2, size: Vector2, text: &str, font_size: f64, color: &str) -> NodeId {
 	let label_id = create_box_node(node_tree, parent_id, name, position, size);
 	let label = node_tree.add_component(label_id, UILabel::create_with_text(text, font_size)).expect("label");
 	label.set_text_color(color);
@@ -105,7 +105,7 @@ struct GallerySource {
 }
 
 impl InputActionSource for GallerySource {
-	fn read_action_value(&mut self, action: &str) -> f32 {
+	fn read_action_value(&mut self, action: &str) -> f64 {
 		let frame_count = self.frame_count.get();
 		if action == "menu" && (80..95).contains(&frame_count) {
 			1.0
@@ -400,7 +400,7 @@ impl Scene for InputGalleryScene {
 	//==============================================================================
 	// 주기적 갱신. (흉내 낸 입력 → 패드 진동 시험 → 노드 갱신과 터치)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.frame_count += 1;
 		let connected_gamepad_count = engine.get_input_manager().get_gamepad_manager().get_connected_gamepad_count();
 		if self.frame_count >= EXIT_FRAME_COUNT && connected_gamepad_count == 0 {

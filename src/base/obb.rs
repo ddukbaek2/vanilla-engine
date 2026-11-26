@@ -152,9 +152,9 @@ impl OBB {
 //==============================================================================
 /// 꼭짓점들을 축에 투영한 최소, 최대값. (원본 overlaps 안의 투영 반복을 떼어 낸 것)
 //==============================================================================
-fn project_onto_axis(points: &[Vector2; 4], axis_x: f32, axis_y: f32) -> (f32, f32) {
-	let mut minimum = f32::INFINITY;
-	let mut maximum = f32::NEG_INFINITY;
+fn project_onto_axis(points: &[Vector2; 4], axis_x: f64, axis_y: f64) -> (f64, f64) {
+	let mut minimum = f64::INFINITY;
+	let mut maximum = f64::NEG_INFINITY;
 	for point in points.iter() {
 		let projection = (point.x * axis_x) + (point.y * axis_y);
 		if projection < minimum {
@@ -174,7 +174,7 @@ mod tests {
 	//==============================================================================
 	/// 점 목록으로 OBB 를 만든다.
 	//==============================================================================
-	fn create_obb(points: [(f32, f32); 4]) -> OBB {
+	fn create_obb(points: [(f64, f64); 4]) -> OBB {
 		let mut obb = OBB::new();
 		obb.set_edges(points.map(|(x, y)| Vector2::create(x, y)));
 		obb

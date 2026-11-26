@@ -129,9 +129,9 @@ impl TypewriterTarget for Text {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TypewriterOptions {
 	/// 초당 글자 수.
-	pub characters_per_second: f32,
+	pub characters_per_second: f64,
 	/// 빨리 감기일 때 곱하는 배율.
-	pub fast_forward_multiplier: f32,
+	pub fast_forward_multiplier: f64,
 }
 
 impl Default for TypewriterOptions {
@@ -187,8 +187,8 @@ type CompleteEvent = Box<dyn FnMut()>;
 pub struct Typewriter {
 	full_characters: Vec<String>,
 	revealed_count: f64,
-	characters_per_second: f32,
-	fast_forward_multiplier: f32,
+	characters_per_second: f64,
+	fast_forward_multiplier: f64,
 	is_fast_forward: bool,
 	is_finished: bool,
 	character_revealed_event: Option<CharacterRevealedEvent>,
@@ -270,7 +270,7 @@ impl Typewriter {
 	/// assert_eq!(*revealed_list.borrow(), vec![(String::from("a"), 0), (String::from("b"), 1)]);
 	/// ```
 	//==============================================================================
-	pub fn tick(&mut self, target: &mut dyn TypewriterTarget, time_delta: f32) {
+	pub fn tick(&mut self, target: &mut dyn TypewriterTarget, time_delta: f64) {
 		if self.is_finished {
 			return;
 		}
@@ -280,10 +280,10 @@ impl Typewriter {
 		else {
 			1.0
 		};
-		let speed = (self.characters_per_second * speed_multiplier) as f64;
+		let speed = self.characters_per_second * speed_multiplier;
 		let character_count = self.full_characters.len() as f64;
 		let previous_whole_count = self.revealed_count.floor() as usize;
-		self.revealed_count = character_count.min(self.revealed_count + speed * time_delta as f64);
+		self.revealed_count = character_count.min(self.revealed_count + speed * time_delta);
 		let current_whole_count = self.revealed_count.floor() as usize;
 		if current_whole_count != previous_whole_count {
 			target.set_visible_character_count(current_whole_count as i32);
@@ -350,7 +350,7 @@ impl Typewriter {
 	/// # 인자
 	/// - `characters_per_second`: 초당 드러낼 글자 묶음 수.
 	//==============================================================================
-	pub fn set_characters_per_second(&mut self, characters_per_second: f32) {
+	pub fn set_characters_per_second(&mut self, characters_per_second: f64) {
 		self.characters_per_second = characters_per_second;
 	}
 

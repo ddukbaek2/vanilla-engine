@@ -21,7 +21,7 @@ use web_time::Instant;
 
 /// 읽은 장치 목록을 다시 읽기까지의 시간. (초)
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
-const DEVICE_LIST_REFRESH_SECONDS: f32 = 2.0;
+const DEVICE_LIST_REFRESH_SECONDS: f64 = 2.0;
 /// X11 장치 형을 볼 장치 번호의 끝. (크로미엄 kMaxDeviceNum)
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 const X11_MAX_DEVICE_COUNT: u64 = 128;
@@ -183,7 +183,7 @@ fn has_touchscreen_axes(valuator_list: &[X11ValuatorRecord]) -> bool {
 pub(super) fn is_coarse_pointer() -> bool {
 	COARSE_POINTER_CACHE.with(|coarse_pointer_cache| {
 		if let Some((is_coarse_pointer, read_instant)) = coarse_pointer_cache.get() {
-			if read_instant.elapsed().as_secs_f32() < DEVICE_LIST_REFRESH_SECONDS {
+			if read_instant.elapsed().as_secs_f64() < DEVICE_LIST_REFRESH_SECONDS {
 				return is_coarse_pointer;
 			}
 		}

@@ -10,7 +10,7 @@
 //!   섀도우 맵이 없으면 섀도우 유닛에 1x1 비교 깊이 텍스처를 묶는다. (원본과 같다)
 //! - 원본과 다른 것:
 //!   - 그리기 함수는 gl 과 &mut SkinnedModel 을 받는다. 바뀐 모프 타깃 업로드(원본 update 6단계)와 와이어프레임 인덱스 업로드를
-//!     여기서 먼저 한다. 행렬 인자는 원본 getElements() 처럼 &[f32; 16] 이다. (matrix.get_elements())
+//!     여기서 먼저 한다. 행렬 인자는 원본 getElements() 처럼 &[f64; 16] 이다. (matrix.get_elements())
 //!   - set_shadow_map 은 원본처럼 배열을 참조로 들지 않고 16개를 복사해 둔다.
 //!   - 생성은 셰이더 컴파일 실패를 오류(Result)로 돌려준다.
 //==============================================================================
@@ -19,6 +19,7 @@ use crate::core::shaderprogram::ShaderProgram;
 use crate::graphics3d::material::TEXTURE_UNIT_SHADOWMAP;
 use crate::graphics3d::skinnedmodel::{Drawable, SkinnedModel};
 use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 use std::rc::Rc;
 
 //==============================================================================
@@ -309,9 +310,9 @@ void main() {
 ///
 /// fn draw_model(graphic: &mut Graphic, skinned_model_renderer: &SkinnedModelRenderer, skinned_model: &mut SkinnedModel) {
 /// 	graphic.flush_batch();
-/// 	let aspect_ratio = graphic.get_drawing_buffer_width() as f32 / graphic.get_drawing_buffer_height().max(1) as f32;
+/// 	let aspect_ratio = graphic.get_drawing_buffer_width() as f64 / graphic.get_drawing_buffer_height().max(1) as f64;
 /// 	let camera_position = Vector3::create(0.0, 1.6, 4.0);
-/// 	let mut view_projection_matrix = Matrix4::create_perspective(std::f32::consts::PI / 3.0, aspect_ratio, 0.1, 100.0);
+/// 	let mut view_projection_matrix = Matrix4::create_perspective(std::f64::consts::PI / 3.0, aspect_ratio, 0.1, 100.0);
 /// 	view_projection_matrix.multiply(&Matrix4::create_look_at(camera_position, Vector3::create(0.0, 1.0, 0.0), Vector3::up()));
 /// 	let model_matrix = Matrix4::create_identity();
 /// 	let gl = graphic.get_gl();
@@ -333,11 +334,11 @@ pub struct SkinnedModelRenderer {
 	/// 그림자를 받지 않을 때 섀도우 유닛에 묶는 1x1 비교 깊이 텍스처.
 	empty_shadow_texture: GlTexture,
 	light_view_projection_elements: Option<[f32; 16]>,
-	shadow_strength: f32,
-	shadow_texel_size: f32,
-	sun_direction: [f32; 3],
-	fog_color: [f32; 3],
-	fog_range: [f32; 2],
+	shadow_strength: f64,
+	shadow_texel_size: f64,
+	sun_direction: [f64; 3],
+	fog_color: [f64; 3],
+	fog_range: [f64; 2],
 }
 
 impl SkinnedModelRenderer {
@@ -430,7 +431,7 @@ impl SkinnedModelRenderer {
 	/// - `camera_y`: 카메라 월드 Y.
 	/// - `camera_z`: 카메라 월드 Z.
 	//==============================================================================
-	pub fn draw(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f32, camera_y: f32, camera_z: f32) {
+	pub fn draw(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f64, camera_y: f64, camera_z: f64) {
 		skinned_model.upload_pending_morph_targets(gl);
 		let shader_program = &*self.shader_program;
 		shader_program.use_program(gl);
@@ -445,10 +446,10 @@ impl SkinnedModelRenderer {
 		unsafe {
 			gl.uniform_matrix_4_f32_slice(view_projection_location.as_ref(), false, view_projection_elements);
 			gl.uniform_matrix_4_f32_slice(model_matrix_location.as_ref(), false, model_matrix_elements);
-			gl.uniform_3_f32(sun_direction_location.as_ref(), self.sun_direction[0], self.sun_direction[1], self.sun_direction[2]);
-			gl.uniform_3_f32(camera_position_location.as_ref(), camera_x, camera_y, camera_z);
-			gl.uniform_3_f32(fog_color_location.as_ref(), self.fog_color[0], self.fog_color[1], self.fog_color[2]);
-			gl.uniform_2_f32(fog_range_location.as_ref(), self.fog_range[0], self.fog_range[1]);
+			gl.uniform_3_f64(sun_direction_location.as_ref(), self.sun_direction[0], self.sun_direction[1], self.sun_direction[2]);
+			gl.uniform_3_f64(camera_position_location.as_ref(), camera_x, camera_y, camera_z);
+			gl.uniform_3_f64(fog_color_location.as_ref(), self.fog_color[0], self.fog_color[1], self.fog_color[2]);
+			gl.uniform_2_f64(fog_range_location.as_ref(), self.fog_range[0], self.fog_range[1]);
 		}
 
 		// 섀도우 맵 수신. (섀도우 샘플러 타입 불일치로 드로우가 무효화되지 않도록 강도와 무관하게 항상 바인드)
@@ -459,8 +460,8 @@ impl SkinnedModelRenderer {
 				unsafe {
 					gl.uniform_matrix_4_f32_slice(light_view_projection_location.as_ref(), false, light_view_projection_elements);
 					gl.uniform_1_i32(shadow_map_texture_location.as_ref(), TEXTURE_UNIT_SHADOWMAP as i32);
-					gl.uniform_1_f32(shadow_texel_size_location.as_ref(), self.shadow_texel_size);
-					gl.uniform_1_f32(shadow_strength_location.as_ref(), self.shadow_strength);
+					gl.uniform_1_f64(shadow_texel_size_location.as_ref(), self.shadow_texel_size);
+					gl.uniform_1_f64(shadow_strength_location.as_ref(), self.shadow_strength);
 					gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
 					gl.bind_texture(glow::TEXTURE_2D, Some(shadow_map_texture));
 					gl.active_texture(glow::TEXTURE0);
@@ -469,7 +470,7 @@ impl SkinnedModelRenderer {
 			_ => {
 				unsafe {
 					gl.uniform_1_i32(shadow_map_texture_location.as_ref(), TEXTURE_UNIT_SHADOWMAP as i32);
-					gl.uniform_1_f32(shadow_strength_location.as_ref(), 0.0);
+					gl.uniform_1_f64(shadow_strength_location.as_ref(), 0.0);
 					gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
 					gl.bind_texture(glow::TEXTURE_2D, Some(self.empty_shadow_texture));
 					gl.active_texture(glow::TEXTURE0);
@@ -522,7 +523,7 @@ impl SkinnedModelRenderer {
 	/// 	let light_view_projection_elements = *shadow_map.get_light_view_projection_matrix().get_elements();
 	/// 	shadow_map.begin_render(gl);
 	/// 	skinned_model_renderer.draw_depth(gl, skinned_model, &light_view_projection_elements, model_matrix.get_elements());
-	/// 	skinned_model_renderer.set_shadow_map(Some(shadow_map.get_depth_texture()), Some(&light_view_projection_elements), 1.0 / shadow_map.get_resolution() as f32);
+	/// 	skinned_model_renderer.set_shadow_map(Some(shadow_map.get_depth_texture()), Some(&light_view_projection_elements), 1.0 / shadow_map.get_resolution() as f64);
 	/// 	skinned_model_renderer.set_shadow_strength(1.0);
 	/// 	skinned_model_renderer.set_sun_direction(sun_direction.x, sun_direction.y, sun_direction.z);
 	/// 	unsafe {
@@ -580,7 +581,7 @@ impl SkinnedModelRenderer {
 	/// - `blue`: 선 색 파랑. (0 ~ 1)
 	/// - `alpha`: 선 불투명도. (0 ~ 1, 블렌드를 켜야 반투명이 된다)
 	//==============================================================================
-	pub fn draw_wireframe(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], red: f32, green: f32, blue: f32, alpha: f32) {
+	pub fn draw_wireframe(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], red: f64, green: f64, blue: f64, alpha: f64) {
 		skinned_model.upload_pending_morph_targets(gl);
 		for drawable_index in 0..skinned_model.get_drawable_list().len() {
 			if skinned_model.get_drawable_list()[drawable_index].wireframe_index_buffer.is_none() {
@@ -598,7 +599,7 @@ impl SkinnedModelRenderer {
 		unsafe {
 			gl.uniform_matrix_4_f32_slice(view_projection_location.as_ref(), false, view_projection_elements);
 			gl.uniform_matrix_4_f32_slice(model_matrix_location.as_ref(), false, model_matrix_elements);
-			gl.uniform_4_f32(wireframe_color_location.as_ref(), red, green, blue, alpha);
+			gl.uniform_4_f64(wireframe_color_location.as_ref(), red, green, blue, alpha);
 		}
 		let skin_list = skinned_model.get_skin_list();
 		for drawable in skinned_model.get_drawable_list().iter() {
@@ -673,7 +674,7 @@ impl SkinnedModelRenderer {
 	/// - `light_view_projection_elements`: 빛의 뷰 x 투영 행렬. (16개를 복사해 둔다, None 이면 그림자를 받지 않는다)
 	/// - `texel_size`: 섀도우 맵 텍셀 크기. (1 / 해상도, PCF 표본 간격, 기본 1 / 2048)
 	//==============================================================================
-	pub fn set_shadow_map(&mut self, shadow_map_texture: Option<GlTexture>, light_view_projection_elements: Option<&[f32; 16]>, texel_size: f32) {
+	pub fn set_shadow_map(&mut self, shadow_map_texture: Option<GlTexture>, light_view_projection_elements: Option<&[f32; 16]>, texel_size: f64) {
 		self.shadow_map_texture = shadow_map_texture;
 		self.light_view_projection_elements = light_view_projection_elements.copied();
 		self.shadow_texel_size = texel_size;
@@ -685,7 +686,7 @@ impl SkinnedModelRenderer {
 	/// # 인자
 	/// - `shadow_strength`: 그림자 강도. (0 ~ 1, 0 이면 받지 않는다, 기본 0)
 	//==============================================================================
-	pub fn set_shadow_strength(&mut self, shadow_strength: f32) {
+	pub fn set_shadow_strength(&mut self, shadow_strength: f64) {
 		self.shadow_strength = shadow_strength;
 	}
 
@@ -697,7 +698,7 @@ impl SkinnedModelRenderer {
 	/// - `y`: 방향 Y.
 	/// - `z`: 방향 Z.
 	//==============================================================================
-	pub fn set_sun_direction(&mut self, x: f32, y: f32, z: f32) {
+	pub fn set_sun_direction(&mut self, x: f64, y: f64, z: f64) {
 		self.sun_direction = [x, y, z];
 	}
 
@@ -709,7 +710,7 @@ impl SkinnedModelRenderer {
 	/// - `green`: 초록. (0 ~ 1)
 	/// - `blue`: 파랑. (0 ~ 1)
 	//==============================================================================
-	pub fn set_fog_color(&mut self, red: f32, green: f32, blue: f32) {
+	pub fn set_fog_color(&mut self, red: f64, green: f64, blue: f64) {
 		self.fog_color = [red, green, blue];
 	}
 
@@ -720,7 +721,7 @@ impl SkinnedModelRenderer {
 	/// - `start_distance`: 안개가 끼기 시작하는 카메라 거리. (월드 단위, 기본 55)
 	/// - `end_distance`: 안개가 다 덮는 카메라 거리. (월드 단위, 기본 250, 사이는 smoothstep)
 	//==============================================================================
-	pub fn set_fog_range(&mut self, start_distance: f32, end_distance: f32) {
+	pub fn set_fog_range(&mut self, start_distance: f64, end_distance: f64) {
 		self.fog_range = [start_distance, end_distance];
 	}
 

@@ -31,6 +31,7 @@ use crate::core::shaderprogram::ShaderProgram;
 use crate::core::textshaping::ShapingDirection;
 use crate::core::textstringtexturecache::{TextDrawKind, TextEntry, TextMetrics, TextStringTextureCache};
 use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -384,12 +385,12 @@ const CORNER_SEGMENT_COUNT: usize = 8;
 const ROUND_RECT_POSITION_COUNT: usize = 4 * (CORNER_SEGMENT_COUNT + 1);
 
 /// 둥근 사각형 꼭짓점의 단위 원 좌표 표. (코너 4 개 x 분할 9 개, 우상 → 우하 → 좌하 → 좌상)
-fn build_round_rect_unit_table() -> [(f32, f32); ROUND_RECT_POSITION_COUNT] {
-	let start_radian_list: [f32; 4] = [-math::PI / 2.0, 0.0, math::PI / 2.0, math::PI];
+fn build_round_rect_unit_table() -> [(f64, f64); ROUND_RECT_POSITION_COUNT] {
+	let start_radian_list: [f64; 4] = [-math::PI / 2.0, 0.0, math::PI / 2.0, math::PI];
 	let mut unit_table = [(0.0, 0.0); ROUND_RECT_POSITION_COUNT];
 	for (corner_index, start_radian) in start_radian_list.into_iter().enumerate() {
 		for segment_index in 0..=CORNER_SEGMENT_COUNT {
-			let radian = start_radian + (math::PI / 2.0) * (segment_index as f32 / CORNER_SEGMENT_COUNT as f32);
+			let radian = start_radian + (math::PI / 2.0) * (segment_index as f64 / CORNER_SEGMENT_COUNT as f64);
 			unit_table[corner_index * (CORNER_SEGMENT_COUNT + 1) + segment_index] = (radian.cos(), radian.sin());
 		}
 	}
@@ -397,8 +398,8 @@ fn build_round_rect_unit_table() -> [(f32, f32); ROUND_RECT_POSITION_COUNT] {
 }
 
 /// 텍스트 베이크 스케일 상한. (과도한 확대 굽기 방지)
-const MAXIMUM_TEXT_BAKE_SCALE: f32 = 8.0;
-const DEFAULT_TEXT_BAKE_SCALE_STEP: f32 = 0.25;
+const MAXIMUM_TEXT_BAKE_SCALE: f64 = 8.0;
+const DEFAULT_TEXT_BAKE_SCALE_STEP: f64 = 0.25;
 
 /// 부드러운 원 텍스처 크기.
 const SOFT_DISC_TEXTURE_SIZE: usize = 64;
@@ -705,7 +706,7 @@ struct OpacityLayer {
 	/// 층을 열기 전에 그리던 프레임버퍼.
 	previous_framebuffer: Option<GlFramebuffer>,
 	/// 층을 얹을 투명도. (층을 열 때의 전역 알파)
-	global_alpha: f32,
+	global_alpha: f64,
 }
 
 //==============================================================================
@@ -947,7 +948,7 @@ pub fn detect_text_direction(text: &str) -> TextDirection {
 #[derive(Clone)]
 struct GraphicState {
 	transform_matrix: TransformMatrix,
-	global_alpha: f32,
+	global_alpha: f64,
 	blend_mode: BlendMode,
 	fill_color: Color,
 	stroke_color: Color,
@@ -963,7 +964,7 @@ struct GraphicState {
 //==============================================================================
 struct ClipEntry {
 	rect: Rect,
-	round_size: f32,
+	round_size: f64,
 	transform_matrix: TransformMatrix,
 }
 
@@ -1040,7 +1041,7 @@ pub struct Graphic {
 	is_image_smoothing_enabled: bool,
 	image_smoothing_quality: ImageSmoothingQuality,
 	is_image_mipmap_enabled: bool,
-	image_mipmap_bias: f32,
+	image_mipmap_bias: f64,
 	shader_program: ShaderProgram,
 	/// 드로우에 잠시 바꿔 끼우는 프로그램. (ShaderSprite 등)
 	shader_program_override: Option<Rc<ShaderProgram>>,
@@ -1055,9 +1056,9 @@ pub struct Graphic {
 	/// 기본 프로그램에 마지막으로 올린 틴트와 전역 투명도를 알고 있는지.
 	is_uploaded_uniform_known: bool,
 	/// 기본 프로그램에 마지막으로 올린 틴트. (r, g, b, a)
-	uploaded_tint_color_value_list: [f32; 4],
+	uploaded_tint_color_value_list: [f64; 4],
 	/// 기본 프로그램에 마지막으로 올린 전역 투명도.
-	uploaded_global_alpha: f32,
+	uploaded_global_alpha: f64,
 	vertex_array: GlVertexArray,
 	vertex_buffer: GlBuffer,
 	vertex_data: Vec<f32>,
@@ -1076,7 +1077,7 @@ pub struct Graphic {
 	/// 상태 스택. (앞의 state_stack_depth 개가 쓰는 칸, 뒤 칸은 폰트 문자열 저장소를 다시 쓰려고 남겨 둔다)
 	state_stack: Vec<GraphicState>,
 	state_stack_depth: usize,
-	global_alpha: f32,
+	global_alpha: f64,
 	blend_mode: BlendMode,
 	/// 지금 블렌드 모드의 셰이더 섞기 번호. (0 이면 고정 블렌딩)
 	shader_blend_mode_index: i32,
@@ -1108,9 +1109,9 @@ pub struct Graphic {
 	model_matrix_array: [f32; 9],
 	applied_viewport_width: i32,
 	applied_viewport_height: i32,
-	text_bake_scale_step: f32,
+	text_bake_scale_step: f64,
 	/// 배율이 움직이는 노드의 텍스트 베이크 스케일 양자화 단위. (text_bake_scale_step 이 0 일 때만 쓴다)
-	text_bake_motion_scale_step: f32,
+	text_bake_motion_scale_step: f64,
 	/// 지금 그리는 노드의 배율이 지난 프레임과 달라 움직이는 중인지.
 	is_text_bake_scale_moving: bool,
 	is_text_pixel_snap_enabled: bool,
@@ -1121,7 +1122,7 @@ pub struct Graphic {
 	culled_node_count: u32,
 	last_frame_culled_node_count: u32,
 	frame_number: u64,
-	round_rect_unit_table: [(f32, f32); ROUND_RECT_POSITION_COUNT],
+	round_rect_unit_table: [(f64, f64); ROUND_RECT_POSITION_COUNT],
 	is_batching_enabled: bool,
 	batch_suspend_depth: u32,
 	batch_vertex_data: Vec<f32>,
@@ -1218,7 +1219,7 @@ impl Graphic {
 		let texture_lod_bias_location = shader_program.get_uniform_location(&gl, "textureLodBias");
 		unsafe {
 			gl.uniform_1_i32(main_texture_location.as_ref(), 0);
-			gl.uniform_1_f32(texture_lod_bias_location.as_ref(), 0.0);
+			gl.uniform_1_f64(texture_lod_bias_location.as_ref(), 0.0);
 			gl.active_texture(glow::TEXTURE0);
 		}
 
@@ -1295,7 +1296,7 @@ impl Graphic {
 			round_rect_unit_table: build_round_rect_unit_table(),
 			is_batching_enabled: true,
 			batch_suspend_depth: 0,
-			batch_vertex_data: vec![0.0f32; BATCH_VERTEX_CAPACITY * BATCH_FLOATS_PER_VERTEX],
+			batch_vertex_data: vec![0.0f64 as f32; BATCH_VERTEX_CAPACITY * BATCH_FLOATS_PER_VERTEX],
 			batch_vertex_count: 0,
 			batch_texture: None,
 			is_culling_enabled: true,
@@ -1338,9 +1339,9 @@ impl Graphic {
 			unsafe {
 				self.gl.viewport(0, 0, drawing_buffer_width, drawing_buffer_height);
 			}
-			let safe_width = drawing_buffer_width.max(1) as f32;
-			let safe_height = drawing_buffer_height.max(1) as f32;
-			self.projection_matrix_array = [2.0 / safe_width, 0.0, 0.0, 0.0, -2.0 / safe_height, 0.0, -1.0, 1.0, 1.0];
+			let safe_width = drawing_buffer_width.max(1) as f64;
+			let safe_height = drawing_buffer_height.max(1) as f64;
+			self.projection_matrix_array = [(2.0 / safe_width) as f32, 0.0, 0.0, 0.0, (-2.0 / safe_height) as f32, 0.0, -1.0, 1.0, 1.0];
 			self.applied_viewport_width = drawing_buffer_width;
 			self.applied_viewport_height = drawing_buffer_height;
 		}
@@ -1586,7 +1587,7 @@ impl Graphic {
 	/// # 인자
 	/// - `value`: 밉맵 단계에 더할 값. (음수면 또렷하게, 0 이면 보정 없음)
 	//==============================================================================
-	pub fn set_image_mipmap_bias(&mut self, value: f32) {
+	pub fn set_image_mipmap_bias(&mut self, value: f64) {
 		self.flush_batch();
 		self.image_mipmap_bias = value;
 		let shader_program_list: [Option<&ShaderProgram>; 6] = [Some(&self.shader_program), self.batch_shader_program.as_ref(), self.particle_shader_program.as_ref(), self.blend_shader_program.as_ref(), self.particle_blend_shader_program.as_ref(), self.shader_program_override.as_deref()];
@@ -1603,7 +1604,7 @@ impl Graphic {
 	/// # 돌려줌
 	/// 설정한 보정 값. (처음 0)
 	//==============================================================================
-	pub fn get_image_mipmap_bias(&self) -> f32 {
+	pub fn get_image_mipmap_bias(&self) -> f64 {
 		self.image_mipmap_bias
 	}
 
@@ -1620,7 +1621,7 @@ impl Graphic {
 			}
 		};
 		unsafe {
-			self.gl.uniform_1_f32(Some(&texture_lod_bias_location), self.image_mipmap_bias);
+			self.gl.uniform_1_f64(Some(&texture_lod_bias_location), self.image_mipmap_bias);
 		}
 	}
 
@@ -1712,7 +1713,7 @@ impl Graphic {
 	/// - `x`: 가로 이동. (지금 좌표계 단위, 픽셀)
 	/// - `y`: 세로 이동. (아래가 +)
 	//==============================================================================
-	pub fn translate(&mut self, x: f32, y: f32) {
+	pub fn translate(&mut self, x: f64, y: f64) {
 		self.transform_matrix.translate(x, y);
 	}
 
@@ -1722,7 +1723,7 @@ impl Graphic {
 	/// # 인자
 	/// - `radian`: 회전 각도. (라디안, 화면에서 시계 방향이 +)
 	//==============================================================================
-	pub fn rotate(&mut self, radian: f32) {
+	pub fn rotate(&mut self, radian: f64) {
 		self.transform_matrix.rotate(radian);
 	}
 
@@ -1733,7 +1734,7 @@ impl Graphic {
 	/// - `x`: 가로 배율. (1 이면 그대로, 음수면 뒤집힌다)
 	/// - `y`: 세로 배율.
 	//==============================================================================
-	pub fn scale(&mut self, x: f32, y: f32) {
+	pub fn scale(&mut self, x: f64, y: f64) {
 		self.transform_matrix.scale(x, y);
 	}
 
@@ -1749,7 +1750,7 @@ impl Graphic {
 	/// - `e`: 가로 이동. (픽셀)
 	/// - `f`: 세로 이동. (픽셀)
 	//==============================================================================
-	pub fn set_transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
+	pub fn set_transform(&mut self, a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) {
 		self.transform_matrix.set_transform(a, b, c, d, e, f);
 	}
 
@@ -1776,7 +1777,7 @@ impl Graphic {
 	/// # 인자
 	/// - `value`: 전역 투명도. (0 ~ 1 로 자른다, 처음 1)
 	//==============================================================================
-	pub fn set_global_alpha(&mut self, value: f32) {
+	pub fn set_global_alpha(&mut self, value: f64) {
 		self.global_alpha = math::clamp01(value);
 	}
 
@@ -1786,7 +1787,7 @@ impl Graphic {
 	/// # 돌려줌
 	/// 지금 전역 투명도. (0 ~ 1)
 	//==============================================================================
-	pub fn get_global_alpha(&self) -> f32 {
+	pub fn get_global_alpha(&self) -> f64 {
 		self.global_alpha
 	}
 
@@ -1796,7 +1797,7 @@ impl Graphic {
 	/// # 인자
 	/// - `value`: 지금 전역 투명도에 곱할 값. (곱한 결과를 0 ~ 1 로 자른다)
 	//==============================================================================
-	pub fn multiply_global_alpha(&mut self, value: f32) {
+	pub fn multiply_global_alpha(&mut self, value: f64) {
 		self.global_alpha = math::clamp01(self.global_alpha * value);
 	}
 
@@ -1958,14 +1959,14 @@ impl Graphic {
 	/// # 돌려줌
 	/// 기록한 뒤의 오프셋. (offset + 24, 4 로 나누면 그때까지의 정점 수)
 	//==============================================================================
-	pub fn write_quad(&mut self, offset: usize, left_x: f32, top_y: f32, right_x: f32, bottom_y: f32, left_u: f32, top_v: f32, right_u: f32, bottom_v: f32) -> usize {
+	pub fn write_quad(&mut self, offset: usize, left_x: f64, top_y: f64, right_x: f64, bottom_y: f64, left_u: f64, top_v: f64, right_u: f64, bottom_v: f64) -> usize {
 		let quad_values: [f32; 24] = [
-			left_x, top_y, left_u, top_v,
-			right_x, top_y, right_u, top_v,
-			left_x, bottom_y, left_u, bottom_v,
-			left_x, bottom_y, left_u, bottom_v,
-			right_x, top_y, right_u, top_v,
-			right_x, bottom_y, right_u, bottom_v,
+			left_x as f32, top_y as f32, left_u as f32, top_v as f32,
+			right_x as f32, top_y as f32, right_u as f32, top_v as f32,
+			left_x as f32, bottom_y as f32, left_u as f32, bottom_v as f32,
+			left_x as f32, bottom_y as f32, left_u as f32, bottom_v as f32,
+			right_x as f32, top_y as f32, right_u as f32, top_v as f32,
+			right_x as f32, bottom_y as f32, right_u as f32, bottom_v as f32,
 		];
 		self.vertex_data[offset..offset + 24].copy_from_slice(&quad_values);
 		offset + 24
@@ -2088,12 +2089,12 @@ impl Graphic {
 		let is_same_global_alpha = is_uploaded_uniform_known && self.uploaded_global_alpha == global_alpha;
 		unsafe {
 			self.gl.uniform_matrix_3_f32_slice(self.model_matrix_location.as_ref(), false, &self.model_matrix_array);
-			self.gl.uniform_4_f32(self.main_color_location.as_ref(), color.red, color.green, color.blue, color.alpha);
+			self.gl.uniform_4_f64(self.main_color_location.as_ref(), color.red, color.green, color.blue, color.alpha);
 			if !is_same_tint_color {
-				self.gl.uniform_4_f32(self.tint_color_location.as_ref(), tint_color_value_list[0], tint_color_value_list[1], tint_color_value_list[2], tint_color_value_list[3]);
+				self.gl.uniform_4_f64(self.tint_color_location.as_ref(), tint_color_value_list[0], tint_color_value_list[1], tint_color_value_list[2], tint_color_value_list[3]);
 			}
 			if !is_same_global_alpha {
-				self.gl.uniform_1_f32(self.global_alpha_location.as_ref(), global_alpha);
+				self.gl.uniform_1_f64(self.global_alpha_location.as_ref(), global_alpha);
 			}
 		}
 
@@ -2165,12 +2166,12 @@ impl Graphic {
 		self.draw_vertex_count += vertex_count as u32;
 
 		// 덧그림 칸의 그릴 영역을 단위 행렬, 흰색, 틴트 없이 섞어 옮긴다. (칸은 화면과 같은 크기라 디바이스 픽셀 그대로 짚는다)
-		let viewport_width = self.applied_viewport_width as f32;
-		let viewport_height = self.applied_viewport_height as f32;
-		let left_x = backdrop_rect.x as f32;
-		let right_x = (backdrop_rect.x + backdrop_rect.width) as f32;
-		let top_y = viewport_height - (backdrop_rect.y + backdrop_rect.height) as f32;
-		let bottom_y = viewport_height - backdrop_rect.y as f32;
+		let viewport_width = self.applied_viewport_width as f64;
+		let viewport_height = self.applied_viewport_height as f64;
+		let left_x = backdrop_rect.x as f64;
+		let right_x = (backdrop_rect.x + backdrop_rect.width) as f64;
+		let top_y = viewport_height - (backdrop_rect.y + backdrop_rect.height) as f64;
+		let bottom_y = viewport_height - backdrop_rect.y as f64;
 		let layer_vertex_count = self.write_quad(0, left_x, top_y, right_x, bottom_y, left_x / viewport_width, (viewport_height - top_y) / viewport_height, right_x / viewport_width, (viewport_height - bottom_y) / viewport_height) / FLOATS_PER_VERTEX;
 		let layer_vertex_bytes = float_slice_to_bytes(&self.vertex_data[..layer_vertex_count * FLOATS_PER_VERTEX]);
 		unsafe {
@@ -2466,15 +2467,15 @@ impl Graphic {
 			let position_x = self.vertex_data[read_offset];
 			let position_y = self.vertex_data[read_offset + 1];
 			let batch_vertex = &mut self.batch_vertex_data[write_offset..write_offset + BATCH_FLOATS_PER_VERTEX];
-			batch_vertex[0] = matrix.a * position_x + matrix.c * position_y + matrix.e;
-			batch_vertex[1] = matrix.b * position_x + matrix.d * position_y + matrix.f;
+			batch_vertex[0] = (matrix.a * position_x as f64 + matrix.c * position_y as f64 + matrix.e) as f32;
+			batch_vertex[1] = (matrix.b * position_x as f64 + matrix.d * position_y as f64 + matrix.f) as f32;
 			batch_vertex[2] = self.vertex_data[read_offset + 2];
 			batch_vertex[3] = self.vertex_data[read_offset + 3];
-			batch_vertex[4] = color_red;
-			batch_vertex[5] = color_green;
-			batch_vertex[6] = color_blue;
-			batch_vertex[7] = color_alpha;
-			batch_vertex[8..12].copy_from_slice(&tint_color_value_list);
+			batch_vertex[4] = color_red as f32;
+			batch_vertex[5] = color_green as f32;
+			batch_vertex[6] = color_blue as f32;
+			batch_vertex[7] = color_alpha as f32;
+			batch_vertex[8..12].copy_from_slice(&tint_color_value_list.map(|value| value as f32));
 			write_offset += BATCH_FLOATS_PER_VERTEX;
 		}
 		self.batch_vertex_count += vertex_count;
@@ -2589,11 +2590,11 @@ impl Graphic {
 		let top_y = rect.position.y;
 		let right_x = rect.position.x + rect.size.x;
 		let bottom_y = rect.position.y + rect.size.y;
-		let corner_list: [(f32, f32); 4] = [(left_x, top_y), (right_x, top_y), (left_x, bottom_y), (right_x, bottom_y)];
-		let mut minimum_x = f32::MAX;
-		let mut minimum_y = f32::MAX;
-		let mut maximum_x = f32::MIN;
-		let mut maximum_y = f32::MIN;
+		let corner_list: [(f64, f64); 4] = [(left_x, top_y), (right_x, top_y), (left_x, bottom_y), (right_x, bottom_y)];
+		let mut minimum_x = f64::MAX;
+		let mut minimum_y = f64::MAX;
+		let mut maximum_x = f64::MIN;
+		let mut maximum_y = f64::MIN;
 		for (corner_x, corner_y) in corner_list {
 			let transformed_x = matrix.a * corner_x + matrix.c * corner_y + matrix.e;
 			let transformed_y = matrix.b * corner_x + matrix.d * corner_y + matrix.f;
@@ -2602,8 +2603,8 @@ impl Graphic {
 			maximum_x = maximum_x.max(transformed_x);
 			maximum_y = maximum_y.max(transformed_y);
 		}
-		let viewport_width = self.applied_viewport_width as f32;
-		let viewport_height = self.applied_viewport_height as f32;
+		let viewport_width = self.applied_viewport_width as f64;
+		let viewport_height = self.applied_viewport_height as f64;
 		maximum_x >= 0.0 && maximum_y >= 0.0 && minimum_x <= viewport_width && minimum_y <= viewport_height
 	}
 
@@ -2779,15 +2780,15 @@ impl Graphic {
 	///
 	/// fn draw(graphic: &mut Graphic) {
 	/// 	let soft_disc_texture = graphic.get_soft_disc_texture();
-	/// 	let particle_list: [(f32, f32, [f32; 4]); 2] = [(100.0, 100.0, [1.0, 0.5, 0.0, 1.0]), (140.0, 120.0, [0.2, 0.6, 1.0, 0.5])];
+	/// 	let particle_list: [(f64, f64, [f64; 4]); 2] = [(100.0, 100.0, [1.0, 0.5, 0.0, 1.0]), (140.0, 120.0, [0.2, 0.6, 1.0, 0.5])];
 	/// 	let half_size = 24.0;
-	/// 	let corner_list: [[f32; 4]; 6] = [[-half_size, -half_size, 0.0, 0.0], [half_size, -half_size, 1.0, 0.0], [half_size, half_size, 1.0, 1.0], [-half_size, -half_size, 0.0, 0.0], [half_size, half_size, 1.0, 1.0], [-half_size, half_size, 0.0, 1.0]];
+	/// 	let corner_list: [[f64; 4]; 6] = [[-half_size, -half_size, 0.0, 0.0], [half_size, -half_size, 1.0, 0.0], [half_size, half_size, 1.0, 1.0], [-half_size, -half_size, 0.0, 0.0], [half_size, half_size, 1.0, 1.0], [-half_size, half_size, 0.0, 1.0]];
 	/// 	let vertex_data = graphic.get_particle_vertex_data(particle_list.len() * 6 * PARTICLE_FLOATS_PER_VERTEX);
 	/// 	let mut offset = 0;
 	/// 	for (center_x, center_y, color) in particle_list {
 	/// 		for corner in corner_list {
 	/// 			let vertex = [center_x + corner[0], center_y + corner[1], corner[2], corner[3], color[0], color[1], color[2], color[3]];
-	/// 			vertex_data[offset..offset + PARTICLE_FLOATS_PER_VERTEX].copy_from_slice(&vertex);
+	/// 			vertex_data[offset..offset + PARTICLE_FLOATS_PER_VERTEX].copy_from_slice(&vertex.map(|value| value as f32));
 	/// 			offset += PARTICLE_FLOATS_PER_VERTEX;
 	/// 		}
 	/// 	}
@@ -2842,7 +2843,7 @@ impl Graphic {
 			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 			self.gl.uniform_matrix_3_f32_slice(model_matrix_location.as_ref(), false, &self.model_matrix_array);
-			self.gl.uniform_1_f32(global_alpha_location.as_ref(), self.global_alpha);
+			self.gl.uniform_1_f64(global_alpha_location.as_ref(), self.global_alpha);
 			if is_shader_blend_draw {
 				self.gl.uniform_1_i32(blend_mode_index_location.as_ref(), shader_blend_mode_index);
 			}
@@ -2955,11 +2956,11 @@ impl Graphic {
 			return soft_disc_texture;
 		}
 		let mut pixels = vec![0u8; SOFT_DISC_TEXTURE_SIZE * SOFT_DISC_TEXTURE_SIZE * 4];
-		let half_size = SOFT_DISC_TEXTURE_SIZE as f32 * 0.5;
+		let half_size = SOFT_DISC_TEXTURE_SIZE as f64 * 0.5;
 		for pixel_y in 0..SOFT_DISC_TEXTURE_SIZE {
 			for pixel_x in 0..SOFT_DISC_TEXTURE_SIZE {
-				let delta_x = (pixel_x as f32 + 0.5 - half_size) / half_size;
-				let delta_y = (pixel_y as f32 + 0.5 - half_size) / half_size;
+				let delta_x = (pixel_x as f64 + 0.5 - half_size) / half_size;
+				let delta_y = (pixel_y as f64 + 0.5 - half_size) / half_size;
 				let distance = (delta_x * delta_x + delta_y * delta_y).sqrt();
 				let falloff = math::clamp01(1.0 - distance);
 				let alpha = (falloff * falloff * 255.0).round() as u8;
@@ -3053,7 +3054,7 @@ impl Graphic {
 	/// - `positions`: 이을 점들. (2 개 미만이면 그리지 않는다)
 	/// - `size`: 선 두께. (픽셀)
 	//==============================================================================
-	pub fn draw_line(&mut self, positions: &[Vector2], size: f32) {
+	pub fn draw_line(&mut self, positions: &[Vector2], size: f64) {
 		self.draw_polyline(positions, size, false);
 	}
 
@@ -3065,7 +3066,7 @@ impl Graphic {
 	/// - `positions`: 이을 점들. (2 개 미만이면 그리지 않는다)
 	/// - `size`: 선 두께. (픽셀)
 	//==============================================================================
-	pub fn draw_line_loop(&mut self, positions: &[Vector2], size: f32) {
+	pub fn draw_line_loop(&mut self, positions: &[Vector2], size: f64) {
 		self.draw_polyline(positions, size, true);
 	}
 
@@ -3078,7 +3079,7 @@ impl Graphic {
 	/// - `size`: 선 두께. (픽셀)
 	/// - `is_closed`: true 면 마지막 점과 첫 점도 잇는다.
 	//==============================================================================
-	pub fn draw_polyline(&mut self, positions: &[Vector2], size: f32, is_closed: bool) {
+	pub fn draw_polyline(&mut self, positions: &[Vector2], size: f64, is_closed: bool) {
 		if positions.len() < 2 {
 			return;
 		}
@@ -3122,7 +3123,7 @@ impl Graphic {
 	/// - `rect`: 외곽선을 그을 사각형. (픽셀)
 	/// - `line_width`: 선 두께. (픽셀, 경계선 양쪽으로 절반씩)
 	//==============================================================================
-	pub fn draw_stroke_rect(&mut self, rect: Rect, line_width: f32) {
+	pub fn draw_stroke_rect(&mut self, rect: Rect, line_width: f64) {
 		let left_x = rect.position.x;
 		let top_y = rect.position.y;
 		let right_x = left_x + rect.size.x;
@@ -3146,7 +3147,7 @@ impl Graphic {
 	/// # 돌려줌
 	/// 모서리마다 9 개씩 36 개의 점. (우상, 우하, 좌하, 좌상 모서리 차례)
 	//==============================================================================
-	pub fn build_round_rect_positions(&self, rect: Rect, round_size: f32) -> [Vector2; ROUND_RECT_POSITION_COUNT] {
+	pub fn build_round_rect_positions(&self, rect: Rect, round_size: f64) -> [Vector2; ROUND_RECT_POSITION_COUNT] {
 		let left_x = rect.position.x;
 		let top_y = rect.position.y;
 		let right_x = left_x + rect.size.x;
@@ -3154,7 +3155,7 @@ impl Graphic {
 		let clamped_round_size = round_size.min(rect.size.x.abs().min(rect.size.y.abs()) / 2.0);
 
 		// 코너 중심 4개. (우상 → 우하 → 좌하 → 좌상)
-		let corner_centers: [(f32, f32); 4] = [
+		let corner_centers: [(f64, f64); 4] = [
 			(right_x - clamped_round_size, top_y + clamped_round_size),
 			(right_x - clamped_round_size, bottom_y - clamped_round_size),
 			(left_x + clamped_round_size, bottom_y - clamped_round_size),
@@ -3199,9 +3200,9 @@ impl Graphic {
 			let second_position = positions[position_index];
 			let third_position = positions[position_index + 1];
 			let triangle_values: [f32; 12] = [
-				first_position.x, first_position.y, 0.5, 0.5,
-				second_position.x, second_position.y, 0.5, 0.5,
-				third_position.x, third_position.y, 0.5, 0.5,
+				first_position.x as f32, first_position.y as f32, 0.5, 0.5,
+				second_position.x as f32, second_position.y as f32, 0.5, 0.5,
+				third_position.x as f32, third_position.y as f32, 0.5, 0.5,
 			];
 			self.vertex_data[offset..offset + 12].copy_from_slice(&triangle_values);
 			offset += 12;
@@ -3219,7 +3220,7 @@ impl Graphic {
 	/// - `rect`: 칠할 사각형. (픽셀)
 	/// - `round_size`: 모서리 반지름. (0 이하면 draw_rect 와 같다)
 	//==============================================================================
-	pub fn draw_round_rect(&mut self, rect: Rect, round_size: f32) {
+	pub fn draw_round_rect(&mut self, rect: Rect, round_size: f64) {
 		if round_size > 0.0 {
 			let positions = self.build_round_rect_positions(rect, round_size);
 			let fill_color = self.get_fill_color();
@@ -3239,7 +3240,7 @@ impl Graphic {
 	/// - `round_size`: 모서리 반지름. (0 이하면 draw_stroke_rect 와 같다)
 	/// - `line_width`: 선 두께. (픽셀)
 	//==============================================================================
-	pub fn draw_stroke_round_rect(&mut self, rect: Rect, round_size: f32, line_width: f32) {
+	pub fn draw_stroke_round_rect(&mut self, rect: Rect, round_size: f64, line_width: f64) {
 		if round_size > 0.0 {
 			let positions = self.build_round_rect_positions(rect, round_size);
 			self.draw_line_loop(&positions, line_width);
@@ -3252,12 +3253,12 @@ impl Graphic {
 	//==============================================================================
 	/// 원 둘레 좌표 목록. (화면상 크기에 비례한 분할 수, 16 ~ 64)
 	//==============================================================================
-	fn build_circle_positions(&self, center: Vector2, radius: f32) -> Vec<Vector2> {
+	fn build_circle_positions(&self, center: Vector2, radius: f64) -> Vec<Vector2> {
 		let maximum_scale = self.transform_matrix.get_maximum_scale();
 		let segment_count = math::clamp((radius * maximum_scale * 0.5).ceil(), 16.0, 64.0) as usize;
 		let mut positions = Vec::with_capacity(segment_count);
 		for segment_index in 0..segment_count {
-			let radian = (math::PI * 2.0) * (segment_index as f32 / segment_count as f32);
+			let radian = (math::PI * 2.0) * (segment_index as f64 / segment_count as f64);
 			let position_x = center.x + radian.cos() * radius;
 			let position_y = center.y + radian.sin() * radius;
 			positions.push(Vector2::create(position_x, position_y));
@@ -3273,7 +3274,7 @@ impl Graphic {
 	/// - `center`: 가운데. (픽셀)
 	/// - `radius`: 반지름. (픽셀, 0 이하면 그리지 않는다)
 	//==============================================================================
-	pub fn draw_circle(&mut self, center: Vector2, radius: f32) {
+	pub fn draw_circle(&mut self, center: Vector2, radius: f64) {
 		if radius <= 0.0 {
 			return;
 		}
@@ -3291,7 +3292,7 @@ impl Graphic {
 	/// - `radius`: 반지름. (픽셀, 0 이하면 그리지 않는다)
 	/// - `line_width`: 선 두께. (픽셀, 반지름 양쪽으로 절반씩)
 	//==============================================================================
-	pub fn draw_stroke_circle(&mut self, center: Vector2, radius: f32, line_width: f32) {
+	pub fn draw_stroke_circle(&mut self, center: Vector2, radius: f64, line_width: f64) {
 		if radius <= 0.0 {
 			return;
 		}
@@ -3318,14 +3319,14 @@ impl Graphic {
 	/// ```rust,no_run
 	/// use vanilla::{math, Graphic, Vector2};
 	///
-	/// fn draw_progress(graphic: &mut Graphic, progress: f32) {
+	/// fn draw_progress(graphic: &mut Graphic, progress: f64) {
 	/// 	let start_radian = -math::PI / 2.0;
 	/// 	graphic.set_fill_color("#40c057");
 	/// 	graphic.draw_ring(Vector2::create(200.0, 200.0), 40.0, 50.0, start_radian, start_radian + math::PI * 2.0 * progress);
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn draw_ring(&mut self, center: Vector2, inner_radius: f32, outer_radius: f32, start_radian: f32, end_radian: f32) {
+	pub fn draw_ring(&mut self, center: Vector2, inner_radius: f64, outer_radius: f64, start_radian: f64, end_radian: f64) {
 		let fill_color = self.get_fill_color();
 		self.draw_ring_with_color(center, inner_radius, outer_radius, start_radian, end_radian, fill_color);
 	}
@@ -3342,7 +3343,7 @@ impl Graphic {
 	/// - `end_radian`: 끝 각도. (라디안)
 	/// - `line_width`: 선 두께. (픽셀)
 	//==============================================================================
-	pub fn draw_arc(&mut self, center: Vector2, radius: f32, start_radian: f32, end_radian: f32, line_width: f32) {
+	pub fn draw_arc(&mut self, center: Vector2, radius: f64, start_radian: f64, end_radian: f64, line_width: f64) {
 		let half_width = line_width * 0.5;
 		let stroke_color = self.get_stroke_color();
 		self.draw_ring_with_color(center, (radius - half_width).max(0.0), radius + half_width, start_radian, end_radian, stroke_color);
@@ -3359,7 +3360,7 @@ impl Graphic {
 	/// - `end_radian`: 끝 각도. (라디안, 시작과 같으면 그리지 않는다, 차이는 한 바퀴까지만 쓴다)
 	/// - `color`: 칠할 색.
 	//==============================================================================
-	pub fn draw_ring_with_color(&mut self, center: Vector2, inner_radius: f32, outer_radius: f32, start_radian: f32, end_radian: f32, color: Color) {
+	pub fn draw_ring_with_color(&mut self, center: Vector2, inner_radius: f64, outer_radius: f64, start_radian: f64, end_radian: f64, color: Color) {
 		let span_radian = end_radian - start_radian;
 		if outer_radius <= 0.0 || outer_radius <= inner_radius || span_radian == 0.0 {
 			return;
@@ -3377,7 +3378,7 @@ impl Graphic {
 			if (vertex_count + 6) * FLOATS_PER_VERTEX > self.vertex_data.len() {
 				break;
 			}
-			let radian = start_radian + clamped_span_radian * (segment_index as f32 / segment_count as f32);
+			let radian = start_radian + clamped_span_radian * (segment_index as f64 / segment_count as f64);
 			let cosine = radian.cos();
 			let sine = radian.sin();
 			let previous_inner_x = center.x + previous_cosine * inner_radius;
@@ -3389,12 +3390,12 @@ impl Graphic {
 			let outer_x = center.x + cosine * outer_radius;
 			let outer_y = center.y + sine * outer_radius;
 			let segment_values: [f32; 24] = [
-				previous_inner_x, previous_inner_y, 0.5, 0.5,
-				previous_outer_x, previous_outer_y, 0.5, 0.5,
-				outer_x, outer_y, 0.5, 0.5,
-				previous_inner_x, previous_inner_y, 0.5, 0.5,
-				outer_x, outer_y, 0.5, 0.5,
-				inner_x, inner_y, 0.5, 0.5,
+				previous_inner_x as f32, previous_inner_y as f32, 0.5, 0.5,
+				previous_outer_x as f32, previous_outer_y as f32, 0.5, 0.5,
+				outer_x as f32, outer_y as f32, 0.5, 0.5,
+				previous_inner_x as f32, previous_inner_y as f32, 0.5, 0.5,
+				outer_x as f32, outer_y as f32, 0.5, 0.5,
+				inner_x as f32, inner_y as f32, 0.5, 0.5,
 			];
 			self.vertex_data[offset..offset + 24].copy_from_slice(&segment_values);
 			offset += 24;
@@ -3423,9 +3424,9 @@ impl Graphic {
 	/// use vanilla::{Colors, Graphic};
 	///
 	/// fn draw_grid(graphic: &mut Graphic) {
-	/// 	let mut position_values: Vec<f32> = Vec::new();
+	/// 	let mut position_values: Vec<f64> = Vec::new();
 	/// 	for line_index in 0..=10 {
-	/// 		let offset = line_index as f32 * 32.0;
+	/// 		let offset = line_index as f64 * 32.0;
 	/// 		position_values.extend_from_slice(&[offset, 0.0, offset, 320.0]);
 	/// 		position_values.extend_from_slice(&[0.0, offset, 320.0, offset]);
 	/// 	}
@@ -3434,7 +3435,7 @@ impl Graphic {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn draw_line_segments(&mut self, position_values: &[f32], size: f32) {
+	pub fn draw_line_segments(&mut self, position_values: &[f64], size: f64) {
 		if position_values.len() < 4 {
 			return;
 		}
@@ -3462,12 +3463,12 @@ impl Graphic {
 			let normal_x = -delta_y / length * half_size;
 			let normal_y = delta_x / length * half_size;
 			let quad_values: [f32; 24] = [
-				start_x + normal_x, start_y + normal_y, 0.5, 0.5,
-				end_x + normal_x, end_y + normal_y, 0.5, 0.5,
-				start_x - normal_x, start_y - normal_y, 0.5, 0.5,
-				start_x - normal_x, start_y - normal_y, 0.5, 0.5,
-				end_x + normal_x, end_y + normal_y, 0.5, 0.5,
-				end_x - normal_x, end_y - normal_y, 0.5, 0.5,
+				(start_x + normal_x) as f32, (start_y + normal_y) as f32, 0.5, 0.5,
+				(end_x + normal_x) as f32, (end_y + normal_y) as f32, 0.5, 0.5,
+				(start_x - normal_x) as f32, (start_y - normal_y) as f32, 0.5, 0.5,
+				(start_x - normal_x) as f32, (start_y - normal_y) as f32, 0.5, 0.5,
+				(end_x + normal_x) as f32, (end_y + normal_y) as f32, 0.5, 0.5,
+				(end_x - normal_x) as f32, (end_y - normal_y) as f32, 0.5, 0.5,
 			];
 			self.vertex_data[offset..offset + 24].copy_from_slice(&quad_values);
 			offset += 24;
@@ -3485,8 +3486,8 @@ impl Graphic {
 	/// - `content_size`: 그릴 크기. (픽셀, 이미지 전체를 이 크기로 늘린다)
 	//==============================================================================
 	pub fn draw_image(&mut self, image: &Rc<Image>, position: Vector2, content_size: Vector2) {
-		let image_width = image.get_width() as f32;
-		let image_height = image.get_height() as f32;
+		let image_width = image.get_width() as f64;
+		let image_height = image.get_height() as f64;
 		self.draw_image_with_source_and_destination(image, 0.0, 0.0, image_width, image_height, position.x, position.y, content_size.x, content_size.y);
 	}
 
@@ -3501,7 +3502,7 @@ impl Graphic {
 	//==============================================================================
 	pub fn draw_image_with_image_rect(&mut self, image: &Rc<Image>, position: Vector2, content_size: Vector2, image_rect: Rect) {
 		let source_rect = if image_rect.is_zero() {
-			Rect::create(0.0, 0.0, image.get_width() as f32, image.get_height() as f32)
+			Rect::create(0.0, 0.0, image.get_width() as f64, image.get_height() as f64)
 		}
 		else {
 			image_rect
@@ -3524,7 +3525,7 @@ impl Graphic {
 	/// - `destination_width`: 그릴 너비. (픽셀)
 	/// - `destination_height`: 그릴 높이. (픽셀)
 	//==============================================================================
-	pub fn draw_image_with_source_and_destination(&mut self, image: &Rc<Image>, source_x: f32, source_y: f32, source_width: f32, source_height: f32, destination_x: f32, destination_y: f32, destination_width: f32, destination_height: f32) {
+	pub fn draw_image_with_source_and_destination(&mut self, image: &Rc<Image>, source_x: f64, source_y: f64, source_width: f64, source_height: f64, destination_x: f64, destination_y: f64, destination_width: f64, destination_height: f64) {
 		let texture = match self.get_image_texture(image) {
 			Some(texture) => {
 				texture
@@ -3534,8 +3535,8 @@ impl Graphic {
 			}
 		};
 
-		let image_width = image.get_width() as f32;
-		let image_height = image.get_height() as f32;
+		let image_width = image.get_width() as f64;
+		let image_height = image.get_height() as f64;
 		let left_u = source_x / image_width;
 		let top_v = source_y / image_height;
 		let right_u = (source_x + source_width) / image_width;
@@ -3567,8 +3568,8 @@ impl Graphic {
 	/// ```
 	//==============================================================================
 	pub fn draw_image_with_nine_slice(&mut self, image: &Rc<Image>, position: Vector2, size: Vector2, nine_slice: Rect) {
-		let source_width = image.get_width() as f32;
-		let source_height = image.get_height() as f32;
+		let source_width = image.get_width() as f64;
+		let source_height = image.get_height() as f64;
 		let destination_x = position.x.floor();
 		let destination_y = position.y.floor();
 		let left = nine_slice.position.x;
@@ -3828,7 +3829,7 @@ impl Graphic {
 	/// # 인자
 	/// - `text_bake_scale_step`: 양자화 단위. (0 미만은 0)
 	//==============================================================================
-	pub fn set_text_bake_scale_step(&mut self, text_bake_scale_step: f32) {
+	pub fn set_text_bake_scale_step(&mut self, text_bake_scale_step: f64) {
 		self.text_bake_scale_step = text_bake_scale_step.max(0.0);
 	}
 
@@ -3838,7 +3839,7 @@ impl Graphic {
 	/// # 돌려줌
 	/// 양자화 단위. (처음 0.25)
 	//==============================================================================
-	pub fn get_text_bake_scale_step(&self) -> f32 {
+	pub fn get_text_bake_scale_step(&self) -> f64 {
 		self.text_bake_scale_step
 	}
 
@@ -3852,7 +3853,7 @@ impl Graphic {
 	/// # 인자
 	/// - `text_bake_motion_scale_step`: 배율이 움직이는 동안의 양자화 단위. (0 미만은 0)
 	//==============================================================================
-	pub fn set_text_bake_motion_scale_step(&mut self, text_bake_motion_scale_step: f32) {
+	pub fn set_text_bake_motion_scale_step(&mut self, text_bake_motion_scale_step: f64) {
 		self.text_bake_motion_scale_step = text_bake_motion_scale_step.max(0.0);
 	}
 
@@ -3862,7 +3863,7 @@ impl Graphic {
 	/// # 돌려줌
 	/// 배율이 움직이는 동안의 양자화 단위. (처음 0.25)
 	//==============================================================================
-	pub fn get_text_bake_motion_scale_step(&self) -> f32 {
+	pub fn get_text_bake_motion_scale_step(&self) -> f64 {
 		self.text_bake_motion_scale_step
 	}
 
@@ -3897,7 +3898,7 @@ impl Graphic {
 	/// # 돌려줌
 	/// 노드에 기억할 배율. (지금 변환의 가장 큰 배율, 양자화 단위가 0 이 아니거나 움직임 단위가 0 이면 받은 값 그대로)
 	//==============================================================================
-	pub fn update_text_bake_scale_moving(&mut self, last_drawn_maximum_scale: f32) -> f32 {
+	pub fn update_text_bake_scale_moving(&mut self, last_drawn_maximum_scale: f64) -> f64 {
 		if self.text_bake_scale_step > 0.0 || self.text_bake_motion_scale_step <= 0.0 {
 			self.is_text_bake_scale_moving = false;
 			return last_drawn_maximum_scale;
@@ -3934,7 +3935,7 @@ impl Graphic {
 	/// # 돌려줌
 	/// 지금 변환의 가장 큰 배율을 양자화 단위로 반올림한 값. (0.25 ~ 8 로 자른다, 단위가 0 이고 움직이는 중이면 움직임 단위로, 둘 다 0 이면 반올림하지 않는다)
 	//==============================================================================
-	pub fn calculate_text_bake_scale(&self) -> f32 {
+	pub fn calculate_text_bake_scale(&self) -> f64 {
 		let maximum_scale = self.transform_matrix.get_maximum_scale();
 		let mut text_bake_scale_step = self.get_text_bake_scale_step();
 		if text_bake_scale_step <= 0.0 && self.is_text_bake_scale_moving() {
@@ -3960,7 +3961,7 @@ impl Graphic {
 	/// - `color`: 곱할 색. (None 이면 흰색, 구운 그대로)
 	/// - `text_direction`: 정렬 Start, End 를 가를 방향.
 	//==============================================================================
-	pub fn draw_text_entry(&mut self, entry: TextEntry, x: f32, y: f32, color: Option<Color>, text_direction: TextDirection) {
+	pub fn draw_text_entry(&mut self, entry: TextEntry, x: f64, y: f64, color: Option<Color>, text_direction: TextDirection) {
 		// 가로 정렬 오프셋.
 		let text_align = self.resolve_text_align(self.get_text_align(), text_direction);
 		let align_offset = match text_align {
@@ -4022,7 +4023,7 @@ impl Graphic {
 	/// - `x`: 기준 x. (set_text_align 의 기준점, 픽셀)
 	/// - `y`: 기준 y. (set_text_baseline 의 기준점, 픽셀)
 	//==============================================================================
-	pub fn draw_fill_text(&mut self, text: &str, x: f32, y: f32) {
+	pub fn draw_fill_text(&mut self, text: &str, x: f64, y: f64) {
 		if text.is_empty() {
 			return;
 		}
@@ -4047,7 +4048,7 @@ impl Graphic {
 	/// - `y`: 기준 y. (set_text_baseline 의 기준점, 픽셀)
 	/// - `line_width`: 외곽선 두께. (픽셀)
 	//==============================================================================
-	pub fn draw_stroke_text(&mut self, text: &str, x: f32, y: f32, line_width: f32) {
+	pub fn draw_stroke_text(&mut self, text: &str, x: f64, y: f64, line_width: f64) {
 		if text.is_empty() {
 			return;
 		}
@@ -4064,10 +4065,10 @@ impl Graphic {
 	//==============================================================================
 	/// 현재 폰트 문자열로 구운 문자열 반환. (없으면 굽는다)
 	//==============================================================================
-	fn get_text_entry(&mut self, text_draw_kind: TextDrawKind, text: &str, line_width: f32, bake_scale: f32, text_direction: TextDirection) -> Option<TextEntry> {
+	fn get_text_entry(&mut self, text_draw_kind: TextDrawKind, text: &str, line_width: f64, bake_scale: f64, text_direction: TextDirection) -> Option<TextEntry> {
 		let shaping_direction = text_direction.to_shaping_direction();
 		if !self.text_string_texture_cache.has_pending_deleted_textures() {
-			if let Some(entry) = self.text_string_texture_cache.find_entry(text_draw_kind, text, &self.font_string, line_width, bake_scale, shaping_direction) {
+			if let Some(entry) = self.text_string_texture_cache.find_entry(text_draw_kind, text, &self.font_string, line_width as f32, bake_scale as f32, shaping_direction) {
 				return Some(entry);
 			}
 		}
@@ -4075,7 +4076,7 @@ impl Graphic {
 		// 새로 굽거나 오래된 것을 버리면 텍스처 바인드가 바뀐다. (지울 텍스처가 묶음에 남아 있을 수 있어 먼저 내보낸다)
 		self.flush_batch();
 		self.bound_texture.set(None);
-		self.text_string_texture_cache.get_entry(&self.gl, text_draw_kind, text, &self.font_string, line_width, bake_scale, shaping_direction)
+		self.text_string_texture_cache.get_entry(&self.gl, text_draw_kind, text, &self.font_string, line_width as f32, bake_scale as f32, shaping_direction)
 	}
 
 	//==============================================================================
@@ -4101,7 +4102,7 @@ impl Graphic {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn begin_clip_rect(&mut self, rect: Rect, round_size: f32) {
+	pub fn begin_clip_rect(&mut self, rect: Rect, round_size: f64) {
 		// 모아 둔 것은 지금 스텐실 상태로 먼저 내보낸다.
 		self.flush_batch();
 
@@ -4225,8 +4226,8 @@ impl Graphic {
 		}
 
 		// 층 칸을 단위 행렬, 흰색, 틴트 없이 source-over 로 얹는다. (칸은 화면과 같은 크기라 디바이스 픽셀 그대로 짚는다, 텍스처는 아래가 0 행)
-		let viewport_width = self.applied_viewport_width as f32;
-		let viewport_height = self.applied_viewport_height as f32;
+		let viewport_width = self.applied_viewport_width as f64;
+		let viewport_height = self.applied_viewport_height as f64;
 		let transform_matrix = self.transform_matrix;
 		let image_tint_color = self.image_tint_color;
 		let blend_mode = self.blend_mode;
@@ -4734,7 +4735,7 @@ fn read_polyline_segment_count(position_count: usize, is_closed: bool) -> usize 
 /// # 돌려줌
 /// (적은 정점 수, 다음에 이어 적을 선분 번호). 다음 선분 번호가 선분 수와 같으면 다 적은 것이다.
 //==============================================================================
-fn write_polyline_vertices(vertex_data: &mut [f32], positions: &[Vector2], half_size: f32, is_closed: bool, first_segment_index: usize) -> (usize, usize) {
+fn write_polyline_vertices(vertex_data: &mut [f32], positions: &[Vector2], half_size: f64, is_closed: bool, first_segment_index: usize) -> (usize, usize) {
 	let segment_count = read_polyline_segment_count(positions.len(), is_closed);
 	let mut offset = 0;
 	let mut vertex_count = 0;
@@ -4782,12 +4783,12 @@ fn write_polyline_vertices(vertex_data: &mut [f32], positions: &[Vector2], half_
 
 		// 쿼드(삼각형 2개) 기록.
 		let segment_values: [f32; 24] = [
-			extended_start_x + normal_x, extended_start_y + normal_y, 0.5, 0.5,
-			extended_end_x + normal_x, extended_end_y + normal_y, 0.5, 0.5,
-			extended_start_x - normal_x, extended_start_y - normal_y, 0.5, 0.5,
-			extended_start_x - normal_x, extended_start_y - normal_y, 0.5, 0.5,
-			extended_end_x + normal_x, extended_end_y + normal_y, 0.5, 0.5,
-			extended_end_x - normal_x, extended_end_y - normal_y, 0.5, 0.5,
+			(extended_start_x + normal_x) as f32, (extended_start_y + normal_y) as f32, 0.5, 0.5,
+			(extended_end_x + normal_x) as f32, (extended_end_y + normal_y) as f32, 0.5, 0.5,
+			(extended_start_x - normal_x) as f32, (extended_start_y - normal_y) as f32, 0.5, 0.5,
+			(extended_start_x - normal_x) as f32, (extended_start_y - normal_y) as f32, 0.5, 0.5,
+			(extended_end_x + normal_x) as f32, (extended_end_y + normal_y) as f32, 0.5, 0.5,
+			(extended_end_x - normal_x) as f32, (extended_end_y - normal_y) as f32, 0.5, 0.5,
 		];
 		vertex_data[offset..offset + 24].copy_from_slice(&segment_values);
 		offset += 24;
@@ -4802,15 +4803,15 @@ fn write_polyline_vertices(vertex_data: &mut [f32], positions: &[Vector2], half_
 /// - 변환으로 옮긴 경계 상자를 픽셀 경계로 넓히고 화면으로 자른 GL 픽셀(왼쪽 아래 원점) 영역이다. 화면에 걸치지 않으면 None.
 //==============================================================================
 fn measure_backdrop_rect(vertex_values: &[f32], floats_per_vertex: usize, matrix: TransformMatrix, viewport_width: i32, viewport_height: i32) -> Option<BackdropRect> {
-	let mut minimum_x = f32::INFINITY;
-	let mut minimum_y = f32::INFINITY;
-	let mut maximum_x = f32::NEG_INFINITY;
-	let mut maximum_y = f32::NEG_INFINITY;
+	let mut minimum_x = f64::INFINITY;
+	let mut minimum_y = f64::INFINITY;
+	let mut maximum_x = f64::NEG_INFINITY;
+	let mut maximum_y = f64::NEG_INFINITY;
 	for vertex_values in vertex_values.chunks_exact(floats_per_vertex) {
 		let position_x = vertex_values[0];
 		let position_y = vertex_values[1];
-		let device_x = matrix.a * position_x + matrix.c * position_y + matrix.e;
-		let device_y = matrix.b * position_x + matrix.d * position_y + matrix.f;
+		let device_x = matrix.a * position_x as f64 + matrix.c * position_y as f64 + matrix.e;
+		let device_y = matrix.b * position_x as f64 + matrix.d * position_y as f64 + matrix.f;
 		minimum_x = minimum_x.min(device_x);
 		minimum_y = minimum_y.min(device_y);
 		maximum_x = maximum_x.max(device_x);
@@ -4818,8 +4819,8 @@ fn measure_backdrop_rect(vertex_values: &[f32], floats_per_vertex: usize, matrix
 	}
 	let left_x = minimum_x.floor().max(0.0);
 	let top_y = minimum_y.floor().max(0.0);
-	let right_x = maximum_x.ceil().min(viewport_width as f32);
-	let bottom_y = maximum_y.ceil().min(viewport_height as f32);
+	let right_x = maximum_x.ceil().min(viewport_width as f64);
+	let bottom_y = maximum_y.ceil().min(viewport_height as f64);
 	let is_visible = right_x > left_x && bottom_y > top_y;
 	if !is_visible {
 		return None;
@@ -4833,7 +4834,7 @@ fn measure_backdrop_rect(vertex_values: &[f32], floats_per_vertex: usize, matrix
 }
 
 //==============================================================================
-/// f32 배열을 바이트 배열로 본다. (GL 버퍼 업로드용)
+/// f64 배열을 바이트 배열로 본다. (GL 버퍼 업로드용)
 //==============================================================================
 fn float_slice_to_bytes(values: &[f32]) -> &[u8] {
 	unsafe {
@@ -4846,12 +4847,12 @@ mod tests {
 	use super::*;
 
 	/// 시험에 쓰는 프리멀티플라이드 색. (r, g, b, a, 알파를 곱한 값)
-	const SAMPLE_COLOR_LIST: [[f32; 4]; 6] = [[0.0, 0.0, 0.0, 0.0], [0.2, 0.1, 0.05, 0.35], [0.5, 0.25, 0.0, 0.5], [0.9, 0.4, 0.1, 1.0], [0.0, 0.6, 0.3, 0.75], [1.0, 1.0, 1.0, 1.0]];
+	const SAMPLE_COLOR_LIST: [[f64; 4]; 6] = [[0.0, 0.0, 0.0, 0.0], [0.2, 0.1, 0.05, 0.35], [0.5, 0.25, 0.0, 0.5], [0.9, 0.4, 0.1, 1.0], [0.0, 0.6, 0.3, 0.75], [1.0, 1.0, 1.0, 1.0]];
 
 	//==============================================================================
 	/// GL 블렌드 계수 값. (채널마다, 알파 채널은 색 계수도 알파 성분을 쓴다)
 	//==============================================================================
-	fn read_factor_value(factor: u32, source: [f32; 4], destination: [f32; 4], channel: usize) -> f32 {
+	fn read_factor_value(factor: u32, source: [f64; 4], destination: [f64; 4], channel: usize) -> f64 {
 		match factor {
 			glow::ZERO => {
 				0.0
@@ -4886,7 +4887,7 @@ mod tests {
 	//==============================================================================
 	/// 고정 블렌딩 한 번. (GL 의 FUNC_ADD, 결과는 0 ~ 1 로 자른다)
 	//==============================================================================
-	fn blend_with_function(blend_mode: BlendMode, source: [f32; 4], destination: [f32; 4]) -> [f32; 4] {
+	fn blend_with_function(blend_mode: BlendMode, source: [f64; 4], destination: [f64; 4]) -> [f64; 4] {
 		let (source_factor, destination_factor) = blend_mode.get_blend_function().expect("고정 블렌딩 모드");
 		let mut result = [0.0; 4];
 		for channel in 0..4 {
@@ -4899,7 +4900,7 @@ mod tests {
 	//==============================================================================
 	/// W3C 9.1 장의 Fa, Fb. (포터 더프 연산자)
 	//==============================================================================
-	fn read_porter_duff_fractions(blend_mode: BlendMode, source_alpha: f32, backdrop_alpha: f32) -> (f32, f32) {
+	fn read_porter_duff_fractions(blend_mode: BlendMode, source_alpha: f64, backdrop_alpha: f64) -> (f64, f64) {
 		match blend_mode {
 			BlendMode::Copy => {
 				(1.0, 0.0)
@@ -4943,7 +4944,7 @@ mod tests {
 	//==============================================================================
 	/// W3C 6 장 일반식의 source-over 섞기. (co = cs x (1 - αb) + cb x (1 - αs) + αs x αb x B(Cb, Cs), 알파는 source-over)
 	//==============================================================================
-	fn blend_with_general_formula(source: [f32; 4], backdrop: [f32; 4], blend: impl Fn(f32, f32) -> f32) -> [f32; 4] {
+	fn blend_with_general_formula(source: [f64; 4], backdrop: [f64; 4], blend: impl Fn(f64, f64) -> f64) -> [f64; 4] {
 		let source_alpha = source[3];
 		let backdrop_alpha = backdrop[3];
 		let mut result = [0.0; 4];
@@ -4969,7 +4970,7 @@ mod tests {
 	//==============================================================================
 	/// 두 색이 거의 같은지.
 	//==============================================================================
-	fn assert_color_near(actual: [f32; 4], expected: [f32; 4], description: &str) {
+	fn assert_color_near(actual: [f64; 4], expected: [f64; 4], description: &str) {
 		for channel in 0..4 {
 			assert!((actual[channel] - expected[channel]).abs() < 1e-5, "{} 채널 {}: {} 이어야 하는데 {}", description, channel, expected[channel], actual[channel]);
 		}
@@ -5047,8 +5048,8 @@ mod tests {
 		let backdrop = [0.2, 0.2, 0.2, 1.0];
 		let half_black = [0.0, 0.0, 0.0, 0.5];
 		let half_white = [0.5, 0.5, 0.5, 0.5];
-		let darken = blend_with_general_formula(half_black, backdrop, |backdrop_value: f32, source_value: f32| backdrop_value.min(source_value));
-		let lighten = blend_with_general_formula(half_white, backdrop, |backdrop_value: f32, source_value: f32| backdrop_value.max(source_value));
+		let darken = blend_with_general_formula(half_black, backdrop, |backdrop_value: f64, source_value: f64| backdrop_value.min(source_value));
+		let lighten = blend_with_general_formula(half_white, backdrop, |backdrop_value: f64, source_value: f64| backdrop_value.max(source_value));
 		assert!((darken[0] - 0.1).abs() < 1e-6);
 		assert!((lighten[0] - 0.6).abs() < 1e-6);
 		assert!((half_black[0].min(backdrop[0]) - darken[0]).abs() > 0.05);
@@ -5060,7 +5061,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn shader_output_with_source_over_matches_general_formula() {
-		let blend_list: [fn(f32, f32) -> f32; 4] = [
+		let blend_list: [fn(f64, f64) -> f64; 4] = [
 			|backdrop_value, source_value| backdrop_value * source_value,
 			|backdrop_value, source_value| (backdrop_value - source_value).abs(),
 			|backdrop_value, source_value| backdrop_value + source_value - 2.0 * backdrop_value * source_value,
@@ -5148,7 +5149,7 @@ mod tests {
 		// 점 10 개, 열린 선은 선분 9 개. 버퍼는 쿼드 4 개(정점 24 개)만 들어간다.
 		let mut positions = Vec::new();
 		for position_index in 0..10 {
-			positions.push(Vector2::create(position_index as f32 * 10.0, 0.0));
+			positions.push(Vector2::create(position_index as f64 * 10.0, 0.0));
 		}
 		let segment_count = read_polyline_segment_count(positions.len(), false);
 		assert_eq!(segment_count, 9);

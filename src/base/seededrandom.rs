@@ -3,10 +3,10 @@
 //! - 같은 시드에서 항상 같은 수열이 나오는 결정론적 난수다. 스테이지 생성, 리플레이, 대전 동기화처럼 재현이 필요한 곳에 쓴다.
 //! - 원본과 같은 시드면 같은 수열이 비트 단위로 똑같이 나온다. 원본의 >>> 0, Math.imul, ^ 는 32 비트 정수 연산이라
 //!   u32 의 wrapping_add / wrapping_mul / ^ 로 그대로 옮겼다. (중간의 mixed + imul(...) 덧셈도 ToInt32 를 거치면 2^32 나머지라
-//!   wrapping_add 와 같다) next_value 는 원본처럼 f64 다. (32 비트 값을 2^32 로 나눈 것이라 f32 로는 끝자리가 뭉개진다)
+//!   wrapping_add 와 같다) next_value 는 원본처럼 f64 다. (32 비트 값을 2^32 로 나눈 것이라 f64 에 그대로 담긴다)
 //! - 시드와 상태는 u32 다. 원본 (seed >>> 0) || 1 은 u32 시드 그대로, 0 이면 1 이다.
 //!   원본에서 음수나 2^32 넘는 수를 시드로 쓰던 곳은 그 수를 u32 로 바꿔 넘기면 같은 수열이 나온다. (as u32 는 ToUint32 와 같다)
-//! - next_range 는 f32 를 받아 f32 를 돌려주되, 계산은 원본처럼 f64 로 하고 끝에 한 번만 f32 로 줄인다.
+//! - next_range 는 f64 를 받아 f64 를 돌려주고, 계산은 원본처럼 f64 다.
 //!   next_int 는 i32 이고 계산은 원본처럼 f64 다.
 //! - pick 은 `Option<&T>`(원본 undefined 는 None), shuffle 은 슬라이스를 제자리에서 섞는다. (원본은 같은 배열을 돌려준다)
 //! - from_date 는 원본이 Date 의 지역 시각 연, 월, 일을 읽는다. 러스트 std 에는 지역 시각이 없어서 연, 월(1 ~ 12), 일을 받는다.
@@ -121,20 +121,20 @@ impl SeededRandom {
 
 	//==============================================================================
 	/// min_value 이상 max_value 미만의 실수 난수를 돌려준다.
-	/// - 끝에 f32 로 줄일 때 반올림되어 max_value 와 같은 값이 나올 수 있다. (next_value 가 1 에 아주 가까울 때)
+	/// - 셈의 반올림으로 max_value 와 같은 값이 나올 수 있다. (next_value 가 1 에 아주 가까울 때, 원본과 같다)
 	///
 	/// # 인자
 	/// - `min_value`: 아래 끝. (포함)
 	/// - `max_value`: 위 끝. (포함하지 않는다)
 	///
 	/// # 돌려줌
-	/// `min_value + (max_value - min_value) * next_value` 를 f64 로 셈한 뒤 f32 로 줄인 값.
+	/// `min_value + (max_value - min_value) * next_value` 를 f64 로 셈한 값.
 	//==============================================================================
-	pub fn next_range(&mut self, min_value: f32, max_value: f32) -> f32 {
-		let minimum = min_value as f64;
-		let maximum = max_value as f64;
+	pub fn next_range(&mut self, min_value: f64, max_value: f64) -> f64 {
+		let minimum = min_value;
+		let maximum = max_value;
 		let value = minimum + (maximum - minimum) * self.next_value();
-		value as f32
+		value
 	}
 
 	//==============================================================================
@@ -321,7 +321,7 @@ mod tests {
 		assert_eq!(integers, vec![2, -5, -3, -4, 1, -1, -3, 3, 1, 3]);
 		let expected_ranges = [4.358857887156773f64, 5.77185053244466, -1.1563375356490724, 4.196428792027291, 2.8847969832713716];
 		for expected_range in expected_ranges.iter() {
-			assert_eq!(random.next_range(-2.5, 7.25), *expected_range as f32);
+			assert_eq!(random.next_range(-2.5, 7.25), *expected_range);
 		}
 		assert_eq!(random.get_state(), 1703684196);
 	}

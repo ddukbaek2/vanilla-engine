@@ -33,7 +33,7 @@ use crate::core::node::worldnode::NodeTransform;
 pub struct Paint {
 	component_base: ComponentBase,
 	color: Color,
-	round_size: f32,
+	round_size: f64,
 }
 
 #[crate::reflect]
@@ -130,7 +130,7 @@ impl Paint {
 	/// # 인자
 	/// - `round_size`: 귀퉁이 둥근 크기. (노드 좌표, 0 이하면 곧은 사각형)
 	//==============================================================================
-	pub fn set_round_size(&mut self, round_size: f32) {
+	pub fn set_round_size(&mut self, round_size: f64) {
 		self.round_size = round_size;
 	}
 
@@ -140,7 +140,7 @@ impl Paint {
 	/// # 돌려줌
 	/// 귀퉁이 둥근 크기. (노드 좌표)
 	//==============================================================================
-	pub fn get_round_size(&self) -> f32 {
+	pub fn get_round_size(&self) -> f64 {
 		self.round_size
 	}
 }

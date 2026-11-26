@@ -8,7 +8,7 @@
 // - 실행: cargo run --example toonview
 //==============================================================================
 use std::cell::{Cell, RefCell};
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 use std::rc::Rc;
 use vanilla::{
 	create_box_geometry, create_faceted_chunk_geometry, create_part_matrix, create_sphere_geometry, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, NodeId, NodeTree, Paint, Pivot, Rect, Scene, SceneBase, Text, TextAlign, ToonDrawOptions, ToonDrawQueue, ToonGeometry, ToonInstance,
@@ -32,7 +32,7 @@ struct PanelMeshes {
 //==============================================================================
 struct PanelDrawer {
 	is_graded: bool,
-	elapsed_seconds: Rc<Cell<f32>>,
+	elapsed_seconds: Rc<Cell<f64>>,
 	meshes: Option<PanelMeshes>,
 	pebble_instance_list: Vec<ToonInstance>,
 	post_process: Option<ToonPostProcess>,
@@ -42,17 +42,17 @@ struct PanelDrawer {
 //==============================================================================
 // 부품 하나의 배열.
 //==============================================================================
-fn build_arrays(geometry: &ToonGeometry, position: [f32; 3], color_text: &str, options: ToonPartOptions) -> ToonMeshArrays {
+fn build_arrays(geometry: &ToonGeometry, position: [f64; 3], color_text: &str, options: ToonPartOptions) -> ToonMeshArrays {
 	let mut builder = MeshBuilder::new();
 	builder.add_part(geometry, &create_part_matrix(None, position, None, None), color_text, options);
 	builder.read_arrays()
 }
 
 impl PanelDrawer {
-	fn new(is_graded: bool, elapsed_seconds: Rc<Cell<f32>>) -> PanelDrawer {
+	fn new(is_graded: bool, elapsed_seconds: Rc<Cell<f64>>) -> PanelDrawer {
 		let mut pebble_instance_list = Vec::new();
 		for pebble_index in 0..24 {
-			let angle = pebble_index as f32 / 24.0 * PI * 2.0;
+			let angle = pebble_index as f64 / 24.0 * PI * 2.0;
 			let mut model_matrix = Matrix4::create_translation(angle.cos() * 3.3, 0.0, angle.sin() * 2.4);
 			model_matrix.rotate_y(angle * 2.0);
 			pebble_instance_list.push(ToonInstance { model_matrix, ..ToonInstance::default() });
@@ -106,7 +106,7 @@ impl PanelDrawer {
 		queue.add_mesh_instanced(&meshes.pebble, &self.pebble_instance_list, ToonDrawOptions::default());
 		let glass_colors = [[1.0, 0.4, 0.4, 1.0], [0.4, 1.0, 0.4, 1.0], [0.5, 0.6, 1.0, 1.0]];
 		for (glass_index, tint_color) in glass_colors.iter().enumerate() {
-			let glass_matrix = Matrix4::create_translation(-0.4 + glass_index as f32 * 0.35, 0.1, 1.6 - glass_index as f32 * 0.7);
+			let glass_matrix = Matrix4::create_translation(-0.4 + glass_index as f64 * 0.35, 0.1, 1.6 - glass_index as f64 * 0.7);
 			queue.add_mesh(&meshes.glass, &glass_matrix, ToonDrawOptions { alpha: 0.55, tint_color: *tint_color, ..ToonDrawOptions::default() });
 		}
 
@@ -168,7 +168,7 @@ fn draw_fallback(graphic: &mut Graphic, content_size: Vector2) {
 // 3D 점 위의 2D 표시 하나.
 //==============================================================================
 struct Marker {
-	point: [f32; 3],
+	point: [f64; 3],
 	marker_id: NodeId,
 	label_id: NodeId,
 }
@@ -178,7 +178,7 @@ struct ToonViewScene {
 	left_panel_id: Option<NodeId>,
 	right_panel_id: Option<NodeId>,
 	marker_list: Vec<Marker>,
-	elapsed_seconds: Rc<Cell<f32>>,
+	elapsed_seconds: Rc<Cell<f64>>,
 	is_renderer_shared: bool,
 }
 
@@ -251,7 +251,7 @@ impl Scene for ToonViewScene {
 	//==============================================================================
 	// 카메라를 돌리고, 같은 카메라로 3D 점 위에 2D 표시를 놓는다.
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		let elapsed_seconds = self.elapsed_seconds.get() + time_delta;
 		self.elapsed_seconds.set(elapsed_seconds);
 		let eye_position = Vector3::create((elapsed_seconds * 0.2).sin() * 1.5, 4.2, 6.5);

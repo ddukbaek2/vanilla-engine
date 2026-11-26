@@ -116,7 +116,7 @@ pub(crate) type Vector3F = [f32; 3];
 /// [x, y, z].
 //==============================================================================
 pub(crate) fn to_vector3f(vector: Vector3) -> Vector3F {
-	[vector.x, vector.y, vector.z]
+	[vector.x as f32, vector.y as f32, vector.z as f32]
 }
 
 //==============================================================================

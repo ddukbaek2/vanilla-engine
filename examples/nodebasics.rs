@@ -11,7 +11,7 @@ use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineConfigur
 //==============================================================================
 struct Spin {
 	component_base: ComponentBase,
-	degrees_per_second: f32,
+	degrees_per_second: f64,
 }
 
 #[vanilla::reflect]
@@ -34,7 +34,7 @@ impl Component for Spin {
 	//==============================================================================
 	// 주기적 갱신. (자기 노드를 돌린다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let transform = context.get_transform_mut();
 		let local_rotation = transform.get_local_rotation();
 		transform.set_local_rotation(local_rotation + self.degrees_per_second * time_delta);
@@ -69,13 +69,13 @@ impl Scene for MainScene {
 		for square_index in 0..3 {
 			let square_id = node_tree.create_child(root_id, "square");
 			let square_node = &mut node_tree[square_id];
-			square_node.set_local_position(Vector2::create(340.0 + square_index as f32 * 300.0, 380.0));
+			square_node.set_local_position(Vector2::create(340.0 + square_index as f64 * 300.0, 380.0));
 			square_node.set_content_size(Vector2::create(160.0, 160.0));
 			square_node.set_pivot(Pivot::MIDDLE_CENTER);
 			square_node.add_component(Paint::create_with_color("#f3e5ab"));
 			square_node.add_component(Spin {
 				component_base: ComponentBase::new(),
-				degrees_per_second: 45.0 * (square_index + 1) as f32,
+				degrees_per_second: 45.0 * (square_index + 1) as f64,
 			});
 		}
 

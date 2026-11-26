@@ -142,7 +142,7 @@ struct BurstScene {
 	scene_base: SceneBase,
 	emitter_id: Option<NodeId>,
 	burst_id: Option<NodeId>,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 }
 
 impl Scene for BurstScene {
@@ -186,7 +186,7 @@ impl Scene for BurstScene {
 		self.burst_id = Some(burst_id);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.elapsed_seconds += time_delta;
 		if let Some(emitter_id) = self.emitter_id {
@@ -328,7 +328,7 @@ use vanilla::{Color, Engine, EngineConfiguration, NodeId, Paint, Scene, SceneBas
 struct TrailScene {
 	scene_base: SceneBase,
 	comet_id: Option<NodeId>,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 }
 
 impl Scene for TrailScene {
@@ -357,7 +357,7 @@ impl Scene for TrailScene {
 		self.comet_id = Some(comet_id);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.elapsed_seconds += time_delta;
 		if let Some(comet_id) = self.comet_id {
@@ -486,7 +486,7 @@ impl Scene for DissolveScene {
 		self.start_dissolve(sprite_id);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		if let (Some(sprite_id), Some(dissolve_tween_id)) = (self.sprite_id, self.dissolve_tween_id) {
 			if self.scene_base.get_tween(dissolve_tween_id).is_none() {
@@ -558,7 +558,7 @@ use vanilla::{Color, Engine, EngineConfiguration, Graphic, Paint, Scene, SceneBa
 struct ScreenEffectScene {
 	scene_base: SceneBase,
 	screen_effect: ScreenEffect,
-	shockwave_seconds: Option<f32>,
+	shockwave_seconds: Option<f64>,
 }
 
 impl Scene for ScreenEffectScene {
@@ -580,13 +580,13 @@ impl Scene for ScreenEffectScene {
 			let box_id = node_tree.create_child(root_id, "Box");
 			let box_node = &mut node_tree[box_id];
 			box_node.set_content_size(Vector2::create(160.0, 160.0));
-			box_node.set_local_position(Vector2::create(240.0 + index as f32 * 200.0, 360.0));
-			let paint = box_node.add_component(Paint::create_with_color(Color::create(0.2 + index as f32 * 0.15, 0.5, 1.0 - index as f32 * 0.15, 1.0)));
+			box_node.set_local_position(Vector2::create(240.0 + index as f64 * 200.0, 360.0));
+			let paint = box_node.add_component(Paint::create_with_color(Color::create(0.2 + index as f64 * 0.15, 0.5, 1.0 - index as f64 * 0.15, 1.0)));
 			paint.set_round_size(24.0);
 		}
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.screen_effect.tick(time_delta);
 		if let Some(shockwave_seconds) = self.shockwave_seconds {
@@ -667,8 +667,8 @@ impl Scene for HeatHazeScene {
 			let stripe_id = node_tree.create_child(root_id, "Stripe");
 			let stripe_node = &mut node_tree[stripe_id];
 			stripe_node.set_content_size(Vector2::create(40.0, 400.0));
-			stripe_node.set_local_position(Vector2::create(390.0 + index as f32 * 100.0, 360.0));
-			stripe_node.add_component(Paint::create_with_color(Color::create(1.0, 0.6 + index as f32 * 0.06, 0.2, 1.0)));
+			stripe_node.set_local_position(Vector2::create(390.0 + index as f64 * 100.0, 360.0));
+			stripe_node.add_component(Paint::create_with_color(Color::create(1.0, 0.6 + index as f64 * 0.06, 0.2, 1.0)));
 		}
 
 		let haze_id = node_tree.create_child(root_id, "HeatHaze");

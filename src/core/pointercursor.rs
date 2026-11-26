@@ -60,9 +60,9 @@ pub struct CursorValue {
 	/// 그림 커서의 2 배 그림 주소. (없으면 빈 글)
 	pub image_url_2x: String,
 	/// 1 배 그림 기준 핫스팟. (원본처럼 반올림한 값)
-	pub hotspot_x: f32,
+	pub hotspot_x: f64,
 	/// 1 배 그림 기준 핫스팟의 y. (픽셀, 원본처럼 반올림한 값, 그림 커서가 아니면 0)
-	pub hotspot_y: f32,
+	pub hotspot_y: f64,
 }
 
 //==============================================================================
@@ -243,7 +243,7 @@ impl PointerCursor {
 	/// assert_eq!(cursor_value.image_url, "examples/assets/atlas/icons.png");
 	/// ```
 	//==============================================================================
-	pub fn register_image_cursor(&mut self, name: &str, url: &str, url_2x: &str, hotspot_x: f32, hotspot_y: f32, fallback_cursor_name: &str) {
+	pub fn register_image_cursor(&mut self, name: &str, url: &str, url_2x: &str, hotspot_x: f64, hotspot_y: f64, fallback_cursor_name: &str) {
 		let hotspot_text = format!(" {} {}, {}", hotspot_x.round() as i32, hotspot_y.round() as i32, fallback_cursor_name);
 		let css_value = if url_2x.is_empty() {
 			format!("url(\"{}\"){}", url, hotspot_text)

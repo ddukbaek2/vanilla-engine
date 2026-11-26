@@ -6,10 +6,10 @@
 //==============================================================================
 
 /// 알려 준 정도를 따라가는 빠르기의 기본값. (초당 남은 거리의 비율)
-const DEFAULT_FOLLOW_RATE: f32 = 6.0;
+const DEFAULT_FOLLOW_RATE: f64 = 6.0;
 
 /// 이만큼 가까워지면 알려 준 정도에 딱 붙인다.
-const SNAP_DISTANCE: f32 = 0.0005;
+const SNAP_DISTANCE: f64 = 0.0005;
 
 //==============================================================================
 /// 로딩 진행률.
@@ -34,9 +34,9 @@ const SNAP_DISTANCE: f32 = 0.0005;
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct LoadingProgress {
-	target_progress: f32,
-	shown_progress: f32,
-	follow_rate: f32,
+	target_progress: f64,
+	shown_progress: f64,
+	follow_rate: f64,
 }
 
 impl LoadingProgress {
@@ -60,7 +60,7 @@ impl LoadingProgress {
 	/// # 인자
 	/// - `progress`: 알린 정도. (0 ~ 1)
 	//==============================================================================
-	pub fn set_progress(&mut self, progress: f32) {
+	pub fn set_progress(&mut self, progress: f64) {
 		if progress.is_nan() {
 			return;
 		}
@@ -74,7 +74,7 @@ impl LoadingProgress {
 	/// # 돌려줌
 	/// 지금까지 알린 가장 큰 정도. (0 ~ 1)
 	//==============================================================================
-	pub fn get_progress(&self) -> f32 {
+	pub fn get_progress(&self) -> f64 {
 		self.target_progress
 	}
 
@@ -84,7 +84,7 @@ impl LoadingProgress {
 	/// # 돌려줌
 	/// 알린 정도를 따라가는 중인 정도. (0 ~ 1)
 	//==============================================================================
-	pub fn get_shown_progress(&self) -> f32 {
+	pub fn get_shown_progress(&self) -> f64 {
 		self.shown_progress
 	}
 
@@ -94,7 +94,7 @@ impl LoadingProgress {
 	/// # 인자
 	/// - `time_delta`: 지난 시간. (초, 남은 거리의 1 - exp(-빠르기 * time_delta) 만큼 다가간다)
 	//==============================================================================
-	pub fn update(&mut self, time_delta: f32) {
+	pub fn update(&mut self, time_delta: f64) {
 		if !time_delta.is_finite() || time_delta <= 0.0 {
 			return;
 		}
@@ -111,7 +111,7 @@ impl LoadingProgress {
 	/// # 인자
 	/// - `follow_rate`: 새 빠르기. (기본 6)
 	//==============================================================================
-	pub fn set_follow_rate(&mut self, follow_rate: f32) {
+	pub fn set_follow_rate(&mut self, follow_rate: f64) {
 		if !follow_rate.is_finite() || follow_rate <= 0.0 {
 			return;
 		}
@@ -124,7 +124,7 @@ impl LoadingProgress {
 	/// # 돌려줌
 	/// 지금 빠르기. (초당 남은 거리의 비율)
 	//==============================================================================
-	pub fn get_follow_rate(&self) -> f32 {
+	pub fn get_follow_rate(&self) -> f64 {
 		self.follow_rate
 	}
 
@@ -171,7 +171,7 @@ mod tests {
 		let mut loading_progress = LoadingProgress::new();
 		loading_progress.set_progress(0.8);
 		loading_progress.set_progress(0.3);
-		loading_progress.set_progress(f32::NAN);
+		loading_progress.set_progress(f64::NAN);
 		assert_eq!(loading_progress.get_progress(), 0.8);
 		loading_progress.update(1.0 / 60.0);
 		let first_shown_progress = loading_progress.get_shown_progress();

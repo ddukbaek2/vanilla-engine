@@ -30,7 +30,7 @@ use std::rc::Rc;
 //==============================================================================
 /// 음량을 0 ~ 1 로 자른다. (유한하지 않으면 1, 원본 setVolume 의 규칙)
 //==============================================================================
-pub(crate) fn clamp_volume(volume: f32) -> f32 {
+pub(crate) fn clamp_volume(volume: f64) -> f64 {
 	if volume.is_finite() {
 		volume.clamp(0.0, 1.0)
 	}
@@ -92,7 +92,7 @@ pub struct AudioPlayer {
 	audio_asset: Option<Rc<AudioAsset>>,
 	is_muted: bool,
 	/// 음량. (0 ~ 1, 음소거를 풀면 이 음량으로 돌아간다)
-	volume: f32,
+	volume: f64,
 	/// 루프 여부.
 	is_loop: bool,
 	/// 재생 위치. (초, play() 를 부르면 이 위치부터 재생)
@@ -237,8 +237,8 @@ impl AudioPlayer {
 	//==============================================================================
 	/// 좌우 설정. (-1 왼쪽 ~ 1 오른쪽, 다음 play 부터 데스크탑, 웹은 바로. SoundSystem 의 효과음 좌우, 원본 AudioPlayer 에는 없다)
 	//==============================================================================
-	pub(crate) fn set_pan(&mut self, pan: f32) {
-		self.audio_player_backend.set_pan(pan);
+	pub(crate) fn set_pan(&mut self, pan: f64) {
+		self.audio_player_backend.set_pan(pan as f32);
 	}
 
 	//==============================================================================
@@ -251,8 +251,8 @@ impl AudioPlayer {
 	//==============================================================================
 	/// PannerNode 의 자리나 방향 값 대입. (원본 panner.positionX.value = 값, 초안)
 	//==============================================================================
-	pub(crate) fn set_panner_param_value(&mut self, param: crate::platform::audio::PannerParam, value: f32) {
-		self.audio_player_backend.set_panner_param_value(param, value);
+	pub(crate) fn set_panner_param_value(&mut self, param: crate::platform::audio::PannerParam, value: f64) {
+		self.audio_player_backend.set_panner_param_value(param, value as f32);
 	}
 
 	//==============================================================================
@@ -279,8 +279,8 @@ impl AudioPlayer {
 	//==============================================================================
 	/// GainNode 의 지금 gain. (원본 gainNode.gain.value 읽기, 자동화로 바뀌는 중이면 그 순간의 값)
 	//==============================================================================
-	pub(crate) fn get_gain_value(&self) -> f32 {
-		self.audio_player_backend.get_gain_value()
+	pub(crate) fn get_gain_value(&self) -> f64 {
+		self.audio_player_backend.get_gain_value() as f64
 	}
 
 	//==============================================================================
@@ -298,7 +298,7 @@ impl AudioPlayer {
 	//==============================================================================
 	pub fn unmute(&mut self) {
 		if self.audio_player_backend.is_available() {
-			self.audio_player_backend.set_gain(self.volume);
+			self.audio_player_backend.set_gain(self.volume as f32);
 			self.is_muted = false;
 		}
 	}
@@ -309,11 +309,11 @@ impl AudioPlayer {
 	/// # 인자
 	/// - `volume`: 음량. (0 ~ 1 로 자른다, 유한하지 않으면 1)
 	//==============================================================================
-	pub fn set_volume(&mut self, volume: f32) {
+	pub fn set_volume(&mut self, volume: f64) {
 		let clamped_volume = clamp_volume(volume);
 		self.volume = clamped_volume;
 		if self.audio_player_backend.is_available() && !self.is_muted {
-			self.audio_player_backend.set_gain(clamped_volume);
+			self.audio_player_backend.set_gain(clamped_volume as f32);
 		}
 	}
 
@@ -323,7 +323,7 @@ impl AudioPlayer {
 	/// # 돌려줌
 	/// 설정한 음량. (0 ~ 1, 음소거해도 바뀌지 않는다)
 	//==============================================================================
-	pub fn get_volume(&self) -> f32 {
+	pub fn get_volume(&self) -> f64 {
 		self.volume
 	}
 
@@ -453,8 +453,8 @@ mod tests {
 		assert_eq!(clamp_volume(0.5), 0.5);
 		assert_eq!(clamp_volume(-0.2), 0.0);
 		assert_eq!(clamp_volume(1.7), 1.0);
-		assert_eq!(clamp_volume(f32::NAN), 1.0);
-		assert_eq!(clamp_volume(f32::INFINITY), 1.0);
+		assert_eq!(clamp_volume(f64::NAN), 1.0);
+		assert_eq!(clamp_volume(f64::INFINITY), 1.0);
 	}
 
 	//==============================================================================

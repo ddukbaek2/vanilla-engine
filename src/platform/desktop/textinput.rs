@@ -166,8 +166,8 @@ impl DesktopTextInputState {
 			return;
 		}
 		self.ime_cursor_area = Some(caret_rect);
-		let area_position = LogicalPosition::new(caret_rect.position.x as f64, caret_rect.position.y as f64);
-		let area_size = LogicalSize::new(caret_rect.size.x.max(1.0) as f64, caret_rect.size.y.max(1.0) as f64);
+		let area_position = LogicalPosition::new(caret_rect.position.x, caret_rect.position.y);
+		let area_size = LogicalSize::new(caret_rect.size.x.max(1.0), caret_rect.size.y.max(1.0));
 		window.set_ime_cursor_area(area_position, area_size);
 	}
 }

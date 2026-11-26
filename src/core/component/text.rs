@@ -530,7 +530,7 @@ fn find_word_boundaries(text: &str) -> Vec<(usize, usize, bool)> {
 /// 	let mut text = Text::create_with_text("A long description that wraps", 20.0);
 /// 	text.set_word_wrap_width(240.0);
 /// 	let wrapped_size = text.measure_wrapped_size(graphic);
-/// 	assert_eq!(wrapped_size.height, wrapped_size.line_count as f32 * 20.0 * text.get_line_spacing());
+/// 	assert_eq!(wrapped_size.height, wrapped_size.line_count as f64 * 20.0 * text.get_line_spacing());
 /// 	wrapped_size
 /// }
 /// ```
@@ -538,9 +538,9 @@ fn find_word_boundaries(text: &str) -> Vec<(usize, usize, bool)> {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TextWrappedSize {
 	/// 가장 넓은 줄의 너비. (픽셀)
-	pub width: f32,
+	pub width: f64,
 	/// 높이. (줄 수 * 글자 크기 * 줄 간격)
-	pub height: f32,
+	pub height: f64,
 	/// 줄 수. (글이 비었으면 0)
 	pub line_count: usize,
 }
@@ -586,10 +586,10 @@ pub struct Text {
 	component_base: ComponentBase,
 	font_family: String,
 	text: String,
-	font_size: f32,
+	font_size: f64,
 	text_color: Color,
 	stroke_color: Color,
-	stroke_width: f32,
+	stroke_width: f64,
 	is_bold: bool,
 	is_italic: bool,
 	is_underline: bool,
@@ -597,27 +597,27 @@ pub struct Text {
 	text_align: TextAlign,
 	text_baseline: TextBaseline,
 	text_direction: TextDirection,
-	word_wrap_width: f32,
+	word_wrap_width: f64,
 	wrap_mode: TextWrapMode,
-	line_spacing: f32,
+	line_spacing: f64,
 	visible_character_count: i32,
 	/// 폰트 문자열. (폰트 이름, 크기, 굵게, 기울임이 바뀔 때만 다시 만든다)
 	font_string: String,
 	/// 줄 나누기를 다시 셀지. (글이나 폰트 문자열이 바뀌면 켠다)
 	is_layout_dirty: bool,
 	/// 마지막으로 줄을 나눈 폭과 그때의 글꼴 등록 횟수. (폭이 바뀌거나 글꼴이 새로 들어오면 다시 센다)
-	layout_wrap_width: f32,
+	layout_wrap_width: f64,
 	layout_font_registration_count: u64,
 	/// 나눈 줄과 줄마다 잰 폭, 글꼴의 위아래 길이. (한 줄로 그릴 때는 글 전체가 한 줄)
 	line_list: Vec<String>,
-	line_width_list: Vec<f32>,
-	layout_font_ascent: f32,
-	layout_font_descent: f32,
+	line_width_list: Vec<f64>,
+	layout_font_ascent: f64,
+	layout_font_descent: f64,
 	/// 한 줄 글을 맞출 너비와 줄이는 가장 작은 비율. (너비가 0 이면 맞추지 않는다)
-	fit_width: f32,
-	fit_minimum_ratio: f32,
+	fit_width: f64,
+	fit_minimum_ratio: f64,
 	/// 그릴 때의 크기와 폰트 문자열. (맞춰 줄였으면 줄인 크기, update_layout 이 정한다)
-	fitted_font_size: f32,
+	fitted_font_size: f64,
 	draw_font_string: String,
 }
 
@@ -677,7 +677,7 @@ impl Text {
 	/// # 돌려줌
 	/// 컴포넌트. (그 밖은 new 와 같다)
 	//==============================================================================
-	pub fn create_with_text(text: &str, font_size: f32) -> Text {
+	pub fn create_with_text(text: &str, font_size: f64) -> Text {
 		let mut text_component = Text::new();
 		text_component.set_text(text);
 		text_component.set_font_size(font_size);
@@ -716,7 +716,7 @@ impl Text {
 	/// assert_eq!(text.build_font_string_with_size(12.5), "italic bold 12.5px GameFont");
 	/// ```
 	//==============================================================================
-	pub fn build_font_string_with_size(&self, font_size: f32) -> String {
+	pub fn build_font_string_with_size(&self, font_size: f64) -> String {
 		let mut style_parts: Vec<String> = Vec::new();
 		if self.is_italic {
 			style_parts.push(String::from("italic"));
@@ -752,7 +752,7 @@ impl Text {
 	//==============================================================================
 	/// 나눈 줄과 줄 폭 갱신. (글, 폰트 문자열, 줄바꿈 폭, 등록된 글꼴이 그대로면 지난번 결과를 쓴다)
 	//==============================================================================
-	fn update_layout(&mut self, graphic: &mut Graphic, content_width: f32) {
+	fn update_layout(&mut self, graphic: &mut Graphic, content_width: f64) {
 		let is_wrapped = self.is_wrapped();
 		let wrap_width = if !is_wrapped {
 			0.0
@@ -808,9 +808,9 @@ impl Text {
 	//==============================================================================
 	/// 그리는 사각형 셈하기. (content 좌표. 정렬, 넘침, 줄바꿈 결과를 따르고, 글자 삐침, 외곽선, 기울임, 밑줄 몫을 넉넉히 더한다)
 	//==============================================================================
-	fn calculate_text_rect(&mut self, graphic: &mut Graphic, content_width: f32, content_height: f32) -> Rect {
+	fn calculate_text_rect(&mut self, graphic: &mut Graphic, content_width: f64, content_height: f64) -> Rect {
 		self.update_layout(graphic, content_width);
-		let maximum_line_width = self.line_width_list.iter().fold(0.0f32, |maximum_width, line_width| maximum_width.max(*line_width));
+		let maximum_line_width = self.line_width_list.iter().fold(0.0f64, |maximum_width, line_width| maximum_width.max(*line_width));
 		let text_direction = self.resolve_draw_direction(graphic, &self.text);
 		let left_x = match graphic.resolve_text_align(self.text_align, text_direction) {
 			TextAlign::Left => {
@@ -828,7 +828,7 @@ impl Text {
 		let (top_y, bottom_y) = if self.is_wrapped() {
 			// 줄마다 가운데 기준선으로 그린다. (draw_wrapped_text 와 같은 자리)
 			let line_height = self.font_size * self.line_spacing;
-			let line_count = self.line_list.len().max(1) as f32;
+			let line_count = self.line_list.len().max(1) as f64;
 			let block_height = line_count * line_height;
 			let block_top = match self.text_baseline {
 				TextBaseline::Top | TextBaseline::Hanging => {
@@ -908,7 +908,7 @@ impl Text {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn wrap_text_to_lines(&self, graphic: &Graphic, text: &str, maximum_width: f32) -> Vec<String> {
+	pub fn wrap_text_to_lines(&self, graphic: &Graphic, text: &str, maximum_width: f64) -> Vec<String> {
 		self.wrap_text_to_lines_with(text, maximum_width, &|candidate_text: &str| graphic.measure_text(candidate_text).width)
 	}
 
@@ -928,8 +928,8 @@ impl Text {
 	/// ```rust
 	/// use vanilla::{Text, TextWrapMode};
 	///
-	/// let measure_width = |line_text: &str| -> f32 {
-	/// 	line_text.chars().count() as f32 * 10.0
+	/// let measure_width = |line_text: &str| -> f64 {
+	/// 	line_text.chars().count() as f64 * 10.0
 	/// };
 	/// let mut text = Text::new();
 	/// assert_eq!(text.wrap_text_to_lines_with("aaa bbb ccc", 75.0, &measure_width), vec!["aaa bbb", "ccc"]);
@@ -938,7 +938,7 @@ impl Text {
 	/// assert_eq!(text.wrap_text_to_lines_with("abcdef", 25.0, &measure_width), vec!["ab", "cd", "ef"]);
 	/// ```
 	//==============================================================================
-	pub fn wrap_text_to_lines_with(&self, text: &str, maximum_width: f32, measure_width: &dyn Fn(&str) -> f32) -> Vec<String> {
+	pub fn wrap_text_to_lines_with(&self, text: &str, maximum_width: f64, measure_width: &dyn Fn(&str) -> f64) -> Vec<String> {
 		if maximum_width <= 0.0 {
 			return text.split('\n').map(|paragraph| paragraph.to_string()).collect();
 		}
@@ -1050,7 +1050,7 @@ impl Text {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn wrap_lines_without_graphic(&self, maximum_width: f32) -> Option<Vec<String>> {
+	pub fn wrap_lines_without_graphic(&self, maximum_width: f64) -> Option<Vec<String>> {
 		crate::core::textstringtexturecache::measure_text_without_graphic(&self.font_string, "")?;
 		let font_string = self.font_string.clone();
 		Some(self.wrap_text_to_lines_with(&self.text, maximum_width, &|line_text: &str| crate::core::textstringtexturecache::measure_text_without_graphic(&font_string, line_text).map(|text_metrics| text_metrics.width).unwrap_or(0.0)))
@@ -1081,16 +1081,16 @@ impl Text {
 			self.word_wrap_width
 		}
 		else {
-			f32::INFINITY
+			f64::INFINITY
 		};
 		graphic.push_state();
 		graphic.set_font_string(&self.font_string);
 		let line_list = self.wrap_text_to_lines(graphic, &self.text, wrap_width);
 		graphic.pop_state();
-		let maximum_line_width = line_list.iter().fold(0.0f32, |maximum_width, line_text| maximum_width.max(self.measure_text(graphic, line_text, self.font_size)));
+		let maximum_line_width = line_list.iter().fold(0.0f64, |maximum_width, line_text| maximum_width.max(self.measure_text(graphic, line_text, self.font_size)));
 		TextWrappedSize {
 			width: maximum_line_width,
-			height: line_list.len() as f32 * line_height,
+			height: line_list.len() as f64 * line_height,
 			line_count: line_list.len(),
 		}
 	}
@@ -1156,7 +1156,7 @@ impl Text {
 	//==============================================================================
 	/// 정렬에 맞는 가로 위치.
 	//==============================================================================
-	fn calculate_draw_x(&self, graphic: &Graphic, content_width: f32, text_direction: TextDirection) -> (f32, TextAlign) {
+	fn calculate_draw_x(&self, graphic: &Graphic, content_width: f64, text_direction: TextDirection) -> (f64, TextAlign) {
 		let text_align = graphic.resolve_text_align(self.text_align, text_direction);
 		let draw_x = match text_align {
 			TextAlign::Left => {
@@ -1175,7 +1175,7 @@ impl Text {
 	//==============================================================================
 	/// 밑줄 시작 x. (실제 정렬 기준, 원본 computeUnderlineStartX)
 	//==============================================================================
-	fn calculate_underline_start_x(&self, draw_x: f32, text_width: f32, text_align: TextAlign) -> f32 {
+	fn calculate_underline_start_x(&self, draw_x: f64, text_width: f64, text_align: TextAlign) -> f64 {
 		match text_align {
 			TextAlign::Left | TextAlign::Start => {
 				draw_x
@@ -1192,7 +1192,7 @@ impl Text {
 	//==============================================================================
 	/// 밑줄 y 오프셋. (기준선에서 아래로, 원본 computeUnderlineOffsetY)
 	//==============================================================================
-	fn calculate_underline_offset_y(&self, font_size: f32) -> f32 {
+	fn calculate_underline_offset_y(&self, font_size: f64) -> f64 {
 		match self.text_baseline {
 			TextBaseline::Top | TextBaseline::Hanging => {
 				font_size + 2.0
@@ -1209,7 +1209,7 @@ impl Text {
 	//==============================================================================
 	/// 취소선 y 오프셋. (원본 computeStrikethroughOffsetY)
 	//==============================================================================
-	fn calculate_strikethrough_offset_y(&self, font_size: f32) -> f32 {
+	fn calculate_strikethrough_offset_y(&self, font_size: f64) -> f64 {
 		match self.text_baseline {
 			TextBaseline::Top | TextBaseline::Hanging => {
 				font_size * 0.55
@@ -1226,21 +1226,21 @@ impl Text {
 	//==============================================================================
 	/// 가로 선 긋기. (밑줄 / 취소선, 원본 strokeHorizontalLine. 선 색은 미리 set_stroke_color)
 	//==============================================================================
-	fn draw_horizontal_line(&self, graphic: &mut Graphic, x: f32, y: f32, width: f32, line_width: f32) {
+	fn draw_horizontal_line(&self, graphic: &mut Graphic, x: f64, y: f64, width: f64, line_width: f64) {
 		graphic.draw_line(&[Vector2::create(x, y), Vector2::create(x + width, y)], line_width);
 	}
 
 	//==============================================================================
 	/// 밑줄 / 취소선 두께. (원본과 같이 max(1, 글자 크기 / 16))
 	//==============================================================================
-	fn calculate_decoration_line_width(&self) -> f32 {
+	fn calculate_decoration_line_width(&self) -> f64 {
 		(self.font_size / 16.0).max(1.0)
 	}
 
 	//==============================================================================
 	/// 한 줄 출력. (text_width 는 밑줄 / 취소선 길이, 꾸밈이 없으면 쓰지 않는다)
 	//==============================================================================
-	fn draw_plain_text(&self, graphic: &mut Graphic, content_width: f32, content_height: f32, text: &str, text_width: f32) {
+	fn draw_plain_text(&self, graphic: &mut Graphic, content_width: f64, content_height: f64, text: &str, text_width: f64) {
 		// 문단의 방향은 그리는 글로 정한다. (Start / End 정렬도 그 방향을 따른다)
 		let text_direction = self.resolve_draw_direction(graphic, text);
 		graphic.set_text_direction(text_direction);
@@ -1286,12 +1286,12 @@ impl Text {
 	//==============================================================================
 	/// 여러 줄 출력. (update_layout 으로 나눈 줄을 그린다)
 	//==============================================================================
-	fn draw_wrapped_text(&self, graphic: &mut Graphic, content_width: f32, content_height: f32) {
+	fn draw_wrapped_text(&self, graphic: &mut Graphic, content_width: f64, content_height: f64) {
 		graphic.set_font_string(&self.font_string);
 
 		let line_list = &self.line_list;
 		let line_height = self.font_size * self.line_spacing;
-		let block_height = line_list.len() as f32 * line_height;
+		let block_height = line_list.len() as f64 * line_height;
 		let block_top = match self.text_baseline {
 			TextBaseline::Top | TextBaseline::Hanging => {
 				0.0
@@ -1328,7 +1328,7 @@ impl Text {
 			if line_text.is_empty() {
 				continue;
 			}
-			let line_y = block_top + (line_index as f32 + 0.5) * line_height;
+			let line_y = block_top + (line_index as f64 + 0.5) * line_height;
 			if self.stroke_width > 0.0 {
 				graphic.set_stroke_color(self.stroke_color);
 				graphic.draw_stroke_text(line_text, draw_x, line_y, self.stroke_width);
@@ -1381,7 +1381,7 @@ impl Text {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn set_fit_width(&mut self, width: f32, minimum_ratio: f32) {
+	pub fn set_fit_width(&mut self, width: f64, minimum_ratio: f64) {
 		let fit_width = width.max(0.0);
 		let fit_minimum_ratio = math::clamp(minimum_ratio, 0.0, 1.0);
 		if self.fit_width != fit_width || self.fit_minimum_ratio != fit_minimum_ratio {
@@ -1397,7 +1397,7 @@ impl Text {
 	/// # 돌려줌
 	/// 맞출 너비. (픽셀)
 	//==============================================================================
-	pub fn get_fit_width(&self) -> f32 {
+	pub fn get_fit_width(&self) -> f64 {
 		self.fit_width
 	}
 
@@ -1407,7 +1407,7 @@ impl Text {
 	/// # 돌려줌
 	/// 비율. (0 ~ 1, 기본 0.55)
 	//==============================================================================
-	pub fn get_fit_minimum_ratio(&self) -> f32 {
+	pub fn get_fit_minimum_ratio(&self) -> f64 {
 		self.fit_minimum_ratio
 	}
 
@@ -1417,7 +1417,7 @@ impl Text {
 	/// # 돌려줌
 	/// 크기. (픽셀, 줄을 다시 셀 일이 남았으면 정한 크기)
 	//==============================================================================
-	pub fn get_fitted_font_size(&self) -> f32 {
+	pub fn get_fitted_font_size(&self) -> f64 {
 		if self.is_layout_dirty {
 			return self.font_size;
 		}
@@ -1482,7 +1482,7 @@ impl Text {
 	/// # 인자
 	/// - `word_wrap_width`: 줄바꿈 폭. (픽셀, 0 이하면 줄바꿈 문자로만 나눈다)
 	//==============================================================================
-	pub fn set_word_wrap_width(&mut self, word_wrap_width: f32) {
+	pub fn set_word_wrap_width(&mut self, word_wrap_width: f64) {
 		if self.word_wrap_width != word_wrap_width {
 			self.word_wrap_width = word_wrap_width;
 			self.is_layout_dirty = true;
@@ -1495,7 +1495,7 @@ impl Text {
 	/// # 돌려줌
 	/// 줄바꿈 폭. (픽셀)
 	//==============================================================================
-	pub fn get_word_wrap_width(&self) -> f32 {
+	pub fn get_word_wrap_width(&self) -> f64 {
 		self.word_wrap_width
 	}
 
@@ -1508,7 +1508,7 @@ impl Text {
 	/// # 돌려줌
 	/// 크기. (픽셀)
 	//==============================================================================
-	pub fn calculate_fitted_font_size(&mut self, graphic: &mut Graphic) -> f32 {
+	pub fn calculate_fitted_font_size(&mut self, graphic: &mut Graphic) -> f64 {
 		let content_width = self.layout_wrap_width;
 		self.update_layout(graphic, content_width);
 		self.fitted_font_size
@@ -1526,7 +1526,7 @@ impl Text {
 	/// # 돌려줌
 	/// 너비. (픽셀, 빈 글은 0)
 	//==============================================================================
-	pub fn measure_text(&self, graphic: &Graphic, text: &str, font_size: f32) -> f32 {
+	pub fn measure_text(&self, graphic: &Graphic, text: &str, font_size: f64) -> f64 {
 		if text.is_empty() {
 			return 0.0;
 		}
@@ -1563,7 +1563,7 @@ impl Text {
 	/// # 인자
 	/// - `line_spacing`: 줄 간격. (글자 크기의 배수, 기본 1.25)
 	//==============================================================================
-	pub fn set_line_spacing(&mut self, line_spacing: f32) {
+	pub fn set_line_spacing(&mut self, line_spacing: f64) {
 		self.line_spacing = line_spacing;
 	}
 
@@ -1573,7 +1573,7 @@ impl Text {
 	/// # 돌려줌
 	/// 줄 간격. (글자 크기의 배수)
 	//==============================================================================
-	pub fn get_line_spacing(&self) -> f32 {
+	pub fn get_line_spacing(&self) -> f64 {
 		self.line_spacing
 	}
 
@@ -1626,7 +1626,7 @@ impl Text {
 	/// # 인자
 	/// - `font_size`: 글자 크기. (픽셀, 기본 32)
 	//==============================================================================
-	pub fn set_font_size(&mut self, font_size: f32) {
+	pub fn set_font_size(&mut self, font_size: f64) {
 		if self.font_size != font_size {
 			self.font_size = font_size;
 			self.update_font_string();
@@ -1639,7 +1639,7 @@ impl Text {
 	/// # 돌려줌
 	/// 글자 크기. (픽셀, 맞춰 줄인 크기가 아니라 정한 크기)
 	//==============================================================================
-	pub fn get_font_size(&self) -> f32 {
+	pub fn get_font_size(&self) -> f64 {
 		self.font_size
 	}
 
@@ -1689,7 +1689,7 @@ impl Text {
 	/// # 인자
 	/// - `stroke_width`: 외곽선 두께. (픽셀, 기본 0)
 	//==============================================================================
-	pub fn set_stroke_width(&mut self, stroke_width: f32) {
+	pub fn set_stroke_width(&mut self, stroke_width: f64) {
 		self.stroke_width = stroke_width;
 	}
 
@@ -1699,7 +1699,7 @@ impl Text {
 	/// # 돌려줌
 	/// 외곽선 두께. (픽셀)
 	//==============================================================================
-	pub fn get_stroke_width(&self) -> f32 {
+	pub fn get_stroke_width(&self) -> f64 {
 		self.stroke_width
 	}
 
@@ -2017,8 +2017,8 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn wrap_text_like_original() {
-		let measure_width = |text: &str| -> f32 {
-			count_graphemes(text) as f32 * 10.0
+		let measure_width = |text: &str| -> f64 {
+			count_graphemes(text) as f64 * 10.0
 		};
 		let mut text = Text::new();
 		assert_eq!(text.wrap_text_to_lines_with("ab cd ef", 50.0, &measure_width), vec!["ab cd", "ef"]);

@@ -20,7 +20,7 @@ use glow::HasContext;
 use std::rc::Weak;
 
 /// 붙을 때 content_size 가 비어 있으면 쓰는 크기. (원본 생성자)
-const DEFAULT_CONTENT_SIZE: f32 = 300.0;
+const DEFAULT_CONTENT_SIZE: f64 = 300.0;
 
 //==============================================================================
 /// 아지랑이 효과 컴포넌트.
@@ -44,13 +44,13 @@ const DEFAULT_CONTENT_SIZE: f32 = 300.0;
 //==============================================================================
 pub struct HeatHazeEffect {
 	component_base: ComponentBase,
-	timer: f32,
+	timer: f64,
 	/// 흔들리는 속도.
-	speed: f32,
+	speed: f64,
 	/// 흔들리는 폭. (강도, 픽셀)
-	amplitude: f32,
+	amplitude: f64,
 	/// 흔들리는 빈도. (물결의 촘촘함)
-	frequency: f32,
+	frequency: f64,
 	capture_texture: Option<GlTexture>,
 	capture_texture_width: i32,
 	capture_texture_height: i32,
@@ -86,7 +86,7 @@ impl HeatHazeEffect {
 	/// # 인자
 	/// - `value`: 흔들림 시계가 흐르는 빠르기. (초당 라디안, tick 마다 time_delta x 속도만큼 흐른다. 기본 2)
 	//==============================================================================
-	pub fn set_speed(&mut self, value: f32) {
+	pub fn set_speed(&mut self, value: f64) {
 		self.speed = value;
 	}
 
@@ -96,7 +96,7 @@ impl HeatHazeEffect {
 	/// # 돌려줌
 	/// 흔들림 시계가 흐르는 빠르기. (초당 라디안)
 	//==============================================================================
-	pub fn get_speed(&self) -> f32 {
+	pub fn get_speed(&self) -> f64 {
 		self.speed
 	}
 
@@ -106,7 +106,7 @@ impl HeatHazeEffect {
 	/// # 인자
 	/// - `value`: 줄이 좌우로 밀리는 가장 큰 폭. (노드 좌표 픽셀, 기본 3)
 	//==============================================================================
-	pub fn set_amplitude(&mut self, value: f32) {
+	pub fn set_amplitude(&mut self, value: f64) {
 		self.amplitude = value;
 	}
 
@@ -116,7 +116,7 @@ impl HeatHazeEffect {
 	/// # 돌려줌
 	/// 줄이 좌우로 밀리는 가장 큰 폭. (노드 좌표 픽셀)
 	//==============================================================================
-	pub fn get_amplitude(&self) -> f32 {
+	pub fn get_amplitude(&self) -> f64 {
 		self.amplitude
 	}
 
@@ -126,7 +126,7 @@ impl HeatHazeEffect {
 	/// # 인자
 	/// - `value`: 줄 위치에 곱하는 빈도. (노드 세로 1 픽셀마다 라디안, 클수록 물결이 촘촘하다. 기본 0.05)
 	//==============================================================================
-	pub fn set_frequency(&mut self, value: f32) {
+	pub fn set_frequency(&mut self, value: f64) {
 		self.frequency = value;
 	}
 
@@ -136,7 +136,7 @@ impl HeatHazeEffect {
 	/// # 돌려줌
 	/// 줄 위치에 곱하는 빈도. (노드 세로 1 픽셀마다 라디안)
 	//==============================================================================
-	pub fn get_frequency(&self) -> f32 {
+	pub fn get_frequency(&self) -> f64 {
 		self.frequency
 	}
 
@@ -146,7 +146,7 @@ impl HeatHazeEffect {
 	/// # 돌려줌
 	/// 흔들림 시계. (라디안, 처음 0)
 	//==============================================================================
-	pub fn get_timer(&self) -> f32 {
+	pub fn get_timer(&self) -> f64 {
 		self.timer
 	}
 
@@ -159,7 +159,7 @@ impl HeatHazeEffect {
 	/// # 돌려줌
 	/// 줄을 밀 x 거리. (노드 좌표, -폭 ~ 폭)
 	//==============================================================================
-	pub fn calculate_row_offset(&self, local_y: f32) -> f32 {
+	pub fn calculate_row_offset(&self, local_y: f64) -> f64 {
 		(self.timer + local_y * self.frequency).sin() * self.amplitude
 	}
 
@@ -272,7 +272,7 @@ impl Component for HeatHazeEffect {
 	//==============================================================================
 	/// 갱신. (흔들림 시계를 흘린다)
 	//==============================================================================
-	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f64) {
 		self.timer += time_delta * self.speed;
 	}
 
@@ -295,10 +295,10 @@ impl Component for HeatHazeEffect {
 			transform_matrix.transform_point(0.0, content_size.y),
 			transform_matrix.transform_point(content_size.x, content_size.y),
 		];
-		let minimum_x = corners.iter().map(|corner| corner.x).fold(f32::INFINITY, f32::min);
-		let maximum_x = corners.iter().map(|corner| corner.x).fold(f32::NEG_INFINITY, f32::max);
-		let minimum_y = corners.iter().map(|corner| corner.y).fold(f32::INFINITY, f32::min);
-		let maximum_y = corners.iter().map(|corner| corner.y).fold(f32::NEG_INFINITY, f32::max);
+		let minimum_x = corners.iter().map(|corner| corner.x).fold(f64::INFINITY, f64::min);
+		let maximum_x = corners.iter().map(|corner| corner.x).fold(f64::NEG_INFINITY, f64::max);
+		let minimum_y = corners.iter().map(|corner| corner.y).fold(f64::INFINITY, f64::min);
+		let maximum_y = corners.iter().map(|corner| corner.y).fold(f64::NEG_INFINITY, f64::max);
 		let bounds_width = maximum_x - minimum_x;
 		let bounds_height = maximum_y - minimum_y;
 		if bounds_width <= 0.0 || bounds_height <= 0.0 {
@@ -336,21 +336,21 @@ impl Component for HeatHazeEffect {
 
 		// 줄마다 쿼드. (x, y, u, v, r, g, b, a)
 		let row_count = (content_size.y.ceil() as usize).max(1);
-		let row_height = content_size.y / row_count as f32;
-		let left_u = (minimum_x - region_x as f32) / region_width as f32;
-		let right_u = (maximum_x - region_x as f32) / region_width as f32;
+		let row_height = content_size.y / row_count as f64;
+		let left_u = (minimum_x - region_x as f64) / region_width as f64;
+		let right_u = (maximum_x - region_x as f64) / region_width as f64;
 		let mut vertex_values: Vec<f32> = Vec::with_capacity(row_count * 6 * PARTICLE_FLOATS_PER_VERTEX);
 		for row_index in 0..row_count {
-			let top_y = row_index as f32 * row_height;
+			let top_y = row_index as f64 * row_height;
 			let bottom_y = top_y + row_height;
 			let offset_x = self.calculate_row_offset(top_y);
 			let source_top_y = minimum_y + top_y / content_size.y * bounds_height;
 			let source_bottom_y = minimum_y + bottom_y / content_size.y * bounds_height;
-			let top_v = 1.0 - (source_top_y - region_y as f32) / region_height as f32;
-			let bottom_v = 1.0 - (source_bottom_y - region_y as f32) / region_height as f32;
+			let top_v = 1.0 - (source_top_y - region_y as f64) / region_height as f64;
+			let bottom_v = 1.0 - (source_bottom_y - region_y as f64) / region_height as f64;
 			let left_x = offset_x;
 			let right_x = offset_x + content_size.x;
-			let corners: [(f32, f32, f32, f32); 4] = [
+			let corners: [(f64, f64, f64, f64); 4] = [
 				(left_x, top_y, left_u, top_v),
 				(right_x, top_y, right_u, top_v),
 				(left_x, bottom_y, left_u, bottom_v),
@@ -358,7 +358,7 @@ impl Component for HeatHazeEffect {
 			];
 			for corner_index in [0usize, 1, 2, 2, 1, 3] {
 				let (corner_x, corner_y, corner_u, corner_v) = corners[corner_index];
-				vertex_values.extend_from_slice(&[corner_x, corner_y, corner_u, corner_v, 1.0, 1.0, 1.0, 1.0]);
+				vertex_values.extend_from_slice(&[corner_x as f32, corner_y as f32, corner_u as f32, corner_v as f32, 1.0, 1.0, 1.0, 1.0]);
 			}
 		}
 		draw_colored_quads_in_chunks(graphic, &vertex_values, capture_texture);
@@ -388,7 +388,7 @@ mod tests {
 		heat_haze_effect.set_frequency(0.1);
 		heat_haze_effect.timer += 0.25 * heat_haze_effect.get_speed();
 		assert_eq!(heat_haze_effect.get_timer(), 1.0);
-		assert!((heat_haze_effect.calculate_row_offset(10.0) - 2.0f32.sin() * 5.0).abs() < 0.00001);
+		assert!((heat_haze_effect.calculate_row_offset(10.0) - 2.0f64.sin() * 5.0).abs() < 0.00001);
 	}
 
 	//==============================================================================

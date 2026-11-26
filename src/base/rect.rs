@@ -46,7 +46,7 @@ impl Rect {
 	/// # 돌려줌
 	/// 만든 사각형.
 	//==============================================================================
-	pub const fn create(x: f32, y: f32, width: f32, height: f32) -> Rect {
+	pub const fn create(x: f64, y: f64, width: f64, height: f64) -> Rect {
 		Rect {
 			position: Vector2::create(x, y),
 			size: Vector2::create(width, height),
@@ -79,7 +79,7 @@ impl Rect {
 	/// # 돌려줌
 	/// 너비. (size.x)
 	//==============================================================================
-	pub fn get_width(&self) -> f32 {
+	pub fn get_width(&self) -> f64 {
 		self.size.x
 	}
 
@@ -89,7 +89,7 @@ impl Rect {
 	/// # 돌려줌
 	/// 높이. (size.y)
 	//==============================================================================
-	pub fn get_height(&self) -> f32 {
+	pub fn get_height(&self) -> f64 {
 		self.size.y
 	}
 
@@ -99,7 +99,7 @@ impl Rect {
 	/// # 인자
 	/// - `width`: 새 너비. (왼쪽 위는 그대로)
 	//==============================================================================
-	pub fn set_width(&mut self, width: f32) {
+	pub fn set_width(&mut self, width: f64) {
 		self.size.x = width;
 	}
 
@@ -109,7 +109,7 @@ impl Rect {
 	/// # 인자
 	/// - `height`: 새 높이. (왼쪽 위는 그대로)
 	//==============================================================================
-	pub fn set_height(&mut self, height: f32) {
+	pub fn set_height(&mut self, height: f64) {
 		self.size.y = height;
 	}
 
@@ -191,7 +191,7 @@ impl Rect {
 	/// # 돌려줌
 	/// 왼쪽 x.
 	//==============================================================================
-	pub fn get_left(&self) -> f32 {
+	pub fn get_left(&self) -> f64 {
 		self.position.x
 	}
 
@@ -201,7 +201,7 @@ impl Rect {
 	/// # 인자
 	/// - `left`: 새 왼쪽 x.
 	//==============================================================================
-	pub fn set_left(&mut self, left: f32) {
+	pub fn set_left(&mut self, left: f64) {
 		self.position.x = left;
 	}
 
@@ -211,7 +211,7 @@ impl Rect {
 	/// # 돌려줌
 	/// 위 y.
 	//==============================================================================
-	pub fn get_top(&self) -> f32 {
+	pub fn get_top(&self) -> f64 {
 		self.position.y
 	}
 
@@ -221,7 +221,7 @@ impl Rect {
 	/// # 인자
 	/// - `top`: 새 위 y.
 	//==============================================================================
-	pub fn set_top(&mut self, top: f32) {
+	pub fn set_top(&mut self, top: f64) {
 		self.position.y = top;
 	}
 
@@ -231,7 +231,7 @@ impl Rect {
 	/// # 돌려줌
 	/// 오른쪽 x. (왼쪽 x + 너비)
 	//==============================================================================
-	pub fn get_right(&self) -> f32 {
+	pub fn get_right(&self) -> f64 {
 		self.position.x + self.size.x
 	}
 
@@ -241,7 +241,7 @@ impl Rect {
 	/// # 인자
 	/// - `right`: 새 오른쪽 x.
 	//==============================================================================
-	pub fn set_right(&mut self, right: f32) {
+	pub fn set_right(&mut self, right: f64) {
 		self.position.x = right - self.size.x;
 	}
 
@@ -251,7 +251,7 @@ impl Rect {
 	/// # 돌려줌
 	/// 아래 y. (위 y + 높이)
 	//==============================================================================
-	pub fn get_bottom(&self) -> f32 {
+	pub fn get_bottom(&self) -> f64 {
 		self.position.y + self.size.y
 	}
 
@@ -261,7 +261,7 @@ impl Rect {
 	/// # 인자
 	/// - `bottom`: 새 아래 y.
 	//==============================================================================
-	pub fn set_bottom(&mut self, bottom: f32) {
+	pub fn set_bottom(&mut self, bottom: f64) {
 		self.position.y = bottom - self.size.y;
 	}
 

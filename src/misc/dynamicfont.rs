@@ -58,11 +58,11 @@ pub struct GlyphInfo {
 	/// 아틀라스 안의 자리와 크기. (픽셀)
 	pub uv_rect: Rect,
 	/// 가로로 나아가는 양. (전진폭 + 자간, 픽셀)
-	pub advance: f32,
+	pub advance: f64,
 	/// 펜 자리에서 글리프 왼쪽 픽셀까지 거리. (왼쪽이 양수)
-	pub bearing_x: f32,
+	pub bearing_x: f64,
 	/// 기준선에서 글리프 위쪽 픽셀까지 거리. (위가 양수)
-	pub bearing_y: f32,
+	pub bearing_y: f64,
 }
 
 //==============================================================================
@@ -75,9 +75,9 @@ struct AtlasGlyph {
 	color_pixels: Option<Vec<u8>>,
 	glyph_width: i32,
 	glyph_height: i32,
-	advance_width: f32,
-	bearing_x: f32,
-	bearing_y: f32,
+	advance_width: f64,
+	bearing_x: f64,
+	bearing_y: f64,
 	atlas_x: i32,
 	atlas_y: i32,
 }
@@ -105,8 +105,8 @@ struct AtlasGlyph {
 //==============================================================================
 pub struct DynamicFont {
 	font_family: String,
-	font_size: f32,
-	letter_spacing: f32,
+	font_size: f64,
+	letter_spacing: f64,
 	glyph_table: HashMap<String, GlyphInfo>,
 	/// 아틀라스에 든 글자. (넣은 차례, 다시 구울 때 모두 놓는다)
 	character_list: Vec<String>,
@@ -158,7 +158,7 @@ impl DynamicFont {
 	/// # 인자
 	/// - `font_size`: 글자 크기. (픽셀, 아틀라스에 없는 글자는 이것의 반만큼 비운다)
 	//==============================================================================
-	pub fn set_font_size(&mut self, font_size: f32) {
+	pub fn set_font_size(&mut self, font_size: f64) {
 		self.font_size = font_size;
 	}
 
@@ -168,7 +168,7 @@ impl DynamicFont {
 	/// # 돌려줌
 	/// 지금 글자 크기. (픽셀)
 	//==============================================================================
-	pub fn get_font_size(&self) -> f32 {
+	pub fn get_font_size(&self) -> f64 {
 		self.font_size
 	}
 
@@ -178,7 +178,7 @@ impl DynamicFont {
 	/// # 인자
 	/// - `letter_spacing`: 글자마다 전진폭에 더할 양. (픽셀)
 	//==============================================================================
-	pub fn set_letter_spacing(&mut self, letter_spacing: f32) {
+	pub fn set_letter_spacing(&mut self, letter_spacing: f64) {
 		self.letter_spacing = letter_spacing;
 	}
 
@@ -188,7 +188,7 @@ impl DynamicFont {
 	/// # 돌려줌
 	/// 지금 자간. (픽셀)
 	//==============================================================================
-	pub fn get_letter_spacing(&self) -> f32 {
+	pub fn get_letter_spacing(&self) -> f64 {
 		self.letter_spacing
 	}
 
@@ -250,7 +250,7 @@ impl DynamicFont {
 	pub fn rebuild_atlas(&mut self, graphic: &mut Graphic) {
 		let font_string = build_font_string(&self.font_family, self.font_size, false, false);
 		let text_string_texture_cache = graphic.get_text_string_texture_cache();
-		self.rebuild_atlas_with(|character| text_string_texture_cache.rasterize_character(character, &font_string));
+		self.rebuild_atlas_with(|character| text_string_texture_cache.rasterize_character(character, &font_string).map(|(raster, advance, ascent, descent)| (raster, advance as f64, ascent as f64, descent as f64)));
 	}
 
 	//==============================================================================
@@ -259,7 +259,7 @@ impl DynamicFont {
 	/// # 인자
 	/// - `rasterize_character`: 글자 → (래스터, 전진폭, 글꼴 위 길이, 글꼴 아래 길이). 굽지 못하면 None.
 	//==============================================================================
-	fn rebuild_atlas_with(&mut self, rasterize_character: impl Fn(&str) -> Option<(GlyphRaster, f32, f32, f32)>) {
+	fn rebuild_atlas_with(&mut self, rasterize_character: impl Fn(&str) -> Option<(GlyphRaster, f64, f64, f64)>) {
 		let mut atlas_glyph_list: Vec<AtlasGlyph> = Vec::new();
 		for character in &self.character_list {
 			let (glyph_raster, advance_width, _, _) = match rasterize_character(character) {
@@ -277,8 +277,8 @@ impl DynamicFont {
 				glyph_width: glyph_raster.width,
 				glyph_height: glyph_raster.height,
 				advance_width,
-				bearing_x: -glyph_raster.left_x as f32,
-				bearing_y: glyph_raster.top_y as f32,
+				bearing_x: -glyph_raster.left_x as f64,
+				bearing_y: glyph_raster.top_y as f64,
 				atlas_x: 0,
 				atlas_y: 0,
 			});
@@ -340,7 +340,7 @@ impl DynamicFont {
 			}
 			self.glyph_table.insert(atlas_glyph.character.clone(), GlyphInfo {
 				character: atlas_glyph.character.clone(),
-				uv_rect: Rect::create(left_x as f32, top_y as f32, atlas_glyph.glyph_width as f32, atlas_glyph.glyph_height as f32),
+				uv_rect: Rect::create(left_x as f64, top_y as f64, atlas_glyph.glyph_width as f64, atlas_glyph.glyph_height as f64),
 				advance: atlas_glyph.advance_width + self.letter_spacing,
 				bearing_x: atlas_glyph.bearing_x,
 				bearing_y: atlas_glyph.bearing_y,
@@ -419,7 +419,7 @@ impl DynamicFont {
 	/// assert!(dynamic_font.get_atlas_image().is_none());
 	/// ```
 	//==============================================================================
-	pub fn measure_text(&self, text: &str) -> f32 {
+	pub fn measure_text(&self, text: &str) -> f64 {
 		text.graphemes(true).map(|character| self.glyph_table.get(character).map(|glyph_info| glyph_info.advance).unwrap_or(self.font_size * 0.5)).sum()
 	}
 
@@ -449,7 +449,7 @@ mod tests {
 	//==============================================================================
 	/// 시험용 글자 래스터. (가로 width, 세로 2 를 꽉 채운 글리프, "?" 는 굽지 못한다)
 	//==============================================================================
-	fn rasterize_test_character(character: &str) -> Option<(GlyphRaster, f32, f32, f32)> {
+	fn rasterize_test_character(character: &str) -> Option<(GlyphRaster, f64, f64, f64)> {
 		if character == "?" {
 			return None;
 		}
@@ -462,7 +462,7 @@ mod tests {
 			top_y: 2,
 			color_pixels: None,
 		};
-		Some((glyph_raster, width as f32, 2.0, 0.0))
+		Some((glyph_raster, width as f64, 2.0, 0.0))
 	}
 
 	//==============================================================================

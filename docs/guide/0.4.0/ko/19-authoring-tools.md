@@ -156,7 +156,7 @@ assert!(node_tree[field_id].get_component::<UIInputField>().is_some());
 
 ### 게임에서 문서 저장하기
 
-`to_json_text(node_tree, root_id, is_pretty)` 는 노드 트리를 같은 꼴의 글로 바꿉니다. 키 차례와 들여쓰기(탭)는 원본 `JSON.stringify` 와 같고, 수는 `f32` 를 가장 짧은 십진으로 적습니다. 등록한 종류는 등록한 이름으로 적고, 등록하지 않은 컴포넌트는 원본처럼 게터와 세터로 적되 `#[vanilla::reflect]` 가 없으면 적을 수 없어 경고를 찍고 뺍니다. 원본처럼 번들러가 클래스 이름을 바꿀 걱정은 없습니다. `&mut self` 게터가 있는 컴포넌트를 적을 때는 `to_json_text_mut` 를 씁니다.
+`to_json_text(node_tree, root_id, is_pretty)` 는 노드 트리를 같은 꼴의 글로 바꿉니다. 키 차례와 들여쓰기(탭)는 원본 `JSON.stringify` 와 같고, 수는 `f64` 를 가장 짧은 십진으로 적습니다. 등록한 종류는 등록한 이름으로 적고, 등록하지 않은 컴포넌트는 원본처럼 게터와 세터로 적되 `#[vanilla::reflect]` 가 없으면 적을 수 없어 경고를 찍고 뺍니다. 원본처럼 번들러가 클래스 이름을 바꿀 걱정은 없습니다. `&mut self` 게터가 있는 컴포넌트를 적을 때는 `to_json_text_mut` 를 씁니다.
 
 ## Timeline Editor 문서 재생하기
 
@@ -376,7 +376,7 @@ impl Scene for VisualScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		let node_tree = self.scene_base.get_node_tree_mut();
 		self.document.bind_pending_images(node_tree);
@@ -423,7 +423,7 @@ let root_id = node_tree.get_root_id();
 let mut document = UIDocument::new();
 for index in 0..3 {
 	let coin_id = document.from_json_text(&mut node_tree, prefab_json_text).unwrap();
-	node_tree[coin_id].set_local_position(Vector2::create(200.0 + index as f32 * 120.0, 120.0));
+	node_tree[coin_id].set_local_position(Vector2::create(200.0 + index as f64 * 120.0, 120.0));
 	node_tree.add_child(root_id, coin_id);
 }
 let coin_ids = node_tree.get_child_ids(root_id).to_vec();

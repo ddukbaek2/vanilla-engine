@@ -46,9 +46,9 @@ pub enum PopupMotionState {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PopupMotionOptions {
 	/// 등장 시간. (초)
-	pub open_duration: f32,
+	pub open_duration: f64,
 	/// 퇴장 시간. (초)
-	pub close_duration: f32,
+	pub close_duration: f64,
 }
 
 impl Default for PopupMotionOptions {
@@ -111,9 +111,9 @@ pub type PopupMotionEvent = Box<dyn FnMut()>;
 //==============================================================================
 pub struct PopupMotion {
 	state: PopupMotionState,
-	elapsed_seconds: f32,
-	open_duration: f32,
-	close_duration: f32,
+	elapsed_seconds: f64,
+	open_duration: f64,
+	close_duration: f64,
 	is_instant_enabled: bool,
 	opened_event: Option<PopupMotionEvent>,
 	closed_event: Option<PopupMotionEvent>,
@@ -207,7 +207,7 @@ impl PopupMotion {
 	/// # 인자
 	/// - `time_delta`: 지난 시간. (초, 여는 중이나 닫는 중일 때만 쌓는다)
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		if self.state == PopupMotionState::Opening {
 			self.elapsed_seconds += time_delta;
 			if self.elapsed_seconds >= self.open_duration {
@@ -230,7 +230,7 @@ impl PopupMotion {
 	/// # 돌려줌
 	/// 판에 걸 배율. (닫힘 0, 열림 1, 여는 중 0.45 에서 1.18 을 거쳐 1, 닫는 중 1 에서 1.08 을 거쳐 0.08)
 	//==============================================================================
-	pub fn get_scale(&self) -> f32 {
+	pub fn get_scale(&self) -> f64 {
 		match self.state {
 			PopupMotionState::Open => {
 				1.0
@@ -266,7 +266,7 @@ impl PopupMotion {
 	/// # 돌려줌
 	/// 막의 알파에 곱할 비율. (0 ~ 1, 여는 동안 0 에서 1 로, 닫는 동안 1 에서 0 으로 고르게)
 	//==============================================================================
-	pub fn get_dim_ratio(&self) -> f32 {
+	pub fn get_dim_ratio(&self) -> f64 {
 		match self.state {
 			PopupMotionState::Open => {
 				1.0

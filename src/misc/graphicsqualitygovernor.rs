@@ -56,8 +56,8 @@ pub struct GraphicsQualityGovernor {
 	lite_override: Option<bool>,
 	is_auto_lite_default: bool,
 	frame_probe: FrameProbe,
-	normal_max_render_pixel_ratio: f32,
-	lite_max_render_pixel_ratio: f32,
+	normal_max_render_pixel_ratio: f64,
+	lite_max_render_pixel_ratio: f64,
 	was_lite: bool,
 }
 
@@ -258,7 +258,7 @@ impl GraphicsQualityGovernor {
 	/// # 돌려줌
 	/// 지난 update 때와 is_lite 가 달라졌으면 true. (설정이나 덮어쓰기로 바뀐 것도 다음 update 에서 true)
 	//==============================================================================
-	pub fn update(&mut self, frame_seconds: f32, maximum_frame_per_second: f32) -> bool {
+	pub fn update(&mut self, frame_seconds: f64, maximum_frame_per_second: f64) -> bool {
 		let is_measured = self.lite_override.is_none() && self.quality == GraphicsQuality::Auto && !self.is_auto_lite_default;
 		if is_measured {
 			self.frame_probe.measure_frame(frame_seconds, maximum_frame_per_second);
@@ -276,7 +276,7 @@ impl GraphicsQualityGovernor {
 	/// - `normal_max_render_pixel_ratio`: 보통 길의 렌더 배율 상한. (음수는 0)
 	/// - `lite_max_render_pixel_ratio`: 가벼운 길의 렌더 배율 상한. (음수는 0)
 	//==============================================================================
-	pub fn set_render_pixel_ratio_limits(&mut self, normal_max_render_pixel_ratio: f32, lite_max_render_pixel_ratio: f32) {
+	pub fn set_render_pixel_ratio_limits(&mut self, normal_max_render_pixel_ratio: f64, lite_max_render_pixel_ratio: f64) {
 		self.normal_max_render_pixel_ratio = normal_max_render_pixel_ratio.max(0.0);
 		self.lite_max_render_pixel_ratio = lite_max_render_pixel_ratio.max(0.0);
 	}
@@ -287,7 +287,7 @@ impl GraphicsQualityGovernor {
 	/// # 돌려줌
 	/// is_lite 면 가벼운 길의 상한, 아니면 보통 길의 상한. (0 이면 제한 없음)
 	//==============================================================================
-	pub fn read_max_render_pixel_ratio(&self) -> f32 {
+	pub fn read_max_render_pixel_ratio(&self) -> f64 {
 		if self.is_lite() {
 			self.lite_max_render_pixel_ratio
 		}

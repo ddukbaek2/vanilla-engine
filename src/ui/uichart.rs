@@ -5,7 +5,7 @@
 //! - UIBarChart: 값 목록을 세로 막대로 그린다. 최댓값을 정하지 않으면 지금 값들의 최대를 쓴다. 강조 번호의 막대는 강조색이다.
 //! - 둘 다 그리기만 하는 컴포넌트라 WorldNode::add_component 로 붙여도 된다. (tick 이 없다)
 //! - 원본과 다른 것:
-//!   - 값 범위 / 최댓값의 "null 이면 자동" 은 `Option<f32>` 다. 강조 번호의 "-1 이면 없음" 은 `Option<usize>` 다.
+//!   - 값 범위 / 최댓값의 "null 이면 자동" 은 `Option<f64>` 다. 강조 번호의 "-1 이면 없음" 은 `Option<usize>` 다.
 //!   - get_value_list 는 복사본 대신 슬라이스를 돌려준다.
 //!   - 점 / 막대 자리 계산을 calculate_points / calculate_bar_rects 로 떼어 냈다. (그리기와 같은 계산, 시험과 충돌 판정용)
 //!   - 라인 차트는 점 버퍼를 들고 다시 써서 매 프레임 할당하지 않는다.
@@ -36,7 +36,7 @@ use crate::core::node::worldnode::NodeTransform;
 /// line_chart.set_line_color(Color::create(0.3, 0.8, 1.0, 1.0));
 /// line_chart.set_line_width(2.0);
 /// for sample_index in 0..80 {
-/// 	line_chart.push_value(50.0 + (sample_index as f32 * 0.3).sin() * 30.0);
+/// 	line_chart.push_value(50.0 + (sample_index as f64 * 0.3).sin() * 30.0);
 /// }
 ///
 /// assert_eq!(line_chart.get_value_list().len(), 60);
@@ -47,13 +47,13 @@ use crate::core::node::worldnode::NodeTransform;
 //==============================================================================
 pub struct UILineChart {
 	component_base: ComponentBase,
-	value_list: Vec<f32>,
+	value_list: Vec<f64>,
 	max_sample_count: usize,
-	min_value: Option<f32>,
-	max_value: Option<f32>,
+	min_value: Option<f64>,
+	max_value: Option<f64>,
 	line_color: Color,
 	grid_color: Color,
-	line_width: f32,
+	line_width: f64,
 	grid_line_count: usize,
 	point_buffer: Vec<Vector2>,
 }
@@ -85,7 +85,7 @@ impl UILineChart {
 	/// # 인자
 	/// - `value`: 끝에 더할 값.
 	//==============================================================================
-	pub fn push_value(&mut self, value: f32) {
+	pub fn push_value(&mut self, value: f64) {
 		self.value_list.push(value);
 		if self.value_list.len() > self.max_sample_count {
 			let excess_count = self.value_list.len() - self.max_sample_count;
@@ -96,7 +96,7 @@ impl UILineChart {
 	//==============================================================================
 	/// 그릴 값 범위. (정하지 않은 쪽은 지금 값들의 최소 / 최대)
 	//==============================================================================
-	fn resolve_value_range(&self) -> (f32, f32) {
+	fn resolve_value_range(&self) -> (f64, f64) {
 		let mut low_value = self.min_value;
 		let mut high_value = self.max_value;
 		if low_value.is_none() || high_value.is_none() {
@@ -120,7 +120,7 @@ impl UILineChart {
 	//==============================================================================
 	/// 폴리라인 점 채우기. (표본이 둘보다 적으면 비운다. 위아래 2 픽셀 여백)
 	//==============================================================================
-	fn fill_points(&self, width: f32, height: f32, points: &mut Vec<Vector2>) {
+	fn fill_points(&self, width: f64, height: f64, points: &mut Vec<Vector2>) {
 		points.clear();
 		let sample_count = self.value_list.len();
 		if sample_count < 2 {
@@ -128,9 +128,9 @@ impl UILineChart {
 		}
 		let (low_value, high_value) = self.resolve_value_range();
 		let value_range = (high_value - low_value).max(0.0001);
-		let sample_span = (self.max_sample_count - 1) as f32;
+		let sample_span = (self.max_sample_count - 1) as f64;
 		for (sample_index, value) in self.value_list.iter().copied().enumerate() {
-			let ratio = sample_index as f32 / sample_span;
+			let ratio = sample_index as f64 / sample_span;
 			let value_ratio = (value - low_value) / value_range;
 			points.push(Vector2::create(ratio * width, height - value_ratio * (height - 4.0) - 2.0));
 		}
@@ -165,7 +165,7 @@ impl UILineChart {
 	/// assert_eq!(line_chart.calculate_points(100.0, 54.0)[1], Vector2::create(25.0, 27.0));
 	/// ```
 	//==============================================================================
-	pub fn calculate_points(&self, width: f32, height: f32) -> Vec<Vector2> {
+	pub fn calculate_points(&self, width: f64, height: f64) -> Vec<Vector2> {
 		let mut points: Vec<Vector2> = Vec::new();
 		self.fill_points(width, height, &mut points);
 		points
@@ -200,7 +200,7 @@ impl UILineChart {
 	/// - `min_value`: 영역 아래 끝에 올 값. None 이면 지금 값들의 최소.
 	/// - `max_value`: 영역 위 끝에 올 값. None 이면 지금 값들의 최대.
 	//==============================================================================
-	pub fn set_value_range(&mut self, min_value: Option<f32>, max_value: Option<f32>) {
+	pub fn set_value_range(&mut self, min_value: Option<f64>, max_value: Option<f64>) {
 		self.min_value = min_value;
 		self.max_value = max_value;
 	}
@@ -210,7 +210,7 @@ impl UILineChart {
 	/// # 인자
 	/// - `value_list`: 새 값 목록. (복사해 든다)
 	//==============================================================================
-	pub fn set_value_list(&mut self, value_list: &[f32]) {
+	pub fn set_value_list(&mut self, value_list: &[f64]) {
 		let start_index = value_list.len().saturating_sub(self.max_sample_count);
 		self.value_list = value_list[start_index..].to_vec();
 	}
@@ -220,7 +220,7 @@ impl UILineChart {
 	/// # 돌려줌
 	/// 지금 든 값. (든 차례대로)
 	//==============================================================================
-	pub fn get_value_list(&self) -> &[f32] {
+	pub fn get_value_list(&self) -> &[f64] {
 		&self.value_list
 	}
 
@@ -247,7 +247,7 @@ impl UILineChart {
 	/// # 인자
 	/// - `line_width`: 폴리라인 두께. (픽셀, 기본 1.5)
 	//==============================================================================
-	pub fn set_line_width(&mut self, line_width: f32) {
+	pub fn set_line_width(&mut self, line_width: f64) {
 		self.line_width = line_width;
 	}
 }
@@ -311,7 +311,7 @@ impl Component for UILineChart {
 		// 격자.
 		graphic.set_stroke_color(self.grid_color);
 		for grid_index in 1..=self.grid_line_count {
-			let grid_y = height * grid_index as f32 / (self.grid_line_count + 1) as f32;
+			let grid_y = height * grid_index as f64 / (self.grid_line_count + 1) as f64;
 			graphic.draw_line(&[Vector2::create(0.0, grid_y), Vector2::create(width, grid_y)], 1.0);
 		}
 
@@ -351,12 +351,12 @@ impl Component for UILineChart {
 //==============================================================================
 pub struct UIBarChart {
 	component_base: ComponentBase,
-	value_list: Vec<f32>,
-	max_value: Option<f32>,
+	value_list: Vec<f64>,
+	max_value: Option<f64>,
 	bar_color: Color,
 	highlight_color: Color,
 	highlight_index: Option<usize>,
-	bar_gap: f32,
+	bar_gap: f64,
 }
 
 #[crate::reflect]
@@ -381,13 +381,13 @@ impl UIBarChart {
 	//==============================================================================
 	/// 그릴 최댓값. (정하지 않았으면 지금 값들의 최대, 적어도 0.0001)
 	//==============================================================================
-	fn resolve_max_value(&self) -> f32 {
+	fn resolve_max_value(&self) -> f64 {
 		match self.max_value {
 			Some(max_value) => {
 				max_value
 			}
 			None => {
-				self.value_list.iter().copied().fold(0.0001, f32::max)
+				self.value_list.iter().copied().fold(0.0001, f64::max)
 			}
 		}
 	}
@@ -395,19 +395,19 @@ impl UIBarChart {
 	//==============================================================================
 	/// 막대 하나의 사각형. (바닥에서 위로, 적어도 1 픽셀)
 	//==============================================================================
-	fn calculate_bar_rect(&self, bar_index: usize, bar_width: f32, height: f32, high_value: f32) -> Rect {
+	fn calculate_bar_rect(&self, bar_index: usize, bar_width: f64, height: f64, high_value: f64) -> Rect {
 		let value_ratio = (self.value_list[bar_index] / high_value).clamp(0.0, 1.0);
 		let bar_height = (value_ratio * height).max(1.0);
-		let bar_x = bar_index as f32 * (bar_width + self.bar_gap);
+		let bar_x = bar_index as f64 * (bar_width + self.bar_gap);
 		Rect::create(bar_x, height - bar_height, bar_width, bar_height)
 	}
 
 	//==============================================================================
 	/// 막대 폭. (막대 사이 간격을 뺀 폭을 똑같이 나눈다)
 	//==============================================================================
-	fn calculate_bar_width(&self, width: f32) -> f32 {
+	fn calculate_bar_width(&self, width: f64) -> f64 {
 		let bar_count = self.value_list.len();
-		(width - self.bar_gap * (bar_count as f32 - 1.0)) / bar_count as f32
+		(width - self.bar_gap * (bar_count as f64 - 1.0)) / bar_count as f64
 	}
 
 	//==============================================================================
@@ -436,7 +436,7 @@ impl UIBarChart {
 	/// assert_eq!(bar_chart.calculate_bar_rects(100.0, 80.0)[2].get_height(), 80.0);
 	/// ```
 	//==============================================================================
-	pub fn calculate_bar_rects(&self, width: f32, height: f32) -> Vec<Rect> {
+	pub fn calculate_bar_rects(&self, width: f64, height: f64) -> Vec<Rect> {
 		if self.value_list.is_empty() {
 			return Vec::new();
 		}
@@ -450,7 +450,7 @@ impl UIBarChart {
 	/// # 인자
 	/// - `value_list`: 막대로 그릴 값 목록. (복사해 든다)
 	//==============================================================================
-	pub fn set_value_list(&mut self, value_list: &[f32]) {
+	pub fn set_value_list(&mut self, value_list: &[f64]) {
 		self.value_list = value_list.to_vec();
 	}
 
@@ -459,7 +459,7 @@ impl UIBarChart {
 	/// # 돌려줌
 	/// 지금 든 값. (든 차례대로)
 	//==============================================================================
-	pub fn get_value_list(&self) -> &[f32] {
+	pub fn get_value_list(&self) -> &[f64] {
 		&self.value_list
 	}
 
@@ -468,7 +468,7 @@ impl UIBarChart {
 	/// # 인자
 	/// - `max_value`: 영역 높이에 맞출 값. None 이면 지금 값들의 최대. (적어도 0.0001)
 	//==============================================================================
-	pub fn set_max_value(&mut self, max_value: Option<f32>) {
+	pub fn set_max_value(&mut self, max_value: Option<f64>) {
 		self.max_value = max_value;
 	}
 
@@ -504,7 +504,7 @@ impl UIBarChart {
 	/// # 인자
 	/// - `bar_gap`: 막대 사이 간격. (픽셀, 기본 4)
 	//==============================================================================
-	pub fn set_bar_gap(&mut self, bar_gap: f32) {
+	pub fn set_bar_gap(&mut self, bar_gap: f64) {
 		self.bar_gap = bar_gap;
 	}
 }

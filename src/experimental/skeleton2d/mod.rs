@@ -7,7 +7,7 @@
 //! - 원본과 다른 점: 원본의 -1 번호는 Option 이다. (뼈 부모, 시간줄 대상) 자료는 `Rc<Skeleton2DData>` 로 나눠 들고,
 //!   뼈, 슬롯, IK 인스턴스는 제 자료를 복사해 든다. 붙임은 두 갈래 열거(Skeleton2DAttachment)다. 슬롯 섞기는 BlendMode 다.
 //! - 셈은 원본처럼 f64 다. (뼈 값, 자세, 행렬, 꼭짓점, 시간, IK, 색 시간줄) 사인, 코사인, 아크 탄젠트 둘, 아크 코사인, 빗변은 base::trigonometry 로
-//!   크롬 Math 와 같은 비트를 낸다. 엔진 Color(슬롯 색), Vector2(local_to_world, world_to_local), 그리기, tick 시간 경계에서만 f32 로 바꾼다.
+//!   크롬 Math 와 같은 비트를 낸다. 엔진 Color(슬롯 색), Vector2(local_to_world, world_to_local), tick 시간도 f64 라 값이 그대로 오가고, 그리기의 정점 버퍼에서만 f32 로 줄인다.
 //!
 //! # 예제
 //! 엔진 JSON 으로 자료를 짓고 걷기를 반 초 돌린 뒤 뼈의 월드 자리 읽기

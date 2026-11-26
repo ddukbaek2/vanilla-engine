@@ -19,13 +19,13 @@ use vanilla::{AssetLoadHandle, AssetLoader, BuildInfo, Color, Engine, EngineConf
 // 전역 상수 목록.
 //==============================================================================
 const EXAMPLE_ASSET_DIRECTORY: &str = "../vanilla.js/examples/timelineshowcase/assets";
-const VIEW_WIDTH: f32 = 1280.0;
-const VIEW_HEIGHT: f32 = 720.0;
+const VIEW_WIDTH: f64 = 1280.0;
+const VIEW_HEIGHT: f64 = 720.0;
 const IMAGE_NAME_LIST: [&str; 7] = ["emblem.png", "slime.png", "star.png", "coin.png", "bat.png", "gem.png", "cover.png"];
 const STAGE_COUNT: usize = 10;
 const STAGE_FRAME_INTERVAL: u64 = 10;
 const ACCENT_COLOR: &str = "#ffcc33";
-const STEP_SECONDS: f32 = 1.0 / 30.0;
+const STEP_SECONDS: f64 = 1.0 / 30.0;
 
 //==============================================================================
 // 로딩 쇼케이스 씬.
@@ -38,10 +38,10 @@ struct LoadingShowcaseScene {
 	stage_handle_list: Vec<AssetLoadHandle>,
 	loading_frame_count: u64,
 	fixed_stepper: FixedStepper,
-	ball_position_x: f32,
-	previous_ball_position_x: f32,
-	ball_velocity_x: f32,
-	last_alpha: f32,
+	ball_position_x: f64,
+	previous_ball_position_x: f64,
+	ball_velocity_x: f64,
+	last_alpha: f64,
 	build_info: BuildInfo,
 }
 
@@ -69,15 +69,15 @@ impl LoadingShowcaseScene {
 	//==============================================================================
 	// 로딩 화면 그리기 함수 만들기. (받은 수를 읽으려고 AssetLoader 손잡이를 나눠 든다)
 	//==============================================================================
-	fn create_loading_drawer(asset_loader: AssetLoader) -> Box<dyn FnMut(&mut Graphic, Vector2, f32, f32)> {
-		Box::new(move |graphic: &mut Graphic, view_size: Vector2, progress: f32, elapsed_seconds: f32| {
+	fn create_loading_drawer(asset_loader: AssetLoader) -> Box<dyn FnMut(&mut Graphic, Vector2, f64, f64)> {
+		Box::new(move |graphic: &mut Graphic, view_size: Vector2, progress: f64, elapsed_seconds: f64| {
 			let center_x = view_size.x * 0.5;
 			let center_y = view_size.y * 0.42;
 			let orbit_radius = 56.0;
 			graphic.set_stroke_color(Color::create_from_hex(ACCENT_COLOR).with_alpha(0.25));
 			graphic.draw_stroke_circle(Vector2::create(center_x, center_y), orbit_radius, 3.0);
 			for dot_index in 0..3 {
-				let angle = elapsed_seconds * 2.4 + dot_index as f32 * std::f32::consts::PI * 2.0 / 3.0;
+				let angle = elapsed_seconds * 2.4 + dot_index as f64 * std::f64::consts::PI * 2.0 / 3.0;
 				let dot_position = Vector2::create(center_x + angle.cos() * orbit_radius, center_y + angle.sin() * orbit_radius);
 				graphic.set_fill_color(ACCENT_COLOR);
 				graphic.draw_circle(dot_position, 12.0);
@@ -175,7 +175,7 @@ impl Scene for LoadingShowcaseScene {
 	//==============================================================================
 	// 갱신. (공은 고정 걸음으로 움직인다. 벽에 닿으면 튕긴다)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.game_scene_base.tick(engine, time_delta);
 		let ball_position_x = &mut self.ball_position_x;
 		let previous_ball_position_x = &mut self.previous_ball_position_x;
@@ -223,8 +223,8 @@ impl Scene for LoadingShowcaseScene {
 			// 한 칸(140 x 120) 안에 비를 지켜 넣는다. (가로로 긴 스프라이트 시트도 칸을 넘지 않게)
 			let box_width = 140.0;
 			let box_height = 120.0;
-			let image_width = image.get_width() as f32;
-			let image_height = image.get_height() as f32;
+			let image_width = image.get_width() as f64;
+			let image_height = image.get_height() as f64;
 			let fit_scale = (box_width / image_width.max(1.0)).min(box_height / image_height.max(1.0));
 			let drawn_size = Vector2::create(image_width * fit_scale, image_height * fit_scale);
 			let drawn_position = Vector2::create(image_left + (box_width - drawn_size.x) * 0.5, 110.0 + (box_height - drawn_size.y) * 0.5);

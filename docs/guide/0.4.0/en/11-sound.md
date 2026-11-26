@@ -291,7 +291,7 @@ impl Scene for MusicScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		if let Some(sound_system) = read_sound_system() {
 			sound_system.borrow_mut().update();

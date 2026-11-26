@@ -70,7 +70,7 @@ pub struct AssetLoadFailure {
 }
 
 /// 진행 알림 함수. (진행률, 끝난 수, 전체 수)
-pub type AssetLoaderProgressHandler = Box<dyn FnMut(f32, usize, usize)>;
+pub type AssetLoaderProgressHandler = Box<dyn FnMut(f64, usize, usize)>;
 
 /// 다 받음 알림 함수. (실패 목록)
 pub type AssetLoaderCompleteHandler = Box<dyn FnMut(&[AssetLoadFailure])>;
@@ -738,9 +738,9 @@ impl AssetLoader {
 	/// let asset_loader = AssetLoader::new();
 	/// asset_loader.add_text("examples/assets/atlas/icons.json");
 	/// asset_loader.add_blob("examples/assets/missing.bin");
-	/// let progress_list: Rc<RefCell<Vec<(f32, usize, usize)>>> = Rc::new(RefCell::new(Vec::new()));
+	/// let progress_list: Rc<RefCell<Vec<(f64, usize, usize)>>> = Rc::new(RefCell::new(Vec::new()));
 	/// let progress_list_for_handler = progress_list.clone();
-	/// asset_loader.set_progress_handler(Some(Box::new(move |progress: f32, finished_count: usize, total_count: usize| {
+	/// asset_loader.set_progress_handler(Some(Box::new(move |progress: f64, finished_count: usize, total_count: usize| {
 	/// 	progress_list_for_handler.borrow_mut().push((progress, finished_count, total_count));
 	/// })));
 	/// let failed_path_list: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
@@ -785,12 +785,12 @@ impl AssetLoader {
 	/// # 돌려줌
 	/// 진행률. (0 ~ 1, 실패도 끝난 것으로 센다)
 	//==============================================================================
-	pub fn get_progress(&self) -> f32 {
+	pub fn get_progress(&self) -> f64 {
 		let state = self.state.borrow();
 		if state.entry_list.is_empty() {
 			return 1.0;
 		}
-		state.finished_count as f32 / state.entry_list.len() as f32
+		state.finished_count as f64 / state.entry_list.len() as f64
 	}
 
 	//==============================================================================

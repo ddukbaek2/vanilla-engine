@@ -22,13 +22,13 @@ use vanilla::{Color, Component, ComponentBase, Engine, EngineConfiguration, Grap
 // 전역 상수 목록.
 //==============================================================================
 const EXAMPLE_ASSET_DIRECTORY: &str = "../vanilla.js/examples/tilemapshowcase/assets";
-const VIEW_WIDTH: f32 = 1280.0;
-const VIEW_HEIGHT: f32 = 720.0;
+const VIEW_WIDTH: f64 = 1280.0;
+const VIEW_HEIGHT: f64 = 720.0;
 const MAP_FILE_LIST: [&str; 3] = ["orthogonal.tmj", "isometric.tmj", "hexagonal.tmj"];
 const TILESET_FILE_LIST: [&str; 1] = ["props.tsj"];
 const IMAGE_FILE_LIST: [&str; 6] = ["terrain.png", "trees.png", "chest.png", "sign.png", "isometric.png", "hexagon.png"];
 // 지도마다 (패널 왼쪽, 위, 너비, 높이, 지도 노드 왼쪽, 위, 배율)
-const PANEL_LAYOUT_LIST: [[f32; 7]; 3] = [
+const PANEL_LAYOUT_LIST: [[f64; 7]; 3] = [
 	[24.0, 40.0, 608.0, 416.0, 40.0, 56.0, 2.0],
 	[664.0, 40.0, 576.0, 312.0, 680.0, 88.0, 2.0],
 	[664.0, 368.0, 576.0, 336.0, 680.0, 384.0, 2.0],
@@ -71,20 +71,20 @@ impl Component for CollisionOverlay {
 	fn draw(&mut self, _transform: &NodeTransform, graphic: &mut Graphic) {
 		graphic.set_stroke_color(Color::create(1.0, 0.85, 0.2, 1.0));
 		for shape in self.shape_list.iter() {
-			// 그리기는 엔진 Vector2(f32)로. (충돌 모양 값은 원본처럼 f64)
-			let (shape_x, shape_y, shape_width, shape_height) = (shape.x as f32, shape.y as f32, shape.width as f32, shape.height as f32);
-			let radian = (shape.rotation as f32).to_radians();
-			let rotate_point = |local_x: f32, local_y: f32| Vector2::create(shape_x + local_x * radian.cos() - local_y * radian.sin(), shape_y + local_x * radian.sin() + local_y * radian.cos());
+			// 그리기는 엔진 Vector2 로. (충돌 모양 값과 같은 f64)
+			let (shape_x, shape_y, shape_width, shape_height) = (shape.x, shape.y, shape.width, shape.height);
+			let radian = shape.rotation.to_radians();
+			let rotate_point = |local_x: f64, local_y: f64| Vector2::create(shape_x + local_x * radian.cos() - local_y * radian.sin(), shape_y + local_x * radian.sin() + local_y * radian.cos());
 			let mut position_list: Vec<Vector2> = Vec::new();
 			match shape.kind {
 				TileCollisionShapeKind::Polygon | TileCollisionShapeKind::Polyline => {
 					for point in shape.points.iter() {
-						position_list.push(Vector2::create(shape_x + point.x as f32, shape_y + point.y as f32));
+						position_list.push(Vector2::create(shape_x + point.x, shape_y + point.y));
 					}
 				}
 				TileCollisionShapeKind::Ellipse => {
 					for step_index in 0..16 {
-						let angle = step_index as f32 / 16.0 * std::f32::consts::PI * 2.0;
+						let angle = step_index as f64 / 16.0 * std::f64::consts::PI * 2.0;
 						position_list.push(rotate_point(shape_width * 0.5 * (1.0 + angle.cos()), shape_height * 0.5 * (1.0 + angle.sin())));
 					}
 				}

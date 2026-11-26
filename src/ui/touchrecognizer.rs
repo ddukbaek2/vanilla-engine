@@ -24,10 +24,10 @@ use crate::ui::uiscrollbar::UIScrollBar;
 use crate::ui::uisnapscrollview::find_scroll_view;
 
 /// 드래그로 바뀌었다고 볼 거리. (px)
-const DRAG_THRESHOLD: f32 = 10.0;
+const DRAG_THRESHOLD: f64 = 10.0;
 
 /// 부모에 스크롤 뷰가 있을 때 누른 노드에 가는 누름을 미루는 시간. (초, 원본 150ms)
-const DELAY_PRESS_SECONDS: f32 = 0.15;
+const DELAY_PRESS_SECONDS: f64 = 0.15;
 
 //==============================================================================
 /// 터치 인식기.
@@ -51,7 +51,7 @@ const DELAY_PRESS_SECONDS: f32 = 0.15;
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 /// 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 /// 		self.touch_recognizer.tick_touch(self.scene_base.get_node_tree_mut(), engine);
 /// 		self.scene_base.tick_tweens(time_delta);
@@ -75,7 +75,7 @@ pub struct TouchRecognizer {
 	scroll_view_node_id: Option<NodeId>,
 	press_position: Option<Vector2>,
 	is_dragging: bool,
-	press_delay_remain_seconds: Option<f32>,
+	press_delay_remain_seconds: Option<f64>,
 	is_press_delivered: bool,
 	is_touching: bool,
 	/// 이번 프레임의 휠을 받아 쓴 컴포넌트가 있었는지.
@@ -217,7 +217,7 @@ impl TouchRecognizer {
 	/// - `engine`: 컴포넌트에 넘길 엔진.
 	/// - `elapsed_seconds`: 지난 시간. (초, 미루는 시간은 0.15 초)
 	//==============================================================================
-	pub fn update_press_delay(&mut self, node_tree: &mut NodeTree, engine: &Engine, elapsed_seconds: f32) {
+	pub fn update_press_delay(&mut self, node_tree: &mut NodeTree, engine: &Engine, elapsed_seconds: f64) {
 		let remain_seconds = match self.press_delay_remain_seconds {
 			Some(remain_seconds) => {
 				remain_seconds - elapsed_seconds

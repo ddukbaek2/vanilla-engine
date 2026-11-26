@@ -184,7 +184,7 @@ impl UISceneBase {
 	/// # 인자
 	/// - `milliseconds`: 로딩 화면을 보일 가장 짧은 시간. (밀리초, 기본 3000)
 	//==============================================================================
-	pub fn set_loading_min_duration_ms(&mut self, milliseconds: f32) {
+	pub fn set_loading_min_duration_ms(&mut self, milliseconds: f64) {
 		self.game_scene_base.set_loading_min_duration_ms(milliseconds);
 	}
 
@@ -252,10 +252,10 @@ impl UISceneBase {
 		let view_size = engine.get_view_manager().get_view_size();
 		self.suggest_screen_size(view_size);
 		let safe_area_rect = self.game_scene_base.compute_safe_area_rect(engine);
-		let inset_top = safe_area_rect.position.y as f64;
-		let inset_left = safe_area_rect.position.x as f64;
-		let inset_right = (view_size.x - (safe_area_rect.position.x + safe_area_rect.size.x)).max(0.0) as f64;
-		let inset_bottom = (view_size.y - (safe_area_rect.position.y + safe_area_rect.size.y)).max(0.0) as f64;
+		let inset_top = safe_area_rect.position.y;
+		let inset_left = safe_area_rect.position.x;
+		let inset_right = (view_size.x - (safe_area_rect.position.x + safe_area_rect.size.x)).max(0.0);
+		let inset_bottom = (view_size.y - (safe_area_rect.position.y + safe_area_rect.size.y)).max(0.0);
 		let insets = LayoutMargins::create(inset_top, inset_left, inset_bottom, inset_right);
 		if insets != self.safe_area_insets {
 			let _ = self.set_safe_area_insets(insets);
@@ -273,7 +273,7 @@ impl UISceneBase {
 	/// # 돌려줌
 	/// 뷰 크기가 바뀌어 레이아웃을 다시 했으면 true.
 	//==============================================================================
-	pub fn tick(&mut self, engine: &mut Engine, time_delta: f32) -> bool {
+	pub fn tick(&mut self, engine: &mut Engine, time_delta: f64) -> bool {
 		let is_layout_changed = self.game_scene_base.tick(engine, time_delta);
 		if is_layout_changed {
 			self.layout(engine);
@@ -315,8 +315,8 @@ impl UISceneBase {
 	/// ```
 	//==============================================================================
 	pub fn suggest_screen_size(&mut self, size: Vector2) {
-		let _ = self.solver.suggest_value(self.screen_node.get_width_variable(), size.x as f64);
-		let _ = self.solver.suggest_value(self.screen_node.get_height_variable(), size.y as f64);
+		let _ = self.solver.suggest_value(self.screen_node.get_width_variable(), size.x);
+		let _ = self.solver.suggest_value(self.screen_node.get_height_variable(), size.y);
 	}
 
 	//==============================================================================
@@ -580,7 +580,7 @@ pub trait UIScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_time_delta`: 지난 프레임부터 흐른 시간. (초)
 	//==============================================================================
-	fn tick(&mut self, _engine: &mut Engine, _time_delta: f32) {
+	fn tick(&mut self, _engine: &mut Engine, _time_delta: f64) {
 	}
 
 	//==============================================================================
@@ -776,7 +776,7 @@ macro_rules! ui_scene {
 				$crate::ui::uiscene::UIScene::layout(self, engine);
 			}
 
-			fn tick(&mut self, engine: &mut $crate::core::engine::Engine, time_delta: f32) {
+			fn tick(&mut self, engine: &mut $crate::core::engine::Engine, time_delta: f64) {
 				if $crate::ui::uiscene::UIScene::get_ui_scene_base_mut(self).tick(engine, time_delta) {
 					$crate::ui::uiscene::UIScene::layout(self, engine);
 				}

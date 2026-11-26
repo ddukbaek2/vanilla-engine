@@ -24,7 +24,7 @@ use std::rc::Rc;
 /// use vanilla::{Animation, Image, Rect, Sprite};
 ///
 /// let sheet = Image::create_from_pixels(64, 16, vec![255u8; 64 * 16 * 4]);
-/// let rects: Vec<Rect> = (0..4).map(|frame_index| Rect::create(16.0 * frame_index as f32, 0.0, 16.0, 16.0)).collect();
+/// let rects: Vec<Rect> = (0..4).map(|frame_index| Rect::create(16.0 * frame_index as f64, 0.0, 16.0, 16.0)).collect();
 /// let mut animation = Animation::new();
 /// animation.set_frames_from_rects(sheet, &rects);
 /// animation.set_animation_speed(8.0);
@@ -41,8 +41,8 @@ pub struct Animation {
 	frames: Vec<Frame>,
 	is_playing: bool,
 	current_frame_index: usize,
-	frame_time_counter: f32,
-	animation_speed: f32,
+	frame_time_counter: f64,
+	animation_speed: f64,
 	is_loop: bool,
 	on_complete: Option<Box<dyn FnMut()>>,
 }
@@ -93,7 +93,7 @@ impl Animation {
 	/// assert_eq!(animation.get_current_frame_index(), 0);
 	/// ```
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		if !self.is_playing || self.frames.is_empty() || self.animation_speed <= 0.0 {
 			return;
 		}
@@ -204,7 +204,7 @@ impl Animation {
 	/// # 인자
 	/// - `animation_speed`: 초당 프레임 수. (처음 10)
 	//==============================================================================
-	pub fn set_animation_speed(&mut self, animation_speed: f32) {
+	pub fn set_animation_speed(&mut self, animation_speed: f64) {
 		self.animation_speed = animation_speed;
 	}
 
@@ -374,7 +374,7 @@ mod tests {
 		let sheet_width = 16 * frame_count as u32;
 		let pixels = vec![0u8; (sheet_width * 16 * 4) as usize];
 		let image = Image::create_from_pixels(sheet_width, 16, pixels);
-		let rects: Vec<Rect> = (0..frame_count).map(|frame_index| Rect::create(16.0 * frame_index as f32, 0.0, 16.0, 16.0)).collect();
+		let rects: Vec<Rect> = (0..frame_count).map(|frame_index| Rect::create(16.0 * frame_index as f64, 0.0, 16.0, 16.0)).collect();
 		let mut animation = Animation::new();
 		animation.set_frames_from_rects(image, &rects);
 		animation

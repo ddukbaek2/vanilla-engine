@@ -18,40 +18,40 @@ use vanilla::{math, Color, Component, ComponentBase, ComponentContext, Engine, E
 //==============================================================================
 // 전역 상수 목록.
 //==============================================================================
-const VIEW_WIDTH: f32 = 1280.0;
-const VIEW_HEIGHT: f32 = 720.0;
+const VIEW_WIDTH: f64 = 1280.0;
+const VIEW_HEIGHT: f64 = 720.0;
 const BACKGROUND_COLOR: &str = "#1b1f27";
 const CELL_COLOR: &str = "#3a4150";
 const LABEL_COLOR: &str = "#c9d1e0";
 const GRID_COLUMN_COUNT: usize = 10;
-const GRID_LEFT: f32 = 15.0;
-const GRID_TOP: f32 = 44.0;
-const CELL_WIDTH: f32 = 84.0;
-const CELL_HEIGHT: f32 = 101.0;
-const SPRITE_SIZE: f32 = 64.0;
+const GRID_LEFT: f64 = 15.0;
+const GRID_TOP: f64 = 44.0;
+const CELL_WIDTH: f64 = 84.0;
+const CELL_HEIGHT: f64 = 101.0;
+const SPRITE_SIZE: f64 = 64.0;
 const SHEET_FRAME_SIZE: u32 = 80;
 const SHEET_GUTTER_SIZE: u32 = 2;
-const STAGE_X: f32 = 870.0;
-const STAGE_Y: f32 = 44.0;
-const STAGE_WIDTH: f32 = 395.0;
-const STAGE_HEIGHT: f32 = 505.0;
-const STAGE_CORNER_RADIUS: f32 = 16.0;
+const STAGE_X: f64 = 870.0;
+const STAGE_Y: f64 = 44.0;
+const STAGE_WIDTH: f64 = 395.0;
+const STAGE_HEIGHT: f64 = 505.0;
+const STAGE_CORNER_RADIUS: f64 = 16.0;
 const EFFECT_SET_FRAME_COUNT: u64 = 30;
 const EFFECT_SET_COUNT: usize = 8;
 const COMPILE_CHECK_FRAME: u64 = 3;
 // 움직이는 노드가 프레임마다 가는 시간. (창이 뜨기 전 첫 프레임들은 수직 동기 없이 빨리 돌아서, 실제 시간으로 움직이면 저장한 프레임 모양이 실행마다 다르다)
-const MOVER_FRAME_STEP: f32 = 1.0 / 60.0;
+const MOVER_FRAME_STEP: f64 = 1.0 / 60.0;
 // 아래 트레일이 오가는 오른쪽 끝. (그 오른쪽은 파티클 칸)
-const TRAIL_END_X: f32 = 410.0;
+const TRAIL_END_X: f64 = 410.0;
 // 파티클 칸 줄.
-const PARTICLE_ROW_LEFT: f32 = 455.0;
-const PARTICLE_ROW_TOP: f32 = 588.0;
-const PARTICLE_CELL_STEP: f32 = 101.25;
-const PARTICLE_CELL_WIDTH: f32 = 97.0;
-const PARTICLE_CELL_HEIGHT: f32 = 124.0;
+const PARTICLE_ROW_LEFT: f64 = 455.0;
+const PARTICLE_ROW_TOP: f64 = 588.0;
+const PARTICLE_CELL_STEP: f64 = 101.25;
+const PARTICLE_CELL_WIDTH: f64 = 97.0;
+const PARTICLE_CELL_HEIGHT: f64 = 124.0;
 const PARTICLE_STAR_SIZE: u32 = 32;
 // 파티클을 미리 흘려 두는 시간. (초)
-const PARTICLE_WARM_UP_SECONDS: f32 = 2.0;
+const PARTICLE_WARM_UP_SECONDS: f64 = 2.0;
 
 //==============================================================================
 // 원을 따라 도는 노드. (무대 안 트레일)
@@ -59,9 +59,9 @@ const PARTICLE_WARM_UP_SECONDS: f32 = 2.0;
 struct OrbitMover {
 	component_base: ComponentBase,
 	center: Vector2,
-	radius: f32,
-	angular_speed: f32,
-	angle: f32,
+	radius: f64,
+	angular_speed: f64,
+	angle: f64,
 }
 
 #[vanilla::reflect]
@@ -81,7 +81,7 @@ impl Component for OrbitMover {
 		"OrbitMover"
 	}
 
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		self.angle += self.angular_speed * MOVER_FRAME_STEP;
 		let radius_scale = 1.0 + 0.25 * (self.angle * 2.0).sin();
 		let position_x = self.center.x + self.angle.cos() * self.radius * radius_scale;
@@ -95,13 +95,13 @@ impl Component for OrbitMover {
 //==============================================================================
 struct WaveMover {
 	component_base: ComponentBase,
-	elapsed_time: f32,
-	start_x: f32,
-	end_x: f32,
-	horizontal_frequency: f32,
-	base_y: f32,
-	amplitude: f32,
-	frequency: f32,
+	elapsed_time: f64,
+	start_x: f64,
+	end_x: f64,
+	horizontal_frequency: f64,
+	base_y: f64,
+	amplitude: f64,
+	frequency: f64,
 }
 
 #[vanilla::reflect]
@@ -121,7 +121,7 @@ impl Component for WaveMover {
 		"WaveMover"
 	}
 
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		self.elapsed_time += MOVER_FRAME_STEP;
 		let travel_ratio = 0.5 - 0.5 * (self.elapsed_time * self.horizontal_frequency).cos();
 		let position_x = self.start_x + (self.end_x - self.start_x) * travel_ratio;
@@ -137,7 +137,7 @@ fn create_character_sheet() -> Rc<Image> {
 	let frame_size = SHEET_FRAME_SIZE;
 	let sheet_width = frame_size * 2;
 	let mut pixels = vec![0u8; (sheet_width * frame_size * 4) as usize];
-	let center = frame_size as f32 * 0.5;
+	let center = frame_size as f64 * 0.5;
 	for pixel_y in 0..frame_size {
 		for pixel_x in 0..sheet_width {
 			let pixel_index = ((pixel_y * sheet_width + pixel_x) * 4) as usize;
@@ -149,13 +149,13 @@ fn create_character_sheet() -> Rc<Image> {
 				}
 				continue;
 			}
-			let sample_x = pixel_x as f32 + 0.5;
-			let sample_y = pixel_y as f32 + 0.5;
+			let sample_x = pixel_x as f64 + 0.5;
+			let sample_y = pixel_y as f64 + 0.5;
 
 			// 몸통. (가장자리 부드럽게, 위왼쪽 하늘색 → 아래오른쪽 보라)
 			let body_distance = ((sample_x - center).powi(2) + (sample_y - center - 4.0).powi(2)).sqrt();
 			let body_coverage = math::clamp01(28.0 - body_distance + 0.5);
-			let gradient = (sample_x + sample_y) / (frame_size as f32 * 2.0);
+			let gradient = (sample_x + sample_y) / (frame_size as f64 * 2.0);
 			let mut color = Color::lerp(Color::create(0.35, 0.88, 1.0, 1.0), Color::create(0.78, 0.32, 0.95, 1.0), gradient);
 			if body_distance > 23.0 {
 				color = Color::create(color.red * 0.6, color.green * 0.6, color.blue * 0.6, 1.0);
@@ -208,11 +208,11 @@ fn create_character_sheet() -> Rc<Image> {
 fn create_star_image() -> Rc<Image> {
 	let image_size = PARTICLE_STAR_SIZE;
 	let mut pixels = vec![0u8; (image_size * image_size * 4) as usize];
-	let center = image_size as f32 * 0.5;
+	let center = image_size as f64 * 0.5;
 	for pixel_y in 0..image_size {
 		for pixel_x in 0..image_size {
-			let delta_x = pixel_x as f32 + 0.5 - center;
-			let delta_y = pixel_y as f32 + 0.5 - center;
+			let delta_x = pixel_x as f64 + 0.5 - center;
+			let delta_y = pixel_y as f64 + 0.5 - center;
 			let distance = (delta_x * delta_x + delta_y * delta_y).sqrt();
 			let angle = delta_y.atan2(delta_x) + math::PI * 0.5;
 			let point_ratio = (0.5 + 0.5 * (angle * 5.0).cos()).powi(3);
@@ -235,7 +235,7 @@ fn create_star_image() -> Rc<Image> {
 //==============================================================================
 // 칸 효과의 진행도. (사라짐 / 드러남은 절반, 광택은 띠가 가운데, 섬광은 조금 덜)
 //==============================================================================
-fn get_gallery_effect_progress(effect: ShaderSpriteEffect) -> f32 {
+fn get_gallery_effect_progress(effect: ShaderSpriteEffect) -> f64 {
 	match effect {
 		ShaderSpriteEffect::Dissolve | ShaderSpriteEffect::Burn | ShaderSpriteEffect::NoiseFade | ShaderSpriteEffect::PixelDissolve | ShaderSpriteEffect::Wipe | ShaderSpriteEffect::Iris | ShaderSpriteEffect::DiamondWipe | ShaderSpriteEffect::ClockWipe | ShaderSpriteEffect::Blinds | ShaderSpriteEffect::CheckerWipe => {
 			0.5
@@ -282,7 +282,7 @@ impl EffectGalleryScene {
 	//==============================================================================
 	// 글 노드 하나 붙이기.
 	//==============================================================================
-	fn add_label(&mut self, parent_id: NodeId, position: Vector2, size: Vector2, text: &str, font_size: f32, text_align: TextAlign) -> NodeId {
+	fn add_label(&mut self, parent_id: NodeId, position: Vector2, size: Vector2, text: &str, font_size: f64, text_align: TextAlign) -> NodeId {
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let label_id = node_tree.create_child(parent_id, "label");
 		let label_node = &mut node_tree[label_id];
@@ -301,12 +301,12 @@ impl EffectGalleryScene {
 	// ShaderSprite 칸 50 개.
 	//==============================================================================
 	fn create_shader_sprite_grid(&mut self, root_id: NodeId, sheet_image: &Rc<Image>) {
-		let frame_rect = Rect::create(0.0, 0.0, SHEET_FRAME_SIZE as f32, SHEET_FRAME_SIZE as f32);
+		let frame_rect = Rect::create(0.0, 0.0, SHEET_FRAME_SIZE as f64, SHEET_FRAME_SIZE as f64);
 		for (effect_index, effect) in ShaderSpriteEffect::get_effect_list().iter().enumerate() {
 			let column_index = effect_index % GRID_COLUMN_COUNT;
 			let row_index = effect_index / GRID_COLUMN_COUNT;
-			let cell_left = GRID_LEFT + column_index as f32 * CELL_WIDTH;
-			let cell_top = GRID_TOP + row_index as f32 * CELL_HEIGHT;
+			let cell_left = GRID_LEFT + column_index as f64 * CELL_WIDTH;
+			let cell_top = GRID_TOP + row_index as f64 * CELL_HEIGHT;
 			let cell_center_x = cell_left + CELL_WIDTH * 0.5;
 
 			let node_tree = self.scene_base.get_node_tree_mut();
@@ -325,7 +325,7 @@ impl EffectGalleryScene {
 			shader_sprite.set_image_rect(frame_rect);
 			shader_sprite.set_effect(*effect);
 			shader_sprite.set_effect_progress(get_gallery_effect_progress(*effect));
-			shader_sprite.set_effect_seed(effect_index as f32 * 7.31);
+			shader_sprite.set_effect_seed(effect_index as f64 * 7.31);
 
 			self.add_label(root_id, Vector2::create(cell_center_x, cell_top + 86.0), Vector2::create(CELL_WIDTH, 14.0), effect.get_name(), 11.0, TextAlign::Center);
 		}
@@ -335,7 +335,7 @@ impl EffectGalleryScene {
 	// ScreenEffect 무대. (둥근 판, 해, 땅, 캐릭터 셋, 도는 트레일)
 	//==============================================================================
 	fn create_stage(&mut self, root_id: NodeId, sheet_image: &Rc<Image>) {
-		let frame_rect = Rect::create(0.0, 0.0, SHEET_FRAME_SIZE as f32, SHEET_FRAME_SIZE as f32);
+		let frame_rect = Rect::create(0.0, 0.0, SHEET_FRAME_SIZE as f64, SHEET_FRAME_SIZE as f64);
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let stage_id = node_tree.create_child(root_id, "stage");
 		let stage_node = &mut node_tree[stage_id];
@@ -359,7 +359,7 @@ impl EffectGalleryScene {
 		let ground_paint = ground_node.add_component(Paint::create_with_color("#2f5d3a"));
 		ground_paint.set_round_size(10.0);
 
-		let character_list: [(f32, f32, f32, ShaderSpriteEffect); 3] = [(90.0, 400.0, 96.0, ShaderSpriteEffect::None), (200.0, 330.0, 72.0, ShaderSpriteEffect::Glow), (310.0, 400.0, 96.0, ShaderSpriteEffect::Hologram)];
+		let character_list: [(f64, f64, f64, ShaderSpriteEffect); 3] = [(90.0, 400.0, 96.0, ShaderSpriteEffect::None), (200.0, 330.0, 72.0, ShaderSpriteEffect::Glow), (310.0, 400.0, 96.0, ShaderSpriteEffect::Hologram)];
 		for (position_x, position_y, size, effect) in character_list {
 			let character_id = node_tree.create_child(stage_id, "character");
 			let character_node = &mut node_tree[character_id];
@@ -408,7 +408,7 @@ impl EffectGalleryScene {
 	// 아래 트레일 둘과 설명 글.
 	//==============================================================================
 	fn create_trail_showcase(&mut self, root_id: NodeId) {
-		let trail_setting_list: [(f32, f32, f32, f32, bool, Color, Color); 2] = [
+		let trail_setting_list: [(f64, f64, f64, f64, bool, Color, Color); 2] = [
 			(610.0, 32.0, 5.0, 16.0, false, Color::create(0.4, 0.8, 1.0, 0.9), Color::create(0.4, 0.8, 1.0, 0.0)),
 			(670.0, 28.0, 4.0, 26.0, true, Color::create(1.0, 0.92, 0.6, 1.0), Color::create(1.0, 0.55, 0.2, 0.0)),
 		];
@@ -442,7 +442,7 @@ impl EffectGalleryScene {
 	// 파티클 칸 하나. (둥근 바탕과 자르기, 아래 이름. 파티클 노드를 칸 왼쪽 위 기준 position 에 만들어 돌려준다)
 	//==============================================================================
 	fn add_particle_cell(&mut self, root_id: NodeId, cell_index: usize, title: &str, position: Vector2) -> NodeId {
-		let cell_left = PARTICLE_ROW_LEFT + cell_index as f32 * PARTICLE_CELL_STEP;
+		let cell_left = PARTICLE_ROW_LEFT + cell_index as f64 * PARTICLE_CELL_STEP;
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let cell_id = node_tree.create_child(root_id, "particleCell");
 		let cell_node = &mut node_tree[cell_id];
@@ -761,7 +761,7 @@ impl Scene for EffectGalleryScene {
 	//==============================================================================
 	// 갱신. (효과 묶음 바꾸기, 충격파 반지름 움직이기)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		let frame_number = engine.get_frame_number();
 		if frame_number == COMPILE_CHECK_FRAME {
 			self.enable_all_effects();
@@ -773,7 +773,7 @@ impl Scene for EffectGalleryScene {
 				self.applied_effect_set_index = Some(effect_set_index);
 			}
 		}
-		let shockwave_radius = (frame_number % EFFECT_SET_FRAME_COUNT) as f32 / EFFECT_SET_FRAME_COUNT as f32 * 1.2 + 0.1;
+		let shockwave_radius = (frame_number % EFFECT_SET_FRAME_COUNT) as f64 / EFFECT_SET_FRAME_COUNT as f64 * 1.2 + 0.1;
 		let stage_center_x = (STAGE_X + STAGE_WIDTH * 0.5) / VIEW_WIDTH;
 		let stage_center_y = (STAGE_Y + STAGE_HEIGHT * 0.45) / VIEW_HEIGHT;
 		self.screen_effect.set_parameters(ScreenEffectType::Shockwave, stage_center_x, stage_center_y, shockwave_radius, 0.12);

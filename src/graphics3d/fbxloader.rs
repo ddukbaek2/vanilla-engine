@@ -68,13 +68,13 @@ pub enum FbxPropertyValue {
 	/// 32비트 정수. (타입 코드 I)
 	Int32(i32),
 	/// 32비트 실수. (타입 코드 F)
-	Float32(f32),
+	Float32(f64),
 	/// 64비트 실수. (타입 코드 D)
 	Float64(f64),
 	/// 64비트 정수. (타입 코드 L, 오브젝트 id)
 	Int64(i64),
 	/// 32비트 실수 배열. (타입 코드 f)
-	Float32array(Vec<f32>),
+	Float32array(Vec<f64>),
 	/// 64비트 실수 배열. (타입 코드 d, 정점 위치 같은 것)
 	Float64array(Vec<f64>),
 	/// 64비트 정수 배열. (타입 코드 l, 키 시간 같은 것)
@@ -158,7 +158,7 @@ impl FbxPropertyValue {
 				Some(*value as f64)
 			}
 			FbxPropertyValue::Float32(value) => {
-				Some(*value as f64)
+				Some(*value)
 			}
 			FbxPropertyValue::Float64(value) => {
 				Some(*value)
@@ -259,7 +259,7 @@ impl FbxPropertyValue {
 	pub fn get_number_at(&self, index: usize) -> Option<f64> {
 		match self {
 			FbxPropertyValue::Float32array(values) => {
-				values.get(index).map(|value| *value as f64)
+				values.get(index).map(|value| *value)
 			}
 			FbxPropertyValue::Float64array(values) => {
 				values.get(index).copied()
@@ -655,11 +655,11 @@ impl<T> FbxObjectMap<T> {
 #[derive(Clone, Debug, Default)]
 pub struct FbxGeometry {
 	/// 코너별 위치. (코너마다 x, y, z, 삼각형 코너 차례)
-	pub positions: Vec<f32>,
+	pub positions: Vec<f64>,
 	/// 코너별 노멀. (코너마다 3개, 노멀 레이어가 없으면 0)
-	pub normals: Vec<f32>,
+	pub normals: Vec<f64>,
 	/// 코너별 UV. (코너마다 2개, UV 레이어가 없으면 0)
-	pub texture_coordinates: Vec<f32>,
+	pub texture_coordinates: Vec<f64>,
 	/// 코너마다 원본 정점 인덱스. (스킨 가중치를 코너로 펼칠 때 쓴다)
 	pub original_vertex_indices: Vec<i32>,
 	/// 삼각형마다 머티리얼 인덱스. (노드 material_ids 안의 자리, 머티리얼 레이어가 없으면 0)
@@ -984,9 +984,9 @@ pub struct FbxAnimationChannel {
 	/// 채널 경로. (Translation, Rotation, Scale 가운데 하나)
 	pub path: AnimationPath,
 	/// 키 시간 목록. (초, 오름차순, X, Y, Z 커브 키 시간의 합집합)
-	pub times: Vec<f32>,
+	pub times: Vec<f64>,
 	/// 키마다 X, Y, Z 값 3개. (회전은 오일러 각 도, 커브가 없는 축은 0, 그 축의 키가 없는 시간은 선형 보간한 값)
-	pub values: Vec<f32>,
+	pub values: Vec<f64>,
 }
 
 //==============================================================================
@@ -1046,7 +1046,7 @@ pub struct FbxAnimation {
 	/// 스택 이름. (AnimationStack 의 두 번째 프로퍼티에서 종류 꼬리 "\u{0}\u{1}AnimStack" 을 뗀 것, "Take 001" 같은)
 	pub name: String,
 	/// 길이. (초, 채널마다 마지막 키 시간 가운데 가장 큰 것, 채널이 없으면 0)
-	pub duration: f32,
+	pub duration: f64,
 	/// 노드와 경로마다 채널 목록. (스택에 든 레이어의 커브노드만)
 	pub channels: Vec<FbxAnimationChannel>,
 }
@@ -1651,7 +1651,7 @@ impl FbxLoader {
 			}
 			'f' => {
 				let element_bytes = self.read_array_property_bytes(file_bytes, 4)?;
-				let values = element_bytes.as_chunks::<4>().0.iter().map(|chunk| f32::from_le_bytes(*chunk)).collect();
+				let values = element_bytes.as_chunks::<4>().0.iter().map(|chunk| f32::from_le_bytes(*chunk) as f64).collect();
 				Ok(FbxPropertyValue::Float32array(values))
 			}
 			'd' => {
@@ -1824,9 +1824,9 @@ impl FbxLoader {
 
 		let corner_count = corner_vertex_indices.len();
 		let triangle_count = corner_count / 3;
-		let mut output_positions = vec![0.0f32; corner_count * 3];
-		let mut output_normals = vec![0.0f32; corner_count * 3];
-		let mut output_texture_coordinates = vec![0.0f32; corner_count * 2];
+		let mut output_positions = vec![0.0f64; corner_count * 3];
+		let mut output_normals = vec![0.0f64; corner_count * 3];
+		let mut output_texture_coordinates = vec![0.0f64; corner_count * 2];
 		let mut output_original_vertex_indices = vec![0i32; corner_count];
 		let mut material_index_per_triangle = vec![0i32; triangle_count];
 
@@ -1838,17 +1838,17 @@ impl FbxLoader {
 			output_original_vertex_indices[corner_index] = original_vertex_index as i32;
 			let position_offset = (original_vertex_index.max(0) as usize) * 3;
 			for component_index in 0..3 {
-				output_positions[corner_index * 3 + component_index] = positions.get_number_at(position_offset + component_index).unwrap_or(0.0) as f32;
+				output_positions[corner_index * 3 + component_index] = positions.get_number_at(position_offset + component_index).unwrap_or(0.0);
 			}
 
 			normal_reader.read(original_vertex_index.max(0) as usize, polygon_vertex_position, &mut normal);
-			output_normals[corner_index * 3] = normal[0] as f32;
-			output_normals[corner_index * 3 + 1] = normal[1] as f32;
-			output_normals[corner_index * 3 + 2] = normal[2] as f32;
+			output_normals[corner_index * 3] = normal[0];
+			output_normals[corner_index * 3 + 1] = normal[1];
+			output_normals[corner_index * 3 + 2] = normal[2];
 
 			uv_reader.read(original_vertex_index.max(0) as usize, polygon_vertex_position, &mut texture_coordinate);
-			output_texture_coordinates[corner_index * 2] = texture_coordinate[0] as f32;
-			output_texture_coordinates[corner_index * 2 + 1] = texture_coordinate[1] as f32;
+			output_texture_coordinates[corner_index * 2] = texture_coordinate[0];
+			output_texture_coordinates[corner_index * 2 + 1] = texture_coordinate[1];
 		}
 
 		for (triangle_index, material_index) in material_index_per_triangle.iter_mut().enumerate() {
@@ -2353,7 +2353,7 @@ impl FbxLoader {
 		let mut animation_list = Vec::new();
 		for (_stack_id, stack) in stack_by_id.iter() {
 			let mut channel_list = Vec::new();
-			let mut duration = 0.0f32;
+			let mut duration = 0.0f64;
 			for (curve_node_id, curve_node) in curve_node_by_id.iter() {
 				let target_node_id = match curve_node.target_node_id {
 					Some(target_node_id) if node_id_to_index.contains_key(&target_node_id) => {
@@ -2392,7 +2392,7 @@ impl FbxLoader {
 	//==============================================================================
 	/// 애니메이션 채널 구성. (커브노드 → 노드 인덱스 + 경로 + 키타임/값, 채널과 길이를 돌려준다)
 	//==============================================================================
-	fn build_animation_channel(&self, curve_node: &AnimationCurveNode, target_node_id: i64, curve_by_id: &FbxObjectMap<AnimationCurve>, node_id_to_index: &HashMap<i64, usize>) -> Option<(FbxAnimationChannel, f32)> {
+	fn build_animation_channel(&self, curve_node: &AnimationCurveNode, target_node_id: i64, curve_by_id: &FbxObjectMap<AnimationCurve>, node_id_to_index: &HashMap<i64, usize>) -> Option<(FbxAnimationChannel, f64)> {
 		let path = match curve_node.target_property.as_deref() {
 			Some("Lcl Translation") => {
 				AnimationPath::Translation
@@ -2426,14 +2426,14 @@ impl FbxLoader {
 		}
 
 		let component_count = 3;
-		let mut times = vec![0.0f32; sorted_times.len()];
-		let mut values = vec![0.0f32; sorted_times.len() * component_count];
+		let mut times = vec![0.0f64; sorted_times.len()];
+		let mut values = vec![0.0f64; sorted_times.len() * component_count];
 		for (time_index, sorted_time) in sorted_times.iter().enumerate() {
-			times[time_index] = (*sorted_time as f64 / FBX_TIME_UNIT) as f32;
+			times[time_index] = *sorted_time as f64 / FBX_TIME_UNIT;
 			for (channel_index, channel_name) in channel_names.iter().enumerate() {
 				let curve = curve_node.curve_by_channel.get(*channel_name).and_then(|curve_id| curve_by_id.get(*curve_id));
 				let sampled_value = FbxLoader::sample_curve_at_time(curve, *sorted_time);
-				values[time_index * component_count + channel_index] = sampled_value as f32;
+				values[time_index * component_count + channel_index] = sampled_value;
 			}
 		}
 
@@ -2578,9 +2578,9 @@ fn read_int64(file_bytes: &[u8], offset: usize) -> Result<i64, String> {
 //==============================================================================
 /// 32비트 실수 읽기. (리틀 엔디언)
 //==============================================================================
-fn read_float32(file_bytes: &[u8], offset: usize) -> Result<f32, String> {
+fn read_float32(file_bytes: &[u8], offset: usize) -> Result<f64, String> {
 	let bytes = read_slice(file_bytes, offset, 4)?;
-	Ok(f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+	Ok(f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64)
 }
 
 //==============================================================================
@@ -2805,7 +2805,7 @@ mod tests {
 	//==============================================================================
 	/// 값 두 개가 허용 오차 안에서 같은지.
 	//==============================================================================
-	fn assert_near(actual: f32, expected: f32) {
+	fn assert_near(actual: f64, expected: f64) {
 		assert!((actual - expected).abs() < 1.0e-5, "{} expected {}", actual, expected);
 	}
 
@@ -2888,9 +2888,9 @@ mod tests {
 		// 0.5초: 본 이동 (0, 2, 0) → 조인트 행렬 = 이동(0, 2, 0) x 이동(-1, -2, -3) = 이동(-1, 0, -3).
 		skinned_model.update(0.5);
 		let joint_matrix_array = &skinned_model.get_skin_list()[0].joint_matrix_array;
-		assert_near(joint_matrix_array[12], -1.0);
-		assert_near(joint_matrix_array[13], 0.0);
-		assert_near(joint_matrix_array[14], -3.0);
+		assert_near((joint_matrix_array[12]) as f64, -1.0);
+		assert_near((joint_matrix_array[13]) as f64, 0.0);
+		assert_near((joint_matrix_array[14]) as f64, -3.0);
 
 		// 같은 장면을 이름으로 붙이면 클립이 하나 더, 이동을 버리면 채널이 없다.
 		skinned_model.add_animations_from_fbx_scene_data(&scene_data, "Moved", false);

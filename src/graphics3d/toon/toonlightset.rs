@@ -73,29 +73,29 @@ static NEXT_LIGHT_SET_ID: AtomicU32 = AtomicU32::new(1);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToonPointLight {
 	/// 월드 자리.
-	pub position: [f32; 3],
+	pub position: [f64; 3],
 	/// 선형 색.
-	pub color: [f32; 3],
+	pub color: [f64; 3],
 	/// 색에 곱할 세기.
-	pub intensity: f32,
+	pub intensity: f64,
 	/// 창의 범위. (0 이면 끝없음)
-	pub range: f32,
+	pub range: f64,
 	/// 거리 감쇠 지수. (0 이면 거리 감쇠 없음)
-	pub decay: f32,
+	pub decay: f64,
 	/// 창 꼴 지수.
-	pub range_exponent: f32,
+	pub range_exponent: f64,
 	/// 감싸기 몫. (0 이면 램버트)
-	pub wrap: f32,
+	pub wrap: f64,
 	/// 빛이 나아가는 쪽. (Some 이면 스포트라이트)
-	pub direction: Option<[f32; 3]>,
+	pub direction: Option<[f64; 3]>,
 	/// 스포트라이트 안쪽 원뿔 반각. (라디안, 여기까지 다 밝다)
-	pub inner_cone_angle: f32,
+	pub inner_cone_angle: f64,
 	/// 스포트라이트 바깥 원뿔 반각. (라디안, 여기서 0 이 된다)
-	pub outer_cone_angle: f32,
+	pub outer_cone_angle: f64,
 	/// 그림자를 드리울지. (ShadowAtlas 가 칸을 준다)
 	pub casts_shadow: bool,
 	/// 그림자의 가까운 거리. (먼 거리는 range, 0 이면 30)
-	pub shadow_near: f32,
+	pub shadow_near: f64,
 }
 
 impl Default for ToonPointLight {
@@ -103,7 +103,7 @@ impl Default for ToonPointLight {
 	/// 기본값. (원본의 기본 꼴과 같다)
 	//==============================================================================
 	fn default() -> Self {
-		ToonPointLight { position: [0.0; 3], color: [1.0; 3], intensity: 1.0, range: 0.0, decay: 2.0, range_exponent: 4.0, wrap: 0.0, direction: None, inner_cone_angle: 0.0, outer_cone_angle: std::f32::consts::FRAC_PI_4, casts_shadow: false, shadow_near: 0.05 }
+		ToonPointLight { position: [0.0; 3], color: [1.0; 3], intensity: 1.0, range: 0.0, decay: 2.0, range_exponent: 4.0, wrap: 0.0, direction: None, inner_cone_angle: 0.0, outer_cone_angle: std::f64::consts::FRAC_PI_4, casts_shadow: false, shadow_near: 0.05 }
 	}
 }
 
@@ -168,9 +168,9 @@ impl Default for ToonLightColorUsage {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToonShadeRimLight {
 	/// 더할 선형 색. ([r, g, b])
-	pub color: [f32; 3],
+	pub color: [f64; 3],
 	/// 거듭제곱. (0 이하면 없음)
-	pub power: f32,
+	pub power: f64,
 }
 
 //==============================================================================
@@ -208,17 +208,17 @@ pub struct ToonLightModel {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToonShade {
 	/// 바탕과 1 차 그늘의 경계. (빛을 받는 몫 x 의 자리, 반 램버트면 0.5 가 해와 직각인 면)
-	pub step: f32,
+	pub step: f64,
 	/// 바탕과 1 차 그늘 경계의 부드러움.
-	pub feather: f32,
+	pub feather: f64,
 	/// 1 차 그늘 색. (바탕색과 빛에 곱하는 선형 배)
-	pub color: [f32; 3],
+	pub color: [f64; 3],
 	/// 1 차와 2 차 그늘의 경계. (0 이하면 2 차 그늘 없음)
-	pub second_step: f32,
+	pub second_step: f64,
 	/// 1 차와 2 차 그늘 경계의 부드러움.
-	pub second_feather: f32,
+	pub second_feather: f64,
 	/// 2 차 그늘 색.
-	pub second_color: [f32; 3],
+	pub second_color: [f64; 3],
 	/// x 를 반 램버트로 셀지.
 	pub is_half_lambert: bool,
 }
@@ -250,11 +250,11 @@ impl Default for ToonShade {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ToonShadeRamp {
 	/// 칸마다의 자리. (빛을 받는 몫 x, 오름차순)
-	pub positions: Vec<f32>,
+	pub positions: Vec<f64>,
 	/// 칸마다의 선형 [r, g, b] 배.
-	pub colors: Vec<[f32; 3]>,
+	pub colors: Vec<[f64; 3]>,
 	/// 칸마다의 부드러움. (그 칸으로 넘어가는 너비)
-	pub feathers: Vec<f32>,
+	pub feathers: Vec<f64>,
 	/// x 를 dot x 0.5 + 0.5 로 셀지. (아니면 max(dot, 0))
 	pub is_half_lambert: bool,
 }
@@ -276,13 +276,13 @@ pub struct ToonShadeRamp {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToonRimLight {
 	/// 더할 선형 색. ([r, g, b])
-	pub color: [f32; 3],
+	pub color: [f64; 3],
 	/// 거듭제곱. (클수록 테가 가늘다, 0 이면 없음)
-	pub power: f32,
+	pub power: f64,
 	/// 0 이면 단단한 테, 1 이면 부드러운 테.
-	pub feather: f32,
+	pub feather: f64,
 	/// 1 이면 해를 받는 쪽에만 테를 둔다. (0 ~ 1)
-	pub light_mask: f32,
+	pub light_mask: f64,
 }
 
 //==============================================================================
@@ -301,19 +301,19 @@ pub struct ToonRimLight {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToonSpecular {
 	/// 세기. (0 이면 없음)
-	pub strength: f32,
+	pub strength: f64,
 	/// 블린 퐁 지수. (클수록 작은 점, 1 밑으로 내리지 않는다)
-	pub exponent: f32,
+	pub exponent: f64,
 	/// 부드러움. (0 이면 단단한 툰 점, 1 이면 부드러운 블린 퐁)
-	pub feather: f32,
+	pub feather: f64,
 	/// 선형 [r, g, b].
-	pub color: [f32; 3],
+	pub color: [f64; 3],
 }
 
 //==============================================================================
 /// 3 수 벡터 길이를 1 로. (길이 0 이면 아래쪽)
 //==============================================================================
-fn normalize_direction(direction: [f32; 3]) -> [f32; 3] {
+fn normalize_direction(direction: [f64; 3]) -> [f64; 3] {
 	let length = (direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]).sqrt();
 	if length <= 0.0 {
 		return [0.0, -1.0, 0.0];
@@ -333,7 +333,7 @@ fn normalize_direction(direction: [f32; 3]) -> [f32; 3] {
 /// 	let mut skin_light_set = renderer.create_light_set();
 /// 	skin_light_set.set_shade(ToonShade { step: 0.55, feather: 0.04, color: [0.86, 0.6, 0.6], ..ToonShade::default() });
 /// 	let mut builder = MeshBuilder::new();
-/// 	builder.add_part(&create_sphere_geometry(0.5, 32, 20, std::f32::consts::PI), &Matrix4::create_identity(), "#f0d0c0", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
+/// 	builder.add_part(&create_sphere_geometry(0.5, 32, 20, std::f64::consts::PI), &Matrix4::create_identity(), "#f0d0c0", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
 /// 	let mesh = renderer.create_mesh(gl, &builder.read_arrays())?;
 /// 	let view_matrix = Matrix4::create_look_at(Vector3::create(0.0, 0.0, 3.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
 /// 	renderer.begin_frame_with_matrices(gl, &view_matrix, &Matrix4::create_perspective(0.8, 1.0, 0.1, 10.0));
@@ -347,12 +347,12 @@ fn normalize_direction(direction: [f32; 3]) -> [f32; 3] {
 pub struct ToonLightSet {
 	id: u32,
 	version: u64,
-	sun_direction: [f32; 3],
-	sun_color: [f32; 3],
-	sky_color: [f32; 3],
-	ground_color: [f32; 3],
-	fill_direction: [f32; 3],
-	fill_color: [f32; 3],
+	sun_direction: [f64; 3],
+	sun_color: [f64; 3],
+	sky_color: [f64; 3],
+	ground_color: [f64; 3],
+	fill_direction: [f64; 3],
+	fill_color: [f64; 3],
 	rim_light: ToonRimLight,
 	shade_rim_light: ToonShadeRimLight,
 	light_color_usage: ToonLightColorUsage,
@@ -474,7 +474,7 @@ impl ToonLightSet {
 	/// - `sky_color`: 위를 보는 면의 바탕빛. [r, g, b]
 	/// - `ground_color`: 아래를 보는 면의 바탕빛. [r, g, b]
 	//==============================================================================
-	pub fn set_light(&mut self, sun_direction: [f32; 3], sun_color: [f32; 3], sky_color: [f32; 3], ground_color: [f32; 3]) {
+	pub fn set_light(&mut self, sun_direction: [f64; 3], sun_color: [f64; 3], sky_color: [f64; 3], ground_color: [f64; 3]) {
 		self.sun_direction = sun_direction;
 		self.sun_color = sun_color;
 		self.sky_color = sky_color;
@@ -488,7 +488,7 @@ impl ToonLightSet {
 	/// # 인자
 	/// - `sun_direction`: [x, y, z]
 	//==============================================================================
-	pub fn set_sun_direction(&mut self, sun_direction: [f32; 3]) {
+	pub fn set_sun_direction(&mut self, sun_direction: [f64; 3]) {
 		self.sun_direction = sun_direction;
 		self.mark_changed();
 	}
@@ -499,7 +499,7 @@ impl ToonLightSet {
 	/// # 돌려줌
 	/// [x, y, z]
 	//==============================================================================
-	pub fn get_sun_direction(&self) -> [f32; 3] {
+	pub fn get_sun_direction(&self) -> [f64; 3] {
 		self.sun_direction
 	}
 
@@ -509,7 +509,7 @@ impl ToonLightSet {
 	/// # 돌려줌
 	/// 선형 [r, g, b].
 	//==============================================================================
-	pub fn get_sun_color(&self) -> [f32; 3] {
+	pub fn get_sun_color(&self) -> [f64; 3] {
 		self.sun_color
 	}
 
@@ -519,7 +519,7 @@ impl ToonLightSet {
 	/// # 돌려줌
 	/// 선형 [r, g, b].
 	//==============================================================================
-	pub fn get_sky_color(&self) -> [f32; 3] {
+	pub fn get_sky_color(&self) -> [f64; 3] {
 		self.sky_color
 	}
 
@@ -529,7 +529,7 @@ impl ToonLightSet {
 	/// # 돌려줌
 	/// 선형 [r, g, b].
 	//==============================================================================
-	pub fn get_ground_color(&self) -> [f32; 3] {
+	pub fn get_ground_color(&self) -> [f64; 3] {
 		self.ground_color
 	}
 
@@ -540,7 +540,7 @@ impl ToonLightSet {
 	/// - `fill_direction`: 빛이 나아가는 쪽. [x, y, z] (길이 1 로 맞춘다, 길이 0 이면 아래쪽)
 	/// - `fill_color`: 선형 [r, g, b].
 	//==============================================================================
-	pub fn set_fill_light(&mut self, fill_direction: [f32; 3], fill_color: [f32; 3]) {
+	pub fn set_fill_light(&mut self, fill_direction: [f64; 3], fill_color: [f64; 3]) {
 		self.fill_direction = normalize_direction(fill_direction);
 		self.fill_color = fill_color;
 		self.mark_changed();
@@ -552,7 +552,7 @@ impl ToonLightSet {
 	/// # 돌려줌
 	/// (방향, 색). (방향은 길이 1)
 	//==============================================================================
-	pub fn get_fill_light(&self) -> ([f32; 3], [f32; 3]) {
+	pub fn get_fill_light(&self) -> ([f64; 3], [f64; 3]) {
 		(self.fill_direction, self.fill_color)
 	}
 
@@ -565,7 +565,7 @@ impl ToonLightSet {
 	/// - `rim_feather`: 0 이면 단단한 테, 1 이면 부드러운 테. (원본 기본 1)
 	/// - `rim_light_mask`: 1 이면 해를 받는 쪽에만 테를 둔다. (원본 기본 0)
 	//==============================================================================
-	pub fn set_rim_light(&mut self, rim_color: [f32; 3], rim_power: f32, rim_feather: f32, rim_light_mask: f32) {
+	pub fn set_rim_light(&mut self, rim_color: [f64; 3], rim_power: f64, rim_feather: f64, rim_light_mask: f64) {
 		self.rim_light = ToonRimLight { color: rim_color, power: rim_power.max(0.0), feather: rim_feather.clamp(0.0, 1.0), light_mask: rim_light_mask.clamp(0.0, 1.0) };
 		self.mark_changed();
 	}
@@ -587,7 +587,7 @@ impl ToonLightSet {
 	/// - `shade_rim_color`: 더할 선형 색. [r, g, b]
 	/// - `shade_rim_power`: 거듭제곱. (0 이면 없음)
 	//==============================================================================
-	pub fn set_shade_rim_light(&mut self, shade_rim_color: [f32; 3], shade_rim_power: f32) {
+	pub fn set_shade_rim_light(&mut self, shade_rim_color: [f64; 3], shade_rim_power: f64) {
 		self.shade_rim_light = ToonShadeRimLight { color: shade_rim_color, power: shade_rim_power.max(0.0) };
 		self.mark_changed();
 	}
@@ -656,7 +656,7 @@ impl ToonLightSet {
 	/// - `specular_feather`: 0 ~ 1. (원본 기본 0, 단단한 점)
 	/// - `specular_color`: 선형 [r, g, b]. (원본 기본 흰색)
 	//==============================================================================
-	pub fn set_specular(&mut self, specular_strength: f32, specular_exponent: f32, specular_feather: f32, specular_color: [f32; 3]) {
+	pub fn set_specular(&mut self, specular_strength: f64, specular_exponent: f64, specular_feather: f64, specular_color: [f64; 3]) {
 		self.specular = ToonSpecular { strength: specular_strength.max(0.0), exponent: specular_exponent.max(1.0), feather: specular_feather.clamp(0.0, 1.0), color: specular_color };
 		self.mark_changed();
 	}
@@ -763,7 +763,7 @@ impl ToonLightSet {
 	/// - `feathers`: 칸마다의 부드러움. (그 칸으로 넘어가는 너비)
 	/// - `is_half_lambert`: x 를 dot x 0.5 + 0.5 로 셀지. (아니면 max(dot, 0))
 	//==============================================================================
-	pub fn set_shade_ramp(&mut self, positions: &[f32], colors: &[[f32; 3]], feathers: &[f32], is_half_lambert: bool) {
+	pub fn set_shade_ramp(&mut self, positions: &[f64], colors: &[[f64; 3]], feathers: &[f64], is_half_lambert: bool) {
 		let stop_count = positions.len().min(colors.len()).min(TOON_MAXIMUM_BAND_STEPS);
 		self.shade_ramp = if stop_count < 2 {
 			ToonShadeRamp { positions: Vec::new(), colors: Vec::new(), feathers: Vec::new(), is_half_lambert }
@@ -812,8 +812,8 @@ impl ToonLightSet {
 		let mut colors = vec![[0.0; 3]];
 		let mut feathers = vec![0.0];
 		for band_index in 1..=count {
-			let value = band_index as f32 / count as f32;
-			positions.push((band_index as f32 - 0.5) / count as f32);
+			let value = band_index as f64 / count as f64;
+			positions.push((band_index as f64 - 0.5) / count as f64);
 			colors.push([value; 3]);
 			feathers.push(0.0);
 		}
@@ -828,7 +828,7 @@ impl ToonLightSet {
 	/// - `values`: 칸마다의 받는 몫.
 	/// - `is_half_lambert`: dot x 0.5 + 0.5 를 문턱에 댈지.
 	//==============================================================================
-	pub fn set_band_ramp(&mut self, thresholds: &[f32], values: &[f32], is_half_lambert: bool) {
+	pub fn set_band_ramp(&mut self, thresholds: &[f64], values: &[f64], is_half_lambert: bool) {
 		let value_count = values.len().min(TOON_MAXIMUM_BAND_STEPS);
 		let mut positions = vec![0.0];
 		let mut colors = Vec::new();

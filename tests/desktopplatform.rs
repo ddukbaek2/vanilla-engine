@@ -15,7 +15,7 @@ use vanilla::platform::desktop::systemfont::{find_last_resort_font_file, read_br
 use vanilla::platform::{find_fallback_font_file, find_family_font_file, read_clipboard_text, write_clipboard_text};
 
 /// 크롬과 같다고 볼 차이. (픽셀, 맥의 크롬 견주기 시험과 같은 자리 수)
-const CHROME_TOLERANCE: f32 = 0.02;
+const CHROME_TOLERANCE: f64 = 0.02;
 
 //==============================================================================
 /// 원본 SYSTEM_FONT_STRING 사슬과 운영체제 대체 글꼴을 건 글자 캐시. (엔진이 기본 글꼴 경로 없이 뜰 때와 같다)
@@ -162,8 +162,8 @@ fn text_widths_match_chrome() {
 	for test_case in case_list {
 		let font = test_case["font"].as_str().expect("font");
 		let text = test_case["text"].as_str().expect("text");
-		let read_number = |name: &str| -> f32 {
-			test_case[name].as_f64().unwrap_or(f64::NAN) as f32
+		let read_number = |name: &str| -> f64 {
+			test_case[name].as_f64().unwrap_or(f64::NAN)
 		};
 		let text_metrics = text_string_texture_cache.measure_text(font, text);
 		let width_difference = (text_metrics.width - read_number("width")).abs();

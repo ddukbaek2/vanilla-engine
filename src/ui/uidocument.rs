@@ -41,7 +41,7 @@
 //!     아직 읽히지 않은 그림은 bind_pending_images 가 다 읽힌 뒤 붙인다. (러스트 애셋은 요청 뒤 나중에 다 읽힌다)
 //!   - 노드 참조($nodeRef)의 기준 뿌리는 to_json_text, from_json_text 의 뿌리다. serialize_node, deserialize_node 를 바로 부르면 그 노드가 뿌리다.
 //!     (원본은 serializeNode 만 부르면 참조를 적지 않고, deserializeNode 만 부르면 참조를 잇지 않는다)
-//!   - 수는 f32 를 가장 짧은 십진으로 적는다. (0.22 는 0.22, 정수는 소수점 없이) 원본 f64 의 끝자리(0.1 + 0.2 같은)는 f32 로 줄어든다.
+//!   - 수는 f64 를 가장 짧은 십진으로 적는다. (0.22 는 0.22, 정수는 소수점 없이, 원본 JSON.stringify 와 같다)
 //! - Sprite 의 nineSlice 는 원본이 쓰는 꼴([왼쪽, 위, 왼쪽 + 오른쪽, 위 + 아래], Rect 의 left, top, right, bottom)을 원본처럼 거꾸로 풀어 읽는다.
 //==============================================================================
 use crate::base::color::Color;
@@ -64,7 +64,7 @@ use crate::core::image::Image;
 use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::node::worldnode::WorldNode;
 use crate::misc::storagetext::{self, JsonSurrogateTable};
-use crate::core::reflection::{collect_reflected_properties, has_mutable_getters, read_reflected_property, read_reflected_property_mut, read_shortest_number, write_reflected_property, write_reflected_property_in_tree, Reflect, ReflectValue, ReflectedProperty};
+use crate::core::reflection::{collect_reflected_properties, has_mutable_getters, read_reflected_property, read_reflected_property_mut, write_reflected_property, write_reflected_property_in_tree, Reflect, ReflectValue, ReflectedProperty};
 use crate::resource::imageasset::ImageAsset;
 use crate::effect::heathazeeffect::HeatHazeEffect;
 use crate::effect::particlesystem::ParticleSystem;
@@ -127,7 +127,7 @@ const REFLECTED_PROPERTY_EXCLUDE_NAMES: [&str; 13] = [
 const NODE_TYPE_NAME: &str = "WorldNode";
 
 /// 원본 UIScrollBar 생성자가 만든 트랙과 썸 Paint 의 둥근 크기.
-const SCROLL_BAR_PART_ROUND_SIZE: f32 = 4.0;
+const SCROLL_BAR_PART_ROUND_SIZE: f64 = 4.0;
 
 /// 정수로 적을 수 있는 가장 큰 크기. (JSON 수를 f64 로 읽어도 정확한 정수 범위, 2 의 53 제곱)
 const MAXIMUM_SAFE_INTEGER: f64 = 9007199254740992.0;
@@ -923,7 +923,7 @@ impl UIDocument {
 	///
 	/// struct Spin {
 	/// 	component_base: ComponentBase,
-	/// 	degrees_per_second: f32,
+	/// 	degrees_per_second: f64,
 	/// }
 	///
 	/// #[vanilla::reflect]
@@ -935,11 +935,11 @@ impl UIDocument {
 	/// 		}
 	/// 	}
 	///
-	/// 	pub fn set_degrees_per_second(&mut self, degrees_per_second: f32) {
+	/// 	pub fn set_degrees_per_second(&mut self, degrees_per_second: f64) {
 	/// 		self.degrees_per_second = degrees_per_second;
 	/// 	}
 	///
-	/// 	pub fn get_degrees_per_second(&self) -> f32 {
+	/// 	pub fn get_degrees_per_second(&self) -> f64 {
 	/// 		self.degrees_per_second
 	/// 	}
 	/// }
@@ -993,7 +993,7 @@ impl UIDocument {
 	///
 	/// struct Spin {
 	/// 	component_base: ComponentBase,
-	/// 	degrees_per_second: f32,
+	/// 	degrees_per_second: f64,
 	/// }
 	///
 	/// #[vanilla::reflect]
@@ -1029,7 +1029,7 @@ impl UIDocument {
 	///
 	/// fn load_spin(spin: &mut Spin, component_data: &Map<String, Value>, _load_context: &mut UIDocumentLoadContext) {
 	/// 	if let Some(degrees_per_second) = component_data.get("degreesPerSecond").and_then(|value| value.as_f64()) {
-	/// 		spin.degrees_per_second = degrees_per_second as f32;
+	/// 		spin.degrees_per_second = degrees_per_second as f64;
 	/// 	}
 	/// }
 	///
@@ -2428,7 +2428,7 @@ impl UIDocument {
 	}
 
 	//==============================================================================
-	/// 수 → 문서 값. (f32 를 가장 짧은 십진으로, 정수면 소수점 없이. 원본 JSON.stringify 와 같은 글이 나온다. 수가 아니면 null)
+	/// 수 → 문서 값. (f64 를 가장 짧은 십진으로, 정수면 소수점 없이. 원본 JSON.stringify 와 같은 글이 나온다. 수가 아니면 null)
 	/// # 인자
 	/// - `number`: 적을 수.
 	///
@@ -2443,14 +2443,14 @@ impl UIDocument {
 	///
 	/// assert_eq!(UIDocument::number_to_value(0.22).to_string(), "0.22");
 	/// assert_eq!(UIDocument::number_to_value(24.0).to_string(), "24");
-	/// assert_eq!(UIDocument::number_to_value(f32::NAN), Value::Null);
+	/// assert_eq!(UIDocument::number_to_value(f64::NAN), Value::Null);
 	/// ```
 	//==============================================================================
-	pub fn number_to_value(number: f32) -> Value {
+	pub fn number_to_value(number: f64) -> Value {
 		if !number.is_finite() {
 			return Value::Null;
 		}
-		UIDocument::double_to_value(read_shortest_number(number))
+		UIDocument::double_to_value(number)
 	}
 
 	//==============================================================================
@@ -2511,10 +2511,10 @@ impl UIDocument {
 		if channels.len() < 4 {
 			return None;
 		}
-		let red = channels[0].as_f64()? as f32;
-		let green = channels[1].as_f64()? as f32;
-		let blue = channels[2].as_f64()? as f32;
-		let alpha = channels[3].as_f64()? as f32;
+		let red = channels[0].as_f64()?;
+		let green = channels[1].as_f64()?;
+		let blue = channels[2].as_f64()?;
+		let alpha = channels[3].as_f64()?;
 		Some(Color::create(red, green, blue, alpha))
 	}
 
@@ -2543,8 +2543,8 @@ impl UIDocument {
 		if values.len() < 2 {
 			return None;
 		}
-		let x = values[0].as_f64()? as f32;
-		let y = values[1].as_f64()? as f32;
+		let x = values[0].as_f64()?;
+		let y = values[1].as_f64()?;
 		Some(Vector2::create(x, y))
 	}
 }
@@ -2568,8 +2568,8 @@ fn write_value(object_data: &mut Map<String, Value>, key: &str, value: Value) {
 //==============================================================================
 /// 수 읽기.
 //==============================================================================
-fn read_number(object_data: &Map<String, Value>, key: &str) -> Option<f32> {
-	object_data.get(key).and_then(|value| value.as_f64()).map(|number| number as f32)
+fn read_number(object_data: &Map<String, Value>, key: &str) -> Option<f64> {
+	object_data.get(key).and_then(|value| value.as_f64()).map(|number| number)
 }
 
 //==============================================================================
@@ -2744,7 +2744,7 @@ fn load_sprite_fields(sprite: &mut Sprite, component_data: &Map<String, Value>) 
 		}
 	}
 	if let Some(Value::Array(values)) = component_data.get("nineSlice") {
-		let edges: Vec<f32> = values.iter().filter_map(|value| value.as_f64()).map(|value| value as f32).collect();
+		let edges: Vec<f64> = values.iter().filter_map(|value| value.as_f64()).map(|value| value).collect();
 		if edges.len() == 4 {
 			sprite.set_nine_slice(Rect::create(edges[0], edges[1], edges[2] - edges[0], edges[3] - edges[1]));
 		}
@@ -3104,7 +3104,7 @@ fn create_part_node_data(name: &str, is_active: bool, position: Vector2, content
 //==============================================================================
 /// 원본 생성자가 붙인 Paint 의 문서 값.
 //==============================================================================
-fn create_part_paint_data(color: Color, round_size: f32, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
+fn create_part_paint_data(color: Color, round_size: f64, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
 	let mut paint = Paint::new();
 	paint.set_color(color);
 	paint.set_round_size(round_size);
@@ -3116,7 +3116,7 @@ fn create_part_paint_data(color: Color, round_size: f32, save_context: &UIDocume
 //==============================================================================
 /// 원본 UIInputField 가 만든 UILabel 의 문서 값. (바탕 투명, 왼쪽 정렬, 가운데 기준선)
 //==============================================================================
-fn create_part_label_data(text: &str, font_size: f32, text_color: Color, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
+fn create_part_label_data(text: &str, font_size: f64, text_color: Color, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
 	let mut label = UILabel::new();
 	label.set_background_color(Color::create(0.0, 0.0, 0.0, 0.0));
 	label.set_text(text);
@@ -3696,7 +3696,7 @@ mod tests {
 	fn registered_game_component_round_trip() {
 		struct Spin {
 			component_base: crate::core::component::ComponentBase,
-			degrees_per_second: f32,
+			degrees_per_second: f64,
 		}
 		#[crate::reflect]
 		impl Spin {}
@@ -3733,7 +3733,7 @@ mod tests {
 			component_data.insert(String::from("degreesPerSecond"), UIDocument::number_to_value(spin.degrees_per_second));
 			component_data
 		}, |spin, component_data, _load_context| {
-			spin.degrees_per_second = component_data.get("degreesPerSecond").and_then(|value| value.as_f64()).unwrap_or(0.0) as f32;
+			spin.degrees_per_second = component_data.get("degreesPerSecond").and_then(|value| value.as_f64()).unwrap_or(0.0);
 		});
 		assert!(document.get_component_type_names().contains(&"Spin"));
 		let spin_root_id = document.from_json_text(&mut node_tree, document_text).expect("document");
@@ -3761,7 +3761,7 @@ mod tests {
 		assert_eq!(UIDocument::number_to_value(0.22).to_string(), "0.22");
 		assert_eq!(UIDocument::number_to_value(24.0).to_string(), "24");
 		assert_eq!(UIDocument::number_to_value(-0.0).to_string(), "0");
-		assert_eq!(UIDocument::number_to_value(f32::NAN), Value::Null);
+		assert_eq!(UIDocument::number_to_value(f64::NAN), Value::Null);
 	}
 
 	//==============================================================================
@@ -3787,14 +3787,14 @@ mod tests {
 	//==============================================================================
 	struct Follower {
 		component_base: crate::core::component::ComponentBase,
-		speed: f32,
+		speed: f64,
 		label: String,
 		tint: Color,
 		offset: Vector2,
 		text_align: TextAlign,
 		leader: Option<NodeId>,
 		slot: usize,
-		cached_area: f32,
+		cached_area: f64,
 		secret: i32,
 		cache_count: usize,
 	}
@@ -3823,14 +3823,14 @@ mod tests {
 		//==============================================================================
 		/// 속도 설정.
 		//==============================================================================
-		pub fn set_speed(&mut self, speed: f32) {
+		pub fn set_speed(&mut self, speed: f64) {
 			self.speed = speed;
 		}
 
 		//==============================================================================
 		/// 속도 반환.
 		//==============================================================================
-		pub fn get_speed(&self) -> f32 {
+		pub fn get_speed(&self) -> f64 {
 			self.speed
 		}
 
@@ -3928,14 +3928,14 @@ mod tests {
 		//==============================================================================
 		/// 넓이 캐시 설정.
 		//==============================================================================
-		pub fn set_cached_area(&mut self, cached_area: f32) {
+		pub fn set_cached_area(&mut self, cached_area: f64) {
 			self.cached_area = cached_area;
 		}
 
 		//==============================================================================
 		/// 넓이 반환. (&mut self 게터, 처음 읽을 때 셈해 둔다)
 		//==============================================================================
-		pub fn get_cached_area(&mut self) -> f32 {
+		pub fn get_cached_area(&mut self) -> f64 {
 			if self.cached_area < 0.0 {
 				self.cached_area = self.offset.x * self.offset.y;
 			}
@@ -4013,7 +4013,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 두 문서 값이 같은지. (키 차례까지 같고, 수는 f32 로 줄여 비교한다. 원본 f64 의 끝자리는 러스트 판에서 f32 로 줄어든다)
+	/// 두 문서 값이 같은지. (키 차례까지 같고, 수는 f64 로 비교한다)
 	//==============================================================================
 	fn assert_same_document_value(left_value: &Value, right_value: &Value, value_path: &str) {
 		match (left_value, right_value) {
@@ -4032,8 +4032,8 @@ mod tests {
 				}
 			}
 			(Value::Number(left_number), Value::Number(right_number)) => {
-				let left_float = left_number.as_f64().unwrap_or(f64::NAN) as f32;
-				let right_float = right_number.as_f64().unwrap_or(f64::NAN) as f32;
+				let left_float = left_number.as_f64().unwrap_or(f64::NAN);
+				let right_float = right_number.as_f64().unwrap_or(f64::NAN);
 				assert_eq!(left_float, right_float, "수가 다르다: {}", value_path);
 			}
 			_ => {
@@ -4418,7 +4418,7 @@ mod tests {
 				_ => {
 				}
 			}
-			let cascade_offset = (palette_index % 8) as f32 * 20.0;
+			let cascade_offset = (palette_index % 8) as f64 * 20.0;
 			node_tree[node_id].set_local_position(Vector2::create(60.0 + cascade_offset, 60.0 + cascade_offset));
 		}
 		let expected_before_tick_data: Value = serde_json::from_str(EDITOR_PALETTE_BEFORE_TICK_TEXT).expect("palette json");

@@ -106,7 +106,7 @@ struct MenuScene {
 }
 
 impl MenuScene {
-	fn create_label(&mut self, position: Vector2, font_size: f32) {
+	fn create_label(&mut self, position: Vector2, font_size: f64) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let label_id = node_tree.create_child(root_id, "Label");
@@ -159,7 +159,7 @@ impl Scene for MenuScene {
 		self.refresh_texts();
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		if engine.get_input_manager().is_touch_pressed() {
 			let next_language = if Localization::get_language() == "en" {
@@ -485,7 +485,7 @@ impl Scene for ScoreScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.score += (time_delta * 1000.0) as u64;
 	}

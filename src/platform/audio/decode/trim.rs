@@ -497,7 +497,7 @@ fn read_mp4_header_timescale_and_duration(body: &[u8]) -> (u32, u64) {
 		if body.len() < 20 {
 			return (0, 0);
 		}
-		(u32::from_be_bytes([body[12], body[13], body[14], body[15]]), read_unsigned(&body[16..20]) as u64)
+		(u32::from_be_bytes([body[12], body[13], body[14], body[15]]), read_unsigned(&body[16..20]))
 	}
 }
 

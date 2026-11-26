@@ -30,7 +30,7 @@ use crate::base::rect::Rect;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FocusNavigatorOptions {
 	/// 이동 축에서 벗어난 거리에 곱하는 벌점.
-	pub cross_axis_penalty: f32,
+	pub cross_axis_penalty: f64,
 }
 
 impl Default for FocusNavigatorOptions {
@@ -78,7 +78,7 @@ struct FocusItem {
 pub struct FocusNavigator {
 	item_list: Vec<FocusItem>,
 	focused_id: Option<String>,
-	cross_axis_penalty: f32,
+	cross_axis_penalty: f64,
 }
 
 impl FocusNavigator {
@@ -156,7 +156,7 @@ impl FocusNavigator {
 	/// # 돌려줌
 	/// 새로 포커스한 항목 이름. 항목이 하나도 없거나 옮길 곳이 없으면 None.
 	//==============================================================================
-	pub fn move_focus(&mut self, direction_x: f32, direction_y: f32) -> Option<String> {
+	pub fn move_focus(&mut self, direction_x: f64, direction_y: f64) -> Option<String> {
 		let first_list_item = self.item_list.first()?;
 		let focused_id = match &self.focused_id {
 			Some(focused_id) => {
@@ -191,7 +191,7 @@ impl FocusNavigator {
 		let current_center_y = current_item.rect.position.y + current_item.rect.size.y * 0.5;
 
 		let mut best_item: Option<&FocusItem> = None;
-		let mut best_score = f32::INFINITY;
+		let mut best_score = f64::INFINITY;
 		for item in self.item_list.iter() {
 			if item.id == focused_id {
 				continue;

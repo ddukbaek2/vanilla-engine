@@ -4,7 +4,7 @@
 //!   원본 clone 은 복사로, equals 는 PartialEq 로 갈음한다.
 //! - 원본 add / subtract / multiply / divide 는 수와 Vector3 를 다 받는다. 러스트 판은 Vector3 를 받는 것과
 //!   수를 받는 ...Scalar 로 나눴다. (Vector2 의 multiply_scalar 와 같은 꼴)
-//! - 원본 수는 f64 이고 러스트 판은 엔진의 다른 값처럼 f32 다.
+//! - 수는 원본 자바스크립트 수처럼 f64 다.
 //! - lerp 는 원본 math.lerp 식(from * (1 - t) + to * t)을 그대로 쓴다. 러스트 math::lerp(from + (to - from) * t)와
 //!   끝자리가 다를 수 있어서 따로 계산한다.
 //==============================================================================
@@ -35,11 +35,11 @@ use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vector3 {
 	/// x 성분.
-	pub x: f32,
+	pub x: f64,
 	/// y 성분. (위쪽이 +)
-	pub y: f32,
+	pub y: f64,
 	/// z 성분.
-	pub z: f32,
+	pub z: f64,
 }
 
 impl Vector3 {
@@ -54,7 +54,7 @@ impl Vector3 {
 	/// # 돌려줌
 	/// (x, y, z) 벡터.
 	//==============================================================================
-	pub const fn create(x: f32, y: f32, z: f32) -> Vector3 {
+	pub const fn create(x: f64, y: f64, z: f64) -> Vector3 {
 		Vector3 { x, y, z }
 	}
 
@@ -96,7 +96,7 @@ impl Vector3 {
 	/// - `y`: 넣을 y 성분.
 	/// - `z`: 넣을 z 성분.
 	//==============================================================================
-	pub fn set(&mut self, x: f32, y: f32, z: f32) {
+	pub fn set(&mut self, x: f64, y: f64, z: f64) {
 		self.x = x;
 		self.y = y;
 		self.z = z;
@@ -108,7 +108,7 @@ impl Vector3 {
 	/// # 돌려줌
 	/// x 성분.
 	//==============================================================================
-	pub fn get_x(&self) -> f32 {
+	pub fn get_x(&self) -> f64 {
 		self.x
 	}
 
@@ -118,7 +118,7 @@ impl Vector3 {
 	/// # 돌려줌
 	/// y 성분.
 	//==============================================================================
-	pub fn get_y(&self) -> f32 {
+	pub fn get_y(&self) -> f64 {
 		self.y
 	}
 
@@ -128,7 +128,7 @@ impl Vector3 {
 	/// # 돌려줌
 	/// z 성분.
 	//==============================================================================
-	pub fn get_z(&self) -> f32 {
+	pub fn get_z(&self) -> f64 {
 		self.z
 	}
 
@@ -138,7 +138,7 @@ impl Vector3 {
 	/// # 돌려줌
 	/// 벡터의 길이. (0 이상)
 	//==============================================================================
-	pub fn length(&self) -> f32 {
+	pub fn length(&self) -> f64 {
 		(self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
 	}
 
@@ -148,7 +148,7 @@ impl Vector3 {
 	/// # 돌려줌
 	/// x * x + y * y + z * z. (제곱근을 셈하지 않는다)
 	//==============================================================================
-	pub fn length_squared(&self) -> f32 {
+	pub fn length_squared(&self) -> f64 {
 		self.x * self.x + self.y * self.y + self.z * self.z
 	}
 
@@ -201,7 +201,7 @@ impl Vector3 {
 	/// # 돌려줌
 	/// 더한 새 벡터.
 	//==============================================================================
-	pub fn add_scalar(&self, scalar: f32) -> Vector3 {
+	pub fn add_scalar(&self, scalar: f64) -> Vector3 {
 		Vector3::create(self.x + scalar, self.y + scalar, self.z + scalar)
 	}
 
@@ -227,7 +227,7 @@ impl Vector3 {
 	/// # 돌려줌
 	/// 뺀 새 벡터.
 	//==============================================================================
-	pub fn subtract_scalar(&self, scalar: f32) -> Vector3 {
+	pub fn subtract_scalar(&self, scalar: f64) -> Vector3 {
 		Vector3::create(self.x - scalar, self.y - scalar, self.z - scalar)
 	}
 
@@ -253,7 +253,7 @@ impl Vector3 {
 	/// # 돌려줌
 	/// 곱한 새 벡터.
 	//==============================================================================
-	pub fn multiply_scalar(&self, scalar: f32) -> Vector3 {
+	pub fn multiply_scalar(&self, scalar: f64) -> Vector3 {
 		Vector3::create(self.x * scalar, self.y * scalar, self.z * scalar)
 	}
 
@@ -279,7 +279,7 @@ impl Vector3 {
 	/// # 돌려줌
 	/// 나눈 새 벡터.
 	//==============================================================================
-	pub fn divide_scalar(&self, scalar: f32) -> Vector3 {
+	pub fn divide_scalar(&self, scalar: f64) -> Vector3 {
 		Vector3::create(self.x / scalar, self.y / scalar, self.z / scalar)
 	}
 
@@ -292,7 +292,7 @@ impl Vector3 {
 	/// # 돌려줌
 	/// 내적 값. (x * other.x + y * other.y + z * other.z)
 	//==============================================================================
-	pub fn dot(&self, other: Vector3) -> f32 {
+	pub fn dot(&self, other: Vector3) -> f64 {
 		self.x * other.x + self.y * other.y + self.z * other.z
 	}
 
@@ -333,7 +333,7 @@ impl Vector3 {
 	/// # 돌려줌
 	/// 두 점 사이 거리. (0 이상)
 	//==============================================================================
-	pub fn distance(&self, other: Vector3) -> f32 {
+	pub fn distance(&self, other: Vector3) -> f64 {
 		let difference = self.subtract(other);
 		difference.length()
 	}
@@ -360,7 +360,7 @@ impl Vector3 {
 	/// assert_eq!(Vector3::lerp(from, to, 1.0), to);
 	/// ```
 	//==============================================================================
-	pub fn lerp(from: Vector3, to: Vector3, normalized_time: f32) -> Vector3 {
+	pub fn lerp(from: Vector3, to: Vector3, normalized_time: f64) -> Vector3 {
 		let from_weight = 1.0 - normalized_time;
 		let lerp_x = from.x * from_weight + to.x * normalized_time;
 		let lerp_y = from.y * from_weight + to.y * normalized_time;
@@ -391,13 +391,13 @@ impl Sub for Vector3 {
 	}
 }
 
-impl Mul<f32> for Vector3 {
+impl Mul<f64> for Vector3 {
 	type Output = Vector3;
 
 	//==============================================================================
 	/// * 스칼라 연산자. (multiply_scalar 와 같다)
 	//==============================================================================
-	fn mul(self, scalar: f32) -> Vector3 {
+	fn mul(self, scalar: f64) -> Vector3 {
 		Vector3::create(self.x * scalar, self.y * scalar, self.z * scalar)
 	}
 }

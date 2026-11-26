@@ -43,7 +43,7 @@ use std::rc::Rc;
 /// 	image_scroller
 /// }
 ///
-/// fn draw_background(image_scroller: &mut ImageScroller, graphic: &mut Graphic, time_delta: f32) {
+/// fn draw_background(image_scroller: &mut ImageScroller, graphic: &mut Graphic, time_delta: f64) {
 /// 	image_scroller.tick(time_delta);
 /// 	image_scroller.draw(graphic);
 /// }
@@ -79,7 +79,7 @@ impl ImageScroller {
 	/// # 인자
 	/// - `time_delta`: 지난 프레임부터 흐른 시간. (초)
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		self.scroll_position.x += self.scroll_speed.x * time_delta;
 		self.scroll_position.y += self.scroll_speed.y * time_delta;
 	}
@@ -94,7 +94,7 @@ impl ImageScroller {
 	/// # 돌려줌
 	/// 첫 타일의 왼쪽 위 좌표. (보이는 영역 왼쪽 위와 같거나 이미지 한 장 안쪽만큼 앞)
 	//==============================================================================
-	pub fn calculate_tile_start(&self, image_width: f32, image_height: f32) -> Vector2 {
+	pub fn calculate_tile_start(&self, image_width: f64, image_height: f64) -> Vector2 {
 		let remainder_x = (self.scroll_position.x % image_width).floor();
 		let remainder_y = (self.scroll_position.y % image_height).floor();
 		let start_x = if remainder_x <= 0.0 {
@@ -128,8 +128,8 @@ impl ImageScroller {
 				return;
 			}
 		};
-		let image_width = image.get_width() as f32;
-		let image_height = image.get_height() as f32;
+		let image_width = image.get_width() as f64;
+		let image_height = image.get_height() as f64;
 		if image_width == 0.0 || image_height == 0.0 {
 			return;
 		}
@@ -213,7 +213,7 @@ impl ImageScroller {
 	/// # 인자
 	/// - `speed`: 세로 속도. (초당 픽셀, + 면 그림이 아래로 흐른다)
 	//==============================================================================
-	pub fn set_vertical_scroll_speed(&mut self, speed: f32) {
+	pub fn set_vertical_scroll_speed(&mut self, speed: f64) {
 		self.scroll_speed.y = speed;
 	}
 
@@ -223,7 +223,7 @@ impl ImageScroller {
 	/// # 인자
 	/// - `speed`: 가로 속도. (초당 픽셀, + 면 그림이 오른쪽으로 흐른다)
 	//==============================================================================
-	pub fn set_horizontal_scroll_speed(&mut self, speed: f32) {
+	pub fn set_horizontal_scroll_speed(&mut self, speed: f64) {
 		self.scroll_speed.x = speed;
 	}
 

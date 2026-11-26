@@ -35,7 +35,7 @@ use crate::core::node::worldnode::WorldNode;
 /// 시작 / 완료 콜백. ((대상))
 type ActionTargetCallback<T> = Box<dyn FnMut(&mut T)>;
 /// 갱신 콜백. ((진행률, 대상))
-type ActionUpdateCallback<T> = Box<dyn FnMut(f32, &mut T)>;
+type ActionUpdateCallback<T> = Box<dyn FnMut(f64, &mut T)>;
 /// 조건 함수. ((대상) → 참이면 넘어간다)
 type ActionConditionFunction<T> = Box<dyn FnMut(&T) -> bool>;
 
@@ -48,12 +48,12 @@ type ActionConditionFunction<T> = Box<dyn FnMut(&T) -> bool>;
 /// ```rust
 /// use vanilla::{Action, ActionCallbacks};
 ///
-/// let mut record: Vec<f32> = Vec::new();
-/// let mut action: Action<Vec<f32>> = Action::new()
+/// let mut record: Vec<f64> = Vec::new();
+/// let mut action: Action<Vec<f64>> = Action::new()
 /// 	.wait(1.0, ActionCallbacks::new()
-/// 		.started(|record: &mut Vec<f32>| record.push(-1.0))
-/// 		.updated(|progress, record: &mut Vec<f32>| record.push(progress))
-/// 		.completed(|record: &mut Vec<f32>| record.push(2.0)));
+/// 		.started(|record: &mut Vec<f64>| record.push(-1.0))
+/// 		.updated(|progress, record: &mut Vec<f64>| record.push(progress))
+/// 		.completed(|record: &mut Vec<f64>| record.push(2.0)));
 /// action.start_with(&mut record);
 /// action.step_with(&mut record, 0.5);
 /// action.step_with(&mut record, 0.5);
@@ -105,7 +105,7 @@ impl<T> ActionCallbacks<T> {
 	/// # 돌려줌
 	/// 갱신 콜백을 넣은 묶음. (이어 부르기용)
 	//==============================================================================
-	pub fn updated(mut self, callback: impl FnMut(f32, &mut T) + 'static) -> ActionCallbacks<T> {
+	pub fn updated(mut self, callback: impl FnMut(f64, &mut T) + 'static) -> ActionCallbacks<T> {
 		self.updated_callback = Some(Box::new(callback));
 		self
 	}
@@ -136,7 +136,7 @@ impl<T> ActionCallbacks<T> {
 	//==============================================================================
 	/// 갱신 콜백 부르기.
 	//==============================================================================
-	fn call_updated(&mut self, progress: f32, target: &mut T) {
+	fn call_updated(&mut self, progress: f64, target: &mut T) {
 		if let Some(updated_callback) = self.updated_callback.as_mut() {
 			updated_callback(progress, target);
 		}
@@ -298,7 +298,7 @@ impl<T> Default for ActionConditionCallbacks<T> {
 enum ActionStep<T> {
 	/// 일정 시간 대기.
 	Wait {
-		duration: f32,
+		duration: f64,
 		callbacks: ActionCallbacks<T>,
 	},
 	/// 조건이 참이 될 때까지 대기.
@@ -359,7 +359,7 @@ enum ActionStep<T> {
 pub struct Action<T = WorldNode> {
 	steps: Vec<ActionStep<T>>,
 	current_step_index: usize,
-	current_step_elapsed: f32,
+	current_step_elapsed: f64,
 	// 지금 repeat 스텝이 끝낸 횟수. (원본 currentStepState.completed_count)
 	completed_count: u32,
 	is_running: bool,
@@ -454,7 +454,7 @@ impl<T> Action<T> {
 	/// # 돌려줌
 	/// wait 스텝을 끝에 더한 액션. (이어 부르기용)
 	//==============================================================================
-	pub fn wait(mut self, duration: f32, callbacks: ActionCallbacks<T>) -> Action<T> {
+	pub fn wait(mut self, duration: f64, callbacks: ActionCallbacks<T>) -> Action<T> {
 		self.steps.push(ActionStep::Wait { duration, callbacks });
 		self
 	}
@@ -617,7 +617,7 @@ impl<T> Action<T> {
 	/// 		fade_in
 	/// 	}
 	///
-	/// 	fn tick(&mut self, time_delta: f32) {
+	/// 	fn tick(&mut self, time_delta: f64) {
 	/// 		self.action.step_with(&mut self.node, time_delta);
 	/// 	}
 	/// }
@@ -629,7 +629,7 @@ impl<T> Action<T> {
 	/// assert!(fade_in.action.is_done());
 	/// ```
 	//==============================================================================
-	pub fn step_with(&mut self, target: &mut T, time_delta: f32) {
+	pub fn step_with(&mut self, target: &mut T, time_delta: f64) {
 		if !self.is_running || self.is_done {
 			return;
 		}
@@ -781,7 +781,7 @@ impl Action<WorldNode> {
 	/// - `node_tree`: 대상 노드가 든 트리.
 	/// - `time_delta`: 지난 프레임에서 흐른 시간. (초)
 	//==============================================================================
-	pub fn step(&mut self, node_tree: &mut NodeTree, time_delta: f32) {
+	pub fn step(&mut self, node_tree: &mut NodeTree, time_delta: f64) {
 		let target_id = match self.target_id {
 			Some(target_id) => {
 				target_id

@@ -63,6 +63,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 
 use crate::base::rect::Rect;
 use crate::graphics3d::camera3d::Camera3D;
@@ -824,7 +825,7 @@ pub fn compose_toon_program_sources(material: Option<&ToonMaterial>, instance_la
 /// fn upload_mesh(gl: &glow::Context, renderer: &ToonRenderer) {
 /// 	let mut builder = MeshBuilder::new();
 /// 	builder.add_part(&create_box_geometry(1.0, 1.0, 1.0), &Matrix4::create_identity(), "#d06060", ToonPartOptions::default());
-/// 	builder.add_part(&create_sphere_geometry(0.4, 16, 12, std::f32::consts::PI), &Matrix4::create_translation(0.0, 0.9, 0.0), "#f0c8a0", ToonPartOptions::default());
+/// 	builder.add_part(&create_sphere_geometry(0.4, 16, 12, std::f64::consts::PI), &Matrix4::create_translation(0.0, 0.9, 0.0), "#f0c8a0", ToonPartOptions::default());
 /// 	if let Some(mesh) = renderer.create_mesh(gl, &builder.read_arrays()) {
 /// 		let (center, radius) = mesh.get_bounding_sphere();
 /// 		let (body_index_count, outline_index_count) = mesh.get_index_counts();
@@ -845,8 +846,8 @@ pub struct ToonMesh {
 	is_skinned: bool,
 	has_uv: bool,
 	has_second_uv: bool,
-	bounding_center: [f32; 3],
-	bounding_radius: f32,
+	bounding_center: [f64; 3],
+	bounding_radius: f64,
 	vertex_buffer: GlBuffer,
 	skin_buffer: Option<GlBuffer>,
 	uv_buffer: Option<GlBuffer>,
@@ -883,7 +884,7 @@ impl ToonMesh {
 	/// # 돌려줌
 	/// (모형 좌표의 가운데 [x, y, z], 반지름)
 	//==============================================================================
-	pub fn get_bounding_sphere(&self) -> ([f32; 3], f32) {
+	pub fn get_bounding_sphere(&self) -> ([f64; 3], f64) {
 		(self.bounding_center, self.bounding_radius)
 	}
 
@@ -932,9 +933,9 @@ impl ToonMesh {
 ///
 /// fn draw_trees(gl: &glow::Context, renderer: &mut ToonRenderer, mesh: &ToonMesh, view_projection_matrix: &Matrix4) -> Result<(), String> {
 /// 	let instance_layout = renderer.create_instance_layout(&[("instanceMatrix", 16), ("instanceTint", 4)])?;
-/// 	let mut data = Vec::new();
+/// 	let mut data: Vec<f32> = Vec::new();
 /// 	for index in 0..9 {
-/// 		let model_matrix = Matrix4::create_translation((index % 3) as f32 - 1.0, 0.0, (index / 3) as f32 - 1.0);
+/// 		let model_matrix = Matrix4::create_translation((index % 3) as f64 - 1.0, 0.0, (index / 3) as f64 - 1.0);
 /// 		data.extend_from_slice(model_matrix.get_elements());
 /// 		data.extend_from_slice(&[1.0, 1.0 - index as f32 * 0.05, 1.0, 1.0]);
 /// 	}
@@ -1048,9 +1049,9 @@ pub type ToonBeforeDrawCallback<'a> = &'a dyn Fn(&ShaderProgram, &glow::Context,
 #[derive(Clone, Copy)]
 pub struct ToonDrawOptions<'a> {
 	/// 틴트 색. ([r, g, b, a] sRGB, 기본 흰색, tint_amount 가 없으면 바탕색에 곱한다, 알파는 불투명도에 곱한다)
-	pub tint_color: [f32; 4],
+	pub tint_color: [f64; 4],
 	/// 불투명도. (기본 1, 1 보다 작으면 비치는 것으로 그린다)
-	pub alpha: f32,
+	pub alpha: f64,
 	/// 본 행렬의 수. (write_skin_pose 가 셈한 것, 본마다 16, None 이면 뼈대로 움직이지 않는다)
 	pub joint_matrices: Option<&'a [f32]>,
 	/// 바깥선 껍데기를 그릴지. (기본 true)
@@ -1062,35 +1063,35 @@ pub struct ToonDrawOptions<'a> {
 	/// 몸을 그릴지. (기본 true, false 면 바깥선만 그린다)
 	pub is_body_drawn: bool,
 	/// 틴트를 섞는 몫. (0 ~ 1, 주면 틴트를 곱하지 않고 sRGB 로 섞는다, 맞은 번쩍임, 고장 빨강)
-	pub tint_amount: Option<f32>,
+	pub tint_amount: Option<f64>,
 	/// 꼭짓점 빛남의 배. (기본 1)
-	pub glow_scale: f32,
+	pub glow_scale: f64,
 	/// 마지막 선형 색의 배. (기본 1, 거울에 비친 모습을 어둡게)
-	pub color_scale: f32,
+	pub color_scale: f64,
 	/// 빛남 색. ([r, g, b] sRGB, 기본 검정)
-	pub emissive_color: [f32; 3],
+	pub emissive_color: [f64; 3],
 	/// 빛남 색의 세기. (선형 배, 기본 1)
-	pub emissive_intensity: f32,
+	pub emissive_intensity: f64,
 	/// 바탕색 텍스처. (바탕색에 곱함, 알파는 불투명도에, None 이면 없음)
 	pub base_color_texture: Option<GlTexture>,
 	/// 빛남 텍스처. (빛남 색에 곱함, None 이면 없음)
 	pub emissive_texture: Option<GlTexture>,
 	/// UV 옮김과 배. ([u 옮김, v 옮김, u 배, v 배], KHR_texture_transform 의 offset, scale)
-	pub uv_transform: [f32; 4],
+	pub uv_transform: [f64; 4],
 	/// 데칼 텍스처. (바탕색 위에 알파로 덮는다, 색 = 텍스처 x decal_color, None 이면 없음)
 	pub decal_texture: Option<GlTexture>,
 	/// 데칼 색. (텍스처에 곱한다, 기본 흰색)
-	pub decal_color: [f32; 3],
+	pub decal_color: [f64; 3],
 	/// 데칼이 그 색으로 빛나는 몫. (기본 0)
-	pub decal_emission: f32,
+	pub decal_emission: f64,
 	/// 데칼 UV 옮김과 배. ([u 옮김, v 옮김, u 배, v 배], 묶음 그림의 한 칸을 고를 때)
-	pub decal_uv_transform: [f32; 4],
+	pub decal_uv_transform: [f64; 4],
 	/// 불투명도가 그보다 작은 화소를 버린다. (0 이면 끔, glTF MASK)
-	pub alpha_cutoff: f32,
+	pub alpha_cutoff: f64,
 	/// 섞는 방식. (기본 ToonBlendMode::Alpha, Alpha 가 아니면 비치는 것으로 그린다)
 	pub blend_mode: ToonBlendMode,
 	/// 가장자리를 엷게 하는 지수. (pow(|dot(N, V)|, soft_edge) 를 불투명도에 곱한다, 0 이면 끔, 프레넬 꼴)
-	pub soft_edge: f32,
+	pub soft_edge: f64,
 	/// 감기를 뒤집어 그릴지. (None 이면 모형 행렬의 행렬식이 음수일 때 스스로 뒤집는다, 보기 행렬이 거울에 비쳤으면 그것도 더해 뒤집는다)
 	pub is_mirrored: Option<bool>,
 	/// 몸의 꼭짓점 번호 가운데 그릴 첫 자리. (GLB 재질 범위, 숨긴 부분)
@@ -1116,31 +1117,31 @@ pub struct ToonDrawOptions<'a> {
 	/// 그림자를 받을지. (false 면 해의 그림자를 보지 않는다)
 	pub receives_shadow: bool,
 	/// 빛을 받는 몫 x 에 더할 값. (그늘 경계를 옮긴다, 길티기어 Xrd 의 꼭짓점 색 문턱, 유니티 툰 셰이더의 Shading Grade Map 꼴, 표면 조각이 surface.shadeOffset 으로 더 고칠 수 있다)
-	pub shade_offset: f32,
+	pub shade_offset: f64,
 	/// 하이라이트 배. (0 이면 이 그리기는 하이라이트가 없다, 재질마다의 세기)
-	pub specular_scale: f32,
+	pub specular_scale: f64,
 	/// 림 빛 배. (0 이면 이 그리기는 림 빛이 없다)
-	pub rim_scale: f32,
+	pub rim_scale: f64,
 	/// 매트캡 텍스처. (보기 공간 노멀로 읽는 공 그림, None 이면 없음)
 	pub matcap_texture: Option<GlTexture>,
 	/// 매트캡 세기.
-	pub matcap_strength: f32,
+	pub matcap_strength: f64,
 	/// 매트캡 섞기. (곱하기나 더하기)
 	pub matcap_blend: ToonMatcapBlend,
 	/// 껍데기 바깥선 색. (sRGB 와 알파, None 이면 렌더러의 set_outline_color)
-	pub outline_color: Option<[f32; 4]>,
+	pub outline_color: Option<[f64; 4]>,
 	/// 껍데기 바깥선 굵기 배. (지은 굵기에 곱한다)
-	pub outline_width_scale: f32,
+	pub outline_width_scale: f64,
 	/// 껍데기 바깥선을 카메라에서 먼 쪽으로 밀 거리. (월드 길이, 몸 앞으로 비치지 않게, 유니티 툰 셰이더의 Offset Z 꼴)
-	pub outline_offset_z: f32,
+	pub outline_offset_z: f64,
 	/// 천사 고리 텍스처. (보기 공간 노멀의 x 와 2 번 UV 의 y 로 읽는 머리카락 반사 띠, None 이면 없음, 유니티 툰 셰이더의 Angel Ring)
 	pub angel_ring_texture: Option<GlTexture>,
 	/// 천사 고리 색. (선형 배)
-	pub angel_ring_color: [f32; 3],
+	pub angel_ring_color: [f64; 3],
 	/// 천사 고리 u 를 화면 가운데 쪽으로 당기는 몫. (0 ~ 0.5, AR_OffsetU)
-	pub angel_ring_offset_u: f32,
+	pub angel_ring_offset_u: f64,
 	/// 천사 고리 v 를 2 번 UV 에서 보기 노멀 쪽으로 옮기는 몫. (0 ~ 1, AR_OffsetV, 기본 0.3)
-	pub angel_ring_offset_v: f32,
+	pub angel_ring_offset_v: f64,
 	/// 천사 고리를 텍스처 알파로 덮을지. (false 면 더한다, ARSampler_AlphaOn)
 	pub is_angel_ring_alpha: bool,
 	/// 화면 공간 바깥선의 선 번호. (ToonDrawQueue 가 선의 판에 그릴 때, None 이면 담은 차례 + 1)
@@ -1259,9 +1260,9 @@ impl std::fmt::Debug for ToonDrawOptions<'_> {
 ///
 /// fn draw_rocks(gl: &glow::Context, renderer: &mut ToonRenderer, mesh: &ToonMesh, view_projection_matrix: &Matrix4) {
 /// 	let instance_list: Vec<ToonInstance> = (0..20).map(|index| {
-/// 		let shade = 0.6 + (index % 5) as f32 * 0.1;
+/// 		let shade = 0.6 + (index % 5) as f64 * 0.1;
 /// 		ToonInstance {
-/// 			model_matrix: Matrix4::create_translation((index % 5) as f32 * 1.5, 0.0, (index / 5) as f32 * 1.5),
+/// 			model_matrix: Matrix4::create_translation((index % 5) as f64 * 1.5, 0.0, (index / 5) as f64 * 1.5),
 /// 			tint_color: [shade, shade, shade, 1.0],
 /// 			line_id: None,
 /// 		}
@@ -1277,7 +1278,7 @@ pub struct ToonInstance {
 	/// 모형 행렬.
 	pub model_matrix: Matrix4,
 	/// 틴트 색. ([r, g, b, a] sRGB, 알파는 바깥선에도 곱한다)
-	pub tint_color: [f32; 4],
+	pub tint_color: [f64; 4],
 	/// 화면 공간 바깥선의 선 번호. (None 이면 공통 번호, ToonRenderer 는 읽지 않는다)
 	pub line_id: Option<u32>,
 }
@@ -1299,7 +1300,7 @@ struct ToonShadowInput {
 	depth_texture: GlTexture,
 	light_view_projection_matrix: Matrix4,
 	resolution: i32,
-	strength: f32,
+	strength: f64,
 }
 
 //==============================================================================
@@ -1346,9 +1347,9 @@ pub struct ToonFrameStatistics {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToonFrameCamera {
 	/// 눈의 자리. ([x, y, z, 1] 원근, [0, 0, 0, 0] 직교)
-	pub position: [f32; 4],
+	pub position: [f64; 4],
 	/// 보는 방향. ([x, y, z], 단위)
-	pub forward: [f32; 3],
+	pub forward: [f64; 3],
 	/// 보기 행렬이 거울에 비쳤는지.
 	pub is_mirrored: bool,
 }
@@ -1381,10 +1382,10 @@ struct SavedState {
 struct ToonLocalShadowInput {
 	depth_texture: GlTexture,
 	light_list: Vec<ShadowAtlasLight>,
-	grid_size: f32,
-	tile_size: f32,
-	texel_size: f32,
-	strength: f32,
+	grid_size: f64,
+	tile_size: f64,
+	texel_size: f64,
+	strength: f64,
 }
 
 //==============================================================================
@@ -1453,12 +1454,12 @@ pub struct ToonRenderer {
 	/// 텍스처를 주지 않은 바탕색, 빛남, 데칼 유닛에 묶는 1x1 흰 텍스처.
 	white_texture: GlTexture,
 	view_projection_matrix: Matrix4,
-	frustum_planes: [[f32; 4]; 6],
-	camera_position: [f32; 4],
-	camera_forward: [f32; 3],
+	frustum_planes: [[f64; 4]; 6],
+	camera_position: [f64; 4],
+	camera_forward: [f64; 3],
 	is_frame_mirrored: bool,
 	light_set: ToonLightSet,
-	outline_color: [f32; 4],
+	outline_color: [f64; 4],
 	is_hdr_output: bool,
 	shadow_input: Option<ToonShadowInput>,
 	is_shadow_pass: bool,
@@ -1472,17 +1473,17 @@ pub struct ToonRenderer {
 	/// 이번 프레임의 보기 돌림 3x3. (열 차례, 매트캡의 보기 공간 노멀)
 	view_rotation: [f32; 9],
 	/// 이번 프레임의 카메라 기울임을 되돌리는 각. (라디안, 천사 고리)
-	camera_roll: f32,
+	camera_roll: f64,
 	/// 껍데기 바깥선의 거리 배. ([기준 거리 (0 이면 끔), 가장 작은 배, 가장 큰 배])
-	outline_distance_scale: [f32; 3],
+	outline_distance_scale: [f64; 3],
 	/// 껍데기 바깥선이 사라지는 거리. ([가까운 거리, 먼 거리], 먼 거리가 가까운 거리 이하면 끔)
-	outline_fade_distance: [f32; 2],
+	outline_fade_distance: [f64; 2],
 	/// 받을 점광과 스포트라이트 그림자.
 	local_shadow_input: Option<ToonLocalShadowInput>,
 }
 
 //==============================================================================
-/// f32, u32 배열을 바이트로 본다. (GL 버퍼 업로드용)
+/// f64, u32 배열을 바이트로 본다. (GL 버퍼 업로드용)
 //==============================================================================
 fn float_slice_to_bytes(values: &[f32]) -> &[u8] {
 	unsafe {
@@ -1508,14 +1509,14 @@ fn index_slice_to_bytes(values: &[u32]) -> &[u8] {
 /// # 돌려줌
 /// 면 여섯의 [a, b, c, d]. (왼쪽, 오른쪽, 아래, 위, 가까운 면, 먼 면)
 //==============================================================================
-pub fn extract_frustum_planes(matrix: &Matrix4) -> [[f32; 4]; 6] {
-	let elements = &matrix.elements;
+pub fn extract_frustum_planes(matrix: &Matrix4) -> [[f64; 4]; 6] {
+	let elements = matrix.read_elements();
 	let row = |row_index: usize| [elements[row_index], elements[4 + row_index], elements[8 + row_index], elements[12 + row_index]];
 	let row0 = row(0);
 	let row1 = row(1);
 	let row2 = row(2);
 	let row3 = row(3);
-	let combine = |first: [f32; 4], second: [f32; 4], sign: f32| [first[0] + second[0] * sign, first[1] + second[1] * sign, first[2] + second[2] * sign, first[3] + second[3] * sign];
+	let combine = |first: [f64; 4], second: [f64; 4], sign: f64| [first[0] + second[0] * sign, first[1] + second[1] * sign, first[2] + second[2] * sign, first[3] + second[3] * sign];
 	let mut planes = [combine(row3, row0, 1.0), combine(row3, row0, -1.0), combine(row3, row1, 1.0), combine(row3, row1, -1.0), combine(row3, row2, 1.0), combine(row3, row2, -1.0)];
 	for plane in planes.iter_mut() {
 		let length = (plane[0] * plane[0] + plane[1] * plane[1] + plane[2] * plane[2]).sqrt();
@@ -1531,7 +1532,7 @@ pub fn extract_frustum_planes(matrix: &Matrix4) -> [[f32; 4]; 6] {
 //==============================================================================
 /// 세 벡터를 행으로 둔 3x3 의 행렬식.
 //==============================================================================
-fn read_determinant(first: [f32; 3], second: [f32; 3], third: [f32; 3]) -> f32 {
+fn read_determinant(first: [f64; 3], second: [f64; 3], third: [f64; 3]) -> f64 {
 	first[0] * (second[1] * third[2] - second[2] * third[1]) - first[1] * (second[0] * third[2] - second[2] * third[0]) + first[2] * (second[0] * third[1] - second[1] * third[0])
 }
 
@@ -1544,9 +1545,9 @@ fn read_determinant(first: [f32; 3], second: [f32; 3], third: [f32; 3]) -> f32 {
 /// # 돌려줌
 /// 왼쪽 위 3x3 의 행렬식. (음수면 거울에 비친 행렬)
 //==============================================================================
-pub fn read_matrix_determinant(matrix: &Matrix4) -> f32 {
-	let elements = &matrix.elements;
-	read_determinant([elements[0], elements[1], elements[2]], [elements[4], elements[5], elements[6]], [elements[8], elements[9], elements[10]])
+pub fn read_matrix_determinant(matrix: &Matrix4) -> f64 {
+	let elements = matrix.read_elements();
+	read_determinant([(elements[0]), (elements[1]), (elements[2])], [(elements[4]), (elements[5]), (elements[6])], [(elements[8]), (elements[9]), (elements[10])])
 }
 
 //==============================================================================
@@ -1562,13 +1563,13 @@ pub fn read_matrix_determinant(matrix: &Matrix4) -> f32 {
 /// 읽은 카메라. (position [x, y, z, w(1 원근, 0 직교)], forward [x, y, z], is_mirrored)
 //==============================================================================
 pub fn read_frame_camera(matrix: &Matrix4) -> ToonFrameCamera {
-	let elements = &matrix.elements;
+	let elements = matrix.read_elements();
 	let row = |row_index: usize| [elements[row_index], elements[4 + row_index], elements[8 + row_index], elements[12 + row_index]];
 	let row0 = row(0);
 	let row1 = row(1);
 	let row2 = row(2);
 	let row3 = row(3);
-	let xyz = |value: [f32; 4]| [value[0], value[1], value[2]];
+	let xyz = |value: [f64; 4]| [value[0], value[1], value[2]];
 	let is_mirrored = read_determinant(xyz(row0), xyz(row1), xyz(row2)) > 0.0;
 	let mut forward = [row0[1] * row1[2] - row0[2] * row1[1], row0[2] * row1[0] - row0[0] * row1[2], row0[0] * row1[1] - row0[1] * row1[0]];
 	let forward_length = (forward[0] * forward[0] + forward[1] * forward[1] + forward[2] * forward[2]).sqrt();
@@ -1583,9 +1584,9 @@ pub fn read_frame_camera(matrix: &Matrix4) -> ToonFrameCamera {
 		return ToonFrameCamera { position: [0.0; 4], forward, is_mirrored };
 	}
 	let constant = [-row0[3], -row1[3], -row3[3]];
-	let position_x = read_determinant([constant[0], row0[1], row0[2]], [constant[1], row1[1], row1[2]], [constant[2], row3[1], row3[2]]) / determinant;
-	let position_y = read_determinant([row0[0], constant[0], row0[2]], [row1[0], constant[1], row1[2]], [row3[0], constant[2], row3[2]]) / determinant;
-	let position_z = read_determinant([row0[0], row0[1], constant[0]], [row1[0], row1[1], constant[1]], [row3[0], row3[1], constant[2]]) / determinant;
+	let position_x = read_determinant([(constant[0]), (row0[1]), (row0[2])], [(constant[1]), (row1[1]), (row1[2])], [(constant[2]), (row3[1]), (row3[2])]) / determinant;
+	let position_y = read_determinant([(row0[0]), (constant[0]), (row0[2])], [(row1[0]), (constant[1]), (row1[2])], [(row3[0]), (constant[2]), (row3[2])]) / determinant;
+	let position_z = read_determinant([(row0[0]), (row0[1]), (constant[0])], [(row1[0]), (row1[1]), (constant[1])], [(row3[0]), (row3[1]), (constant[2])]) / determinant;
 	ToonFrameCamera { position: [position_x, position_y, position_z, 1.0], forward, is_mirrored }
 }
 
@@ -1600,15 +1601,15 @@ pub fn read_frame_camera(matrix: &Matrix4) -> ToonFrameCamera {
 /// # 돌려줌
 /// mat3 의 수 9. (열 차례)
 //==============================================================================
-pub fn read_view_rotation(view_projection_matrix: &Matrix4, forward: [f32; 3]) -> [f32; 9] {
-	let elements = &view_projection_matrix.elements;
+pub fn read_view_rotation(view_projection_matrix: &Matrix4, forward: [f64; 3]) -> [f64; 9] {
+	let elements = view_projection_matrix.read_elements();
 	let row_x = [elements[0], elements[4], elements[8]];
-	let along = row_x[0] * forward[0] + row_x[1] * forward[1] + row_x[2] * forward[2];
-	let mut right = [row_x[0] - forward[0] * along, row_x[1] - forward[1] * along, row_x[2] - forward[2] * along];
+	let along = row_x[0] * ((forward[0]) as f32) as f64 + row_x[1] * ((forward[1]) as f32) as f64 + row_x[2] * ((forward[2]) as f32) as f64;
+	let mut right = [row_x[0] - ((forward[0] * along) as f32) as f64, row_x[1] - ((forward[1] * along) as f32) as f64, row_x[2] - ((forward[2] * along) as f32) as f64];
 	let right_length = (right[0] * right[0] + right[1] * right[1] + right[2] * right[2]).sqrt();
 	right = if right_length > 0.000001 { [right[0] / right_length, right[1] / right_length, right[2] / right_length] } else { [1.0, 0.0, 0.0] };
-	let up = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]];
-	[right[0], up[0], -forward[0], right[1], up[1], -forward[1], right[2], up[2], -forward[2]]
+	let up = [right[1] * ((forward[2]) as f32) as f64 - right[2] * ((forward[1]) as f32) as f64, right[2] * ((forward[0]) as f32) as f64 - right[0] * ((forward[2]) as f32) as f64, right[0] * ((forward[1]) as f32) as f64 - right[1] * ((forward[0]) as f32) as f64];
+	[(right[0]), (up[0]), -forward[0], (right[1]), (up[1]), -forward[1], (right[2]), (up[2]), -forward[2]]
 }
 
 //==============================================================================
@@ -1624,7 +1625,7 @@ pub fn read_view_rotation(view_projection_matrix: &Matrix4, forward: [f32; 3]) -
 /// # 돌려줌
 /// 천사 고리 UV 를 (0.5, 0.5) 둘레로 돌릴 각. (라디안)
 //==============================================================================
-pub fn read_camera_roll(view_rotation: &[f32; 9], is_mirrored: bool) -> f32 {
+pub fn read_camera_roll(view_rotation: &[f32; 9], is_mirrored: bool) -> f64 {
 	let right = [view_rotation[0], view_rotation[3], view_rotation[6]];
 	let forward = [-view_rotation[2], -view_rotation[5], -view_rotation[8]];
 	let axis_sign = if is_mirrored { -1.0 } else { 1.0 };
@@ -1637,13 +1638,13 @@ pub fn read_camera_roll(view_rotation: &[f32; 9], is_mirrored: bool) -> f32 {
 	let cosine = (right_axis[0] * right[0] + right_axis[1] * right[1] + right_axis[2] * right[2]) / (axis_length * right_length);
 	let roll = cosine.clamp(-1.0, 1.0).acos();
 	let direction = if right[1] < 0.0 { -1.0 } else { 1.0 };
-	-(direction * roll)
+	(-(direction * roll)) as f64
 }
 
 //==============================================================================
 /// 껍데기 바깥선에 곱할 해의 색 읽기. (유니티 툰 셰이더 바깥선과 같이 세기가 1 이상이면 세기로 나눈다, 세기는 0.299 R + 0.587 G + 0.114 B)
 //==============================================================================
-fn read_outline_light_color(sun_color: [f32; 3]) -> [f32; 3] {
+fn read_outline_light_color(sun_color: [f64; 3]) -> [f64; 3] {
 	let intensity = 0.299 * sun_color[0] + 0.587 * sun_color[1] + 0.114 * sun_color[2];
 	if intensity < 1.0 {
 		sun_color
@@ -1711,7 +1712,7 @@ pub fn read_outline_vertex_data(outline_vertex_data: &[f32], outline_base_data: 
 //==============================================================================
 /// 스포트라이트 원뿔의 각 감쇠 배와 덧셈. (glTF KHR_lights_punctual, 각 감쇠는 clamp(cos 각 x 배 + 덧셈, 0, 1) 의 제곱)
 //==============================================================================
-fn read_spot_cone(inner_cone_angle: f32, outer_cone_angle: f32) -> (f32, f32) {
+fn read_spot_cone(inner_cone_angle: f64, outer_cone_angle: f64) -> (f64, f64) {
 	let outer_cosine = outer_cone_angle.cos();
 	let cone_scale = 1.0 / (inner_cone_angle.min(outer_cone_angle).cos() - outer_cosine).max(0.001);
 	(cone_scale, -outer_cosine * cone_scale)
@@ -1728,32 +1729,32 @@ fn read_spot_cone(inner_cone_angle: f32, outer_cone_angle: f32) -> (f32, f32) {
 /// # 돌려줌
 /// 평면에 비친 행렬.
 //==============================================================================
-pub fn create_reflection_matrix(plane_point: [f32; 3], plane_normal: [f32; 3]) -> Matrix4 {
+pub fn create_reflection_matrix(plane_point: [f64; 3], plane_normal: [f64; 3]) -> Matrix4 {
 	let length = (plane_normal[0] * plane_normal[0] + plane_normal[1] * plane_normal[1] + plane_normal[2] * plane_normal[2]).sqrt();
 	let (normal_x, normal_y, normal_z) = if length > 0.0 { (plane_normal[0] / length, plane_normal[1] / length, plane_normal[2] / length) } else { (0.0, 1.0, 0.0) };
 	let distance = normal_x * plane_point[0] + normal_y * plane_point[1] + normal_z * plane_point[2];
 	let mut matrix = Matrix4::create_identity();
 	let elements = &mut matrix.elements;
-	elements[0] = 1.0 - 2.0 * normal_x * normal_x;
-	elements[1] = -2.0 * normal_x * normal_y;
-	elements[2] = -2.0 * normal_x * normal_z;
-	elements[4] = -2.0 * normal_y * normal_x;
-	elements[5] = 1.0 - 2.0 * normal_y * normal_y;
-	elements[6] = -2.0 * normal_y * normal_z;
-	elements[8] = -2.0 * normal_z * normal_x;
-	elements[9] = -2.0 * normal_z * normal_y;
-	elements[10] = 1.0 - 2.0 * normal_z * normal_z;
-	elements[12] = 2.0 * distance * normal_x;
-	elements[13] = 2.0 * distance * normal_y;
-	elements[14] = 2.0 * distance * normal_z;
+	elements[0] = (1.0 - 2.0 * normal_x * normal_x) as f32;
+	elements[1] = (-2.0 * normal_x * normal_y) as f32;
+	elements[2] = (-2.0 * normal_x * normal_z) as f32;
+	elements[4] = (-2.0 * normal_y * normal_x) as f32;
+	elements[5] = (1.0 - 2.0 * normal_y * normal_y) as f32;
+	elements[6] = (-2.0 * normal_y * normal_z) as f32;
+	elements[8] = (-2.0 * normal_z * normal_x) as f32;
+	elements[9] = (-2.0 * normal_z * normal_y) as f32;
+	elements[10] = (1.0 - 2.0 * normal_z * normal_z) as f32;
+	elements[12] = (2.0 * distance * normal_x) as f32;
+	elements[13] = (2.0 * distance * normal_y) as f32;
+	elements[14] = (2.0 * distance * normal_z) as f32;
 	matrix
 }
 
 //==============================================================================
 /// 행렬의 가장 큰 크기. (세 축 길이 가운데 큰 것)
 //==============================================================================
-fn read_maximum_scale(matrix: &Matrix4) -> f32 {
-	let elements = &matrix.elements;
+fn read_maximum_scale(matrix: &Matrix4) -> f64 {
+	let elements = matrix.read_elements();
 	let scale_x = (elements[0] * elements[0] + elements[1] * elements[1] + elements[2] * elements[2]).sqrt();
 	let scale_y = (elements[4] * elements[4] + elements[5] * elements[5] + elements[6] * elements[6]).sqrt();
 	let scale_z = (elements[8] * elements[8] + elements[9] * elements[9] + elements[10] * elements[10]).sqrt();
@@ -1763,29 +1764,29 @@ fn read_maximum_scale(matrix: &Matrix4) -> f32 {
 //==============================================================================
 /// 꼭짓점 배열의 경계 구. (자리 셋씩, 가운데는 상자의 가운데)
 //==============================================================================
-fn read_bounding_sphere(positions: &[f32], stride: usize) -> ([f32; 3], f32) {
-	let mut minimum = [f32::MAX; 3];
-	let mut maximum = [f32::MIN; 3];
+fn read_bounding_sphere(positions: &[f32], stride: usize) -> ([f64; 3], f64) {
+	let mut minimum = [f64::MAX; 3];
+	let mut maximum = [f64::MIN; 3];
 	for point in positions.chunks(stride) {
 		if point.len() < 3 {
 			continue;
 		}
 		for axis in 0..3 {
-			minimum[axis] = minimum[axis].min(point[axis]);
-			maximum[axis] = maximum[axis].max(point[axis]);
+			minimum[axis] = minimum[axis].min((point[axis]) as f64);
+			maximum[axis] = maximum[axis].max((point[axis]) as f64);
 		}
 	}
 	if minimum[0] > maximum[0] {
 		return ([0.0; 3], 0.0);
 	}
 	let center = [(minimum[0] + maximum[0]) * 0.5, (minimum[1] + maximum[1]) * 0.5, (minimum[2] + maximum[2]) * 0.5];
-	let mut radius_squared: f32 = 0.0;
+	let mut radius_squared: f64 = 0.0;
 	for point in positions.chunks(stride) {
 		if point.len() < 3 {
 			continue;
 		}
-		let delta = [point[0] - center[0], point[1] - center[1], point[2] - center[2]];
-		radius_squared = radius_squared.max(delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]);
+		let delta = [point[0] - (center[0]) as f32, point[1] - (center[1]) as f32, point[2] - (center[2]) as f32];
+		radius_squared = radius_squared.max((delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]) as f64);
 	}
 	(center, radius_squared.sqrt())
 }
@@ -2606,7 +2607,7 @@ impl ToonRenderer {
 		self.camera_position = frame_camera.position;
 		self.camera_forward = frame_camera.forward;
 		self.is_frame_mirrored = frame_camera.is_mirrored;
-		self.view_rotation = read_view_rotation(view_projection_matrix, frame_camera.forward);
+		self.view_rotation = read_view_rotation(view_projection_matrix, frame_camera.forward).map(|value| value as f32);
 		self.camera_roll = read_camera_roll(&self.view_rotation, frame_camera.is_mirrored);
 		self.frame_statistics = ToonFrameStatistics::default();
 		self.is_shadow_pass = false;
@@ -2672,7 +2673,7 @@ impl ToonRenderer {
 	/// - `width`: 너비. (픽셀)
 	/// - `height`: 높이. (픽셀)
 	//==============================================================================
-	pub fn set_screen_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
+	pub fn set_screen_rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
 		self.screen_rect = Some(Rect::create(x, y, width.max(0.0), height.max(0.0)));
 	}
 
@@ -2705,17 +2706,17 @@ impl ToonRenderer {
 				return;
 			}
 		};
-		let viewport_width = viewport[2].max(1) as f32;
-		let viewport_height = viewport[3].max(1) as f32;
+		let viewport_width = viewport[2].max(1) as f64;
+		let viewport_height = viewport[3].max(1) as f64;
 		let scale_x = screen_rect.size.x / viewport_width;
 		let scale_y = screen_rect.size.y / viewport_height;
 		let offset_x = (screen_rect.position.x * 2.0 + screen_rect.size.x) / viewport_width - 1.0;
 		let offset_y = 1.0 - (screen_rect.position.y * 2.0 + screen_rect.size.y) / viewport_height;
 		let elements = &mut self.view_projection_matrix.elements;
 		for column_index in 0..4 {
-			let clip_w = elements[column_index * 4 + 3];
-			elements[column_index * 4] = elements[column_index * 4] * scale_x + clip_w * offset_x;
-			elements[column_index * 4 + 1] = elements[column_index * 4 + 1] * scale_y + clip_w * offset_y;
+			let clip_w = elements[column_index * 4 + 3] as f64;
+			elements[column_index * 4] = (elements[column_index * 4] as f64 * scale_x + clip_w * offset_x) as f32;
+			elements[column_index * 4 + 1] = (elements[column_index * 4 + 1] as f64 * scale_y + clip_w * offset_y) as f32;
 		}
 		let scissor_left = screen_rect.position.x.floor() as i32;
 		let scissor_bottom = (viewport_height - screen_rect.position.y - screen_rect.size.y).floor() as i32;
@@ -2872,7 +2873,7 @@ impl ToonRenderer {
 				first_matrix = instance.model_matrix;
 			}
 			instance_data.extend_from_slice(&instance.model_matrix.elements);
-			instance_data.extend_from_slice(&instance.tint_color);
+			instance_data.extend_from_slice(&instance.tint_color.map(|value| value as f32));
 			instance_count += 1;
 		}
 		self.frame_statistics.drawn_object_count += instance_count;
@@ -2937,29 +2938,29 @@ impl ToonRenderer {
 				ToonProgramKind::Outline => {
 					let camera_position = self.camera_position;
 					let outline_distance_scale = self.outline_distance_scale;
-					gl.uniform_4_f32(program.get_uniform_location(gl, "cameraPosition").as_ref(), camera_position[0], camera_position[1], camera_position[2], camera_position[3]);
-					gl.uniform_3_f32(program.get_uniform_location(gl, "outlineDistanceScale").as_ref(), outline_distance_scale[0], outline_distance_scale[1], outline_distance_scale[2]);
-					gl.uniform_2_f32(program.get_uniform_location(gl, "outlineFadeDistance").as_ref(), self.outline_fade_distance[0], self.outline_fade_distance[1]);
-					gl.uniform_3_f32(program.get_uniform_location(gl, "cameraForward").as_ref(), self.camera_forward[0], self.camera_forward[1], self.camera_forward[2]);
-					gl.uniform_1_f32(program.get_uniform_location(gl, "hdrOutput").as_ref(), hdr_output);
+					gl.uniform_4_f64(program.get_uniform_location(gl, "cameraPosition").as_ref(), camera_position[0], camera_position[1], camera_position[2], camera_position[3]);
+					gl.uniform_3_f64(program.get_uniform_location(gl, "outlineDistanceScale").as_ref(), outline_distance_scale[0], outline_distance_scale[1], outline_distance_scale[2]);
+					gl.uniform_2_f64(program.get_uniform_location(gl, "outlineFadeDistance").as_ref(), self.outline_fade_distance[0], self.outline_fade_distance[1]);
+					gl.uniform_3_f64(program.get_uniform_location(gl, "cameraForward").as_ref(), self.camera_forward[0], self.camera_forward[1], self.camera_forward[2]);
+					gl.uniform_1_f64(program.get_uniform_location(gl, "hdrOutput").as_ref(), hdr_output);
 				}
 				ToonProgramKind::Solid => {
 					let camera_position = self.camera_position;
 					let camera_forward = self.camera_forward;
-					gl.uniform_4_f32(program.get_uniform_location(gl, "cameraPosition").as_ref(), camera_position[0], camera_position[1], camera_position[2], camera_position[3]);
-					gl.uniform_3_f32(program.get_uniform_location(gl, "cameraForward").as_ref(), camera_forward[0], camera_forward[1], camera_forward[2]);
+					gl.uniform_4_f64(program.get_uniform_location(gl, "cameraPosition").as_ref(), camera_position[0], camera_position[1], camera_position[2], camera_position[3]);
+					gl.uniform_3_f64(program.get_uniform_location(gl, "cameraForward").as_ref(), camera_forward[0], camera_forward[1], camera_forward[2]);
 					gl.uniform_matrix_3_f32_slice(program.get_uniform_location(gl, "viewRotation").as_ref(), false, &self.view_rotation);
-					gl.uniform_2_f32(program.get_uniform_location(gl, "cameraRoll").as_ref(), self.camera_roll.cos(), self.camera_roll.sin());
-					gl.uniform_1_f32(program.get_uniform_location(gl, "hdrOutput").as_ref(), hdr_output);
+					gl.uniform_2_f64(program.get_uniform_location(gl, "cameraRoll").as_ref(), self.camera_roll.cos(), self.camera_roll.sin());
+					gl.uniform_1_f64(program.get_uniform_location(gl, "hdrOutput").as_ref(), hdr_output);
 					match self.shadow_input {
 						Some(shadow_input) => {
-							gl.uniform_1_f32(program.get_uniform_location(gl, "shadowEnabled").as_ref(), 1.0);
-							gl.uniform_1_f32(program.get_uniform_location(gl, "shadowStrength").as_ref(), shadow_input.strength);
-							gl.uniform_1_f32(program.get_uniform_location(gl, "shadowTexelSize").as_ref(), 1.0 / shadow_input.resolution.max(1) as f32);
+							gl.uniform_1_f64(program.get_uniform_location(gl, "shadowEnabled").as_ref(), 1.0);
+							gl.uniform_1_f64(program.get_uniform_location(gl, "shadowStrength").as_ref(), shadow_input.strength);
+							gl.uniform_1_f64(program.get_uniform_location(gl, "shadowTexelSize").as_ref(), 1.0 / shadow_input.resolution.max(1) as f64);
 							gl.uniform_matrix_4_f32_slice(program.get_uniform_location(gl, "lightViewProjectionMatrix").as_ref(), false, &shadow_input.light_view_projection_matrix.elements);
 						}
 						None => {
-							gl.uniform_1_f32(program.get_uniform_location(gl, "shadowEnabled").as_ref(), 0.0);
+							gl.uniform_1_f64(program.get_uniform_location(gl, "shadowEnabled").as_ref(), 0.0);
 						}
 					}
 					self.upload_local_shadow_uniforms(gl, program);
@@ -2982,14 +2983,14 @@ impl ToonRenderer {
 			if let Some(local_shadow_input) = self.local_shadow_input.as_ref() {
 				for (slot, light) in local_shadow_input.light_list.iter().take(SHADOW_ATLAS_MAXIMUM_LIGHTS).enumerate() {
 					if light.light_index < TOON_MAXIMUM_POINT_LIGHTS {
-						slot_values[light.light_index] = (slot + 1) as f32;
+						slot_values[light.light_index] = ((slot + 1) as f64) as f32;
 					}
-					position_values[slot * 4..slot * 4 + 4].copy_from_slice(&[light.position[0], light.position[1], light.position[2], light.near]);
-					forward_values[slot * 4..slot * 4 + 4].copy_from_slice(&[light.forward[0], light.forward[1], light.forward[2], light.far]);
-					up_values[slot * 4..slot * 4 + 4].copy_from_slice(&[light.up[0], light.up[1], light.up[2], light.tangent]);
-					tile_values[slot] = light.first_tile as f32;
+					position_values[slot * 4..slot * 4 + 4].copy_from_slice(&[(light.position[0]) as f32, (light.position[1]) as f32, (light.position[2]) as f32, light.near as f32]);
+					forward_values[slot * 4..slot * 4 + 4].copy_from_slice(&[(light.forward[0]) as f32, (light.forward[1]) as f32, (light.forward[2]) as f32, light.far as f32]);
+					up_values[slot * 4..slot * 4 + 4].copy_from_slice(&[(light.up[0]) as f32, (light.up[1]) as f32, (light.up[2]) as f32, light.tangent as f32]);
+					tile_values[slot] = (light.first_tile as f64) as f32;
 				}
-				gl.uniform_4_f32(program.get_uniform_location(gl, "localShadowAtlas").as_ref(), local_shadow_input.grid_size, local_shadow_input.tile_size, local_shadow_input.texel_size, local_shadow_input.strength);
+				gl.uniform_4_f64(program.get_uniform_location(gl, "localShadowAtlas").as_ref(), local_shadow_input.grid_size, local_shadow_input.tile_size, local_shadow_input.texel_size, local_shadow_input.strength);
 			}
 			gl.uniform_1_f32_slice(program.get_uniform_location(gl, "pointLightShadowSlots").as_ref(), &slot_values);
 			gl.uniform_4_f32_slice(program.get_uniform_location(gl, "localShadowPositions").as_ref(), &position_values);
@@ -3022,9 +3023,9 @@ impl ToonRenderer {
 		let mut shade_color_values = [0.0f32; TOON_MAXIMUM_BAND_STEPS * 3];
 		let shade_stop_count = shade_ramp.positions.len().min(TOON_MAXIMUM_BAND_STEPS);
 		for stop_index in 0..shade_stop_count {
-			shade_position_values[stop_index] = shade_ramp.positions[stop_index];
-			shade_feather_values[stop_index] = shade_ramp.feathers[stop_index];
-			shade_color_values[stop_index * 3..stop_index * 3 + 3].copy_from_slice(&shade_ramp.colors[stop_index]);
+			shade_position_values[stop_index] = (shade_ramp.positions[stop_index]) as f32;
+			shade_feather_values[stop_index] = (shade_ramp.feathers[stop_index]) as f32;
+			shade_color_values[stop_index * 3..stop_index * 3 + 3].copy_from_slice(&shade_ramp.colors[stop_index].map(|value| value as f32));
 		}
 		let point_light_count = light_set.get_point_light_count();
 		let mut position_values = [0.0f32; TOON_MAXIMUM_POINT_LIGHTS * 4];
@@ -3033,40 +3034,40 @@ impl ToonRenderer {
 		let mut spot_values = [0.0f32; TOON_MAXIMUM_POINT_LIGHTS * 4];
 		let mut cone_values = [0.0f32; TOON_MAXIMUM_POINT_LIGHTS * 2];
 		for (light_index, point_light) in light_set.get_point_lights().iter().take(point_light_count).enumerate() {
-			position_values[light_index * 4..light_index * 4 + 4].copy_from_slice(&[point_light.position[0], point_light.position[1], point_light.position[2], point_light.range]);
-			color_values[light_index * 3..light_index * 3 + 3].copy_from_slice(&[point_light.color[0] * point_light.intensity, point_light.color[1] * point_light.intensity, point_light.color[2] * point_light.intensity]);
-			shape_values[light_index * 3..light_index * 3 + 3].copy_from_slice(&[point_light.decay, point_light.range_exponent, point_light.wrap]);
+			position_values[light_index * 4..light_index * 4 + 4].copy_from_slice(&[(point_light.position[0]) as f32, (point_light.position[1]) as f32, (point_light.position[2]) as f32, point_light.range as f32]);
+			color_values[light_index * 3..light_index * 3 + 3].copy_from_slice(&[(point_light.color[0] * point_light.intensity) as f32, (point_light.color[1] * point_light.intensity) as f32, (point_light.color[2] * point_light.intensity) as f32]);
+			shape_values[light_index * 3..light_index * 3 + 3].copy_from_slice(&[point_light.decay as f32, point_light.range_exponent as f32, point_light.wrap as f32]);
 			if let Some(direction) = point_light.direction {
 				let (cone_scale, cone_offset) = read_spot_cone(point_light.inner_cone_angle, point_light.outer_cone_angle);
-				spot_values[light_index * 4..light_index * 4 + 4].copy_from_slice(&[direction[0], direction[1], direction[2], 1.0]);
-				cone_values[light_index * 2..light_index * 2 + 2].copy_from_slice(&[cone_scale, cone_offset]);
+				spot_values[light_index * 4..light_index * 4 + 4].copy_from_slice(&[(direction[0]) as f32, (direction[1]) as f32, (direction[2]) as f32, 1.0]);
+				cone_values[light_index * 2..light_index * 2 + 2].copy_from_slice(&[cone_scale as f32, cone_offset as f32]);
 			}
 		}
 		unsafe {
-			gl.uniform_3_f32(program.get_uniform_location(gl, "sunDirection").as_ref(), sun_direction[0], sun_direction[1], sun_direction[2]);
-			gl.uniform_3_f32(program.get_uniform_location(gl, "sunColor").as_ref(), sun_color[0], sun_color[1], sun_color[2]);
-			gl.uniform_3_f32(program.get_uniform_location(gl, "skyColor").as_ref(), sky_color[0], sky_color[1], sky_color[2]);
-			gl.uniform_3_f32(program.get_uniform_location(gl, "groundColor").as_ref(), ground_color[0], ground_color[1], ground_color[2]);
-			gl.uniform_3_f32(program.get_uniform_location(gl, "fillDirection").as_ref(), fill_direction[0], fill_direction[1], fill_direction[2]);
-			gl.uniform_3_f32(program.get_uniform_location(gl, "fillColor").as_ref(), fill_color[0], fill_color[1], fill_color[2]);
-			gl.uniform_4_f32(program.get_uniform_location(gl, "rimLight").as_ref(), rim_light.color[0], rim_light.color[1], rim_light.color[2], rim_light.power);
-			gl.uniform_2_f32(program.get_uniform_location(gl, "rimShape").as_ref(), rim_light.feather, rim_light.light_mask);
+			gl.uniform_3_f64(program.get_uniform_location(gl, "sunDirection").as_ref(), sun_direction[0], sun_direction[1], sun_direction[2]);
+			gl.uniform_3_f64(program.get_uniform_location(gl, "sunColor").as_ref(), sun_color[0], sun_color[1], sun_color[2]);
+			gl.uniform_3_f64(program.get_uniform_location(gl, "skyColor").as_ref(), sky_color[0], sky_color[1], sky_color[2]);
+			gl.uniform_3_f64(program.get_uniform_location(gl, "groundColor").as_ref(), ground_color[0], ground_color[1], ground_color[2]);
+			gl.uniform_3_f64(program.get_uniform_location(gl, "fillDirection").as_ref(), fill_direction[0], fill_direction[1], fill_direction[2]);
+			gl.uniform_3_f64(program.get_uniform_location(gl, "fillColor").as_ref(), fill_color[0], fill_color[1], fill_color[2]);
+			gl.uniform_4_f64(program.get_uniform_location(gl, "rimLight").as_ref(), rim_light.color[0], rim_light.color[1], rim_light.color[2], rim_light.power);
+			gl.uniform_2_f64(program.get_uniform_location(gl, "rimShape").as_ref(), rim_light.feather, rim_light.light_mask);
 			let shade_rim_light = light_set.get_shade_rim_light();
-			gl.uniform_4_f32(program.get_uniform_location(gl, "shadeRimLight").as_ref(), shade_rim_light.color[0], shade_rim_light.color[1], shade_rim_light.color[2], shade_rim_light.power);
+			gl.uniform_4_f64(program.get_uniform_location(gl, "shadeRimLight").as_ref(), shade_rim_light.color[0], shade_rim_light.color[1], shade_rim_light.color[2], shade_rim_light.power);
 			let light_color_usage = light_set.get_light_color_usage();
 			let read_usage = |is_used: bool| if is_used { 1.0 } else { 0.0 };
-			gl.uniform_4_f32(program.get_uniform_location(gl, "lightColorUsage").as_ref(), read_usage(light_color_usage.base), read_usage(light_color_usage.shade), read_usage(light_color_usage.highlight), read_usage(light_color_usage.rim));
-			gl.uniform_3_f32(program.get_uniform_location(gl, "lightColorUsageExtra").as_ref(), read_usage(light_color_usage.shade_rim), read_usage(light_color_usage.matcap), read_usage(light_color_usage.angel_ring));
-			gl.uniform_3_f32(program.get_uniform_location(gl, "specularLight").as_ref(), specular.strength, specular.exponent, specular.feather);
-			gl.uniform_3_f32(program.get_uniform_location(gl, "specularColor").as_ref(), specular.color[0], specular.color[1], specular.color[2]);
-			gl.uniform_1_f32(program.get_uniform_location(gl, "energyNormalized").as_ref(), if light_set.get_light_model().is_energy_normalized { 1.0 } else { 0.0 });
-			gl.uniform_1_f32(program.get_uniform_location(gl, "lightIntensityLimit").as_ref(), if light_set.is_light_intensity_limited() { 1.0 } else { 0.0 });
+			gl.uniform_4_f64(program.get_uniform_location(gl, "lightColorUsage").as_ref(), read_usage(light_color_usage.base), read_usage(light_color_usage.shade), read_usage(light_color_usage.highlight), read_usage(light_color_usage.rim));
+			gl.uniform_3_f64(program.get_uniform_location(gl, "lightColorUsageExtra").as_ref(), read_usage(light_color_usage.shade_rim), read_usage(light_color_usage.matcap), read_usage(light_color_usage.angel_ring));
+			gl.uniform_3_f64(program.get_uniform_location(gl, "specularLight").as_ref(), specular.strength, specular.exponent, specular.feather);
+			gl.uniform_3_f64(program.get_uniform_location(gl, "specularColor").as_ref(), specular.color[0], specular.color[1], specular.color[2]);
+			gl.uniform_1_f64(program.get_uniform_location(gl, "energyNormalized").as_ref(), if light_set.get_light_model().is_energy_normalized { 1.0 } else { 0.0 });
+			gl.uniform_1_f64(program.get_uniform_location(gl, "lightIntensityLimit").as_ref(), if light_set.is_light_intensity_limited() { 1.0 } else { 0.0 });
 			gl.uniform_1_i32(program.get_uniform_location(gl, "shadeStopCount").as_ref(), shade_stop_count as i32);
 			gl.uniform_1_f32_slice(program.get_uniform_location(gl, "shadeStopPositions").as_ref(), &shade_position_values);
 			gl.uniform_1_f32_slice(program.get_uniform_location(gl, "shadeStopFeathers").as_ref(), &shade_feather_values);
 			gl.uniform_3_f32_slice(program.get_uniform_location(gl, "shadeStopColors").as_ref(), &shade_color_values);
-			gl.uniform_1_f32(program.get_uniform_location(gl, "shadeHalfLambert").as_ref(), if shade_ramp.is_half_lambert { 1.0 } else { 0.0 });
-			gl.uniform_1_f32(program.get_uniform_location(gl, "rampTextureEnabled").as_ref(), if light_set.get_ramp_texture().is_some() { 1.0 } else { 0.0 });
+			gl.uniform_1_f64(program.get_uniform_location(gl, "shadeHalfLambert").as_ref(), if shade_ramp.is_half_lambert { 1.0 } else { 0.0 });
+			gl.uniform_1_f64(program.get_uniform_location(gl, "rampTextureEnabled").as_ref(), if light_set.get_ramp_texture().is_some() { 1.0 } else { 0.0 });
 			gl.uniform_1_i32(program.get_uniform_location(gl, "pointLightCount").as_ref(), point_light_count as i32);
 			gl.uniform_4_f32_slice(program.get_uniform_location(gl, "pointLightPositions").as_ref(), &position_values);
 			gl.uniform_3_f32_slice(program.get_uniform_location(gl, "pointLightColors").as_ref(), &color_values);
@@ -3079,11 +3080,11 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 그리기마다의 공용 유니폼 올리기. (모형 행렬, 뼈대, 인스턴싱 0 아님, 1 인스턴스 행렬과 틴트, 2 인스턴스 틴트만)
 	//==============================================================================
-	fn upload_draw_uniforms(gl: &glow::Context, program: &ShaderProgram, model_matrix: &Matrix4, is_skinned: bool, instanced_mode: f32, joint_matrices: Option<&[f32]>) {
+	fn upload_draw_uniforms(gl: &glow::Context, program: &ShaderProgram, model_matrix: &Matrix4, is_skinned: bool, instanced_mode: f64, joint_matrices: Option<&[f32]>) {
 		unsafe {
 			gl.uniform_matrix_4_f32_slice(program.get_uniform_location(gl, "modelMatrix").as_ref(), false, &model_matrix.elements);
-			gl.uniform_1_f32(program.get_uniform_location(gl, "instanced").as_ref(), instanced_mode);
-			gl.uniform_1_f32(program.get_uniform_location(gl, "skinned").as_ref(), if is_skinned { 1.0 } else { 0.0 });
+			gl.uniform_1_f64(program.get_uniform_location(gl, "instanced").as_ref(), instanced_mode);
+			gl.uniform_1_f64(program.get_uniform_location(gl, "skinned").as_ref(), if is_skinned { 1.0 } else { 0.0 });
 			if let (true, Some(joint_matrices)) = (is_skinned, joint_matrices) {
 				let joint_float_count = joint_matrices.len().min(TOON_MAXIMUM_JOINTS * 16) / 16 * 16;
 				gl.uniform_matrix_4_f32_slice(program.get_uniform_location(gl, "jointMatrices").as_ref(), false, &joint_matrices[..joint_float_count]);
@@ -3123,7 +3124,7 @@ impl ToonRenderer {
 				};
 				if !instance_buffer.layout.has_tint() {
 					unsafe {
-						gl.vertex_attrib_4_f32(INSTANCE_TINT_LOCATION, 1.0, 1.0, 1.0, 1.0);
+						gl.vertex_attrib_4_f64(INSTANCE_TINT_LOCATION, 1.0, 1.0, 1.0, 1.0);
 					}
 				}
 				(body_vertex_array, outline_vertex_array, if instance_buffer.layout.has_matrix() { 1.0 } else { 2.0 })
@@ -3216,14 +3217,14 @@ impl ToonRenderer {
 			ToonRenderer::upload_draw_uniforms(gl, outline_program, model_matrix, is_skinned, instanced_mode, options.joint_matrices);
 			let outline_color = options.outline_color.unwrap_or(self.outline_color);
 			unsafe {
-				gl.uniform_4_f32(outline_program.get_uniform_location(gl, "outlineColor").as_ref(), outline_color[0], outline_color[1], outline_color[2], outline_color[3]);
-				gl.uniform_1_f32(outline_program.get_uniform_location(gl, "outlineWidthScale").as_ref(), options.outline_width_scale.max(0.0));
-				gl.uniform_1_f32(outline_program.get_uniform_location(gl, "outlineOffsetZ").as_ref(), options.outline_offset_z);
+				gl.uniform_4_f64(outline_program.get_uniform_location(gl, "outlineColor").as_ref(), outline_color[0], outline_color[1], outline_color[2], outline_color[3]);
+				gl.uniform_1_f64(outline_program.get_uniform_location(gl, "outlineWidthScale").as_ref(), options.outline_width_scale.max(0.0));
+				gl.uniform_1_f64(outline_program.get_uniform_location(gl, "outlineOffsetZ").as_ref(), options.outline_offset_z);
 				let outline_light_set = options.light_set.unwrap_or(&self.light_set);
 				let outline_light_color = if outline_light_set.get_light_color_usage().outline { read_outline_light_color(outline_light_set.get_sun_color()) } else { [1.0; 3] };
-				gl.uniform_3_f32(outline_program.get_uniform_location(gl, "outlineLightColor").as_ref(), outline_light_color[0], outline_light_color[1], outline_light_color[2]);
-				gl.uniform_1_f32(outline_program.get_uniform_location(gl, "alpha").as_ref(), options.alpha);
-				gl.uniform_1_f32(outline_program.get_uniform_location(gl, "premultipliedOutput").as_ref(), premultiplied_output);
+				gl.uniform_3_f64(outline_program.get_uniform_location(gl, "outlineLightColor").as_ref(), outline_light_color[0], outline_light_color[1], outline_light_color[2]);
+				gl.uniform_1_f64(outline_program.get_uniform_location(gl, "alpha").as_ref(), options.alpha);
+				gl.uniform_1_f64(outline_program.get_uniform_location(gl, "premultipliedOutput").as_ref(), premultiplied_output);
 			}
 			if let Some(on_before_draw) = options.on_before_draw {
 				on_before_draw(outline_program, gl, ToonProgramKind::Outline);
@@ -3262,25 +3263,25 @@ impl ToonRenderer {
 		let decal_uv_transform = options.decal_uv_transform;
 		let enabled = |texture: Option<GlTexture>| if texture.is_some() { 1.0 } else { 0.0 };
 		unsafe {
-			gl.uniform_4_f32(solid_program.get_uniform_location(gl, "tintColor").as_ref(), tint_color[0], tint_color[1], tint_color[2], tint_color[3]);
-			gl.uniform_1_f32(solid_program.get_uniform_location(gl, "tintAmount").as_ref(), options.tint_amount.map(|tint_amount| tint_amount.clamp(0.0, 1.0)).unwrap_or(-1.0));
-			gl.uniform_1_f32(solid_program.get_uniform_location(gl, "alpha").as_ref(), options.alpha);
-			gl.uniform_1_f32(solid_program.get_uniform_location(gl, "glowScale").as_ref(), options.glow_scale);
-			gl.uniform_1_f32(solid_program.get_uniform_location(gl, "colorScale").as_ref(), options.color_scale);
-			gl.uniform_4_f32(solid_program.get_uniform_location(gl, "emissiveColor").as_ref(), emissive_color[0], emissive_color[1], emissive_color[2], options.emissive_intensity);
-			gl.uniform_1_f32(solid_program.get_uniform_location(gl, "softEdge").as_ref(), options.soft_edge);
-			gl.uniform_1_f32(solid_program.get_uniform_location(gl, "alphaCutoff").as_ref(), options.alpha_cutoff);
-			gl.uniform_1_f32(solid_program.get_uniform_location(gl, "premultipliedOutput").as_ref(), premultiplied_output);
-			gl.uniform_3_f32(solid_program.get_uniform_location(gl, "textureEnabled").as_ref(), enabled(options.base_color_texture), enabled(options.emissive_texture), enabled(options.decal_texture));
-			gl.uniform_4_f32(solid_program.get_uniform_location(gl, "uvTransform").as_ref(), uv_transform[0], uv_transform[1], uv_transform[2], uv_transform[3]);
-			gl.uniform_4_f32(solid_program.get_uniform_location(gl, "decalUvTransform").as_ref(), decal_uv_transform[0], decal_uv_transform[1], decal_uv_transform[2], decal_uv_transform[3]);
-			gl.uniform_4_f32(solid_program.get_uniform_location(gl, "decalColor").as_ref(), decal_color[0], decal_color[1], decal_color[2], options.decal_emission);
-			gl.uniform_1_f32(solid_program.get_uniform_location(gl, "receivesShadow").as_ref(), if options.receives_shadow { 1.0 } else { 0.0 });
-			gl.uniform_1_f32(solid_program.get_uniform_location(gl, "shadeOffset").as_ref(), options.shade_offset);
-			gl.uniform_2_f32(solid_program.get_uniform_location(gl, "highlightScale").as_ref(), options.specular_scale.max(0.0), options.rim_scale.max(0.0));
-			gl.uniform_3_f32(solid_program.get_uniform_location(gl, "matcapSettings").as_ref(), enabled(options.matcap_texture), options.matcap_strength, if options.matcap_blend == ToonMatcapBlend::Add { 1.0 } else { 0.0 });
-			gl.uniform_4_f32(solid_program.get_uniform_location(gl, "angelRingSettings").as_ref(), enabled(options.angel_ring_texture), options.angel_ring_offset_u, options.angel_ring_offset_v, if options.is_angel_ring_alpha { 1.0 } else { 0.0 });
-			gl.uniform_3_f32(solid_program.get_uniform_location(gl, "angelRingColor").as_ref(), options.angel_ring_color[0], options.angel_ring_color[1], options.angel_ring_color[2]);
+			gl.uniform_4_f64(solid_program.get_uniform_location(gl, "tintColor").as_ref(), tint_color[0], tint_color[1], tint_color[2], tint_color[3]);
+			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "tintAmount").as_ref(), options.tint_amount.map(|tint_amount| tint_amount.clamp(0.0, 1.0)).unwrap_or(-1.0));
+			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "alpha").as_ref(), options.alpha);
+			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "glowScale").as_ref(), options.glow_scale);
+			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "colorScale").as_ref(), options.color_scale);
+			gl.uniform_4_f64(solid_program.get_uniform_location(gl, "emissiveColor").as_ref(), emissive_color[0], emissive_color[1], emissive_color[2], options.emissive_intensity);
+			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "softEdge").as_ref(), options.soft_edge);
+			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "alphaCutoff").as_ref(), options.alpha_cutoff);
+			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "premultipliedOutput").as_ref(), premultiplied_output);
+			gl.uniform_3_f64(solid_program.get_uniform_location(gl, "textureEnabled").as_ref(), enabled(options.base_color_texture), enabled(options.emissive_texture), enabled(options.decal_texture));
+			gl.uniform_4_f64(solid_program.get_uniform_location(gl, "uvTransform").as_ref(), uv_transform[0], uv_transform[1], uv_transform[2], uv_transform[3]);
+			gl.uniform_4_f64(solid_program.get_uniform_location(gl, "decalUvTransform").as_ref(), decal_uv_transform[0], decal_uv_transform[1], decal_uv_transform[2], decal_uv_transform[3]);
+			gl.uniform_4_f64(solid_program.get_uniform_location(gl, "decalColor").as_ref(), decal_color[0], decal_color[1], decal_color[2], options.decal_emission);
+			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "receivesShadow").as_ref(), if options.receives_shadow { 1.0 } else { 0.0 });
+			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "shadeOffset").as_ref(), options.shade_offset);
+			gl.uniform_2_f64(solid_program.get_uniform_location(gl, "highlightScale").as_ref(), options.specular_scale.max(0.0), options.rim_scale.max(0.0));
+			gl.uniform_3_f64(solid_program.get_uniform_location(gl, "matcapSettings").as_ref(), enabled(options.matcap_texture), options.matcap_strength, if options.matcap_blend == ToonMatcapBlend::Add { 1.0 } else { 0.0 });
+			gl.uniform_4_f64(solid_program.get_uniform_location(gl, "angelRingSettings").as_ref(), enabled(options.angel_ring_texture), options.angel_ring_offset_u, options.angel_ring_offset_v, if options.is_angel_ring_alpha { 1.0 } else { 0.0 });
+			gl.uniform_3_f64(solid_program.get_uniform_location(gl, "angelRingColor").as_ref(), options.angel_ring_color[0], options.angel_ring_color[1], options.angel_ring_color[2]);
 			gl.active_texture(glow::TEXTURE0 + SHADOW_TEXTURE_UNIT);
 			gl.bind_texture(glow::TEXTURE_2D, Some(self.shadow_input.map(|shadow_input| shadow_input.depth_texture).unwrap_or(self.empty_shadow_texture)));
 		}
@@ -3330,7 +3331,7 @@ impl ToonRenderer {
 	/// - `sky_color`: 위에서 오는 바탕빛의 선형 색.
 	/// - `ground_color`: 아래에서 오는 바탕빛의 선형 색.
 	//==============================================================================
-	pub fn set_light(&mut self, sun_direction: [f32; 3], sun_color: [f32; 3], sky_color: [f32; 3], ground_color: [f32; 3]) {
+	pub fn set_light(&mut self, sun_direction: [f64; 3], sun_color: [f64; 3], sky_color: [f64; 3], ground_color: [f64; 3]) {
 		self.light_set.set_light(sun_direction, sun_color, sky_color, ground_color);
 	}
 
@@ -3340,7 +3341,7 @@ impl ToonRenderer {
 	/// # 인자
 	/// - `sun_direction`: 빛이 나아가는 방향. ([x, y, z])
 	//==============================================================================
-	pub fn set_sun_direction(&mut self, sun_direction: [f32; 3]) {
+	pub fn set_sun_direction(&mut self, sun_direction: [f64; 3]) {
 		self.light_set.set_sun_direction(sun_direction);
 	}
 
@@ -3350,7 +3351,7 @@ impl ToonRenderer {
 	/// # 돌려줌
 	/// 해가 비추는 방향. ([x, y, z])
 	//==============================================================================
-	pub fn get_sun_direction(&self) -> [f32; 3] {
+	pub fn get_sun_direction(&self) -> [f64; 3] {
 		self.light_set.get_sun_direction()
 	}
 
@@ -3361,7 +3362,7 @@ impl ToonRenderer {
 	/// - `fill_direction`: 빛이 나아가는 방향. ([x, y, z])
 	/// - `fill_color`: 선형 색. (0 이면 없음)
 	//==============================================================================
-	pub fn set_fill_light(&mut self, fill_direction: [f32; 3], fill_color: [f32; 3]) {
+	pub fn set_fill_light(&mut self, fill_direction: [f64; 3], fill_color: [f64; 3]) {
 		self.light_set.set_fill_light(fill_direction, fill_color);
 	}
 
@@ -3374,7 +3375,7 @@ impl ToonRenderer {
 	/// - `rim_feather`: 0 단단한 테 ~ 1 부드러운 테.
 	/// - `rim_light_mask`: 1 이면 해를 받는 쪽에만.
 	//==============================================================================
-	pub fn set_rim_light(&mut self, rim_color: [f32; 3], rim_power: f32, rim_feather: f32, rim_light_mask: f32) {
+	pub fn set_rim_light(&mut self, rim_color: [f64; 3], rim_power: f64, rim_feather: f64, rim_light_mask: f64) {
 		self.light_set.set_rim_light(rim_color, rim_power, rim_feather, rim_light_mask);
 	}
 
@@ -3387,7 +3388,7 @@ impl ToonRenderer {
 	/// - `specular_feather`: 0 단단한 점 ~ 1 부드러운 빛.
 	/// - `specular_color`: 선형 색.
 	//==============================================================================
-	pub fn set_specular(&mut self, specular_strength: f32, specular_exponent: f32, specular_feather: f32, specular_color: [f32; 3]) {
+	pub fn set_specular(&mut self, specular_strength: f64, specular_exponent: f64, specular_feather: f64, specular_color: [f64; 3]) {
 		self.light_set.set_specular(specular_strength, specular_exponent, specular_feather, specular_color);
 	}
 
@@ -3430,7 +3431,7 @@ impl ToonRenderer {
 	/// - `feathers`: 칸마다의 부드러움.
 	/// - `is_half_lambert`: 반 램버트로 셀지.
 	//==============================================================================
-	pub fn set_shade_ramp(&mut self, positions: &[f32], colors: &[[f32; 3]], feathers: &[f32], is_half_lambert: bool) {
+	pub fn set_shade_ramp(&mut self, positions: &[f64], colors: &[[f64; 3]], feathers: &[f64], is_half_lambert: bool) {
 		self.light_set.set_shade_ramp(positions, colors, feathers, is_half_lambert);
 	}
 
@@ -3459,7 +3460,7 @@ impl ToonRenderer {
 	/// - `values`: 칸마다의 받는 몫.
 	/// - `is_half_lambert`: 반 램버트로 셀지.
 	//==============================================================================
-	pub fn set_band_ramp(&mut self, thresholds: &[f32], values: &[f32], is_half_lambert: bool) {
+	pub fn set_band_ramp(&mut self, thresholds: &[f64], values: &[f64], is_half_lambert: bool) {
 		self.light_set.set_band_ramp(thresholds, values, is_half_lambert);
 	}
 
@@ -3490,7 +3491,7 @@ impl ToonRenderer {
 	/// # 인자
 	/// - `outline_color`: [r, g, b, a] (sRGB 0 ~ 1 과 알파)
 	//==============================================================================
-	pub fn set_outline_color(&mut self, outline_color: [f32; 4]) {
+	pub fn set_outline_color(&mut self, outline_color: [f64; 4]) {
 		self.outline_color = outline_color;
 		self.frame_serial += 1;
 	}
@@ -3504,7 +3505,7 @@ impl ToonRenderer {
 	/// - `minimum_scale`: 가장 작은 배.
 	/// - `maximum_scale`: 가장 큰 배.
 	//==============================================================================
-	pub fn set_outline_distance_scale(&mut self, reference_distance: f32, minimum_scale: f32, maximum_scale: f32) {
+	pub fn set_outline_distance_scale(&mut self, reference_distance: f64, minimum_scale: f64, maximum_scale: f64) {
 		let minimum_scale = minimum_scale.max(0.0);
 		self.outline_distance_scale = [reference_distance.max(0.0), minimum_scale, maximum_scale.max(minimum_scale)];
 		self.frame_serial += 1;
@@ -3517,7 +3518,7 @@ impl ToonRenderer {
 	/// - `near_distance`: 지은 굵기 그대로인 거리.
 	/// - `far_distance`: 굵기가 0 이 되는 거리.
 	//==============================================================================
-	pub fn set_outline_fade_distance(&mut self, near_distance: f32, far_distance: f32) {
+	pub fn set_outline_fade_distance(&mut self, near_distance: f64, far_distance: f64) {
 		self.outline_fade_distance = [near_distance.max(0.0), far_distance.max(0.0)];
 		self.frame_serial += 1;
 	}
@@ -3528,7 +3529,7 @@ impl ToonRenderer {
 	/// # 돌려줌
 	/// [가까운 거리, 먼 거리]
 	//==============================================================================
-	pub fn get_outline_fade_distance(&self) -> [f32; 2] {
+	pub fn get_outline_fade_distance(&self) -> [f64; 2] {
 		self.outline_fade_distance
 	}
 
@@ -3539,11 +3540,11 @@ impl ToonRenderer {
 	/// - `shadow_atlas`: ShadowAtlas 나 None.
 	/// - `strength`: 그림자 세기. (0 ~ 1)
 	//==============================================================================
-	pub fn set_local_shadows(&mut self, shadow_atlas: Option<&ShadowAtlas>, strength: f32) {
+	pub fn set_local_shadows(&mut self, shadow_atlas: Option<&ShadowAtlas>, strength: f64) {
 		self.frame_serial += 1;
 		self.local_shadow_input = shadow_atlas.map(|shadow_atlas| {
-			let resolution = shadow_atlas.get_resolution().max(1) as f32;
-			ToonLocalShadowInput { depth_texture: shadow_atlas.get_depth_texture(), light_list: shadow_atlas.get_lights().to_vec(), grid_size: shadow_atlas.get_grid_size() as f32, tile_size: shadow_atlas.get_tile_size() as f32 / resolution, texel_size: 1.0 / resolution, strength: strength.clamp(0.0, 1.0) }
+			let resolution = shadow_atlas.get_resolution().max(1) as f64;
+			ToonLocalShadowInput { depth_texture: shadow_atlas.get_depth_texture(), light_list: shadow_atlas.get_lights().to_vec(), grid_size: shadow_atlas.get_grid_size() as f64, tile_size: shadow_atlas.get_tile_size() as f64 / resolution, texel_size: 1.0 / resolution, strength: strength.clamp(0.0, 1.0) }
 		});
 	}
 
@@ -3574,7 +3575,7 @@ impl ToonRenderer {
 	/// - `shade_rim_color`: 더할 선형 색.
 	/// - `shade_rim_power`: 거듭제곱. (0 이면 없음)
 	//==============================================================================
-	pub fn set_shade_rim_light(&mut self, shade_rim_color: [f32; 3], shade_rim_power: f32) {
+	pub fn set_shade_rim_light(&mut self, shade_rim_color: [f64; 3], shade_rim_power: f64) {
 		self.light_set.set_shade_rim_light(shade_rim_color, shade_rim_power);
 	}
 
@@ -3584,7 +3585,7 @@ impl ToonRenderer {
 	/// # 돌려줌
 	/// [기준 거리, 가장 작은 배, 가장 큰 배]
 	//==============================================================================
-	pub fn get_outline_distance_scale(&self) -> [f32; 3] {
+	pub fn get_outline_distance_scale(&self) -> [f64; 3] {
 		self.outline_distance_scale
 	}
 
@@ -3606,7 +3607,7 @@ impl ToonRenderer {
 	/// - `shadow_map`: 받을 ShadowMap. (None 이면 그림자를 받지 않는다)
 	/// - `strength`: 그림자 세기 0 ~ 1.
 	//==============================================================================
-	pub fn set_shadow(&mut self, shadow_map: Option<&ShadowMap>, strength: f32) {
+	pub fn set_shadow(&mut self, shadow_map: Option<&ShadowMap>, strength: f64) {
 		self.frame_serial += 1;
 		self.shadow_input = shadow_map.map(|shadow_map| {
 			ToonShadowInput { depth_texture: shadow_map.get_depth_texture(), light_view_projection_matrix: *shadow_map.get_light_view_projection_matrix(), resolution: shadow_map.get_resolution(), strength }
@@ -3745,8 +3746,8 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn camera_roll_matches_tilted_camera() {
-		let roll = 0.3f32;
-		let rotation = [roll.cos(), -roll.sin(), 0.0, roll.sin(), roll.cos(), 0.0, 0.0, 0.0, 1.0];
+		let roll = 0.3f64;
+		let rotation = [roll.cos(), -roll.sin(), 0.0, roll.sin(), roll.cos(), 0.0, 0.0, 0.0, 1.0].map(|value: f64| value as f32);
 		assert!((read_camera_roll(&rotation, false) + roll).abs() < 0.0001);
 		assert!(read_camera_roll(&[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0], false).abs() < 0.0001);
 		assert_eq!(read_camera_roll(&[1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0], false), 0.0);
@@ -3778,7 +3779,7 @@ mod tests {
 		let mut view_projection_matrix = Matrix4::create_perspective(0.8, 1.0, 0.1, 100.0);
 		view_projection_matrix.multiply(&view_matrix);
 		let planes = extract_frustum_planes(&view_projection_matrix);
-		let is_inside = |point: [f32; 3], radius: f32| planes.iter().all(|plane| plane[0] * point[0] + plane[1] * point[1] + plane[2] * point[2] + plane[3] >= -radius);
+		let is_inside = |point: [f64; 3], radius: f64| planes.iter().all(|plane| plane[0] * point[0] + plane[1] * point[1] + plane[2] * point[2] + plane[3] >= -radius);
 		assert!(is_inside([0.0, 0.0, 0.0], 1.0));
 		assert!(!is_inside([0.0, 0.0, 20.0], 1.0));
 		assert!(!is_inside([50.0, 0.0, 0.0], 1.0));

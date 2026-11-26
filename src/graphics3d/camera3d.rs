@@ -21,7 +21,7 @@ use crate::base::vector2::Vector2;
 use crate::base::vector3::Vector3;
 
 /// 카메라 앞으로 칠 가장 작은 깊이. (이보다 가까우면 투영하지 않는다)
-const MINIMUM_FRONT_DEPTH: f32 = 0.0001;
+const MINIMUM_FRONT_DEPTH: f64 = 0.0001;
 
 //==============================================================================
 /// 투영한 점. (view_rect 의 좌표, 카메라 앞 깊이, 눈의 면보다 앞인지, 앞이 아니면 x, y 는 0)
@@ -42,11 +42,11 @@ const MINIMUM_FRONT_DEPTH: f32 = 0.0001;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ProjectedPoint {
 	/// view_rect 좌표의 가로 자리. (앞이 아니면 0)
-	pub x: f32,
+	pub x: f64,
 	/// view_rect 좌표의 세로 자리. (위가 0 이고 아래로 늘어남, 앞이 아니면 0)
-	pub y: f32,
+	pub y: f64,
 	/// 카메라 앞 깊이. (보는 쪽으로 잰 거리, 눈의 면보다 뒤면 음수, read_view_depth 와 같다)
-	pub depth: f32,
+	pub depth: f64,
 	/// 눈의 면보다 앞인지. (깊이가 0.0001 이상이고 클립 w 가 0 이 아니면 true)
 	pub is_in_front: bool,
 }
@@ -90,11 +90,11 @@ struct CameraMatrices {
 #[derive(Clone, Debug)]
 pub struct Camera3D {
 	is_orthographic: bool,
-	field_of_view_radian: f32,
-	orthographic_height: f32,
-	aspect_ratio: f32,
-	near_distance: f32,
-	far_distance: f32,
+	field_of_view_radian: f64,
+	orthographic_height: f64,
+	aspect_ratio: f64,
+	near_distance: f64,
+	far_distance: f64,
 	eye_position: Vector3,
 	target_position: Vector3,
 	up_direction: Vector3,
@@ -147,7 +147,7 @@ impl Camera3D {
 	/// - `near_distance`: 가까운 거리. (카메라 앞, 월드 단위)
 	/// - `far_distance`: 먼 거리. (월드 단위)
 	//==============================================================================
-	pub fn set_perspective(&mut self, field_of_view_radian: f32, near_distance: f32, far_distance: f32) {
+	pub fn set_perspective(&mut self, field_of_view_radian: f64, near_distance: f64, far_distance: f64) {
 		self.clear_raw_matrices();
 		self.is_orthographic = false;
 		self.field_of_view_radian = field_of_view_radian;
@@ -181,7 +181,7 @@ impl Camera3D {
 	/// assert!(projected_point.y.abs() < 0.01);
 	/// ```
 	//==============================================================================
-	pub fn set_orthographic(&mut self, orthographic_height: f32, near_distance: f32, far_distance: f32) {
+	pub fn set_orthographic(&mut self, orthographic_height: f64, near_distance: f64, far_distance: f64) {
 		self.clear_raw_matrices();
 		self.is_orthographic = true;
 		self.orthographic_height = orthographic_height;
@@ -206,7 +206,7 @@ impl Camera3D {
 	/// # 인자
 	/// - `aspect_ratio`: 가로 세로 비. (너비 / 높이, NaN 이나 0 이하는 무시한다)
 	//==============================================================================
-	pub fn set_aspect_ratio(&mut self, aspect_ratio: f32) {
+	pub fn set_aspect_ratio(&mut self, aspect_ratio: f64) {
 		if aspect_ratio.is_nan() || aspect_ratio <= 0.0 || aspect_ratio == self.aspect_ratio {
 			return;
 		}
@@ -220,7 +220,7 @@ impl Camera3D {
 	/// # 돌려줌
 	/// 가로 세로 비. (너비 / 높이, 기본 1)
 	//==============================================================================
-	pub fn get_aspect_ratio(&self) -> f32 {
+	pub fn get_aspect_ratio(&self) -> f64 {
 		self.aspect_ratio
 	}
 
@@ -230,7 +230,7 @@ impl Camera3D {
 	/// # 돌려줌
 	/// 세로 시야각. (라디안, 기본 0.8, 원 행렬을 써도 마지막으로 준 값)
 	//==============================================================================
-	pub fn get_field_of_view(&self) -> f32 {
+	pub fn get_field_of_view(&self) -> f64 {
 		self.field_of_view_radian
 	}
 
@@ -240,7 +240,7 @@ impl Camera3D {
 	/// # 돌려줌
 	/// 보이는 높이. (월드 단위, 기본 10)
 	//==============================================================================
-	pub fn get_orthographic_height(&self) -> f32 {
+	pub fn get_orthographic_height(&self) -> f64 {
 		self.orthographic_height
 	}
 
@@ -250,7 +250,7 @@ impl Camera3D {
 	/// # 돌려줌
 	/// 가까운 거리. (월드 단위, 기본 0.1)
 	//==============================================================================
-	pub fn get_near_distance(&self) -> f32 {
+	pub fn get_near_distance(&self) -> f64 {
 		self.near_distance
 	}
 
@@ -260,7 +260,7 @@ impl Camera3D {
 	/// # 돌려줌
 	/// 먼 거리. (월드 단위, 기본 1000)
 	//==============================================================================
-	pub fn get_far_distance(&self) -> f32 {
+	pub fn get_far_distance(&self) -> f64 {
 		self.far_distance
 	}
 
@@ -340,7 +340,7 @@ impl Camera3D {
 	/// ```
 	//==============================================================================
 	pub fn set_matrices(&mut self, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
-		let view_elements = view_matrix.elements;
+		let view_elements = view_matrix.read_elements();
 		let translation_x = view_elements[12];
 		let translation_y = view_elements[13];
 		let translation_z = view_elements[14];
@@ -476,8 +476,8 @@ impl Camera3D {
 	/// assert!((camera.read_view_depth(0.0, 0.0, 0.0) - 10.0).abs() < 0.001);
 	/// ```
 	//==============================================================================
-	pub fn read_view_depth(&self, x: f32, y: f32, z: f32) -> f32 {
-		let view_elements = self.read_matrices().view_matrix.elements;
+	pub fn read_view_depth(&self, x: f64, y: f64, z: f64) -> f64 {
+		let view_elements = self.read_matrices().view_matrix.read_elements();
 		-(view_elements[2] * x + view_elements[6] * y + view_elements[10] * z + view_elements[14])
 	}
 
@@ -509,7 +509,7 @@ impl Camera3D {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn project_to_view(&self, x: f32, y: f32, z: f32, view_rect: Rect) -> ProjectedPoint {
+	pub fn project_to_view(&self, x: f64, y: f64, z: f64, view_rect: Rect) -> ProjectedPoint {
 		let clip = self.read_matrices().view_projection_matrix.transform_point(x, y, z);
 		let depth = self.read_view_depth(x, y, z);
 		if depth < MINIMUM_FRONT_DEPTH || clip.w.abs() < MINIMUM_FRONT_DEPTH {
@@ -551,7 +551,7 @@ impl Camera3D {
 	/// assert_eq!(camera.unproject_to_plane(Vector2::create(200.0, 0.0), 0.0, view_rect), None);
 	/// ```
 	//==============================================================================
-	pub fn unproject_to_plane(&self, view_position: Vector2, plane_height: f32, view_rect: Rect) -> Option<Vector3> {
+	pub fn unproject_to_plane(&self, view_position: Vector2, plane_height: f64, view_rect: Rect) -> Option<Vector3> {
 		if view_rect.size.x <= 0.0 || view_rect.size.y <= 0.0 {
 			return None;
 		}
@@ -603,7 +603,7 @@ mod tests {
 		assert!(projected.is_in_front);
 		assert!((projected.x - 300.0).abs() < 0.01);
 		assert!((projected.y - 150.0).abs() < 0.01);
-		assert!((projected.depth - 125.0f32.sqrt()).abs() < 0.001);
+		assert!((projected.depth - 125.0f64.sqrt()).abs() < 0.001);
 		let behind = camera.project_to_view(0.0, 5.0, 20.0, view_rect);
 		assert!(!behind.is_in_front);
 	}

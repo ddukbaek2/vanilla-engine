@@ -165,7 +165,7 @@ pub fn read_canvas_client_position() -> Vector2 {
 	match canvas {
 		Some(canvas) => {
 			let canvas_rect = canvas.get_bounding_client_rect();
-			Vector2::create(canvas_rect.left() as f32, canvas_rect.top() as f32)
+			Vector2::create(canvas_rect.left() as f64, canvas_rect.top() as f64)
 		}
 		None => {
 			Vector2::zero()
@@ -217,7 +217,7 @@ pub fn read_client_native_size() -> Option<Vector2> {
 	let window = web_sys::window()?;
 	let client_width = window.inner_width().ok()?.as_f64()?;
 	let client_height = window.inner_height().ok()?.as_f64()?;
-	Some(Vector2::create(client_width as f32, client_height as f32))
+	Some(Vector2::create(client_width as f64, client_height as f64))
 }
 
 thread_local! {
@@ -300,8 +300,8 @@ pub(crate) fn read_renderbuffer_sample_counts(internal_format: u32) -> Vec<i32> 
 /// # 돌려줌
 /// [위, 오른쪽, 아래, 왼쪽] 인셋. (CSS 픽셀, 읽지 못한 칸은 0)
 //==============================================================================
-pub fn read_safe_area_insets() -> [f32; 4] {
-	let read_insets = || -> Option<[f32; 4]> {
+pub fn read_safe_area_insets() -> [f64; 4] {
+	let read_insets = || -> Option<[f64; 4]> {
 		let window = web_sys::window()?;
 		let document = window.document()?;
 		let body = document.body()?;
@@ -316,13 +316,13 @@ pub fn read_safe_area_insets() -> [f32; 4] {
 			Some(probe_element)
 		})?;
 		let computed_style = window.get_computed_style(&probe_element).ok()??;
-		let read_padding = |property_name: &str| -> f32 {
+		let read_padding = |property_name: &str| -> f64 {
 			let value = crate::core::viewmanager::parse_leading_float(&computed_style.get_property_value(property_name).unwrap_or_default());
 			if value.is_nan() {
 				0.0
 			}
 			else {
-				value as f32
+				value as f64
 			}
 		};
 		Some([read_padding("padding-top"), read_padding("padding-right"), read_padding("padding-bottom"), read_padding("padding-left")])
@@ -725,7 +725,7 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 		dispatch_web_event(&web_application_cell_for_wheel, move |web_application| {
 			web_application.update_pointer_position(wheel_event.client_x() as f64, wheel_event.client_y() as f64);
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
-			input_manager.add_wheel_delta(wheel_event.delta_x() as f32, wheel_event.delta_y() as f32);
+			input_manager.add_wheel_delta(wheel_event.delta_x() as f64, wheel_event.delta_y() as f64);
 			input_manager.set_wheel_with_ctrl(wheel_event.ctrl_key());
 			input_manager.set_last_input_device(InputDevice::Mouse);
 		});
@@ -1019,7 +1019,7 @@ impl WebApplication {
 	fn read_canvas_native_position(&self, client_x: f64, client_y: f64) -> Option<Vector2> {
 		let canvas = self.engine_runner.engine.platform_window.as_ref()?;
 		let canvas_rect = canvas.get_bounding_client_rect();
-		Some(Vector2::create((client_x - canvas_rect.left()) as f32, (client_y - canvas_rect.top()) as f32))
+		Some(Vector2::create((client_x - canvas_rect.left()) as f64, (client_y - canvas_rect.top()) as f64))
 	}
 
 	//==============================================================================
@@ -1191,7 +1191,7 @@ impl WebApplication {
 			1.0
 		};
 		// 렌더 배율 상한을 건다. (상한이 바뀌어도 이 값이 달라져 다시 맞춘다)
-		let device_pixel_ratio = self.engine_runner.engine.get_view_manager().limit_render_pixel_ratio(device_pixel_ratio as f32) as f64;
+		let device_pixel_ratio = self.engine_runner.engine.get_view_manager().limit_render_pixel_ratio(device_pixel_ratio as f64) as f64;
 		let is_text_field_focused = is_text_field_focused();
 		let window_state = match self.window_state.as_mut() {
 			Some(window_state) => {
@@ -1252,7 +1252,7 @@ impl WebApplication {
 		let canvas_pixel_height = (canvas_height * device_pixel_ratio).round() as u32;
 		window_state.canvas.set_width(canvas_pixel_width);
 		window_state.canvas.set_height(canvas_pixel_height);
-		self.engine_runner.engine.get_view_manager_mut().calculate_view_rect(canvas_pixel_width, canvas_pixel_height, device_pixel_ratio as f32);
+		self.engine_runner.engine.get_view_manager_mut().calculate_view_rect(canvas_pixel_width, canvas_pixel_height, device_pixel_ratio as f64);
 		self.engine_runner.notify_scene_resize();
 	}
 }

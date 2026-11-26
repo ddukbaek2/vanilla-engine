@@ -120,7 +120,7 @@ struct ColorEntry {
 #[derive(Clone, Copy, Debug)]
 struct PendingRelease {
 	view_input_position: Vector2,
-	remain_seconds: f32,
+	remain_seconds: f64,
 }
 
 //==============================================================================
@@ -170,15 +170,15 @@ pub struct UIButton {
 	long_pressed_event: Option<Rc<RefCell<UIButtonEvent>>>,
 	hover_event: Option<Rc<RefCell<UIButtonEvent>>>,
 	is_press_tracking: bool,
-	minimum_pressed_seconds: f32,
-	pressed_elapsed_seconds: f32,
+	minimum_pressed_seconds: f64,
+	pressed_elapsed_seconds: f64,
 	pending_release: Option<PendingRelease>,
-	long_press_seconds: f32,
+	long_press_seconds: f64,
 	has_long_press_fired: bool,
 	pressed_tint_color: Color,
 	hover_tint_color: Color,
-	transition_duration: f32,
-	tint_progress: f32,
+	transition_duration: f64,
+	tint_progress: f64,
 	color_entries: Vec<ColorEntry>,
 	is_interactable: bool,
 	disabled_tint_color: Color,
@@ -435,7 +435,7 @@ impl UIButton {
 	/// 누름 추적과 미뤄 둔 뗌 갱신. (뗌을 처리해 클릭이 났으면 true)
 	/// - UIToggleButton 이 클릭을 받아 켜짐을 뒤집으려고 따로 부른다.
 	//==============================================================================
-	pub(crate) fn tick_press(&mut self, context: &mut ComponentContext, time_delta: f32) -> bool {
+	pub(crate) fn tick_press(&mut self, context: &mut ComponentContext, time_delta: f64) -> bool {
 		if self.is_color_target_collect_pending {
 			self.is_color_target_collect_pending = false;
 			self.collect_color_targets(context);
@@ -499,7 +499,7 @@ impl UIButton {
 	//==============================================================================
 	/// 틴트 트랜지션 갱신. (누르거나 올려 두면 차오르고, 아니면 빠진다. 사용 불가면 어두운 틴트)
 	//==============================================================================
-	pub(crate) fn update_tint_transition(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	pub(crate) fn update_tint_transition(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		if !self.get_interactable() {
 			self.apply_disabled_tint(context);
 			return;
@@ -594,7 +594,7 @@ impl UIButton {
 	//==============================================================================
 	/// 틴트 적용. (덮는 색은 알파만 차오르고, 원래 색은 틴트 색 쪽으로 보간한다)
 	//==============================================================================
-	pub(crate) fn apply_tint_progress(&mut self, context: &mut ComponentContext, progress: f32) {
+	pub(crate) fn apply_tint_progress(&mut self, context: &mut ComponentContext, progress: f64) {
 		let tint_color = if self.get_button_state() == ButtonState::Hover {
 			self.get_hover_tint_color()
 		}
@@ -832,7 +832,7 @@ impl UIButton {
 	/// # 돌려줌
 	/// 누른 뒤 지난 초. (tick 에서 쌓는다, 누르고 있지 않으면 0)
 	//==============================================================================
-	pub fn get_pressed_elapsed_seconds(&self) -> f32 {
+	pub fn get_pressed_elapsed_seconds(&self) -> f64 {
 		if self.is_press_tracking {
 			self.pressed_elapsed_seconds
 		}
@@ -847,7 +847,7 @@ impl UIButton {
 	/// # 인자
 	/// - `long_press_seconds`: 누름이 이만큼 이어지면 길게 누름으로 본다. (초, 기본 0.5)
 	//==============================================================================
-	pub fn set_long_press_seconds(&mut self, long_press_seconds: f32) {
+	pub fn set_long_press_seconds(&mut self, long_press_seconds: f64) {
 		self.long_press_seconds = long_press_seconds;
 	}
 
@@ -857,7 +857,7 @@ impl UIButton {
 	/// # 돌려줌
 	/// 길게 누름 판정 시간. (초)
 	//==============================================================================
-	pub fn get_long_press_seconds(&self) -> f32 {
+	pub fn get_long_press_seconds(&self) -> f64 {
 		self.long_press_seconds
 	}
 
@@ -897,7 +897,7 @@ impl UIButton {
 	/// assert_eq!(click_count.get(), 1);
 	/// ```
 	//==============================================================================
-	pub fn set_minimum_pressed_seconds(&mut self, minimum_pressed_seconds: f32) {
+	pub fn set_minimum_pressed_seconds(&mut self, minimum_pressed_seconds: f64) {
 		self.minimum_pressed_seconds = minimum_pressed_seconds.max(0.0);
 	}
 
@@ -907,7 +907,7 @@ impl UIButton {
 	/// # 돌려줌
 	/// 최소 눌림 표시 시간. (초, 기본 0)
 	//==============================================================================
-	pub fn get_minimum_pressed_seconds(&self) -> f32 {
+	pub fn get_minimum_pressed_seconds(&self) -> f64 {
 		self.minimum_pressed_seconds
 	}
 
@@ -1107,7 +1107,7 @@ impl UIButton {
 	/// # 인자
 	/// - `transition_duration`: 틴트가 끝까지 차오르거나 빠지는 시간. (초, 기본 0.3)
 	//==============================================================================
-	pub fn set_transition_duration(&mut self, transition_duration: f32) {
+	pub fn set_transition_duration(&mut self, transition_duration: f64) {
 		self.transition_duration = transition_duration;
 	}
 
@@ -1117,7 +1117,7 @@ impl UIButton {
 	/// # 돌려줌
 	/// 트랜지션 시간. (초)
 	//==============================================================================
-	pub fn get_transition_duration(&self) -> f32 {
+	pub fn get_transition_duration(&self) -> f64 {
 		self.transition_duration
 	}
 
@@ -1268,7 +1268,7 @@ impl Component for UIButton {
 	//==============================================================================
 	/// 갱신. (누름 추적과 미룬 뗌, 마우스 오버, 틴트 트랜지션)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		self.tick_press(context, time_delta);
 		self.update_hover_state(context);
 		self.update_tint_transition(context, time_delta);

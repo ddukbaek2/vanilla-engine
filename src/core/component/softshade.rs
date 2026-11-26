@@ -58,9 +58,9 @@ pub struct SoftShade {
 	component_base: ComponentBase,
 	shape: SoftShadeShape,
 	color: Color,
-	opacity: f32,
-	fade_width: f32,
-	bake_unit: f32,
+	opacity: f64,
+	fade_width: f64,
+	bake_unit: f64,
 	bake_maximum_size: u32,
 	bake_image: Option<Rc<Image>>,
 	bake_key: Option<(SoftShadeShape, [u32; 3], u32, u32, u32, u32)>,
@@ -69,7 +69,7 @@ pub struct SoftShade {
 //==============================================================================
 /// 부드럽게 0 에서 1 로. (edge 이하에서 세제곱 곡선, edge 가 0 이면 계단)
 //==============================================================================
-fn read_smooth_rise(edge: f32, value: f32) -> f32 {
+fn read_smooth_rise(edge: f64, value: f64) -> f64 {
 	if edge <= 0.0 {
 		return if value > 0.0 { 1.0 } else { 0.0 };
 	}
@@ -133,8 +133,8 @@ impl SoftShade {
 				return;
 			}
 		};
-		let image_width = bake_image.get_width() as f32;
-		let image_height = bake_image.get_height() as f32;
+		let image_width = bake_image.get_width() as f64;
+		let image_height = bake_image.get_height() as f64;
 		graphic.draw_image_with_source_and_destination(&bake_image, 0.0, 0.0, image_width, image_height, 0.0, 0.0, content_width, content_height);
 	}
 
@@ -166,17 +166,17 @@ impl SoftShade {
 	/// assert_eq!(pixels[7], 191);
 	/// ```
 	//==============================================================================
-	pub fn bake_shade(&self, bake_width: u32, bake_height: u32, fade_ratio: f32) -> Rc<Image> {
+	pub fn bake_shade(&self, bake_width: u32, bake_height: u32, fade_ratio: f64) -> Rc<Image> {
 		let red = (self.color.red * 255.0).round().clamp(0.0, 255.0) as u8;
 		let green = (self.color.green * 255.0).round().clamp(0.0, 255.0) as u8;
 		let blue = (self.color.blue * 255.0).round().clamp(0.0, 255.0) as u8;
 		let is_band = self.shape == SoftShadeShape::Band;
 		let mut pixels = vec![0u8; (bake_width * bake_height * 4) as usize];
 		for row in 0..bake_height {
-			let down = (row as f32 + 0.5) / bake_height as f32;
+			let down = (row as f64 + 0.5) / bake_height as f64;
 			let row_shade = if is_band { read_smooth_rise(0.5, down.min(1.0 - down)) } else { down };
 			for column in 0..bake_width {
-				let across = (column as f32 + 0.5) / bake_width as f32;
+				let across = (column as f64 + 0.5) / bake_width as f64;
 				let column_shade = if is_band { read_smooth_rise(fade_ratio, across.min(1.0 - across)) } else { 1.0 };
 				let pixel_index = ((row * bake_width + column) * 4) as usize;
 				pixels[pixel_index] = red;
@@ -197,7 +197,7 @@ impl SoftShade {
 	/// - `opacity`: 가장 짙은 곳의 불투명도. (0 ~ 1, 0 이하면 그리지 않는다, 처음 0.5)
 	/// - `fade_width`: Band 의 양옆이 엷어지는 너비. (노드 좌표, 노드 너비의 반까지만 먹는다, 처음 0)
 	//==============================================================================
-	pub fn set_shade(&mut self, shape: SoftShadeShape, color: impl Into<Color>, opacity: f32, fade_width: f32) {
+	pub fn set_shade(&mut self, shape: SoftShadeShape, color: impl Into<Color>, opacity: f64, fade_width: f64) {
 		self.shape = shape;
 		self.color = color.into();
 		self.opacity = opacity;
@@ -226,7 +226,7 @@ impl SoftShade {
 	/// assert_eq!(soft_shade.get_bake_maximum_size(), 2);
 	/// ```
 	//==============================================================================
-	pub fn set_bake_resolution(&mut self, bake_unit: f32, bake_maximum_size: u32) {
+	pub fn set_bake_resolution(&mut self, bake_unit: f64, bake_maximum_size: u32) {
 		self.bake_unit = bake_unit.max(1.0);
 		self.bake_maximum_size = bake_maximum_size.max(2);
 	}
@@ -257,7 +257,7 @@ impl SoftShade {
 	/// # 돌려줌
 	/// 가장 짙은 곳의 불투명도. (0 ~ 1)
 	//==============================================================================
-	pub fn get_opacity(&self) -> f32 {
+	pub fn get_opacity(&self) -> f64 {
 		self.opacity
 	}
 
@@ -267,7 +267,7 @@ impl SoftShade {
 	/// # 돌려줌
 	/// 띠의 양옆이 엷어지는 너비. (노드 좌표)
 	//==============================================================================
-	pub fn get_fade_width(&self) -> f32 {
+	pub fn get_fade_width(&self) -> f64 {
 		self.fade_width
 	}
 
@@ -277,7 +277,7 @@ impl SoftShade {
 	/// # 돌려줌
 	/// 구운 한 픽셀이 덮는 노드 좌표 크기. (1 이상)
 	//==============================================================================
-	pub fn get_bake_unit(&self) -> f32 {
+	pub fn get_bake_unit(&self) -> f64 {
 		self.bake_unit
 	}
 

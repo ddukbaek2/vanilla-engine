@@ -354,7 +354,7 @@ impl Skeleton2DAnimator {
 	fn read_origin(transform: &NodeTransform) -> (f64, f64) {
 		let pivot = transform.get_pivot();
 		let content_size = transform.get_content_size();
-		(content_size.x as f64 * pivot.x as f64, content_size.y as f64 * pivot.y as f64)
+		(content_size.x * pivot.x, content_size.y * pivot.y)
 	}
 }
 
@@ -393,9 +393,9 @@ impl Component for Skeleton2DAnimator {
 	//==============================================================================
 	/// 갱신. (빠르기를 곱한 시간으로 update)
 	//==============================================================================
-	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f64) {
 		let time_scale = self.time_scale;
-		self.update(time_delta as f64 * time_scale);
+		self.update(time_delta * time_scale);
 	}
 
 	//==============================================================================
@@ -431,7 +431,7 @@ impl Component for Skeleton2DAnimator {
 			if self.vertex_positions.len() < vertex_count * 2 {
 				self.vertex_positions.resize(vertex_count * 2, 0.0);
 			}
-			skeleton.compute_attachment_vertices(slot_index, &mut self.vertex_positions, image_rect.size.x as f64, image_rect.size.y as f64);
+			skeleton.compute_attachment_vertices(slot_index, &mut self.vertex_positions, image_rect.size.x, image_rect.size.y);
 			let uvs = attachment.get_uvs();
 			let triangles = attachment.get_triangles();
 			let image_width = image.get_width() as f64;
@@ -447,10 +447,10 @@ impl Component for Skeleton2DAnimator {
 					let vertex_data = graphic.get_vertex_data();
 					let mut offset = 0usize;
 					for &vertex_index in &triangles[first_triangle * 3..(first_triangle + chunk_triangle_count) * 3] {
-						vertex_data[offset] = (self.vertex_positions[vertex_index * 2] + origin.0) as f32;
-						vertex_data[offset + 1] = (self.vertex_positions[vertex_index * 2 + 1] + origin.1) as f32;
-						vertex_data[offset + 2] = ((image_rect.position.x as f64 + uvs[vertex_index * 2] * image_rect.size.x as f64) / image_width) as f32;
-						vertex_data[offset + 3] = ((image_rect.position.y as f64 + uvs[vertex_index * 2 + 1] * image_rect.size.y as f64) / image_height) as f32;
+						vertex_data[offset] = ((self.vertex_positions[vertex_index * 2] + origin.0)) as f32;
+						vertex_data[offset + 1] = ((self.vertex_positions[vertex_index * 2 + 1] + origin.1)) as f32;
+						vertex_data[offset + 2] = (((image_rect.position.x + uvs[vertex_index * 2] * image_rect.size.x) / image_width)) as f32;
+						vertex_data[offset + 3] = (((image_rect.position.y + uvs[vertex_index * 2 + 1] * image_rect.size.y) / image_height)) as f32;
 						offset += FLOATS_PER_VERTEX;
 					}
 				}
@@ -476,10 +476,10 @@ impl Component for Skeleton2DAnimator {
 		graphic.set_fill_color(GIZMO_JOINT_COLOR);
 		for bone in skeleton.get_bones() {
 			let length = bone.get_data().get_length();
-			let start = Vector2::create((bone.get_world_x() + origin.0) as f32, (bone.get_world_y() + origin.1) as f32);
+			let start = Vector2::create(bone.get_world_x() + origin.0, bone.get_world_y() + origin.1);
 			if length > 0.0 {
 				let tip = bone.local_to_world(length, 0.0);
-				graphic.draw_line(&[start, Vector2::create(tip.x + origin.0 as f32, tip.y + origin.1 as f32)], 2.0);
+				graphic.draw_line(&[start, Vector2::create(tip.x + origin.0, tip.y + origin.1)], 2.0);
 			}
 			graphic.draw_circle(start, 3.0);
 		}

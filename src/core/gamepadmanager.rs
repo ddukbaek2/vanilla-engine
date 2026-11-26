@@ -50,10 +50,10 @@ const STANDARD_BUTTON_COUNT: usize = 17;
 const STANDARD_AXIS_COUNT: usize = 4;
 /// 아날로그 버튼을 눌림으로 보는 값. (크로미엄 GamepadButton::kDefaultButtonPressedThreshold, XInput 트리거 데드존과 같다)
 #[cfg(not(target_arch = "wasm32"))]
-const BUTTON_PRESSED_THRESHOLD: f32 = 30.0 / 255.0;
+const BUTTON_PRESSED_THRESHOLD: f64 = 30.0 / 255.0;
 /// 축(햇 스위치)으로 오는 십자키를 눌림으로 보는 값.
 #[cfg(not(target_arch = "wasm32"))]
-const DIRECTIONAL_PAD_AXIS_THRESHOLD: f32 = 0.5;
+const DIRECTIONAL_PAD_AXIS_THRESHOLD: f64 = 0.5;
 /// 축 변화를 받는 최소 폭. (원본: 미세한 떨림을 거르려 0.01 넘는 변화만 받는다)
 const AXIS_CHANGE_THRESHOLD: f64 = 0.01;
 /// 플레이스테이션 패드의 USB 제조사 번호. (소니)
@@ -101,7 +101,7 @@ const STANDARD_BUTTON_LIST: [Button; STANDARD_BUTTON_COUNT] = [
 
 /// W3C Standard Gamepad 축 순서의 gilrs 축과 곱할 부호. (gilrs 의 Y 는 위가 양수, W3C 는 아래가 양수라 뒤집는다)
 #[cfg(not(target_arch = "wasm32"))]
-const STANDARD_AXIS_LIST: [(Axis, f32); STANDARD_AXIS_COUNT] = [
+const STANDARD_AXIS_LIST: [(Axis, f64); STANDARD_AXIS_COUNT] = [
 	(Axis::LeftStickX, 1.0),
 	(Axis::LeftStickY, -1.0),
 	(Axis::RightStickX, 1.0),
@@ -311,7 +311,7 @@ pub enum GamepadInputType {
 }
 
 /// 입력 콜백. (gamepad_index, input_type, input_index, value)
-pub type GamepadInputCallback = Box<dyn FnMut(usize, GamepadInputType, usize, f32)>;
+pub type GamepadInputCallback = Box<dyn FnMut(usize, GamepadInputType, usize, f64)>;
 
 //==============================================================================
 /// 게임패드 버튼 하나. (W3C GamepadButton)
@@ -332,7 +332,7 @@ pub struct GamepadButton {
 	/// 눌렸는지.
 	pub pressed: bool,
 	/// 값. (0.0 ~ 1.0, 트리거는 아날로그)
-	pub value: f32,
+	pub value: f64,
 }
 
 //==============================================================================
@@ -367,7 +367,7 @@ pub struct Gamepad {
 	/// 버튼 목록. (GamepadButtonCode 순서)
 	pub buttons: Vec<GamepadButton>,
 	/// 축 목록. (GamepadAnalogStickCode 순서, -1.0 ~ 1.0)
-	pub axes: Vec<f32>,
+	pub axes: Vec<f64>,
 }
 
 impl Gamepad {
@@ -511,7 +511,7 @@ impl GamepadManager {
 	/// # 인자
 	/// - `_time_delta`: 지난 프레임 뒤로 흐른 초. (쓰지 않는다)
 	//==============================================================================
-	pub fn tick(&mut self, _time_delta: f32) {
+	pub fn tick(&mut self, _time_delta: f64) {
 		self.update_all_gamepads();
 	}
 
@@ -637,7 +637,7 @@ impl GamepadManager {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn vibrate(&mut self, strong_magnitude: f32, weak_magnitude: f32, seconds: f32) {
+	pub fn vibrate(&mut self, strong_magnitude: f64, weak_magnitude: f64, seconds: f64) {
 		let clamped_strong_magnitude = if strong_magnitude.is_finite() {
 			strong_magnitude.clamp(0.0, 1.0)
 		}
@@ -867,7 +867,7 @@ impl GamepadManager {
 				}
 
 				// 아날로그 값(트리거 등) 변화 감지. (소수점 2자리까지)
-				let current_value = round_to_hundredths(current_button.value as f64);
+				let current_value = round_to_hundredths(current_button.value);
 				if last_button_state.value != current_value {
 					last_button_state.value = current_value;
 
@@ -882,7 +882,7 @@ impl GamepadManager {
 
 						// 콜백 호출.
 						if let Some(input_event_callback) = self.input_event_callback.as_mut() {
-							input_event_callback(hardware_index, GamepadInputType::Value, button_index, current_value as f32);
+							input_event_callback(hardware_index, GamepadInputType::Value, button_index, current_value);
 						}
 					}
 				}
@@ -890,7 +890,7 @@ impl GamepadManager {
 
 			// 아날로그 스틱(축) 상태 확인.
 			for (axis_index, axis_value) in gamepad.axes.iter().enumerate() {
-				let current_axis_value = round_to_hundredths(*axis_value as f64);
+				let current_axis_value = round_to_hundredths(*axis_value);
 				let last_axis_value = match state.axes.get_mut(axis_index) {
 					Some(last_axis_value) => {
 						last_axis_value
@@ -916,7 +916,7 @@ impl GamepadManager {
 
 					// 콜백 호출.
 					if let Some(input_event_callback) = self.input_event_callback.as_mut() {
-						input_event_callback(hardware_index, GamepadInputType::Axis, axis_index, current_axis_value as f32);
+						input_event_callback(hardware_index, GamepadInputType::Axis, axis_index, current_axis_value);
 					}
 				}
 			}
@@ -999,10 +999,10 @@ impl GamepadManager {
 	/// # 돌려줌
 	/// 소수점 둘째 자리로 반올림한 값. 패드나 버튼이 없으면 0.0.
 	//==============================================================================
-	pub fn get_button_value(&self, gamepad_index: usize, button_index: usize) -> f32 {
+	pub fn get_button_value(&self, gamepad_index: usize, button_index: usize) -> f64 {
 		match self.find_button_state(gamepad_index, button_index) {
 			Some(button_state) => {
-				button_state.value as f32
+				button_state.value
 			}
 			None => {
 				0.0
@@ -1021,7 +1021,7 @@ impl GamepadManager {
 	/// # 돌려줌
 	/// 소수점 둘째 자리로 반올림한 값. 패드나 축이 없거나 NaN 이면 0.0.
 	//==============================================================================
-	pub fn get_axis_value(&self, gamepad_index: usize, axis_index: usize) -> f32 {
+	pub fn get_axis_value(&self, gamepad_index: usize, axis_index: usize) -> f64 {
 		let state = match self.connected_gamepad_states.get(&gamepad_index) {
 			Some(state) => {
 				state
@@ -1032,7 +1032,7 @@ impl GamepadManager {
 		};
 		match state.axes.get(axis_index) {
 			Some(axis_value) => {
-				zero_if_falsy(*axis_value) as f32
+				zero_if_falsy(*axis_value)
 			}
 			None => {
 				0.0
@@ -1155,7 +1155,7 @@ fn write_log(message: &str) {
 /// 브라우저 패드 떨기. (원본처럼 navigator.getGamepads() 의 vibrationActuator.playEffect("dual-rumble"), 없으면 건너뛴다)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
-fn vibrate_browser_gamepads(strong_magnitude: f32, weak_magnitude: f32, duration_milliseconds: u32) {
+fn vibrate_browser_gamepads(strong_magnitude: f64, weak_magnitude: f64, duration_milliseconds: u32) {
 	use wasm_bindgen::{JsCast, JsValue};
 	let window = match web_sys::window() {
 		Some(window) => {
@@ -1229,7 +1229,7 @@ trait GamepadElementReader {
 	/// 버튼의 눌림과 값.
 	fn read_button(&self, button: Button) -> GamepadButton;
 	/// 축의 값. (gilrs 꼴, Y 는 위가 양수)
-	fn read_axis(&self, axis: Axis) -> f32;
+	fn read_axis(&self, axis: Axis) -> f64;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1242,7 +1242,7 @@ impl GamepadElementReader for gilrs::Gamepad<'_> {
 			Some(button_data) => {
 				GamepadButton {
 					pressed: button_data.is_pressed(),
-					value: button_data.value(),
+					value: button_data.value() as f64,
 				}
 			}
 			None => {
@@ -1257,8 +1257,8 @@ impl GamepadElementReader for gilrs::Gamepad<'_> {
 	//==============================================================================
 	/// 축 읽기. (gilrs 가 모르는 축은 0)
 	//==============================================================================
-	fn read_axis(&self, axis: Axis) -> f32 {
-		self.value(axis)
+	fn read_axis(&self, axis: Axis) -> f64 {
+		self.value(axis) as f64
 	}
 }
 
@@ -1266,7 +1266,7 @@ impl GamepadElementReader for gilrs::Gamepad<'_> {
 /// 십자키 버튼에 겹쳐 읽을 축과 방향. (햇 스위치를 축으로 주는 패드. gilrs DPadX 는 오른쪽, DPadY 는 위가 양수)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
-fn get_directional_pad_axis(button_index: usize) -> Option<(Axis, f32)> {
+fn get_directional_pad_axis(button_index: usize) -> Option<(Axis, f64)> {
 	match button_index {
 		GamepadButtonCode::DPAD_UP => {
 			Some((Axis::DPadY, 1.0))
@@ -1314,7 +1314,7 @@ fn create_standard_gamepad(index: usize, id: &str, element_reader: &impl Gamepad
 	}
 	for (axis_index, (standard_axis, direction)) in STANDARD_AXIS_LIST.iter().enumerate() {
 		let axis_value = element_reader.read_axis(*standard_axis) * direction;
-		gamepad.axes[axis_index] = zero_if_falsy(axis_value as f64) as f32;
+		gamepad.axes[axis_index] = zero_if_falsy(axis_value);
 	}
 	gamepad
 }
@@ -1452,7 +1452,7 @@ impl GamepadReader {
 	/// 연결된 패드를 모두 떨기. (macOS: gilrs 패드의 OS 이름을 연결 차례로 넘겨 플랫폼 층이 짝인 GCController 를 떤다)
 	//==============================================================================
 	#[cfg(target_os = "macos")]
-	fn vibrate(&mut self, strong_magnitude: f32, weak_magnitude: f32, duration_milliseconds: u32) {
+	fn vibrate(&mut self, strong_magnitude: f64, weak_magnitude: f64, duration_milliseconds: u32) {
 		let gamepad_name_list: Vec<String> = self.gilrs.gamepads().map(|(_, gilrs_gamepad)| gilrs_gamepad.os_name().to_string()).collect();
 		crate::platform::vibrate_gamepads(&gamepad_name_list, strong_magnitude, weak_magnitude, duration_milliseconds);
 	}
@@ -1461,7 +1461,7 @@ impl GamepadReader {
 	/// 진동을 대는 연결된 패드를 모두 떨기. (gilrs force feedback, 무거운 모터 Strong 과 가벼운 모터 Weak)
 	//==============================================================================
 	#[cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))]
-	fn vibrate(&mut self, strong_magnitude: f32, weak_magnitude: f32, duration_milliseconds: u32) {
+	fn vibrate(&mut self, strong_magnitude: f64, weak_magnitude: f64, duration_milliseconds: u32) {
 		use gilrs::ff::{BaseEffect, BaseEffectType, EffectBuilder, Repeat, Replay, Ticks};
 		let gamepad_id_list: Vec<gilrs::GamepadId> = self.gilrs.gamepads().filter(|(_, gilrs_gamepad)| gilrs_gamepad.is_ff_supported()).map(|(gamepad_id, _)| gamepad_id).collect();
 		if gamepad_id_list.is_empty() || duration_milliseconds == 0 {
@@ -1473,12 +1473,12 @@ impl GamepadReader {
 			..Default::default()
 		};
 		let strong_effect = BaseEffect {
-			kind: BaseEffectType::Strong { magnitude: (strong_magnitude * u16::MAX as f32) as u16 },
+			kind: BaseEffectType::Strong { magnitude: (strong_magnitude * u16::MAX as f64) as u16 },
 			scheduling,
 			..Default::default()
 		};
 		let weak_effect = BaseEffect {
-			kind: BaseEffectType::Weak { magnitude: (weak_magnitude * u16::MAX as f32) as u16 },
+			kind: BaseEffectType::Weak { magnitude: (weak_magnitude * u16::MAX as f64) as u16 },
 			scheduling,
 			..Default::default()
 		};
@@ -1601,14 +1601,14 @@ fn convert_button_data(button_data: Option<&gilrs::ev::state::ButtonData>) -> Ga
 			(false, 0.0)
 		}
 	};
-	let is_pressed = raw_pressed || raw_value > BUTTON_PRESSED_THRESHOLD;
+	let is_pressed = raw_pressed || raw_value > BUTTON_PRESSED_THRESHOLD as f32;
 	let mut button_value = raw_value.clamp(0.0, 1.0);
 	if is_pressed && button_value <= 0.0 {
 		button_value = 1.0;
 	}
 	GamepadButton {
 		pressed: is_pressed,
-		value: button_value,
+		value: button_value as f64,
 	}
 }
 
@@ -1641,7 +1641,7 @@ fn append_extra_elements(extra_button_code_table: &mut HashMap<usize, Vec<gilrs:
 	extra_axis_code_list.extend(new_axis_code_list);
 	for code in extra_axis_code_list.iter() {
 		let axis_value = gamepad_state.axis_data(*code).map(|axis_data| axis_data.value()).unwrap_or(0.0);
-		gamepad.axes.push(zero_if_falsy(axis_value as f64) as f32);
+		gamepad.axes.push(zero_if_falsy(axis_value as f64));
 	}
 }
 
@@ -1766,13 +1766,13 @@ fn read_browser_gamepads() -> Vec<Option<Gamepad>> {
 			for browser_button in button_array.iter() {
 				gamepad.buttons.push(GamepadButton {
 					pressed: read_property(&browser_button, "pressed").as_bool().unwrap_or(false),
-					value: read_property(&browser_button, "value").as_f64().unwrap_or(0.0) as f32,
+					value: read_property(&browser_button, "value").as_f64().unwrap_or(0.0) as f64,
 				});
 			}
 		}
 		if let Ok(axis_array) = read_property(&browser_gamepad, "axes").dyn_into::<js_sys::Array>() {
 			for axis_value in axis_array.iter() {
-				gamepad.axes.push(axis_value.as_f64().unwrap_or(0.0) as f32);
+				gamepad.axes.push(axis_value.as_f64().unwrap_or(0.0) as f64);
 			}
 		}
 		gamepad_list.push(Some(gamepad));
@@ -1787,14 +1787,14 @@ mod tests {
 	use std::rc::Rc;
 
 	/// 콜백으로 받은 입력 하나. (gamepad_index, input_type, input_index, value)
-	type ReceivedInputEvent = (usize, GamepadInputType, usize, f32);
+	type ReceivedInputEvent = (usize, GamepadInputType, usize, f64);
 
 	//==============================================================================
 	/// 시험용 가짜 패드. (눌린 버튼과 값, 축 값을 직접 준다)
 	//==============================================================================
 	struct TestElementReader {
 		button_list: Vec<(Button, GamepadButton)>,
-		axis_list: Vec<(Axis, f32)>,
+		axis_list: Vec<(Axis, f64)>,
 	}
 
 	impl GamepadElementReader for TestElementReader {
@@ -1816,7 +1816,7 @@ mod tests {
 		//==============================================================================
 		/// 축 읽기.
 		//==============================================================================
-		fn read_axis(&self, axis: Axis) -> f32 {
+		fn read_axis(&self, axis: Axis) -> f64 {
 			for (listed_axis, listed_value) in self.axis_list.iter() {
 				if *listed_axis == axis {
 					return *listed_value;
@@ -2214,6 +2214,6 @@ mod tests {
 		assert_eq!(round_to_hundredths(0.125), 0.13);
 		assert_eq!(round_to_hundredths(-0.456), -0.46);
 		assert_eq!(round_to_hundredths(1.0), 1.0);
-		assert_eq!(round_to_hundredths(0.29f32 as f64), 0.29);
+		assert_eq!(round_to_hundredths(0_f64), 0.29);
 	}
 }

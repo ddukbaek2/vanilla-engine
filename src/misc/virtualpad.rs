@@ -6,7 +6,7 @@
 //!   떼면 구슬이 초당 1600 픽셀로 패드 가운데로 돌아가며 알리고, 다 돌아오면 (0.5, 0.5), 0 을 한 번 알린다.
 //! - 원본과 다른 점:
 //!   상태 이름 move 는 러스트 예약어라 moved 다. 원본 상태 값의 글자("wait", "pressed", "move", "released")는 get_name 으로 얻는다.
-//!   이벤트 콜백은 FnMut(Vector2, f32) 다.
+//!   이벤트 콜백은 FnMut(Vector2, f64) 다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;
@@ -54,7 +54,7 @@ impl VirtualPadState {
 }
 
 /// 구슬 이동 이벤트. (방향 0 ~ 1, 당긴 세기 0 ~ 1)
-type BallMoveEvent = Box<dyn FnMut(Vector2, f32)>;
+type BallMoveEvent = Box<dyn FnMut(Vector2, f64)>;
 
 //==============================================================================
 /// 가상 패드.
@@ -93,12 +93,12 @@ type BallMoveEvent = Box<dyn FnMut(Vector2, f32)>;
 pub struct VirtualPad {
 	virtual_pad_state: VirtualPadState,
 	pad_position: Vector2,
-	pad_radius: f32,
+	pad_radius: f64,
 	pad_color: Color,
 	ball_position: Vector2,
-	ball_radius: f32,
+	ball_radius: f64,
 	ball_color: Color,
-	ball_return_speed: f32,
+	ball_return_speed: f64,
 	ball_move_event: Option<BallMoveEvent>,
 }
 
@@ -126,7 +126,7 @@ impl VirtualPad {
 	//==============================================================================
 	/// 구슬 이동 이벤트 부르기. (방향을 0 ~ 1 범위로 바꿔 넘긴다)
 	//==============================================================================
-	fn fire_ball_move_event(&mut self, direction: Vector2, pull_strength: f32) {
+	fn fire_ball_move_event(&mut self, direction: Vector2, pull_strength: f64) {
 		if let Some(ball_move_event) = self.ball_move_event.as_mut() {
 			let normalized_direction_x = (direction.x + 1.0) / 2.0;
 			let normalized_direction_y = (direction.y + 1.0) / 2.0;
@@ -142,7 +142,7 @@ impl VirtualPad {
 	/// # 인자
 	/// - `time_delta`: 지난 시간. (초, 돌아가는 거리는 초당 1600 픽셀 * time_delta)
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		let virtual_pad_state = self.get_virtual_pad_state();
 		if virtual_pad_state == VirtualPadState::None {
 			return;
@@ -266,7 +266,7 @@ impl VirtualPad {
 	/// # 인자
 	/// - `callback`: 구슬이 움직일 때 부를 함수. 방향(단위 벡터의 각 축을 (값 + 1) / 2 로 바꾼 것, 가운데가 (0.5, 0.5))과 당긴 세기(패드 가운데에서 거리 / 패드 반지름)를 받는다.
 	//==============================================================================
-	pub fn set_ball_move_event(&mut self, callback: impl FnMut(Vector2, f32) + 'static) {
+	pub fn set_ball_move_event(&mut self, callback: impl FnMut(Vector2, f64) + 'static) {
 		self.ball_move_event = Some(Box::new(callback));
 	}
 
@@ -297,7 +297,7 @@ impl VirtualPad {
 	/// # 인자
 	/// - `pad_radius`: 패드 반지름. (픽셀, 구슬 중심이 이 안에 갇힌다)
 	//==============================================================================
-	pub fn set_pad_radius(&mut self, pad_radius: f32) {
+	pub fn set_pad_radius(&mut self, pad_radius: f64) {
 		self.pad_radius = pad_radius;
 	}
 
@@ -307,7 +307,7 @@ impl VirtualPad {
 	/// # 돌려줌
 	/// 패드 반지름. (픽셀)
 	//==============================================================================
-	pub fn get_pad_radius(&self) -> f32 {
+	pub fn get_pad_radius(&self) -> f64 {
 		self.pad_radius
 	}
 
@@ -327,7 +327,7 @@ impl VirtualPad {
 	/// # 인자
 	/// - `ball_radius`: 구슬 반지름. (픽셀, 그리기에만 쓴다)
 	//==============================================================================
-	pub fn set_ball_radius(&mut self, ball_radius: f32) {
+	pub fn set_ball_radius(&mut self, ball_radius: f64) {
 		self.ball_radius = ball_radius;
 	}
 
@@ -337,7 +337,7 @@ impl VirtualPad {
 	/// # 돌려줌
 	/// 구슬 반지름. (픽셀)
 	//==============================================================================
-	pub fn get_ball_radius(&self) -> f32 {
+	pub fn get_ball_radius(&self) -> f64 {
 		self.ball_radius
 	}
 
@@ -405,7 +405,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn ball_is_clamped_and_returns() {
-		let event_list: Rc<RefCell<Vec<(Vector2, f32)>>> = Rc::new(RefCell::new(Vec::new()));
+		let event_list: Rc<RefCell<Vec<(Vector2, f64)>>> = Rc::new(RefCell::new(Vec::new()));
 		let event_list_for_callback = event_list.clone();
 		let mut virtual_pad = VirtualPad::new();
 		virtual_pad.set_pad_radius(100.0);

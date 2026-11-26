@@ -26,15 +26,15 @@ use crate::ui::uiscrollbar::{ScrollBarAxis, UIScrollBar};
 use crate::ui::uiview::UIView;
 
 /// 스크롤바 기본 두께 / 여백. (UIKit 표시기 꼴)
-const SCROLLBAR_THICKNESS: f32 = 12.0;
-const SCROLLBAR_MARGIN: f32 = 6.0;
-const WHEEL_SCROLL_SCALE: f32 = 1.0;
+const SCROLLBAR_THICKNESS: f64 = 12.0;
+const SCROLLBAR_MARGIN: f64 = 6.0;
+const WHEEL_SCROLL_SCALE: f64 = 1.0;
 
 /// 탄성 모드 상수. (원본과 같다)
-const ELASTIC_RESISTANCE: f32 = 0.5;
-const SPRING_CONSTANT: f32 = 1200.0;
-const DAMPING_COEFFICIENT: f32 = 30.0;
-const FRICTION_COEFFICIENT: f32 = 5.0;
+const ELASTIC_RESISTANCE: f64 = 0.5;
+const SPRING_CONSTANT: f64 = 1200.0;
+const DAMPING_COEFFICIENT: f64 = 30.0;
+const FRICTION_COEFFICIENT: f64 = 5.0;
 
 //==============================================================================
 /// 스크롤 모드.
@@ -74,7 +74,7 @@ crate::core::reflection::impl_reflect_names!(ScrollMode, [
 /// for index in 0..10 {
 /// 	let item_id = node_tree.create_child(content_id, "item");
 /// 	node_tree[item_id].set_pivot(Pivot::TOP_LEFT);
-/// 	node_tree[item_id].set_rect(0.0, index as f32 * 40.0, 200.0, 40.0);
+/// 	node_tree[item_id].set_rect(0.0, index as f64 * 40.0, 200.0, 40.0);
 /// }
 ///
 /// let scroll_view = node_tree[scroll_id].get_component_mut::<UIScrollView>().expect("scroll view");
@@ -98,14 +98,14 @@ pub struct UIScrollView {
 	is_dragging: bool,
 	drag_start_view_position: Vector2,
 	drag_start_offset: Vector2,
-	drag_sensitivity: f32,
+	drag_sensitivity: f64,
 	vertical_scroll_bar_id: Option<NodeId>,
 	horizontal_scroll_bar_id: Option<NodeId>,
 	shows_vertical_scroll_bar: bool,
 	shows_horizontal_scroll_bar: bool,
 	pending_vertical_scroll_bar_active: Option<bool>,
 	pending_horizontal_scroll_bar_active: Option<bool>,
-	wheel_scroll_scale: f32,
+	wheel_scroll_scale: f64,
 	passes_cross_axis_drag: bool,
 	viewport_size: Vector2,
 	is_offset_clamp_pending: bool,
@@ -319,7 +319,7 @@ impl UIScrollView {
 	//==============================================================================
 	/// 드래그 중 오프셋과 속도 계산. (tick)
 	//==============================================================================
-	fn update_drag(&mut self, time_delta: f32) {
+	fn update_drag(&mut self, time_delta: f64) {
 		let view_input_position = self.current_view_input_position;
 		let drag_sensitivity = self.get_drag_sensitivity();
 		let raw_delta_x = (view_input_position.x - self.drag_start_view_position.x) * drag_sensitivity;
@@ -389,7 +389,7 @@ impl UIScrollView {
 	//==============================================================================
 	/// 탄성 모드에서 놓은 뒤 스프링 / 마찰 물리. (tick)
 	//==============================================================================
-	fn update_elastic_physics(&mut self, time_delta: f32) {
+	fn update_elastic_physics(&mut self, time_delta: f64) {
 		let minimum_offset = self.calculate_minimum_offset();
 		let bounds_maximum_x = 0.0;
 		let bounds_minimum_x = minimum_offset.x;
@@ -587,7 +587,7 @@ impl UIScrollView {
 	/// assert!(scroll_view.is_scroll_drag(2.0, -30.0));
 	/// ```
 	//==============================================================================
-	pub fn is_scroll_drag(&self, delta_x: f32, delta_y: f32) -> bool {
+	pub fn is_scroll_drag(&self, delta_x: f64, delta_y: f64) -> bool {
 		if !self.passes_cross_axis_drag {
 			return true;
 		}
@@ -610,7 +610,7 @@ impl UIScrollView {
 	/// # 인자
 	/// - `drag_sensitivity`: 끈 거리에 곱할 배율. (기본 1)
 	//==============================================================================
-	pub fn set_drag_sensitivity(&mut self, drag_sensitivity: f32) {
+	pub fn set_drag_sensitivity(&mut self, drag_sensitivity: f64) {
 		self.drag_sensitivity = drag_sensitivity;
 	}
 
@@ -619,7 +619,7 @@ impl UIScrollView {
 	/// # 돌려줌
 	/// 드래그 배율.
 	//==============================================================================
-	pub fn get_drag_sensitivity(&self) -> f32 {
+	pub fn get_drag_sensitivity(&self) -> f64 {
 		self.drag_sensitivity
 	}
 
@@ -852,7 +852,7 @@ impl UIScrollView {
 	/// # 돌려줌
 	/// 보이기로 정했고 노드가 있으면 24 (두께 12 + 여백 6 의 두 배, 픽셀), 아니면 0.
 	//==============================================================================
-	pub fn get_vertical_scroll_bar_reserved_width(&self) -> f32 {
+	pub fn get_vertical_scroll_bar_reserved_width(&self) -> f64 {
 		if self.shows_vertical_scroll_bar && self.vertical_scroll_bar_id.is_some() {
 			SCROLLBAR_THICKNESS + SCROLLBAR_MARGIN * 2.0
 		}
@@ -866,7 +866,7 @@ impl UIScrollView {
 	/// # 돌려줌
 	/// 보이기로 정했고 노드가 있으면 24 (두께 12 + 여백 6 의 두 배, 픽셀), 아니면 0.
 	//==============================================================================
-	pub fn get_horizontal_scroll_bar_reserved_height(&self) -> f32 {
+	pub fn get_horizontal_scroll_bar_reserved_height(&self) -> f64 {
 		if self.shows_horizontal_scroll_bar && self.horizontal_scroll_bar_id.is_some() {
 			SCROLLBAR_THICKNESS + SCROLLBAR_MARGIN * 2.0
 		}
@@ -892,7 +892,7 @@ impl UIScrollView {
 	/// # 인자
 	/// - `wheel_scroll_scale`: 휠 값에 곱할 배율. (기본 1)
 	//==============================================================================
-	pub fn set_wheel_scroll_scale(&mut self, wheel_scroll_scale: f32) {
+	pub fn set_wheel_scroll_scale(&mut self, wheel_scroll_scale: f64) {
 		self.wheel_scroll_scale = wheel_scroll_scale;
 	}
 
@@ -1041,7 +1041,7 @@ impl Component for UIScrollView {
 	//==============================================================================
 	/// 갱신. (스크롤바 → 드래그 → 탄성 물리 → content 노드 반영)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		self.update_viewport_size(context);
 		if self.is_offset_clamp_pending {
 			self.is_offset_clamp_pending = false;

@@ -39,7 +39,7 @@ use std::fmt::Display;
 pub struct AnimationClip {
 	frames: Vec<Rect>,
 	is_loop: bool,
-	duration: f32,
+	duration: f64,
 }
 
 impl AnimationClip {
@@ -99,7 +99,7 @@ impl AnimationClip {
 	/// assert!(!clip.is_loop());
 	/// ```
 	//==============================================================================
-	pub fn from_atlas<T: Display>(atlas_json: &Value, frame_ids: &[T], fps: f32, is_loop: bool) -> AnimationClip {
+	pub fn from_atlas<T: Display>(atlas_json: &Value, frame_ids: &[T], fps: f64, is_loop: bool) -> AnimationClip {
 		let mut clip = AnimationClip::new();
 		let mut frame_rects: Vec<Rect> = Vec::new();
 		for frame_id in frame_ids.iter() {
@@ -126,7 +126,7 @@ impl AnimationClip {
 					frame_data
 				}
 			};
-			let read_number = |short_name: &str, long_name: &str| -> f32 {
+			let read_number = |short_name: &str, long_name: &str| -> f64 {
 				let value = match rect_data.get(short_name) {
 					Some(value) => {
 						Some(value)
@@ -135,7 +135,7 @@ impl AnimationClip {
 						rect_data.get(long_name)
 					}
 				};
-				value.and_then(|value| value.as_f64()).unwrap_or(0.0) as f32
+				value.and_then(|value| value.as_f64()).unwrap_or(0.0)
 			};
 			frame_rects.push(Rect::create(read_number("x", "x"), read_number("y", "y"), read_number("w", "width"), read_number("h", "height")));
 		}
@@ -143,7 +143,7 @@ impl AnimationClip {
 		clip.set_frames(frame_rects);
 		clip.set_loop(is_loop);
 		clip.set_duration(if fps > 0.0 {
-			frame_count as f32 / fps
+			frame_count as f64 / fps
 		}
 		else {
 			0.0
@@ -177,7 +177,7 @@ impl AnimationClip {
 	/// # 인자
 	/// - `duration`: 한 바퀴 재생 시간. (초)
 	//==============================================================================
-	pub fn set_duration(&mut self, duration: f32) {
+	pub fn set_duration(&mut self, duration: f64) {
 		self.duration = duration;
 	}
 
@@ -230,7 +230,7 @@ impl AnimationClip {
 	/// # 돌려줌
 	/// 한 바퀴 재생 시간. (초, 기본 0)
 	//==============================================================================
-	pub fn get_duration(&self) -> f32 {
+	pub fn get_duration(&self) -> f64 {
 		self.duration
 	}
 }

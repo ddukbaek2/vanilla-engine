@@ -24,7 +24,7 @@ use crate::core::image::Image;
 /// # 돌려줌
 /// 시그마. (CSS 픽셀)
 //==============================================================================
-pub(crate) fn css_blur_radius_to_sigma(blur_radius: f32) -> f32 {
+pub(crate) fn css_blur_radius_to_sigma(blur_radius: f64) -> f64 {
 	blur_radius.max(0.0) * 0.5
 }
 
@@ -37,11 +37,11 @@ pub(crate) fn css_blur_radius_to_sigma(blur_radius: f32) -> f32 {
 /// # 돌려줌
 /// 시그마. (DIP)
 //==============================================================================
-pub(crate) fn views_shadow_blur_to_sigma(shadow_blur: i32) -> f32 {
+pub(crate) fn views_shadow_blur_to_sigma(shadow_blur: i32) -> f64 {
 	// blur() / 2 는 정수 나눗셈이고, 0.288675f 는 float 를 double 로 넓혀 셈한 뒤 float 로 돌린다.
 	let radius = (shadow_blur / 2) as f64;
 	if radius > 0.0 {
-		(0.288675f32 as f64 * radius + 0.5f32 as f64) as f32
+		(0.288675f32 as f64 * radius + 0.5) as f32 as f64
 	}
 	else {
 		0.0
@@ -75,7 +75,7 @@ pub(crate) struct ShadowMask {
 /// # 돌려줌
 /// 구운 덮임 그림.
 //==============================================================================
-pub(crate) fn bake_shadow_mask(width: f32, height: f32, corner_radius: f32, sigma: f32) -> ShadowMask {
+pub(crate) fn bake_shadow_mask(width: f64, height: f64, corner_radius: f64, sigma: f64) -> ShadowMask {
 	let width = width.max(0.0);
 	let height = height.max(0.0);
 	let corner_radius = corner_radius.max(0.0).min(width * 0.5).min(height * 0.5);
@@ -97,7 +97,7 @@ pub(crate) fn bake_shadow_mask(width: f32, height: f32, corner_radius: f32, sigm
 		kernel.push(1.0f32);
 	}
 	else {
-		let denominator = 2.0 * sigma as f64 * sigma as f64;
+		let denominator = 2.0 * sigma * sigma;
 		let mut sum = 0.0f64;
 		let mut weight_list = Vec::with_capacity(kernel_radius * 2 + 1);
 		for offset in -(kernel_radius as i64)..=(kernel_radius as i64) {
@@ -113,19 +113,19 @@ pub(crate) fn bake_shadow_mask(width: f32, height: f32, corner_radius: f32, sigm
 	// 덮인 정도와 가로 흐림. (열 먼저 담아 세로 흐림이 이어진 조각을 읽게 한다)
 	let half_width = width * 0.5;
 	let half_height = height * 0.5;
-	let center_x = margin as f32 + half_width;
-	let center_y = margin as f32 + half_height;
+	let center_x = margin as f64 + half_width;
+	let center_y = margin as f64 + half_height;
 	let mut column_major = vec![0.0f32; image_width_size * image_height_size];
 	let mut coverage_row = vec![0.0f32; image_width_size];
 	let mut previous_coverage_row: Vec<f32> = Vec::new();
 	let mut blurred_row = vec![0.0f32; image_width_size];
 	for row_index in 0..image_height_size {
-		let local_y = (row_index as f32 + 0.5 - center_y).abs() - (half_height - corner_radius);
+		let local_y = (row_index as f64 + 0.5 - center_y).abs() - (half_height - corner_radius);
 		for column_index in 0..image_width_size {
-			let local_x = (column_index as f32 + 0.5 - center_x).abs() - (half_width - corner_radius);
+			let local_x = (column_index as f64 + 0.5 - center_x).abs() - (half_width - corner_radius);
 			let outside_length = (local_x.max(0.0) * local_x.max(0.0) + local_y.max(0.0) * local_y.max(0.0)).sqrt();
 			let distance = outside_length + local_x.max(local_y).min(0.0) - corner_radius;
-			coverage_row[column_index] = (0.5 - distance).clamp(0.0, 1.0);
+			coverage_row[column_index] = (0.5 - distance).clamp(0.0, 1.0) as f32;
 		}
 		if coverage_row != previous_coverage_row {
 			blur_line(&coverage_row, &kernel, kernel_radius, &mut blurred_row);
@@ -164,13 +164,13 @@ pub(crate) fn bake_shadow_mask(width: f32, height: f32, corner_radius: f32, sigm
 fn blur_line(source: &[f32], kernel: &[f32], kernel_radius: usize, destination: &mut [f32]) {
 	let length = source.len();
 	for index in 0..length {
-		let mut sum = 0.0f32;
+		let mut sum = 0.0f64;
 		let first = index.saturating_sub(kernel_radius);
 		let last = (index + kernel_radius).min(length - 1);
 		for source_index in first..=last {
-			sum += source[source_index] * kernel[source_index + kernel_radius - index];
+			sum += source[source_index] as f64 * kernel[source_index + kernel_radius - index] as f64;
 		}
-		destination[index] = sum;
+		destination[index] = sum as f32;
 	}
 }
 
@@ -180,7 +180,7 @@ fn blur_line(source: &[f32], kernel: &[f32], kernel_radius: usize, destination: 
 #[derive(Default)]
 pub(crate) struct BlurredRoundRectShadow {
 	/// 구운 값. (폭, 높이, 모서리, 시그마, 배율, 빨강, 초록, 파랑, 알파의 비트)
-	baked_key: Option<[u32; 9]>,
+	baked_key: Option<[u64; 9]>,
 	/// 구운 그림.
 	baked_image: Option<Rc<Image>>,
 	/// 구운 그림의 여백. (기기 픽셀)
@@ -199,7 +199,7 @@ impl BlurredRoundRectShadow {
 	/// - `sigma`: 가우스 시그마. (논리 픽셀)
 	/// - `color`: 그림자 색. (덮인 정도에 알파를 곱한다)
 	//==============================================================================
-	pub(crate) fn draw(&mut self, graphic: &mut Graphic, shape_rect: Rect, corner_radius: f32, offset: Vector2, sigma: f32, color: Color) {
+	pub(crate) fn draw(&mut self, graphic: &mut Graphic, shape_rect: Rect, corner_radius: f64, offset: Vector2, sigma: f64, color: Color) {
 		if shape_rect.size.x <= 0.0 || shape_rect.size.y <= 0.0 || color.alpha <= 0.0 {
 			return;
 		}
@@ -224,16 +224,16 @@ impl BlurredRoundRectShadow {
 			let alpha = color.alpha.clamp(0.0, 1.0);
 			let mut straight_pixels = Vec::with_capacity(mask.coverage_list.len() * 4);
 			for coverage in &mask.coverage_list {
-				straight_pixels.extend_from_slice(&[red, green, blue, (coverage * alpha * 255.0).round() as u8]);
+				straight_pixels.extend_from_slice(&[red, green, blue, (*coverage as f64 * alpha * 255.0).round() as u8]);
 			}
 			self.baked_image = Some(Image::create_from_pixels(mask.width, mask.height, straight_pixels));
 			self.baked_margin = mask.margin;
 			self.baked_key = Some(key);
 		}
 		if let Some(image) = &self.baked_image {
-			let margin = self.baked_margin as f32 / scale;
+			let margin = self.baked_margin as f64 / scale;
 			let position = Vector2::create(shape_rect.position.x + offset.x - margin, shape_rect.position.y + offset.y - margin);
-			let content_size = Vector2::create(image.get_width() as f32 / scale, image.get_height() as f32 / scale);
+			let content_size = Vector2::create(image.get_width() as f64 / scale, image.get_height() as f64 / scale);
 			graphic.draw_image(image, position, content_size);
 		}
 	}
@@ -258,8 +258,8 @@ mod tests {
 		assert_eq!(mask.margin, 25);
 		assert_eq!(mask.width, 150);
 		assert_eq!(mask.height, 110);
-		let area = 100.0 * 60.0 - (4.0 - std::f32::consts::PI) * 64.0;
-		let sum: f32 = mask.coverage_list.iter().sum();
+		let area = 100.0 * 60.0 - (4.0 - std::f64::consts::PI) * 64.0;
+		let sum: f64 = mask.coverage_list.iter().map(|coverage| *coverage as f64).sum();
 		assert!((sum - area).abs() / area < 0.01, "sum {sum} area {area}");
 		let read = |x: u32, y: u32| mask.coverage_list[(y * mask.width + x) as usize];
 		// 가운데는 거의 다 덮이고, 곧은 변 위는 반, 3 시그마 밖은 거의 0.

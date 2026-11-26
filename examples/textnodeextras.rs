@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use vanilla::{math, Component, ComponentBase, ComponentContext, Engine, EngineConfiguration, Graphic, NodeId, NodeTransform, NodeTree, Outline, Paint, Pivot, Scene, SceneBase, ShadowText, Sprite, SpriteAtlas, Text, TextAlign, TextBaseline, UILabel, Vector2};
 
 const EXAMPLE_ASSET_DIRECTORY: &str = "examples/assets";
-const VIEW_WIDTH: f32 = 1280.0;
-const VIEW_HEIGHT: f32 = 720.0;
+const VIEW_WIDTH: f64 = 1280.0;
+const VIEW_HEIGHT: f64 = 720.0;
 const BACKGROUND_COLOR: &str = "#151821";
 const TEXT_COLOR: &str = "#e8ebf2";
 const CAPTION_COLOR: &str = "#9aa2b2";
@@ -23,7 +23,7 @@ const ATLAS_FRAME_NAMES: [&str; 5] = ["star", "heart", "leaf", "gem", "coin"];
 //==============================================================================
 // 상자 노드 만들기. (왼쪽 위 피봇, set_rect)
 //==============================================================================
-fn create_box_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, x: f32, y: f32, width: f32, height: f32) -> NodeId {
+fn create_box_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, x: f64, y: f64, width: f64, height: f64) -> NodeId {
 	let node_id = node_tree.create_child(parent_id, name);
 	let node = &mut node_tree[node_id];
 	node.set_pivot(Pivot::TOP_LEFT);
@@ -34,7 +34,7 @@ fn create_box_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, x: f
 //==============================================================================
 // 설명 글 노드 만들기.
 //==============================================================================
-fn create_caption_node(node_tree: &mut NodeTree, parent_id: NodeId, x: f32, y: f32, text: &str) -> NodeId {
+fn create_caption_node(node_tree: &mut NodeTree, parent_id: NodeId, x: f64, y: f64, text: &str) -> NodeId {
 	let caption_id = create_box_node(node_tree, parent_id, "caption", x, y, 560.0, 24.0);
 	let caption_text = node_tree[caption_id].add_component(Text::create_with_text(text, 16.0));
 	caption_text.set_text_color(CAPTION_COLOR);
@@ -48,8 +48,8 @@ fn create_caption_node(node_tree: &mut NodeTree, parent_id: NodeId, x: f32, y: f
 //==============================================================================
 struct ShapeGallery {
 	component_base: ComponentBase,
-	elapsed_seconds: f32,
-	line_position_values: Vec<f32>,
+	elapsed_seconds: f64,
+	line_position_values: Vec<f64>,
 }
 
 #[vanilla::reflect]
@@ -60,8 +60,8 @@ impl ShapeGallery {
 	fn new() -> ShapeGallery {
 		let mut line_position_values = Vec::new();
 		for line_index in 0..600 {
-			let column = (line_index % 30) as f32;
-			let row = (line_index / 30) as f32;
+			let column = (line_index % 30) as f64;
+			let row = (line_index / 30) as f64;
 			let x = 360.0 + column * 9.0;
 			let y = 10.0 + row * 9.0;
 			line_position_values.extend_from_slice(&[x, y, x + 6.0, y + 6.0]);
@@ -88,7 +88,7 @@ impl Component for ShapeGallery {
 		"ShapeGallery"
 	}
 
-	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 	}
 
@@ -129,7 +129,7 @@ struct MainScene {
 	pointer_label_id: Option<NodeId>,
 	pointer_target_id: Option<NodeId>,
 	pulse_label_id: Option<NodeId>,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 }
 
 impl MainScene {
@@ -141,7 +141,7 @@ impl MainScene {
 		create_caption_node(node_tree, root_id, 40.0, 90.0, "set_fit_width (칸 220, 최소 비율 0.55)");
 		let text_list = ["짧은 글", "조금 길어서 줄여야 맞는 글", "아주아주 길어서 최소 비율까지 줄여도 넘치는 글입니다", "UILabel 도 같은 맞춤을 씁니다"];
 		for (text_index, text) in text_list.iter().enumerate() {
-			let y = 124.0 + text_index as f32 * 56.0;
+			let y = 124.0 + text_index as f64 * 56.0;
 			let box_id = create_box_node(node_tree, root_id, "fitBox", 40.0, y, 220.0, 44.0);
 			let box_node = &mut node_tree[box_id];
 			let paint = box_node.add_component(Paint::create_with_color(BOX_COLOR));
@@ -189,7 +189,7 @@ impl MainScene {
 		let node_tree = self.scene_base.get_node_tree_mut();
 		create_caption_node(node_tree, root_id, 40.0, 440.0, "SpriteAtlas (atlas.cjs, 늘여 붙이기 2)");
 		for frame_index in 0..ATLAS_FRAME_NAMES.len() {
-			let sprite_id = create_box_node(node_tree, root_id, "atlasSprite", 40.0 + frame_index as f32 * 76.0, 474.0, 64.0, 64.0);
+			let sprite_id = create_box_node(node_tree, root_id, "atlasSprite", 40.0 + frame_index as f64 * 76.0, 474.0, 64.0, 64.0);
 			node_tree[sprite_id].add_component(Sprite::new());
 			self.sprite_node_ids.push(sprite_id);
 		}
@@ -197,7 +197,7 @@ impl MainScene {
 		// 같은 모양의 그림자 글 둘은 구운 그림 하나를 나눠 쓴다.
 		create_caption_node(node_tree, root_id, 460.0, 440.0, "ShadowText (위 둘은 구운 그림 하나)");
 		for (shadow_index, text) in ["같은 그림자 글", "같은 그림자 글", "다른 그림자 글"].iter().enumerate() {
-			let shadow_id = create_box_node(node_tree, root_id, "shadowText", 460.0, 474.0 + shadow_index as f32 * 40.0, 300.0, 36.0);
+			let shadow_id = create_box_node(node_tree, root_id, "shadowText", 460.0, 474.0 + shadow_index as f64 * 40.0, 300.0, 36.0);
 			let shadow_text = node_tree[shadow_id].add_component(ShadowText::create_with_text(text, 24.0));
 			shadow_text.set_text_style(24.0, true, TEXT_COLOR);
 			shadow_text.set_shadow("#000000", 2.0, 3.0);
@@ -280,7 +280,7 @@ impl Scene for MainScene {
 	//==============================================================================
 	// 주기적 갱신.
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 		self.apply_atlas_frames(engine);
 		let pulse_scale = 1.0 + 0.15 * (self.elapsed_seconds * 2.0).sin().max(0.0);

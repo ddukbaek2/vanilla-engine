@@ -31,13 +31,13 @@
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UIScaleOptions {
 	/// 한 단위가 이 CSS 픽셀보다 작으면 키운다.
-	pub minimum_css_scale: f32,
+	pub minimum_css_scale: f64,
 	/// 키우는 상한. (세로 화면은 받지 않는다)
-	pub maximum_scale: f32,
+	pub maximum_scale: f64,
 	/// 키운 UI 층이 지키는 가장 낮은 높이. (0 이면 보지 않는다)
-	pub minimum_layer_height: f32,
+	pub minimum_layer_height: f64,
 	/// 가로가 세로의 이 배 이하면 세로 화면.
-	pub portrait_ratio: f32,
+	pub portrait_ratio: f64,
 }
 
 impl Default for UIScaleOptions {
@@ -101,7 +101,7 @@ impl UIScale {
 	/// assert_eq!(UIScale::read(1920.0, 1080.0, 0.0, &options), 1.0);
 	/// ```
 	//==============================================================================
-	pub fn read(view_width: f32, view_height: f32, css_pixel_scale: f32, options: &UIScaleOptions) -> f32 {
+	pub fn read(view_width: f64, view_height: f64, css_pixel_scale: f64, options: &UIScaleOptions) -> f64 {
 		if !(css_pixel_scale > 0.0) {
 			return 1.0;
 		}
@@ -127,7 +127,7 @@ impl UIScale {
 	/// # 돌려줌
 	/// 가로가 세로의 portrait_ratio 배 이하면 true.
 	//==============================================================================
-	pub fn is_portrait(view_width: f32, view_height: f32, portrait_ratio: f32) -> bool {
+	pub fn is_portrait(view_width: f64, view_height: f64, portrait_ratio: f64) -> bool {
 		view_width <= view_height * portrait_ratio
 	}
 }

@@ -275,7 +275,7 @@ impl Localization {
 	/// assert_eq!(Localization::read_layout_text_align(TextAlign::Left), TextAlign::Right);
 	/// ```
 	//==============================================================================
-	pub fn mirror_layout_x(x: f32, width: f32, parent_width: f32) -> f32 {
+	pub fn mirror_layout_x(x: f64, width: f64, parent_width: f64) -> f64 {
 		if !Localization::is_right_to_left() {
 			return x;
 		}

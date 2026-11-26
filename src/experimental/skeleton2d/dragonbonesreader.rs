@@ -51,7 +51,7 @@ fn create_read_error(message: &str) -> String {
 fn read_number(source: &Map<String, Value>, key: &str, default_value: f64) -> f64 {
 	match source.get(key).and_then(|value| value.as_f64()) {
 		Some(number) => {
-			number as f64
+			number
 		}
 		None => {
 			default_value
@@ -84,7 +84,7 @@ fn read_array<'a>(source: &'a Map<String, Value>, key: &str) -> &'a [Value] {
 /// 숫자 배열 칸 읽기. (없으면 빈 배열, 숫자가 아닌 값은 0)
 //==============================================================================
 fn read_number_array(source: &Map<String, Value>, key: &str) -> Vec<f64> {
-	read_array(source, key).iter().map(|value| value.as_f64().unwrap_or(0.0) as f64).collect()
+	read_array(source, key).iter().map(|value| value.as_f64().unwrap_or(0.0)).collect()
 }
 
 //==============================================================================
@@ -154,14 +154,14 @@ fn read_color_transform(color_json: Option<&Value>) -> [f64; 4] {
 fn read_frame_curve(frame_json: &Map<String, Value>) -> FrameCurve {
 	if let Some(Value::Array(curve_values)) = frame_json.get("curve") {
 		if curve_values.len() == 4 {
-			let read_value = |value_index: usize| -> f64 { curve_values[value_index].as_f64().unwrap_or(0.0) as f64 };
+			let read_value = |value_index: usize| -> f64 { curve_values[value_index].as_f64().unwrap_or(0.0) };
 			return (Skeleton2DCurveType::Bezier, Some([read_value(0), read_value(1), read_value(2), read_value(3)]));
 		}
 		return (Skeleton2DCurveType::Linear, None);
 	}
 	let tween_easing = match frame_json.get("tweenEasing").and_then(|value| value.as_f64()) {
 		Some(tween_easing) => {
-			tween_easing as f64
+			tween_easing
 		}
 		None => {
 			return (Skeleton2DCurveType::Stepped, None);
@@ -555,7 +555,7 @@ fn read_animation(skeleton_data: &Skeleton2DData, animation_json: &Map<String, V
 				};
 				let name = read_string(event_object, "name", "");
 				let int_value = read_array(event_object, "ints").first().and_then(|value| value.as_f64()).unwrap_or(0.0) as i32;
-				let float_value = read_array(event_object, "floats").first().and_then(|value| value.as_f64()).unwrap_or(0.0) as f64;
+				let float_value = read_array(event_object, "floats").first().and_then(|value| value.as_f64()).unwrap_or(0.0);
 				let string_value = read_array(event_object, "strings").first().and_then(|value| value.as_str()).unwrap_or("");
 				timeline.add_event_frame(Skeleton2DEvent::new(name, *frame_time, int_value, float_value, string_value));
 			}
@@ -703,7 +703,7 @@ pub(crate) fn read_dragon_bones_json(json: &Value, armature_name: Option<&str>) 
 		};
 		let mut slot_data = Skeleton2DSlotData::new(slot_data_list.len(), slot_name, bone_index);
 		let color = read_color_transform(slot_object.get("color"));
-		slot_data.set_color(Color::create(color[0] as f32, color[1] as f32, color[2] as f32, color[3] as f32));
+		slot_data.set_color(Color::create(color[0], color[1], color[2], color[3]));
 		slot_data.set_blend_mode(read_blend_mode(read_string(slot_object, "blendMode", "normal")));
 		slot_data_list.push(slot_data);
 		display_index_list.push(read_number(slot_object, "displayIndex", 0.0));

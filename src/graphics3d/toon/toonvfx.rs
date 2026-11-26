@@ -25,6 +25,7 @@
 use std::collections::HashSet;
 
 use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 
 use crate::base::matrix4::Matrix4;
 use crate::base::seededrandom::SeededRandom;
@@ -49,7 +50,7 @@ pub const TOON_VFX_DEFAULT_PARTICLE_CAPACITY: usize = 3000;
 /// 파티클 하나의 값. (vec4 일곱)
 const PARTICLE_FLOAT_COUNT: usize = 28;
 /// 바닥에 멈추지 않는 파티클의 바닥 높이.
-const NO_FLOOR: f32 = -100000.0;
+const NO_FLOOR: f64 = -100000.0;
 /// 불덩이 구와 충격파 띠, 회전체(빔, 연기 기둥)의 나눔. (둘레, 가로질러나 윤곽을 따라)
 const FIREBALL_SEGMENTS: [usize; 2] = [32, 20];
 const BAND_SEGMENTS: [usize; 2] = [96, 8];
@@ -57,25 +58,25 @@ const LATHE_SEGMENTS: [usize; 2] = [40, 28];
 /// 리본 정점 하나의 값. (x, y, z, 길이 쪽 0 ~ 1, 가로 0 ~ 1)
 const RIBBON_FLOAT_COUNT: usize = 5;
 /// 번개가 다시 꺾이는 초와 번개 하나의 마디 수.
-const LIGHTNING_KINK_SECONDS: f32 = 0.08;
+const LIGHTNING_KINK_SECONDS: f64 = 0.08;
 const LIGHTNING_POINT_COUNT: usize = 22;
 /// 프레임마다 넘기는 빛 점의 수 기본 상한. (set_glint_capacity)
 const DEFAULT_GLINT_CAPACITY: usize = 96;
 /// 파티클 꼴의 수. (꼴마다 밝기 배)
 const LOOK_COUNT: usize = 7;
 /// 발밑 그늘의 기본 짙기. (가운데)
-const DEFAULT_BLOB_SHADOW_ALPHA: f32 = 0.45;
+const DEFAULT_BLOB_SHADOW_ALPHA: f64 = 0.45;
 /// 바닥 자국과 충격파 바닥 빛을 바닥 위로 띄우는 높이.
-const DECAL_LIFT: f32 = 0.014;
-const GROUND_GLOW_LIFT: f32 = 0.02;
+const DECAL_LIFT: f64 = 0.014;
+const GROUND_GLOW_LIFT: f64 = 0.02;
 /// 아틀라스를 묶는 텍스처 유닛. (툰 렌더러의 그림자 유닛 3, 화면 공간 바깥선의 5, 6 과 겹치지 않게)
 const VFX_TEXTURE_UNIT: u32 = 4;
 /// 효과 테의 기본 색. (테를 두른 파티클과 번짐 리본의 가장자리, ToonRenderer 의 기본 바깥선 색과 같다)
-const DEFAULT_RIM_COLOR: [f32; 3] = [0.05, 0.05, 0.08];
+const DEFAULT_RIM_COLOR: [f64; 3] = [0.05, 0.05, 0.08];
 /// 카메라 흔들림을 Shaker 에 넣을 때 곱하는 몫. (Shaker 는 세기 0.05 아래에서 멈춘다. 그 문턱이 화면 픽셀 기준이라 장면 길이를 백 배로 넣는다)
-const SHAKE_UNIT_SCALE: f32 = 100.0;
+const SHAKE_UNIT_SCALE: f64 = 100.0;
 /// 번개가 끝에 엷어지는 초.
-const LIGHTNING_FADE_SECONDS: f32 = 0.1;
+const LIGHTNING_FADE_SECONDS: f64 = 0.1;
 /// 어트리뷰트 자리.
 const PARTICLE_ATTRIBUTE_LOCATIONS: [(&str, u32); 8] = [("vertexCorner", 0), ("particleStart", 1), ("particleVelocity", 2), ("particleMotion", 3), ("particleColor", 4), ("particleLook", 5), ("particleExtra", 6), ("particleShape", 7)];
 const SPHERE_ATTRIBUTE_LOCATIONS: [(&str, u32); 1] = [("vertexPosition", 0)];
@@ -173,7 +174,7 @@ impl ToonVfxLook {
 	//==============================================================================
 	/// 셰이더 번호.
 	//==============================================================================
-	fn get_index(&self) -> f32 {
+	fn get_index(&self) -> f64 {
 		match self {
 			ToonVfxLook::Soft => {
 				0.0
@@ -242,7 +243,7 @@ impl ToonVfxDecalMode {
 	//==============================================================================
 	/// 셰이더 번호.
 	//==============================================================================
-	fn get_index(&self) -> f32 {
+	fn get_index(&self) -> f64 {
 		match self {
 			ToonVfxDecalMode::Scorch => {
 				0.0
@@ -284,9 +285,9 @@ impl ToonVfxDecalMode {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToonVfxRange {
 	/// 최소.
-	pub minimum: f32,
+	pub minimum: f64,
 	/// 최대.
-	pub maximum: f32,
+	pub maximum: f64,
 }
 
 impl ToonVfxRange {
@@ -300,26 +301,26 @@ impl ToonVfxRange {
 	/// # 돌려줌
 	/// 새 범위.
 	//==============================================================================
-	pub fn new(minimum: f32, maximum: f32) -> ToonVfxRange {
+	pub fn new(minimum: f64, maximum: f64) -> ToonVfxRange {
 		ToonVfxRange { minimum, maximum }
 	}
 
 	//==============================================================================
 	/// 값 하나 읽기.
 	//==============================================================================
-	fn read_value(&self, seeded_random: &mut SeededRandom) -> f32 {
+	fn read_value(&self, seeded_random: &mut SeededRandom) -> f64 {
 		if self.minimum == self.maximum {
 			return self.minimum;
 		}
-		self.minimum + (self.maximum - self.minimum) * seeded_random.next_value() as f32
+		self.minimum + (self.maximum - self.minimum) * seeded_random.next_value()
 	}
 }
 
-impl From<f32> for ToonVfxRange {
+impl From<f64> for ToonVfxRange {
 	//==============================================================================
 	/// 값 하나로. (최소와 최대가 같은 범위, 원본이 수 하나를 받던 자리)
 	//==============================================================================
-	fn from(value: f32) -> Self {
+	fn from(value: f64) -> Self {
 		ToonVfxRange { minimum: value, maximum: value }
 	}
 }
@@ -363,17 +364,17 @@ pub struct ToonParticleOptions {
 	/// 낼 수. (set_count_ratio 의 몫을 곱한다)
 	pub count: u32,
 	/// 낼 자리.
-	pub position: [f32; 3],
+	pub position: [f64; 3],
 	/// 내는 꼴.
 	pub shape: ToonVfxShape,
 	/// 꼴의 반지름. (Point 는 보지 않음)
-	pub radius: f32,
+	pub radius: f64,
 	/// 원뿔과 선의 쪽.
-	pub direction: [f32; 3],
+	pub direction: [f64; 3],
 	/// 원뿔의 벌어짐. (라디안)
-	pub spread: f32,
+	pub spread: f64,
 	/// 선의 길이.
-	pub length: f32,
+	pub length: f64,
 	/// 아래로 가는 쪽을 위로 뒤집을지.
 	pub is_upward: bool,
 	/// 속도를 무시하고 나이가 다할 때 낸 자리로 빨려 들지.
@@ -383,43 +384,43 @@ pub struct ToonParticleOptions {
 	/// 위로 더하는 처음 빠르기.
 	pub rise: ToonVfxRange,
 	/// 아래로 당기는 가속.
-	pub gravity: f32,
+	pub gravity: f64,
 	/// 끌림. (빠르기가 exp(-drag x 나이) 로 준다)
-	pub drag: f32,
+	pub drag: f64,
 	/// 처음 크기.
 	pub size: ToonVfxRange,
 	/// 끝 크기. (시작 크기에 곱함)
 	pub size_end: ToonVfxRange,
 	/// 크기가 처음에서 끝으로 가는 굽기. (나아감의 거듭제곱, 1 이면 곧게)
-	pub size_curve: f32,
+	pub size_curve: f64,
 	/// 사는 초.
 	pub life: ToonVfxRange,
 	/// 늦게 나타나는 초.
 	pub delay: ToonVfxRange,
 	/// 색. (0 ~ 1 의 [r, g, b], 램프가 있으면 램프 색에 곱함)
-	pub color: [f32; 3],
+	pub color: [f64; 3],
 	/// 램프 줄. (-1 이면 없음)
 	pub ramp: i32,
 	/// 파티클의 꼴.
 	pub look: ToonVfxLook,
 	/// Streak 꼴에서 화면에 비친 속도에 곱하는 늘임.
-	pub stretch: f32,
+	pub stretch: f64,
 	/// 초당 도는 각. (라디안, Streak 꼴은 속도 쪽을 따르므로 돌지 않음)
 	pub spin: ToonVfxRange,
 	/// 멈출 바닥 높이. (None 이면 is_grounded 를 본다)
-	pub floor: Option<f32>,
+	pub floor: Option<f64>,
 	/// 낸 자리의 바닥 높이에서 멈출지.
 	pub is_grounded: bool,
 	/// 밝기 배. (꼴마다의 set_look_gain 배도 곱함)
-	pub brightness: f32,
+	pub brightness: f64,
 	/// 짙기.
-	pub alpha: f32,
+	pub alpha: f64,
 	/// 나타나는 몫. (나이의 이만큼 동안 엷음에서 짙어짐)
-	pub fade_in: f32,
+	pub fade_in: f64,
 	/// 빛의 꼴의 테. (0 이면 더하는 빛만, 1 이면 테 색으로 덮음, 음수면 엷게 덮는 빛무리)
-	pub rim: f32,
+	pub rim: f64,
 	/// 이미 지난 초. (음수면 그만큼 늦게)
-	pub age: f32,
+	pub age: f64,
 	/// 사건 열쇠. (이미 낸 열쇠면 내지 않음)
 	pub key: Option<u64>,
 }
@@ -435,7 +436,7 @@ impl Default for ToonParticleOptions {
 			shape: ToonVfxShape::Point,
 			radius: 0.0,
 			direction: [0.0, 1.0, 0.0],
-			spread: std::f32::consts::PI,
+			spread: std::f64::consts::PI,
 			length: 1.0,
 			is_upward: false,
 			is_inward: false,
@@ -482,25 +483,25 @@ impl Default for ToonParticleOptions {
 #[derive(Clone, Copy, Debug)]
 pub struct ToonFireballOptions {
 	/// 가운데.
-	pub position: [f32; 3],
+	pub position: [f64; 3],
 	/// 다 부푼 반지름. (끝까지 1.25 배로 더 커진다)
-	pub radius: f32,
+	pub radius: f64,
 	/// 사는 초.
-	pub life: f32,
+	pub life: f64,
 	/// 불의 램프 줄.
 	pub ramp: i32,
 	/// 식어 덮는 연기 색.
-	pub smoke_color: [f32; 3],
+	pub smoke_color: [f64; 3],
 	/// 사는 동안 떠오르는 높이.
-	pub rise: f32,
+	pub rise: f64,
 	/// 부푸는 초. (반지름의 0.25 배에서 1 배로)
-	pub grow_seconds: f32,
+	pub grow_seconds: f64,
 	/// 겉이 끓는 정도.
-	pub boil: f32,
+	pub boil: f64,
 	/// 덮는 꼴의 몫. (0 이면 더하는 빛만, 1 이면 몸을 덮고 가장자리를 테 색으로)
-	pub rim: f32,
+	pub rim: f64,
 	/// 이미 지난 초. (음수면 그만큼 늦게)
-	pub age: f32,
+	pub age: f64,
 	/// 사건 열쇠. (이미 낸 열쇠면 내지 않음)
 	pub key: Option<u64>,
 }
@@ -530,31 +531,31 @@ impl Default for ToonFireballOptions {
 #[derive(Clone, Copy, Debug)]
 pub struct ToonShockwaveOptions {
 	/// 가운데 자리. (높이는 바닥 높이)
-	pub x: f32,
+	pub x: f64,
 	/// 가운데 자리의 z.
-	pub z: f32,
+	pub z: f64,
 	/// 퍼지는 처음과 끝 반지름. (빠르게 퍼지다 천천히)
-	pub start_radius: f32,
+	pub start_radius: f64,
 	/// 퍼지는 끝 반지름.
-	pub end_radius: f32,
+	pub end_radius: f64,
 	/// 띠 너비. (나이만큼 0.55 배까지 가늘어지고 반지름을 넘지 않음)
-	pub width: f32,
+	pub width: f64,
 	/// 사는 초. (delay 뒤부터)
-	pub life: f32,
+	pub life: f64,
 	/// 램프 줄.
 	pub ramp: i32,
 	/// 램프 색에 곱하는 색.
-	pub color: [f32; 3],
+	pub color: [f64; 3],
 	/// 바깥 끝이 말려 오르는 높이.
-	pub lift: f32,
+	pub lift: f64,
 	/// 바닥 위로 띄우는 높이.
-	pub height: f32,
+	pub height: f64,
 	/// 늦게 퍼지기 시작하는 초.
-	pub delay: f32,
+	pub delay: f64,
 	/// 덮는 꼴의 몫. (0 이면 더하는 빛만, 1 이면 띠의 몸을 테 색으로 덮고 심은 색)
-	pub rim: f32,
+	pub rim: f64,
 	/// 이미 지난 초. (음수면 그만큼 늦게)
-	pub age: f32,
+	pub age: f64,
 	/// 사건 열쇠. (이미 낸 열쇠면 내지 않음)
 	pub key: Option<u64>,
 }
@@ -585,19 +586,19 @@ impl Default for ToonShockwaveOptions {
 #[derive(Clone, Copy, Debug)]
 pub struct ToonDecalOptions {
 	/// 가운데 자리. (높이는 바닥 높이)
-	pub x: f32,
+	pub x: f64,
 	/// 가운데 자리의 z.
-	pub z: f32,
+	pub z: f64,
 	/// 반지름. (start_radius 에서 grow_seconds 동안 퍼져 닿는 반지름)
-	pub radius: f32,
+	pub radius: f64,
 	/// 퍼지기 시작하는 반지름. (None 이면 radius)
-	pub start_radius: Option<f32>,
+	pub start_radius: Option<f64>,
 	/// 퍼지는 초. (0 이면 처음부터 radius)
-	pub grow_seconds: f32,
+	pub grow_seconds: f64,
 	/// 사는 초. (끝 1 초에 엷어짐)
-	pub life: f32,
+	pub life: f64,
 	/// 열기가 식는 초. (0 이면 열기 없음)
-	pub heat_seconds: f32,
+	pub heat_seconds: f64,
 	/// 그릴 아틀라스 칸.
 	pub slot: ToonVfxSlot,
 	/// 자국의 꼴.
@@ -605,21 +606,21 @@ pub struct ToonDecalOptions {
 	/// 열기와 빛, 테의 램프 줄. (Scorch, Glow, Ring 꼴이 읽는다)
 	pub ramp: i32,
 	/// 색. (빛과 테는 램프 색에 곱하고, Stain, Sheen 은 이 색으로 덮는다)
-	pub tint: [f32; 3],
+	pub tint: [f64; 3],
 	/// 짙기.
-	pub alpha: f32,
+	pub alpha: f64,
 	/// 돎. (None 이면 add_decal 은 무작위, queue_decal 은 0)
-	pub angle: Option<f32>,
+	pub angle: Option<f64>,
 	/// Ring 꼴의 (테 반지름, 테 너비, 잡음 잘기, 흐르는 빠르기). (반지름 몫)
-	pub ring: [f32; 4],
+	pub ring: [f64; 4],
 	/// queue_decal 의 열기. (0 ~ 1)
-	pub heat: f32,
+	pub heat: f64,
 	/// 잡음 씨앗. (None 이면 add_decal 은 무작위, queue_decal 은 0)
-	pub seed: Option<f32>,
+	pub seed: Option<f64>,
 	/// 깜빡이는 반주기 초. (0 이면 없음, 반주기마다 걸러 엷게)
-	pub flicker: f32,
+	pub flicker: f64,
 	/// 이미 지난 초. (add_decal 만 읽음, 음수면 그만큼 늦게)
-	pub age: f32,
+	pub age: f64,
 	/// 사건 열쇠. (add_decal 만 읽음, 이미 낸 열쇠면 내지 않음)
 	pub key: Option<u64>,
 }
@@ -643,7 +644,7 @@ impl Default for ToonDecalOptions {
 ///
 /// fn draw_blob_shadows(gl: &glow::Context, vfx: &mut ToonVfx) {
 /// 	let view_matrix = Matrix4::create_look_at(Vector3::create(0.0, 4.0, 6.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
-/// 	let projection_matrix = Matrix4::create_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+/// 	let projection_matrix = Matrix4::create_perspective(std::f64::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
 /// 	let character_positions = [[0.0, 0.0], [1.5, -0.5], [-1.0, 1.0]];
 /// 	for position in character_positions {
 /// 		vfx.queue_blob_shadow(&ToonBlobShadowOptions { x: position[0], z: position[1], radius: 0.5, ..ToonBlobShadowOptions::default() });
@@ -655,13 +656,13 @@ impl Default for ToonDecalOptions {
 #[derive(Clone, Copy, Debug)]
 pub struct ToonBlobShadowOptions {
 	/// 가운데 자리. (높이는 바닥 높이)
-	pub x: f32,
+	pub x: f64,
 	/// 가운데 자리의 z.
-	pub z: f32,
+	pub z: f64,
 	/// 반지름.
-	pub radius: f32,
+	pub radius: f64,
 	/// 가운데 짙기.
-	pub alpha: f32,
+	pub alpha: f64,
 }
 
 impl Default for ToonBlobShadowOptions {
@@ -689,23 +690,23 @@ impl Default for ToonBlobShadowOptions {
 #[derive(Clone, Copy, Debug)]
 pub struct ToonPlumeOptions {
 	/// 밑 자리. (높이는 바닥 높이)
-	pub x: f32,
+	pub x: f64,
 	/// 밑 자리의 z.
-	pub z: f32,
+	pub z: f64,
 	/// 기둥 높이.
-	pub height: f32,
+	pub height: f64,
 	/// 갓 반지름. (None 이면 높이의 0.4)
-	pub cap_radius: Option<f32>,
+	pub cap_radius: Option<f64>,
 	/// 기둥 반지름. (None 이면 높이의 0.1)
-	pub stem_radius: Option<f32>,
+	pub stem_radius: Option<f64>,
 	/// 사는 초.
-	pub life: f32,
+	pub life: f64,
 	/// 갓 밑이 달아오르는 램프 줄.
 	pub ramp: i32,
 	/// 연기 색.
-	pub smoke_color: [f32; 3],
+	pub smoke_color: [f64; 3],
 	/// 이미 지난 초. (음수면 그만큼 늦게)
-	pub age: f32,
+	pub age: f64,
 	/// 사건 열쇠. (이미 낸 열쇠면 내지 않음)
 	pub key: Option<u64>,
 }
@@ -729,7 +730,7 @@ impl Default for ToonPlumeOptions {
 ///
 /// fn draw_beam(gl: &glow::Context, vfx: &mut ToonVfx) {
 /// 	let view_matrix = Matrix4::create_look_at(Vector3::create(4.0, 3.0, 4.0), Vector3::create(0.0, 1.0, -4.0), Vector3::create(0.0, 1.0, 0.0));
-/// 	let projection_matrix = Matrix4::create_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+/// 	let projection_matrix = Matrix4::create_perspective(std::f64::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
 /// 	let start = [0.0, 1.0, 0.0];
 /// 	let end = [0.0, 1.0, -8.0];
 /// 	vfx.queue_beam(&ToonBeamOptions { start, end, radius: 0.12, is_core: true, alpha: 1.0, brightness: 1.5, ..ToonBeamOptions::default() });
@@ -741,29 +742,29 @@ impl Default for ToonPlumeOptions {
 #[derive(Clone, Copy, Debug)]
 pub struct ToonBeamOptions {
 	/// 축의 시작과 끝.
-	pub start: [f32; 3],
+	pub start: [f64; 3],
 	/// 축의 끝.
-	pub end: [f32; 3],
+	pub end: [f64; 3],
 	/// 반지름.
-	pub radius: f32,
+	pub radius: f64,
 	/// 심이면 흰빛, 아니면 램프의 겉집.
 	pub is_core: bool,
 	/// 짙기.
-	pub alpha: f32,
+	pub alpha: f64,
 	/// 밝기 배.
-	pub brightness: f32,
+	pub brightness: f64,
 	/// 겉집의 램프 줄.
 	pub ramp: i32,
 	/// 겉이 일렁이는 몫. (반지름에 곱함)
-	pub wobble: f32,
+	pub wobble: f64,
 	/// 결이 흐르는 빠르기.
-	pub flow_speed: f32,
+	pub flow_speed: f64,
 	/// 길이 한 칸마다의 결.
-	pub grain_repeat: f32,
+	pub grain_repeat: f64,
 	/// 결과 일렁임의 시각. (None 이면 이 바탕의 시계)
-	pub time: Option<f32>,
+	pub time: Option<f64>,
 	/// 잡음 씨앗.
-	pub seed: f32,
+	pub seed: f64,
 }
 
 impl Default for ToonBeamOptions {
@@ -794,27 +795,27 @@ impl Default for ToonBeamOptions {
 #[derive(Clone, Debug)]
 pub struct ToonRibbonOptions {
 	/// 점열. (둘 이상)
-	pub points: Vec<[f32; 3]>,
+	pub points: Vec<[f64; 3]>,
 	/// 너비.
-	pub width: f32,
+	pub width: f64,
 	/// 0 이면 고른 너비, 1 이면 두 끝이 0.
-	pub taper: f32,
+	pub taper: f64,
 	/// 색. (0 ~ 1 의 [r, g, b], 램프가 있으면 램프 색에 곱함)
-	pub color: [f32; 3],
+	pub color: [f64; 3],
 	/// 램프 줄. (-1 이면 color 만)
 	pub ramp: i32,
 	/// 짙기.
-	pub alpha: f32,
+	pub alpha: f64,
 	/// 밝기 배.
-	pub brightness: f32,
+	pub brightness: f64,
 	/// 길이 한 칸마다의 결.
-	pub grain_repeat: f32,
+	pub grain_repeat: f64,
 	/// 결의 자리. (None 이면 이 바탕의 시계)
-	pub flow: Option<f32>,
+	pub flow: Option<f64>,
 	/// 번짐 색. (주면 흰 심과 그 색 둘레와 테 색 가장자리로 덮는다, None 이면 더하는 빛)
-	pub glow: Option<[f32; 3]>,
+	pub glow: Option<[f64; 3]>,
 	/// 덮는 꼴의 몫. (번짐 색이 없을 때 몸을 테 색으로 덮고 심은 색, 0 이면 더하는 빛만)
-	pub rim: f32,
+	pub rim: f64,
 }
 
 impl Default for ToonRibbonOptions {
@@ -843,37 +844,37 @@ impl Default for ToonRibbonOptions {
 #[derive(Clone, Copy, Debug)]
 pub struct ToonLightningOptions {
 	/// 축의 시작과 끝.
-	pub start: [f32; 3],
+	pub start: [f64; 3],
 	/// 축의 끝.
-	pub end: [f32; 3],
+	pub end: [f64; 3],
 	/// 감는 반지름.
-	pub radius: f32,
+	pub radius: f64,
 	/// 감아 내리는 리본 수.
 	pub count: u32,
 	/// 리본 너비. (리본마다 0.7 ~ 1.3 배)
-	pub width: f32,
+	pub width: f64,
 	/// 감는 바퀴.
-	pub turns: f32,
+	pub turns: f64,
 	/// 리본 색. (0 ~ 1 의 [r, g, b], 램프가 있으면 램프 색에 곱함)
-	pub color: [f32; 3],
+	pub color: [f64; 3],
 	/// 리본의 램프 줄. (-1 이면 color 만)
 	pub ramp: i32,
 	/// 리본의 짙기.
-	pub alpha: f32,
+	pub alpha: f64,
 	/// 리본의 밝기 배.
-	pub brightness: f32,
+	pub brightness: f64,
 	/// 꺾임의 시각. (None 이면 이 바탕의 시계, add_lightning 은 늘 이 바탕의 시계)
-	pub time: Option<f32>,
+	pub time: Option<f64>,
 	/// 씨앗. (None 이면 queue_lightning 은 0, add_lightning 은 무작위)
-	pub seed: Option<f32>,
+	pub seed: Option<f64>,
 	/// 리본의 번짐 색.
-	pub glow: Option<[f32; 3]>,
+	pub glow: Option<[f64; 3]>,
 	/// 사는 초와 나이. (add_lightning 만 읽는다, 나이가 음수면 그만큼 늦게 나타남)
-	pub life: f32,
+	pub life: f64,
 	/// 나이. (add_lightning 만 읽는다, 음수면 그만큼 늦게 나타남)
-	pub age: f32,
+	pub age: f64,
 	/// 리본의 덮는 꼴의 몫.
-	pub rim: f32,
+	pub rim: f64,
 	/// 사건 열쇠. (add_lightning 만 읽는다, 이미 낸 열쇠면 내지 않음)
 	pub key: Option<u64>,
 }
@@ -905,23 +906,23 @@ impl Default for ToonLightningOptions {
 #[derive(Clone, Copy, Debug)]
 pub struct ToonGlintOptions {
 	/// 그 자리.
-	pub position: [f32; 3],
+	pub position: [f64; 3],
 	/// 크기.
-	pub size: f32,
+	pub size: f64,
 	/// 색. (0 ~ 1 의 [r, g, b], 램프가 있으면 램프 색에 곱함)
-	pub color: [f32; 3],
+	pub color: [f64; 3],
 	/// 램프 줄. (-1 이면 없음)
 	pub ramp: i32,
 	/// 꼴.
 	pub look: ToonVfxLook,
 	/// 밝기 배. (꼴마다의 set_look_gain 배도 곱함)
-	pub brightness: f32,
+	pub brightness: f64,
 	/// 짙기.
-	pub alpha: f32,
+	pub alpha: f64,
 	/// 돎. (라디안)
-	pub angle: f32,
+	pub angle: f64,
 	/// 파티클의 rim 과 같다.
-	pub rim: f32,
+	pub rim: f64,
 }
 
 impl Default for ToonGlintOptions {
@@ -949,13 +950,13 @@ impl Default for ToonGlintOptions {
 #[derive(Clone, Copy, Debug)]
 pub struct ToonFlashOptions {
 	/// 덮는 색.
-	pub color: [f32; 3],
+	pub color: [f64; 3],
 	/// 처음 덮는 몫.
-	pub strength: f32,
+	pub strength: f64,
 	/// 걷히는 초.
-	pub life: f32,
+	pub life: f64,
 	/// 나이. (음수면 그만큼 늦게 나타남)
-	pub age: f32,
+	pub age: f64,
 	/// 사건 열쇠. (이미 낸 열쇠면 내지 않음)
 	pub key: Option<u64>,
 }
@@ -978,7 +979,7 @@ impl Default for ToonFlashOptions {
 /// use vanilla::ToonRampColor;
 ///
 /// let from_text = "#ff8000".read_ramp_color();
-/// let values: [f32; 3] = [1.0, 0.5, 0.0];
+/// let values: [f64; 3] = [1.0, 0.5, 0.0];
 /// let from_values = values.read_ramp_color();
 /// assert_eq!(from_text[0], 1.0);
 /// assert!((from_text[1] - from_values[1]).abs() < 0.01);
@@ -992,14 +993,14 @@ pub trait ToonRampColor {
 	/// # 돌려줌
 	/// 0 ~ 1 의 [r, g, b].
 	//==============================================================================
-	fn read_ramp_color(&self) -> [f32; 3];
+	fn read_ramp_color(&self) -> [f64; 3];
 }
 
-impl ToonRampColor for [f32; 3] {
+impl ToonRampColor for [f64; 3] {
 	//==============================================================================
 	/// 그대로.
 	//==============================================================================
-	fn read_ramp_color(&self) -> [f32; 3] {
+	fn read_ramp_color(&self) -> [f64; 3] {
 		*self
 	}
 }
@@ -1008,7 +1009,7 @@ impl ToonRampColor for &str {
 	//==============================================================================
 	/// 색 글자 읽기. ("#rrggbb")
 	//==============================================================================
-	fn read_ramp_color(&self) -> [f32; 3] {
+	fn read_ramp_color(&self) -> [f64; 3] {
 		read_color_values(self)
 	}
 }
@@ -1017,7 +1018,7 @@ impl ToonRampColor for String {
 	//==============================================================================
 	/// 색 글자 읽기. ("#rrggbb")
 	//==============================================================================
-	fn read_ramp_color(&self) -> [f32; 3] {
+	fn read_ramp_color(&self) -> [f64; 3] {
 		read_color_values(self)
 	}
 }
@@ -1064,9 +1065,9 @@ pub struct ToonVfxCounts {
 struct LiveFireball {
 	options: ToonFireballOptions,
 	/// 잡음 씨앗.
-	seed: f32,
+	seed: f64,
 	/// 나이. (음수면 아직 나타나지 않음)
-	age: f32,
+	age: f64,
 }
 
 //==============================================================================
@@ -1076,9 +1077,9 @@ struct LiveFireball {
 struct LiveShockwave {
 	options: ToonShockwaveOptions,
 	/// 낼 때 읽은 바닥 높이.
-	floor_height: f32,
-	seed: f32,
-	age: f32,
+	floor_height: f64,
+	seed: f64,
+	age: f64,
 }
 
 //==============================================================================
@@ -1088,11 +1089,11 @@ struct LiveShockwave {
 struct LiveDecal {
 	options: ToonDecalOptions,
 	/// 낼 때 읽은 바닥 높이.
-	floor_height: f32,
+	floor_height: f64,
 	/// 정한 돎. (options.angle 이 None 이면 무작위나 0)
-	angle: f32,
-	seed: f32,
-	age: f32,
+	angle: f64,
+	seed: f64,
+	age: f64,
 }
 
 //==============================================================================
@@ -1102,11 +1103,11 @@ struct LiveDecal {
 struct LivePlume {
 	options: ToonPlumeOptions,
 	/// 낼 때 읽은 바닥 높이.
-	floor_height: f32,
-	cap_radius: f32,
-	stem_radius: f32,
-	seed: f32,
-	age: f32,
+	floor_height: f64,
+	cap_radius: f64,
+	stem_radius: f64,
+	seed: f64,
+	age: f64,
 }
 
 //==============================================================================
@@ -1123,11 +1124,11 @@ struct IndexedMesh {
 struct VfxFrame {
 	view_projection_matrix: Matrix4,
 	/// 장면에서 카메라 쪽.
-	view_direction: [f32; 3],
-	camera_right: [f32; 3],
-	camera_up: [f32; 3],
+	view_direction: [f64; 3],
+	camera_right: [f64; 3],
+	camera_up: [f64; 3],
 	/// 원근이면 [자리, 1], 직교면 [카메라 쪽, 0].
-	camera_point: [f32; 4],
+	camera_point: [f64; 4],
 }
 
 //==============================================================================
@@ -1151,7 +1152,7 @@ struct VfxFrame {
 /// 	vfx.add_decal(&ToonDecalOptions { radius: 1.4, life: 8.0, heat_seconds: 1.5, mode: ToonVfxDecalMode::Scorch, ramp: 0, ..ToonDecalOptions::default() });
 /// 	vfx.emit_particles(&ToonParticleOptions { count: 40, position: [0.0, 0.6, 0.0], shape: ToonVfxShape::Sphere, radius: 0.3, speed: ToonVfxRange::new(2.0, 5.0), gravity: 6.0, size: ToonVfxRange::new(0.05, 0.12), life: ToonVfxRange::new(0.4, 0.9), look: ToonVfxLook::Streak, stretch: 0.05, ramp: 0, is_grounded: true, ..ToonParticleOptions::default() });
 /// 	let view_matrix = Matrix4::create_look_at(Vector3::create(4.0, 3.0, 5.0), Vector3::create(0.0, 0.5, 0.0), Vector3::create(0.0, 1.0, 0.0));
-/// 	let projection_matrix = Matrix4::create_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+/// 	let projection_matrix = Matrix4::create_perspective(std::f64::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
 /// 	vfx.update(1.0 / 60.0);
 /// 	renderer.begin_frame_with_matrices(gl, &view_matrix, &projection_matrix);
 /// 	renderer.draw_mesh(gl, &floor_mesh, &Matrix4::create_identity(), ToonDrawOptions::default());
@@ -1168,7 +1169,7 @@ pub struct ToonVfx {
 	/// 아틀라스 픽셀. (램프를 바꿀 때 다시 칠함)
 	atlas_pixels: Option<Vec<u8>>,
 	/// 색 램프 줄들. (줄마다 흰 심에서 어둠으로 가는 색)
-	ramp_list: Vec<Vec<[f32; 3]>>,
+	ramp_list: Vec<Vec<[f64; 3]>>,
 	/// 램프 칸을 다시 올릴지.
 	is_ramp_dirty: bool,
 	particle_program: ShaderProgram,
@@ -1180,7 +1181,7 @@ pub struct ToonVfx {
 	ribbon_program: ShaderProgram,
 	flash_program: ShaderProgram,
 	/// 효과 테의 색.
-	rim_color: [f32; 3],
+	rim_color: [f64; 3],
 	/// 지울 버퍼.
 	buffer_list: Vec<GlBuffer>,
 	particle_vertex_array: GlVertexArray,
@@ -1195,9 +1196,9 @@ pub struct ToonVfx {
 	/// 버퍼에 올릴 것이 있는지.
 	is_particle_dirty: bool,
 	/// 낸 파티클이 다 사라지는 시각.
-	particle_live_until: f32,
+	particle_live_until: f64,
 	/// 내는 파티클 수에 곱하는 몫.
-	count_ratio: f32,
+	count_ratio: f64,
 	/// 불덩이 구.
 	sphere_mesh: IndexedMesh,
 	/// 충격파 띠.
@@ -1237,10 +1238,10 @@ pub struct ToonVfx {
 	/// 이번 프레임에 glint_data 에 쓴 빛 점 수.
 	queued_glint_count: usize,
 	/// 이 바탕의 시계. (초)
-	time: f32,
+	time: f64,
 	seeded_random: SeededRandom,
 	/// (x, z) → 바닥 높이. (None 이면 0)
-	floor_height_reader: Option<Box<dyn Fn(f32, f32) -> f32>>,
+	floor_height_reader: Option<Box<dyn Fn(f64, f64) -> f64>>,
 }
 
 //==============================================================================
@@ -1271,14 +1272,14 @@ fn expand_shader(source: &str) -> String {
 //==============================================================================
 /// 0 ~ 1 로 가두기와 부드러운 계단. (셰이더의 clamp, smoothstep)
 //==============================================================================
-fn clamp_unit(value: f32) -> f32 {
+fn clamp_unit(value: f64) -> f64 {
 	value.clamp(0.0, 1.0)
 }
 
 //==============================================================================
 /// 부드러운 계단. (셰이더의 smoothstep)
 //==============================================================================
-fn smooth_step(edge_start: f32, edge_end: f32, value: f32) -> f32 {
+fn smooth_step(edge_start: f64, edge_end: f64, value: f64) -> f64 {
 	let ratio = clamp_unit((value - edge_start) / (edge_end - edge_start));
 	ratio * ratio * (3.0 - 2.0 * ratio)
 }
@@ -1286,15 +1287,15 @@ fn smooth_step(edge_start: f32, edge_end: f32, value: f32) -> f32 {
 //==============================================================================
 /// 값 잡음의 격자. (256 x 256 의 0 ~ 1, 아틀라스를 지을 때만)
 //==============================================================================
-fn create_noise_grid(seed: u32) -> Vec<f32> {
+fn create_noise_grid(seed: u32) -> Vec<f64> {
 	let mut seeded_random = SeededRandom::new(seed);
-	(0..256 * 256).map(|_| seeded_random.next_value() as f32).collect()
+	(0..256 * 256).map(|_| seeded_random.next_value()).collect()
 }
 
 //==============================================================================
 /// 잇는 값 잡음 하나. (주기마다 이어 붙어 타일이 된다)
 //==============================================================================
-fn read_grid_noise(grid: &[f32], x: f32, y: f32, period_x: i64, period_y: i64) -> f32 {
+fn read_grid_noise(grid: &[f64], x: f64, y: f64, period_x: i64, period_y: i64) -> f64 {
 	let column = x.floor();
 	let row = y.floor();
 	let offset_x = x - column;
@@ -1314,7 +1315,7 @@ fn read_grid_noise(grid: &[f32], x: f32, y: f32, period_x: i64, period_y: i64) -
 //==============================================================================
 /// 여러 겹 값 잡음. (겹마다 두 배로 잘게, 주기도 두 배, 0 ~ 1)
 //==============================================================================
-fn read_grid_fbm(grid: &[f32], x: f32, y: f32, period_x: i64, period_y: i64, octave_count: u32) -> f32 {
+fn read_grid_fbm(grid: &[f64], x: f64, y: f64, period_x: i64, period_y: i64, octave_count: u32) -> f64 {
 	let mut sum = 0.0;
 	let mut total = 0.0;
 	let mut amplitude = 0.5;
@@ -1332,11 +1333,11 @@ fn read_grid_fbm(grid: &[f32], x: f32, y: f32, period_x: i64, period_y: i64, oct
 //==============================================================================
 /// 아틀라스 칸 하나 칠하기. (painter 가 (u, v, texel) 로 0 ~ 1 의 RGBA 를 채움, 첫 줄이 텍스처의 v 0)
 //==============================================================================
-fn paint_cell(pixels: &mut [u8], origin_x: usize, origin_y: usize, painter: impl Fn(f32, f32, &mut [f32; 4])) {
+fn paint_cell(pixels: &mut [u8], origin_x: usize, origin_y: usize, painter: impl Fn(f64, f64, &mut [f64; 4])) {
 	for pixel_y in 0..ATLAS_SLOT_SIZE {
-		let v = (pixel_y as f32 + 0.5) / ATLAS_SLOT_SIZE as f32;
+		let v = (pixel_y as f64 + 0.5) / ATLAS_SLOT_SIZE as f64;
 		for pixel_x in 0..ATLAS_SLOT_SIZE {
-			let u = (pixel_x as f32 + 0.5) / ATLAS_SLOT_SIZE as f32;
+			let u = (pixel_x as f64 + 0.5) / ATLAS_SLOT_SIZE as f64;
 			let mut texel = [1.0, 1.0, 1.0, 0.0];
 			painter(u, v, &mut texel);
 			let offset = ((origin_y + pixel_y) * ATLAS_WIDTH + origin_x + pixel_x) * 4;
@@ -1350,7 +1351,7 @@ fn paint_cell(pixels: &mut [u8], origin_x: usize, origin_y: usize, painter: impl
 //==============================================================================
 /// 아틀라스 오른쪽 반의 칸 하나 칠하기.
 //==============================================================================
-fn paint_slot(pixels: &mut [u8], slot: ToonVfxSlot, painter: impl Fn(f32, f32, &mut [f32; 4])) {
+fn paint_slot(pixels: &mut [u8], slot: ToonVfxSlot, painter: impl Fn(f64, f64, &mut [f64; 4])) {
 	let index = slot.get_index();
 	paint_cell(pixels, ATLAS_WIDTH / 2 + (index % 4) * ATLAS_SLOT_SIZE, (index / 4) * ATLAS_SLOT_SIZE, painter);
 }
@@ -1358,9 +1359,9 @@ fn paint_slot(pixels: &mut [u8], slot: ToonVfxSlot, painter: impl Fn(f32, f32, &
 //==============================================================================
 /// 색 램프 칸 칠하기. (줄마다 색들을 고르게 나눠 잇는다, 여덟 줄보다 적으면 마지막 줄을 되풀이)
 //==============================================================================
-fn paint_ramps(pixels: &mut [u8], ramp_list: &[Vec<[f32; 3]>]) {
+fn paint_ramps(pixels: &mut [u8], ramp_list: &[Vec<[f64; 3]>]) {
 	paint_slot(pixels, ToonVfxSlot::Ramps, |u, v, color| {
-		let row_index = ((v * TOON_VFX_MAXIMUM_RAMPS as f32).floor() as usize).min(ramp_list.len() - 1);
+		let row_index = ((v * TOON_VFX_MAXIMUM_RAMPS as f64).floor() as usize).min(ramp_list.len() - 1);
 		let stops = &ramp_list[row_index];
 		if stops.len() == 1 {
 			color[0] = stops[0][0];
@@ -1369,9 +1370,9 @@ fn paint_ramps(pixels: &mut [u8], ramp_list: &[Vec<[f32; 3]>]) {
 			color[3] = 1.0;
 			return;
 		}
-		let position = u * (stops.len() - 1) as f32;
+		let position = u * (stops.len() - 1) as f64;
 		let stop_index = (position.floor() as usize).min(stops.len() - 2);
-		let blend = position - stop_index as f32;
+		let blend = position - stop_index as f64;
 		for channel in 0..3 {
 			color[channel] = stops[stop_index][channel] + (stops[stop_index + 1][channel] - stops[stop_index][channel]) * blend;
 		}
@@ -1388,7 +1389,7 @@ fn create_atlas_pixels() -> Vec<u8> {
 	let grid = grid.as_slice();
 	// 연기 플립북. (잡음 덩어리가 칸마다 말리며 퍼지고 엷어짐, 위쪽이 밝음)
 	for frame in 0..SMOKE_FRAME_COUNT {
-		let progress = frame as f32 / (SMOKE_FRAME_COUNT - 1) as f32;
+		let progress = frame as f64 / (SMOKE_FRAME_COUNT - 1) as f64;
 		let swirl = progress * 1.1;
 		let swirl_cosine = swirl.cos();
 		let swirl_sine = swirl.sin();
@@ -1489,13 +1490,13 @@ fn create_atlas_pixels() -> Vec<u8> {
 //==============================================================================
 fn create_sphere_arrays() -> (Vec<f32>, Vec<u16>) {
 	let [around_count, down_count] = FIREBALL_SEGMENTS;
-	let mut positions = Vec::new();
+	let mut positions: Vec<f32> = Vec::new();
 	let mut indices = Vec::new();
 	for down_index in 0..=down_count {
-		let polar = down_index as f32 / down_count as f32 * std::f32::consts::PI;
+		let polar = down_index as f64 / down_count as f64 * std::f64::consts::PI;
 		for around_index in 0..=around_count {
-			let azimuth = around_index as f32 / around_count as f32 * std::f32::consts::PI * 2.0;
-			positions.extend_from_slice(&[polar.sin() * azimuth.cos(), polar.cos(), polar.sin() * azimuth.sin()]);
+			let azimuth = around_index as f64 / around_count as f64 * std::f64::consts::PI * 2.0;
+			positions.extend_from_slice(&[(polar.sin() * azimuth.cos()) as f32, polar.cos() as f32, (polar.sin() * azimuth.sin()) as f32]);
 		}
 	}
 	push_grid_indices(&mut indices, around_count, down_count);
@@ -1507,11 +1508,11 @@ fn create_sphere_arrays() -> (Vec<f32>, Vec<u16>) {
 //==============================================================================
 fn create_grid_arrays(segments: [usize; 2]) -> (Vec<f32>, Vec<u16>) {
 	let [around_count, across_count] = segments;
-	let mut positions = Vec::new();
+	let mut positions: Vec<f32> = Vec::new();
 	let mut indices = Vec::new();
 	for across_index in 0..=across_count {
 		for around_index in 0..=around_count {
-			positions.extend_from_slice(&[around_index as f32 / around_count as f32, across_index as f32 / across_count as f32]);
+			positions.extend_from_slice(&[(around_index as f64 / around_count as f64) as f32, (across_index as f64 / across_count as f64) as f32]);
 		}
 	}
 	push_grid_indices(&mut indices, around_count, across_count);
@@ -1534,7 +1535,7 @@ fn push_grid_indices(indices: &mut Vec<u16>, around_count: usize, row_count: usi
 //==============================================================================
 /// 축에 수직인 두 쪽. ([옆 A, 옆 B], 둘 다 길이 1, 축이 0 이면 x 와 z)
 //==============================================================================
-fn read_axis_sides(axis: [f32; 3]) -> [[f32; 3]; 2] {
+fn read_axis_sides(axis: [f64; 3]) -> [[f64; 3]; 2] {
 	let axis_length = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
 	if axis_length < 0.000001 {
 		return [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]];
@@ -1552,36 +1553,36 @@ fn read_axis_sides(axis: [f32; 3]) -> [[f32; 3]; 2] {
 //==============================================================================
 /// 유니폼 올리기. (이름으로 찾아)
 //==============================================================================
-fn set_uniform_float(gl: &glow::Context, shader_program: &ShaderProgram, name: &str, value: f32) {
+fn set_uniform_float(gl: &glow::Context, shader_program: &ShaderProgram, name: &str, value: f64) {
 	unsafe {
-		gl.uniform_1_f32(shader_program.get_uniform_location(gl, name).as_ref(), value);
+		gl.uniform_1_f64(shader_program.get_uniform_location(gl, name).as_ref(), value);
 	}
 }
 
 //==============================================================================
 /// vec2 유니폼 올리기. (이름으로 찾아)
 //==============================================================================
-fn set_uniform_vector2(gl: &glow::Context, shader_program: &ShaderProgram, name: &str, x: f32, y: f32) {
+fn set_uniform_vector2(gl: &glow::Context, shader_program: &ShaderProgram, name: &str, x: f64, y: f64) {
 	unsafe {
-		gl.uniform_2_f32(shader_program.get_uniform_location(gl, name).as_ref(), x, y);
+		gl.uniform_2_f64(shader_program.get_uniform_location(gl, name).as_ref(), x, y);
 	}
 }
 
 //==============================================================================
 /// vec3 유니폼 올리기. (이름으로 찾아)
 //==============================================================================
-fn set_uniform_vector3(gl: &glow::Context, shader_program: &ShaderProgram, name: &str, value: [f32; 3]) {
+fn set_uniform_vector3(gl: &glow::Context, shader_program: &ShaderProgram, name: &str, value: [f64; 3]) {
 	unsafe {
-		gl.uniform_3_f32(shader_program.get_uniform_location(gl, name).as_ref(), value[0], value[1], value[2]);
+		gl.uniform_3_f64(shader_program.get_uniform_location(gl, name).as_ref(), value[0], value[1], value[2]);
 	}
 }
 
 //==============================================================================
 /// vec4 유니폼 올리기. (이름으로 찾아)
 //==============================================================================
-fn set_uniform_vector4(gl: &glow::Context, shader_program: &ShaderProgram, name: &str, value: [f32; 4]) {
+fn set_uniform_vector4(gl: &glow::Context, shader_program: &ShaderProgram, name: &str, value: [f64; 4]) {
 	unsafe {
-		gl.uniform_4_f32(shader_program.get_uniform_location(gl, name).as_ref(), value[0], value[1], value[2], value[3]);
+		gl.uniform_4_f64(shader_program.get_uniform_location(gl, name).as_ref(), value[0], value[1], value[2], value[3]);
 	}
 }
 
@@ -1716,7 +1717,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 기본 색 램프. (흰빛에서 어둠으로 식는 한 줄)
 	//==============================================================================
-	fn read_default_ramps() -> Vec<Vec<[f32; 3]>> {
+	fn read_default_ramps() -> Vec<Vec<[f64; 3]>> {
 		vec![vec![[1.0, 1.0, 1.0], [0.85, 0.85, 0.85], [0.63, 0.63, 0.63], [0.41, 0.41, 0.41], [0.2, 0.2, 0.2], [0.06, 0.06, 0.06]]]
 	}
 
@@ -1778,7 +1779,7 @@ impl ToonVfx {
 	/// - `ramp_list`: 줄마다 흰 심에서 어둠으로 가는 색들. (여덟 줄까지, 빈 줄은 버림)
 	//==============================================================================
 	pub fn set_ramps<C: ToonRampColor>(&mut self, ramp_list: &[Vec<C>]) {
-		let valid_list: Vec<Vec<[f32; 3]>> = ramp_list.iter().filter(|stops| !stops.is_empty()).take(TOON_VFX_MAXIMUM_RAMPS).map(|stops| stops.iter().map(|stop| stop.read_ramp_color()).collect()).collect();
+		let valid_list: Vec<Vec<[f64; 3]>> = ramp_list.iter().filter(|stops| !stops.is_empty()).take(TOON_VFX_MAXIMUM_RAMPS).map(|stops| stops.iter().map(|stop| stop.read_ramp_color()).collect()).collect();
 		self.ramp_list = if valid_list.is_empty() { ToonVfx::read_default_ramps() } else { valid_list };
 		self.is_ramp_dirty = true;
 	}
@@ -1862,7 +1863,7 @@ impl ToonVfx {
 	/// # 인자
 	/// - `count_ratio`: 내는 파티클 수에 곱하는 몫. (0 ~ 1)
 	//==============================================================================
-	pub fn set_count_ratio(&mut self, count_ratio: f32) {
+	pub fn set_count_ratio(&mut self, count_ratio: f64) {
 		self.count_ratio = count_ratio.clamp(0.0, 1.0);
 	}
 
@@ -1872,7 +1873,7 @@ impl ToonVfx {
 	/// # 돌려줌
 	/// 내는 파티클 수에 곱하는 몫. (0 ~ 1)
 	//==============================================================================
-	pub fn get_count_ratio(&self) -> f32 {
+	pub fn get_count_ratio(&self) -> f64 {
 		self.count_ratio
 	}
 
@@ -1905,8 +1906,8 @@ impl ToonVfx {
 	/// - `look`: 꼴. (ToonVfxLook)
 	/// - `gain`: 밝기 배. (0 이상, 기본 1)
 	//==============================================================================
-	pub fn set_look_gain(&mut self, look: ToonVfxLook, gain: f32) {
-		self.look_gain_list[look.get_index() as usize] = gain.max(0.0);
+	pub fn set_look_gain(&mut self, look: ToonVfxLook, gain: f64) {
+		self.look_gain_list[look.get_index() as usize] = gain.max(0.0) as f32;
 	}
 
 	//==============================================================================
@@ -1918,8 +1919,8 @@ impl ToonVfx {
 	/// # 돌려줌
 	/// 그 꼴의 밝기 배.
 	//==============================================================================
-	pub fn get_look_gain(&self, look: ToonVfxLook) -> f32 {
-		self.look_gain_list[look.get_index() as usize]
+	pub fn get_look_gain(&self, look: ToonVfxLook) -> f64 {
+		(self.look_gain_list[look.get_index() as usize]) as f64
 	}
 
 	//==============================================================================
@@ -1948,7 +1949,7 @@ impl ToonVfx {
 	/// # 인자
 	/// - `rim_color`: 테의 색. ([r, g, b] 0 ~ 1)
 	//==============================================================================
-	pub fn set_rim_color(&mut self, rim_color: [f32; 3]) {
+	pub fn set_rim_color(&mut self, rim_color: [f64; 3]) {
 		self.rim_color = rim_color;
 	}
 
@@ -1958,7 +1959,7 @@ impl ToonVfx {
 	/// # 돌려줌
 	/// 효과 테의 색. ([r, g, b] 0 ~ 1)
 	//==============================================================================
-	pub fn get_rim_color(&self) -> [f32; 3] {
+	pub fn get_rim_color(&self) -> [f64; 3] {
 		self.rim_color
 	}
 
@@ -1968,7 +1969,7 @@ impl ToonVfx {
 	/// # 인자
 	/// - `floor_height_reader`: (x, z) 로 바닥 높이를 돌려주는 함수. (None 이면 늘 0)
 	//==============================================================================
-	pub fn set_floor_height_reader(&mut self, floor_height_reader: Option<Box<dyn Fn(f32, f32) -> f32>>) {
+	pub fn set_floor_height_reader(&mut self, floor_height_reader: Option<Box<dyn Fn(f64, f64) -> f64>>) {
 		self.floor_height_reader = floor_height_reader;
 	}
 
@@ -1982,7 +1983,7 @@ impl ToonVfx {
 	/// # 돌려줌
 	/// 그 자리의 바닥 높이.
 	//==============================================================================
-	pub fn read_floor_height(&self, x: f32, z: f32) -> f32 {
+	pub fn read_floor_height(&self, x: f64, z: f64) -> f64 {
 		match self.floor_height_reader.as_ref() {
 			Some(floor_height_reader) => {
 				floor_height_reader(x, z)
@@ -1999,7 +2000,7 @@ impl ToonVfx {
 	/// # 돌려줌
 	/// 이 바탕의 시계. (초, update 로 나아감)
 	//==============================================================================
-	pub fn get_time(&self) -> f32 {
+	pub fn get_time(&self) -> f64 {
 		self.time
 	}
 
@@ -2053,7 +2054,7 @@ impl ToonVfx {
 	/// # 인자
 	/// - `delta_time`: 초.
 	//==============================================================================
-	pub fn update(&mut self, delta_time: f32) {
+	pub fn update(&mut self, delta_time: f64) {
 		self.time += delta_time;
 		self.fireball_list.retain_mut(|effect| {
 			effect.age += delta_time;
@@ -2092,7 +2093,7 @@ impl ToonVfx {
 		if self.count_ratio >= 1.0 {
 			return count;
 		}
-		((count as f32 * self.count_ratio).round() as u32).max(1)
+		((count as f64 * self.count_ratio).round() as u32).max(1)
 	}
 
 	//==============================================================================
@@ -2121,17 +2122,17 @@ impl ToonVfx {
 		let sides = read_axis_sides(direction);
 		let radius = options.radius;
 		for particle_index in 0..count {
-			let mut random = || self.seeded_random.next_value() as f32;
-			let mut offset = [0.0f32; 3];
-			let mut heading = [0.0f32, 1.0, 0.0];
+			let mut random = || self.seeded_random.next_value();
+			let mut offset = [0.0f64; 3];
+			let mut heading = [0.0f64, 1.0, 0.0];
 			match options.shape {
 				ToonVfxShape::Ring => {
-					let angle = (particle_index as f32 + random() * 0.8) / count as f32 * std::f32::consts::PI * 2.0;
+					let angle = (particle_index as f64 + random() * 0.8) / count as f64 * std::f64::consts::PI * 2.0;
 					offset = [angle.cos() * radius, 0.0, angle.sin() * radius];
 					heading = [angle.cos(), 0.0, angle.sin()];
 				}
 				ToonVfxShape::Disc => {
-					let angle = random() * std::f32::consts::PI * 2.0;
+					let angle = random() * std::f64::consts::PI * 2.0;
 					let reach = random().sqrt() * radius;
 					offset = [angle.cos() * reach, 0.0, angle.sin() * reach];
 					heading = [angle.cos(), 0.0, angle.sin()];
@@ -2139,7 +2140,7 @@ impl ToonVfx {
 				ToonVfxShape::Cone => {
 					// 고른 쪽을 가운데로 spread 안의 원뿔. (쪽에 수직인 두 축으로 기울임)
 					let tilt = random() * options.spread;
-					let turn = random() * std::f32::consts::PI * 2.0;
+					let turn = random() * std::f64::consts::PI * 2.0;
 					let reach = random().sqrt() * radius;
 					for component in 0..3 {
 						let around = sides[0][component] * turn.cos() + sides[1][component] * turn.sin();
@@ -2149,7 +2150,7 @@ impl ToonVfx {
 				}
 				ToonVfxShape::Line => {
 					let along = random() * options.length;
-					let turn = random() * std::f32::consts::PI * 2.0;
+					let turn = random() * std::f64::consts::PI * 2.0;
 					let reach = random().sqrt() * radius;
 					heading = axis;
 					for component in 0..3 {
@@ -2159,7 +2160,7 @@ impl ToonVfx {
 				ToonVfxShape::Point | ToonVfxShape::Sphere => {
 					// 공 안의 고른 쪽. (point 는 반지름을 보지 않는다)
 					let height_ratio = random() * 2.0 - 1.0;
-					let angle = random() * std::f32::consts::PI * 2.0;
+					let angle = random() * std::f64::consts::PI * 2.0;
 					let ring_ratio = (1.0 - height_ratio * height_ratio).sqrt();
 					heading = [angle.cos() * ring_ratio, height_ratio, angle.sin() * ring_ratio];
 					let reach = if options.shape == ToonVfxShape::Point { 0.0 } else { random().cbrt() * radius };
@@ -2178,7 +2179,7 @@ impl ToonVfx {
 			let life = options.life.read_value(seeded_random).max(0.001);
 			let delay = options.delay.read_value(seeded_random);
 			let spin = options.spin.read_value(seeded_random);
-			let seed = seeded_random.next_value() as f32;
+			let seed = seeded_random.next_value();
 			let mut velocity = [heading[0] * speed, heading[1] * speed + rise, heading[2] * speed];
 			if options.is_inward {
 				velocity = [-offset[0] / life, -offset[1] / life, -offset[2] / life];
@@ -2188,7 +2189,7 @@ impl ToonVfx {
 				[x + offset[0], y + offset[1], z + offset[2], start_time],
 				[velocity[0], velocity[1], velocity[2], life],
 				[options.gravity, options.drag, size, size_end],
-				[options.color[0], options.color[1], options.color[2], options.ramp as f32],
+				[options.color[0], options.color[1], options.color[2], options.ramp as f64],
 				[options.look.get_index(), options.stretch, spin, floor],
 				[options.brightness, options.alpha, seed, options.fade_in],
 				[options.size_curve, options.rim, 0.0, 0.0],
@@ -2199,10 +2200,10 @@ impl ToonVfx {
 	//==============================================================================
 	/// 파티클 하나를 다음 칸에 쓰기. (가득 차면 가장 오래 전에 쓴 칸을 덮음, 값 일곱은 원본 writeParticle 의 차례)
 	//==============================================================================
-	fn write_particle(&mut self, value_list: [[f32; 4]; 7]) {
+	fn write_particle(&mut self, value_list: [[f64; 4]; 7]) {
 		let offset = self.particle_write_index * PARTICLE_FLOAT_COUNT;
 		for (value_index, values) in value_list.iter().enumerate() {
-			self.particle_data[offset + value_index * 4..offset + value_index * 4 + 4].copy_from_slice(values);
+			self.particle_data[offset + value_index * 4..offset + value_index * 4 + 4].copy_from_slice(&values.map(|value| value as f32));
 		}
 		self.particle_write_index = (self.particle_write_index + 1) % self.particle_capacity;
 		self.particle_used_count = (self.particle_used_count + 1).min(self.particle_capacity);
@@ -2220,7 +2221,7 @@ impl ToonVfx {
 		if !self.register_event_key(options.key) || (options.age > 0.0 && options.age >= options.life) {
 			return;
 		}
-		let seed = self.seeded_random.next_value() as f32 * 40.0;
+		let seed = self.seeded_random.next_value() * 40.0;
 		let mut options = *options;
 		options.grow_seconds = options.grow_seconds.max(0.001);
 		self.fireball_list.push(LiveFireball { options, seed, age: options.age });
@@ -2237,7 +2238,7 @@ impl ToonVfx {
 			return;
 		}
 		let floor_height = self.read_floor_height(options.x, options.z);
-		let seed = self.seeded_random.next_value() as f32 * 40.0;
+		let seed = self.seeded_random.next_value() * 40.0;
 		self.shockwave_list.push(LiveShockwave { options: *options, floor_height, seed, age: options.age });
 	}
 
@@ -2252,8 +2253,8 @@ impl ToonVfx {
 			return;
 		}
 		let floor_height = self.read_floor_height(options.x, options.z);
-		let random_angle = self.seeded_random.next_value() as f32 * std::f32::consts::PI * 2.0;
-		let random_seed = self.seeded_random.next_value() as f32 * 40.0;
+		let random_angle = self.seeded_random.next_value() * std::f64::consts::PI * 2.0;
+		let random_seed = self.seeded_random.next_value() * 40.0;
 		self.decal_list.push(LiveDecal { options: *options, floor_height, angle: options.angle.unwrap_or(random_angle), seed: options.seed.unwrap_or(random_seed), age: options.age });
 	}
 
@@ -2289,7 +2290,7 @@ impl ToonVfx {
 			return;
 		}
 		let floor_height = self.read_floor_height(options.x, options.z);
-		let seed = self.seeded_random.next_value() as f32 * 40.0;
+		let seed = self.seeded_random.next_value() * 40.0;
 		self.plume_list.push(LivePlume { options: *options, floor_height, cap_radius: options.cap_radius.unwrap_or(options.height * 0.4), stem_radius: options.stem_radius.unwrap_or(options.height * 0.1), seed, age: options.age });
 	}
 
@@ -2336,14 +2337,14 @@ impl ToonVfx {
 		for bolt_index in 0..count {
 			let seed = ((base_seed * 7919.0).floor() as i64 + kink_step * 131 + bolt_index as i64 * 977) as u32;
 			let mut seeded_random = SeededRandom::new(seed);
-			let mut random = || seeded_random.next_value() as f32;
-			let phase = bolt_index as f32 / count as f32 * std::f32::consts::PI * 2.0 + random() * 0.8;
+			let mut random = || seeded_random.next_value();
+			let phase = bolt_index as f64 / count as f64 * std::f64::consts::PI * 2.0 + random() * 0.8;
 			let turn_scale = options.turns * (0.8 + random() * 0.4);
 			let bolt_turns = if random() < 0.5 { -turn_scale } else { turn_scale };
 			let mut points = Vec::with_capacity(LIGHTNING_POINT_COUNT);
 			for point_index in 0..LIGHTNING_POINT_COUNT {
-				let along = point_index as f32 / (LIGHTNING_POINT_COUNT - 1) as f32;
-				let angle = phase + along * bolt_turns * std::f32::consts::PI * 2.0 + (random() - 0.5) * 0.5;
+				let along = point_index as f64 / (LIGHTNING_POINT_COUNT - 1) as f64;
+				let angle = phase + along * bolt_turns * std::f64::consts::PI * 2.0 + (random() - 0.5) * 0.5;
 				let reach = options.radius * (0.75 + random() * 0.5);
 				let cosine = angle.cos() * reach;
 				let sine = angle.sin() * reach;
@@ -2354,7 +2355,7 @@ impl ToonVfx {
 				]);
 			}
 			let width = options.width * (0.7 + random() * 0.6);
-			self.queue_ribbon(ToonRibbonOptions { points, width, taper: 0.6, color: options.color, ramp: options.ramp, alpha: options.alpha, brightness: options.brightness, grain_repeat: 1.5, flow: Some(time * 6.0 + bolt_index as f32), glow: options.glow, rim: options.rim });
+			self.queue_ribbon(ToonRibbonOptions { points, width, taper: 0.6, color: options.color, ramp: options.ramp, alpha: options.alpha, brightness: options.brightness, grain_repeat: 1.5, flow: Some(time * 6.0 + bolt_index as f64), glow: options.glow, rim: options.rim });
 		}
 	}
 
@@ -2373,14 +2374,14 @@ impl ToonVfx {
 			[x, y, z, self.time],
 			[0.0, 0.0, 0.0, 1000000.0],
 			[0.0, 0.0, options.size, options.size],
-			[options.color[0], options.color[1], options.color[2], options.ramp as f32],
+			[options.color[0], options.color[1], options.color[2], options.ramp as f64],
 			[options.look.get_index(), 0.0, 0.0, NO_FLOOR],
-			[options.brightness, options.alpha, options.angle / (std::f32::consts::PI * 2.0), 0.0],
+			[options.brightness, options.alpha, options.angle / (std::f64::consts::PI * 2.0), 0.0],
 			[1.0, options.rim, 0.0, 0.0],
 		];
 		let offset = self.queued_glint_count * PARTICLE_FLOAT_COUNT;
 		for (value_index, values) in value_list.iter().enumerate() {
-			self.glint_data[offset + value_index * 4..offset + value_index * 4 + 4].copy_from_slice(values);
+			self.glint_data[offset + value_index * 4..offset + value_index * 4 + 4].copy_from_slice(&values.map(|value| value as f32));
 		}
 		self.queued_glint_count += 1;
 	}
@@ -2397,7 +2398,7 @@ impl ToonVfx {
 		}
 		let mut lightning = *options;
 		if lightning.seed.is_none() {
-			lightning.seed = Some(self.seeded_random.next_value() as f32 * 1000.0);
+			lightning.seed = Some(self.seeded_random.next_value() * 1000.0);
 		}
 		self.lightning_list.push(lightning);
 	}
@@ -2421,7 +2422,7 @@ impl ToonVfx {
 	/// # 인자
 	/// - `strength`: 흔들림의 최대 오프셋. (장면 길이)
 	//==============================================================================
-	pub fn add_shake(&mut self, strength: f32) {
+	pub fn add_shake(&mut self, strength: f64) {
 		self.shaker.add_shake(strength * SHAKE_UNIT_SCALE);
 	}
 
@@ -2525,7 +2526,7 @@ impl ToonVfx {
 	/// 그리는 프레임의 카메라. (보기 행렬에서 카메라 쪽, 오른쪽, 위쪽, 자리를 읽는다, 원근이면 빔과 리본이 카메라 자리를 향한다)
 	//==============================================================================
 	fn read_frame(view_matrix: &Matrix4, projection_matrix: &Matrix4) -> VfxFrame {
-		let view_elements = &view_matrix.elements;
+		let view_elements = view_matrix.read_elements();
 		let mut view_projection_matrix = *projection_matrix;
 		view_projection_matrix.multiply(view_matrix);
 		let view_direction = [view_elements[2], view_elements[6], view_elements[10]];
@@ -2599,7 +2600,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 바닥 자국 하나 그리기. (자국 셰이더와 네 귀퉁이가 묶여 있음)
 	//==============================================================================
-	fn draw_decal(&self, gl: &glow::Context, decal: &LiveDecal, alpha: f32, heat: f32) {
+	fn draw_decal(&self, gl: &glow::Context, decal: &LiveDecal, alpha: f64, heat: f64) {
 		let decal_program = &self.decal_program;
 		let options = &decal.options;
 		let start_radius = options.start_radius.unwrap_or(options.radius);
@@ -2607,10 +2608,10 @@ impl ToonVfx {
 		let radius = start_radius + (options.radius - start_radius) * grow;
 		set_uniform_vector4(gl, decal_program, "decalShape", [options.x, options.z, radius, decal.angle]);
 		set_uniform_float(gl, decal_program, "decalHeight", decal.floor_height + DECAL_LIFT);
-		set_uniform_float(gl, decal_program, "decalSlot", options.slot.get_index() as f32);
+		set_uniform_float(gl, decal_program, "decalSlot", options.slot.get_index() as f64);
 		set_uniform_float(gl, decal_program, "decalAlpha", alpha);
 		set_uniform_float(gl, decal_program, "decalHeat", heat);
-		set_uniform_float(gl, decal_program, "decalRamp", options.ramp as f32);
+		set_uniform_float(gl, decal_program, "decalRamp", options.ramp as f64);
 		set_uniform_vector3(gl, decal_program, "decalTint", options.tint);
 		set_uniform_float(gl, decal_program, "decalMode", options.mode.get_index());
 		set_uniform_vector4(gl, decal_program, "decalRing", options.ring);
@@ -2646,7 +2647,7 @@ impl ToonVfx {
 			let alpha = (1.0 - progress).powf(1.3);
 			set_uniform_float(gl, band_program, "bandProgress", progress);
 			set_uniform_float(gl, band_program, "bandRepeat", (options.end_radius * 4.0).round().max(6.0));
-			set_uniform_float(gl, band_program, "bandRamp", options.ramp as f32);
+			set_uniform_float(gl, band_program, "bandRamp", options.ramp as f64);
 			set_uniform_vector3(gl, band_program, "bandColor", options.color);
 			set_uniform_float(gl, band_program, "bandSeed", shockwave.seed);
 			set_uniform_float(gl, band_program, "bandAlpha", alpha);
@@ -2689,7 +2690,7 @@ impl ToonVfx {
 			set_uniform_vector4(gl, plume_program, "plumeShape", [options.x, options.z, options.height, plume.cap_radius]);
 			set_uniform_vector4(gl, plume_program, "plumeMotion", [progress, plume.age, plume.seed, plume.stem_radius]);
 			set_uniform_float(gl, plume_program, "plumeBase", plume.floor_height);
-			set_uniform_vector4(gl, plume_program, "plumeLook", [alpha, heat, options.ramp as f32, plume.age]);
+			set_uniform_vector4(gl, plume_program, "plumeLook", [alpha, heat, options.ramp as f64, plume.age]);
 			set_uniform_vector3(gl, plume_program, "smokeColor", options.smoke_color);
 			ToonVfx::draw_indexed_mesh(gl, &self.lathe_mesh);
 		}
@@ -2725,7 +2726,7 @@ impl ToonVfx {
 			set_uniform_float(gl, fireball_program, "ballBoil", options.boil);
 			set_uniform_float(gl, fireball_program, "ballHeat", heat);
 			set_uniform_float(gl, fireball_program, "ballAlpha", alpha);
-			set_uniform_float(gl, fireball_program, "ballRamp", options.ramp as f32);
+			set_uniform_float(gl, fireball_program, "ballRamp", options.ramp as f64);
 			set_uniform_vector3(gl, fireball_program, "smokeColor", options.smoke_color);
 			set_uniform_float(gl, fireball_program, "ballRim", options.rim);
 			ToonVfx::draw_indexed_mesh(gl, &self.sphere_mesh);
@@ -2756,7 +2757,7 @@ impl ToonVfx {
 			set_uniform_vector3(gl, beam_program, "beamSideB", sides[1]);
 			set_uniform_vector4(gl, beam_program, "beamShape", [beam.radius, beam.wobble, beam.time.unwrap_or(self.time), beam.seed]);
 			set_uniform_vector4(gl, beam_program, "beamFlow", [beam_length, beam.flow_speed, beam.grain_repeat, 0.0]);
-			set_uniform_vector4(gl, beam_program, "beamLook", [if beam.is_core { 0.0 } else { 1.0 }, beam.alpha, beam.ramp as f32, beam.brightness]);
+			set_uniform_vector4(gl, beam_program, "beamLook", [if beam.is_core { 0.0 } else { 1.0 }, beam.alpha, beam.ramp as f64, beam.brightness]);
 			ToonVfx::draw_indexed_mesh(gl, &self.lathe_mesh);
 		}
 	}
@@ -2790,14 +2791,14 @@ impl ToonVfx {
 				}
 				let mut side = [tangent[1] * toward[2] - tangent[2] * toward[1], tangent[2] * toward[0] - tangent[0] * toward[2], tangent[0] * toward[1] - tangent[1] * toward[0]];
 				let side_length = (side[0] * side[0] + side[1] * side[1] + side[2] * side[2]).sqrt().max(0.000001);
-				let along = point_index as f32 / last_index as f32;
+				let along = point_index as f64 / last_index as f64;
 				let edge = 2.0 * along - 1.0;
 				let half_width = ribbon.width * 0.5 * (1.0 - ribbon.taper * edge * edge);
 				for value in side.iter_mut() {
 					*value *= half_width / side_length;
 				}
-				for (sign, across) in [(1.0f32, 1.0f32), (-1.0, 0.0)] {
-					ribbon_data.extend_from_slice(&[point[0] + side[0] * sign, point[1] + side[1] * sign, point[2] + side[2] * sign, along, across]);
+				for (sign, across) in [(1.0f64, 1.0f64), (-1.0, 0.0)] {
+					ribbon_data.extend_from_slice(&[(point[0] + side[0] * sign) as f32, (point[1] + side[1] * sign) as f32, (point[2] + side[2] * sign) as f32, along as f32, across as f32]);
 				}
 			}
 			ribbon_length_list.push(ribbon_length);
@@ -2814,7 +2815,7 @@ impl ToonVfx {
 		for (ribbon, ribbon_length) in self.queued_ribbon_list.iter().zip(ribbon_length_list.iter()) {
 			let vertex_count = (ribbon.points.len() * 2) as i32;
 			set_uniform_vector3(gl, ribbon_program, "ribbonColor", ribbon.color);
-			set_uniform_vector4(gl, ribbon_program, "ribbonLook", [ribbon.ramp as f32, ribbon.alpha, ribbon.brightness, ribbon.flow.unwrap_or(self.time)]);
+			set_uniform_vector4(gl, ribbon_program, "ribbonLook", [ribbon.ramp as f64, ribbon.alpha, ribbon.brightness, ribbon.flow.unwrap_or(self.time)]);
 			set_uniform_vector2(gl, ribbon_program, "ribbonGrain", ribbon_length * ribbon.grain_repeat, ribbon.rim);
 			let glow_value = match ribbon.glow {
 				Some(glow) => {
@@ -2959,7 +2960,7 @@ mod tests {
 	#[test]
 	fn axis_sides_are_unit_and_perpendicular() {
 		let sides = read_axis_sides([0.3, 2.0, -0.5]);
-		let dot = |first: [f32; 3], second: [f32; 3]| first[0] * second[0] + first[1] * second[1] + first[2] * second[2];
+		let dot = |first: [f64; 3], second: [f64; 3]| first[0] * second[0] + first[1] * second[1] + first[2] * second[2];
 		assert!((dot(sides[0], sides[0]) - 1.0).abs() < 0.0001);
 		assert!((dot(sides[1], sides[1]) - 1.0).abs() < 0.0001);
 		assert!(dot(sides[0], sides[1]).abs() < 0.0001);

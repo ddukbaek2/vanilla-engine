@@ -267,12 +267,12 @@ impl TileCollisionShape {
 	/// 옮긴 새 모양.
 	//==============================================================================
 	pub fn create_transformed(&self, transform_matrix: &TransformMatrix) -> TileCollisionShape {
-		let matrix_a = transform_matrix.a as f64;
-		let matrix_b = transform_matrix.b as f64;
-		let matrix_c = transform_matrix.c as f64;
-		let matrix_d = transform_matrix.d as f64;
-		let matrix_e = transform_matrix.e as f64;
-		let matrix_f = transform_matrix.f as f64;
+		let matrix_a = transform_matrix.a;
+		let matrix_b = transform_matrix.b;
+		let matrix_c = transform_matrix.c;
+		let matrix_d = transform_matrix.d;
+		let matrix_e = transform_matrix.e;
+		let matrix_f = transform_matrix.f;
 		let mut shape = TileCollisionShape::new(self.kind);
 		let radian = self.rotation * PI / 180.0;
 		let cos_rotation = trigonometry::cos(radian);
@@ -901,11 +901,11 @@ impl Tileset {
 			let row = tile_id / self.columns;
 			let left = self.margin + column as f64 * (self.tile_width + self.spacing);
 			let top = self.margin + row as f64 * (self.tile_height + self.spacing);
-			return Rect::create(left as f32, top as f32, self.tile_width as f32, self.tile_height as f32);
+			return Rect::create(left, top, self.tile_width, self.tile_height);
 		}
 		match self.get_tile_image(tile_id) {
 			Some(image) => {
-				Rect::create(0.0, 0.0, image.get_width() as f32, image.get_height() as f32)
+				Rect::create(0.0, 0.0, image.get_width() as f64, image.get_height() as f64)
 			}
 			None => {
 				Rect::zero()
@@ -1091,13 +1091,13 @@ impl Tileset {
 		let mut maximum_extent = js_max(self.tile_width, self.tile_height);
 		for tile_data in self.tile_data_table.values() {
 			if let Some(image_rect) = tile_data.image_rect {
-				maximum_extent = js_max(js_max(maximum_extent, image_rect.size.x as f64), image_rect.size.y as f64);
+				maximum_extent = js_max(js_max(maximum_extent, image_rect.size.x), image_rect.size.y);
 			}
 			else if let Some(image) = &tile_data.image {
 				maximum_extent = js_max(js_max(maximum_extent, image.get_width() as f64), image.get_height() as f64);
 			}
 		}
-		maximum_extent + (self.tile_offset.x as f64).abs() + (self.tile_offset.y as f64).abs()
+		maximum_extent + self.tile_offset.x.abs() + self.tile_offset.y.abs()
 	}
 }
 

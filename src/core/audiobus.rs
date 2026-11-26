@@ -27,7 +27,7 @@ struct AudioBusState {
 	audio_bus_backend: AudioBusBackend,
 	is_muted: bool,
 	/// 크기. (0 ~ 1, 음소거를 풀면 이 크기로 돌아간다)
-	volume: f32,
+	volume: f64,
 }
 
 //==============================================================================
@@ -130,7 +130,7 @@ impl AudioBus {
 		let mut state = self.state.borrow_mut();
 		if state.audio_bus_backend.is_available() {
 			let volume = state.volume;
-			state.audio_bus_backend.set_gain(volume);
+			state.audio_bus_backend.set_gain(volume as f32);
 			state.is_muted = false;
 		}
 	}
@@ -141,12 +141,12 @@ impl AudioBus {
 	/// # 인자
 	/// - `volume`: 버스 크기. (0 ~ 1 로 자른다, 유한하지 않으면 1)
 	//==============================================================================
-	pub fn set_volume(&self, volume: f32) {
+	pub fn set_volume(&self, volume: f64) {
 		let clamped_volume = clamp_volume(volume);
 		let mut state = self.state.borrow_mut();
 		state.volume = clamped_volume;
 		if state.audio_bus_backend.is_available() && !state.is_muted {
-			state.audio_bus_backend.set_gain(clamped_volume);
+			state.audio_bus_backend.set_gain(clamped_volume as f32);
 		}
 	}
 
@@ -156,7 +156,7 @@ impl AudioBus {
 	/// # 돌려줌
 	/// 설정한 크기. (0 ~ 1, 음소거해도 바뀌지 않는다)
 	//==============================================================================
-	pub fn get_volume(&self) -> f32 {
+	pub fn get_volume(&self) -> f64 {
 		self.state.borrow().volume
 	}
 

@@ -21,12 +21,12 @@ use vanilla::{Color, Engine, EngineConfiguration, Graphic, JsonAsset, NodeId, Pi
 // 전역 상수 목록.
 //==============================================================================
 const EXAMPLE_ASSET_DIRECTORY: &str = "examples/assets";
-const VIEW_WIDTH: f32 = 960.0;
-const VIEW_HEIGHT: f32 = 540.0;
-const GROUND_Y: f32 = 430.0;
-const CHARACTER_SCALE: f32 = 2.0;
-const CHARACTER_X_LIST: [f32; 4] = [120.0, 360.0, 600.0, 840.0];
-const TIME_STEP: f32 = 1.0 / 60.0;
+const VIEW_WIDTH: f64 = 960.0;
+const VIEW_HEIGHT: f64 = 540.0;
+const GROUND_Y: f64 = 430.0;
+const CHARACTER_SCALE: f64 = 2.0;
+const CHARACTER_X_LIST: [f64; 4] = [120.0, 360.0, 600.0, 840.0];
+const TIME_STEP: f64 = 1.0 / 60.0;
 const CROSSFADE_PERIOD_FRAMES: u64 = 120;
 const CROSSFADE_MIX_SECONDS: f64 = 0.6;
 const BACKGROUND_COLOR: Color = Color::create(0.11, 0.133, 0.188, 1.0);
@@ -108,7 +108,7 @@ impl Skeleton2DScene {
 	// IK 목표 자리. (뼈대 기준, 어깨 앞의 원)
 	//==============================================================================
 	fn read_target_position(frame_index: u64) -> Vector2 {
-		let angle = frame_index as f32 * TIME_STEP * 2.0;
+		let angle = frame_index as f64 * TIME_STEP * 2.0;
 		Vector2::create(16.0 + angle.cos() * 16.0, -70.0 + angle.sin() * 16.0)
 	}
 
@@ -130,7 +130,7 @@ impl Skeleton2DScene {
 					skeleton_animator.set_animation(0, "walk", true, CROSSFADE_MIX_SECONDS);
 				}
 			}
-			skeleton_animator.update(TIME_STEP as f64);
+			skeleton_animator.update(TIME_STEP);
 			let fired_events = skeleton_animator.take_events();
 			if character_index == 0 {
 				self.step_count += fired_events.iter().filter(|fired_event| fired_event.get_event().get_name() == "step").count() as u32;
@@ -138,7 +138,7 @@ impl Skeleton2DScene {
 			if character_index == 3 {
 				let target_position = Self::read_target_position(frame_index + 1);
 				if let Some(target_bone) = skeleton_animator.find_bone_mut("handTarget") {
-					target_bone.set_position(target_position.x as f64, target_position.y as f64);
+					target_bone.set_position(target_position.x, target_position.y);
 				}
 			}
 		}
@@ -238,7 +238,7 @@ impl Scene for Skeleton2DScene {
 	//==============================================================================
 	// 주기적 갱신. (컴포넌트를 돌린 뒤 한 걸음)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.apply_atlas(engine);
 		if self.character_id_list.is_empty() {

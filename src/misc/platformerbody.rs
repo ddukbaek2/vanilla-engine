@@ -50,10 +50,10 @@ type LandedEvent = Box<dyn FnMut()>;
 pub struct PlatformerBody {
 	component_base: ComponentBase,
 	velocity: Vector2,
-	gravity: f32,
-	ground_y: f32,
-	left_bound: Option<f32>,
-	right_bound: Option<f32>,
+	gravity: f64,
+	ground_y: f64,
+	left_bound: Option<f64>,
+	right_bound: Option<f64>,
 	is_grounded: bool,
 	landed_event: Option<LandedEvent>,
 }
@@ -104,7 +104,7 @@ impl PlatformerBody {
 	/// assert!(!body.is_grounded());
 	/// ```
 	//==============================================================================
-	pub fn integrate(&mut self, current_position: Vector2, time_delta: f32) -> Vector2 {
+	pub fn integrate(&mut self, current_position: Vector2, time_delta: f64) -> Vector2 {
 		self.velocity = Vector2::create(self.velocity.x, self.velocity.y + self.gravity * time_delta);
 
 		let mut next_x = current_position.x + self.velocity.x * time_delta;
@@ -149,7 +149,7 @@ impl PlatformerBody {
 	/// # 돌려줌
 	/// 접지 중이라 뛰었으면 true. 공중이면 false 이고 속도를 바꾸지 않는다.
 	//==============================================================================
-	pub fn jump(&mut self, jump_speed: f32) -> bool {
+	pub fn jump(&mut self, jump_speed: f64) -> bool {
 		if !self.is_grounded {
 			return false;
 		}
@@ -164,7 +164,7 @@ impl PlatformerBody {
 	/// # 인자
 	/// - `velocity_x`: 가로 속도. (픽셀/초, 오른쪽이 +)
 	//==============================================================================
-	pub fn set_velocity_x(&mut self, velocity_x: f32) {
+	pub fn set_velocity_x(&mut self, velocity_x: f64) {
 		self.velocity = Vector2::create(velocity_x, self.velocity.y);
 	}
 
@@ -174,7 +174,7 @@ impl PlatformerBody {
 	/// # 인자
 	/// - `velocity_y`: 세로 속도. (픽셀/초, 아래쪽이 +)
 	//==============================================================================
-	pub fn set_velocity_y(&mut self, velocity_y: f32) {
+	pub fn set_velocity_y(&mut self, velocity_y: f64) {
 		self.velocity = Vector2::create(self.velocity.x, velocity_y);
 	}
 
@@ -194,7 +194,7 @@ impl PlatformerBody {
 	/// # 인자
 	/// - `gravity`: 중력. (픽셀/초², 아래쪽이 +, 기본 2000)
 	//==============================================================================
-	pub fn set_gravity(&mut self, gravity: f32) {
+	pub fn set_gravity(&mut self, gravity: f64) {
 		self.gravity = gravity;
 	}
 
@@ -204,7 +204,7 @@ impl PlatformerBody {
 	/// # 돌려줌
 	/// 지금 중력. (픽셀/초²)
 	//==============================================================================
-	pub fn get_gravity(&self) -> f32 {
+	pub fn get_gravity(&self) -> f64 {
 		self.gravity
 	}
 
@@ -214,7 +214,7 @@ impl PlatformerBody {
 	/// # 인자
 	/// - `ground_y`: 바닥 높이. (로컬 Y, 이 값 아래로 내려가지 않는다)
 	//==============================================================================
-	pub fn set_ground_y(&mut self, ground_y: f32) {
+	pub fn set_ground_y(&mut self, ground_y: f64) {
 		self.ground_y = ground_y;
 	}
 
@@ -224,7 +224,7 @@ impl PlatformerBody {
 	/// # 돌려줌
 	/// 지금 바닥 높이. (로컬 Y)
 	//==============================================================================
-	pub fn get_ground_y(&self) -> f32 {
+	pub fn get_ground_y(&self) -> f64 {
 		self.ground_y
 	}
 
@@ -235,7 +235,7 @@ impl PlatformerBody {
 	/// - `left_bound`: 왼쪽 경계. (로컬 X, 이보다 작아지지 않는다)
 	/// - `right_bound`: 오른쪽 경계. (로컬 X, 이보다 커지지 않는다)
 	//==============================================================================
-	pub fn set_horizontal_bounds(&mut self, left_bound: Option<f32>, right_bound: Option<f32>) {
+	pub fn set_horizontal_bounds(&mut self, left_bound: Option<f64>, right_bound: Option<f64>) {
 		self.left_bound = left_bound;
 		self.right_bound = right_bound;
 	}
@@ -317,7 +317,7 @@ impl Component for PlatformerBody {
 	//==============================================================================
 	/// 갱신. (적분한 위치를 노드 로컬 위치에 넣는다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let current_position = context.get_transform().get_local_position();
 		let next_position = self.integrate(current_position, time_delta);
 		context.get_transform_mut().set_local_position(next_position);

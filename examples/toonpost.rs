@@ -8,7 +8,7 @@
 //   빛 점 120 개(상한 160), 불꽃 줄기 밝기 배 5. 불덩이는 3 초마다 사건 열쇠와 나이로 한 번만 낸다.
 // - 실행: cargo run --example toonpost
 //==============================================================================
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 use vanilla::{
 	create_box_geometry, create_part_matrix, create_sphere_geometry, Camera3D, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, NodeId, NodeTree, Paint, Pivot, Rect, Scene, SceneBase, Text, TextAlign, ToonBlobShadowOptions, ToonDecalOptions, ToonDrawOptions, ToonDrawQueue,
 	ToonFireballOptions, ToonGeometry, ToonGlintOptions, ToonMesh, ToonMeshArrays, ToonParticleOptions, ToonPartOptions, ToonPostProcess, ToonPostProcessOptions, ToonRenderer, ToonRibbonOptions, ToonShockwaveOptions, ToonView3D, ToonVfx, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange,
@@ -16,9 +16,9 @@ use vanilla::{
 };
 
 // 한 프레임의 초. (찍을 때마다 같은 그림)
-const FRAME_SECONDS: f32 = 1.0 / 60.0;
+const FRAME_SECONDS: f64 = 1.0 / 60.0;
 // 불덩이 사건의 되풀이 초.
-const BLAST_CYCLE_SECONDS: f32 = 3.0;
+const BLAST_CYCLE_SECONDS: f64 = 3.0;
 // 판의 꼴.
 const PANEL_MODE_DEFAULT: u32 = 0;
 const PANEL_MODE_MULTISAMPLE: u32 = 1;
@@ -48,7 +48,7 @@ struct PanelDrawer {
 //==============================================================================
 // 부품 하나의 배열.
 //==============================================================================
-fn build_arrays(geometry: &ToonGeometry, position: [f32; 3], color_text: &str, options: ToonPartOptions) -> ToonMeshArrays {
+fn build_arrays(geometry: &ToonGeometry, position: [f64; 3], color_text: &str, options: ToonPartOptions) -> ToonMeshArrays {
 	let mut builder = MeshBuilder::new();
 	builder.add_part(geometry, &create_part_matrix(None, position, None, None), color_text, options);
 	builder.read_arrays()
@@ -115,7 +115,7 @@ impl PanelDrawer {
 	//==============================================================================
 	// 이번 프레임의 효과. (불덩이 사건은 되풀이마다 열쇠 하나와 그 나이로, 프레임마다 다시 불러도 한 번만 난다)
 	//==============================================================================
-	fn emit_effects(vfx: &mut ToonVfx, elapsed_seconds: f32) {
+	fn emit_effects(vfx: &mut ToonVfx, elapsed_seconds: f64) {
 		let cycle_index = (elapsed_seconds / BLAST_CYCLE_SECONDS).floor();
 		let age = elapsed_seconds - cycle_index * BLAST_CYCLE_SECONDS;
 		let cycle_key = cycle_index as u64;
@@ -148,13 +148,13 @@ impl PanelDrawer {
 		// 덮는 꼴 리본. (공 둘레의 고리)
 		let mut points = Vec::new();
 		for point_index in 0..=40 {
-			let angle = point_index as f32 / 40.0 * PI * 1.6 + elapsed_seconds;
+			let angle = point_index as f64 / 40.0 * PI * 1.6 + elapsed_seconds;
 			points.push([-0.2 + angle.cos() * 0.9, 1.1 + (angle * 2.0).sin() * 0.15, -0.9 + angle.sin() * 0.9]);
 		}
 		vfx.queue_ribbon(ToonRibbonOptions { points, width: 0.14, color: [0.6, 0.9, 1.0], ramp: 1, alpha: 1.0, brightness: 1.4, rim: 1.0, ..ToonRibbonOptions::default() });
 		// 빛 점 120 개. (기본 상한 96 을 넘는다)
 		for glint_index in 0..120 {
-			let angle = glint_index as f32 / 120.0 * PI * 2.0;
+			let angle = glint_index as f64 / 120.0 * PI * 2.0;
 			vfx.queue_glint(&ToonGlintOptions { position: [angle.cos() * 3.4, 0.08, angle.sin() * 2.5], size: 0.14, color: [1.0, 0.85, 0.4], brightness: 3.0, ..ToonGlintOptions::default() });
 		}
 	}
@@ -193,7 +193,7 @@ impl PanelDrawer {
 		let (Some(meshes), Some(post_process), Some(vfx)) = (self.meshes.as_ref(), self.post_process.as_mut(), self.vfx.as_mut()) else {
 			return;
 		};
-		let elapsed_seconds = self.frame_count as f32 * FRAME_SECONDS;
+		let elapsed_seconds = self.frame_count as f64 * FRAME_SECONDS;
 		renderer.set_band_count(3);
 		renderer.set_light([-0.5, -1.0, -0.35], [0.85, 0.8, 0.75], [0.55, 0.6, 0.7], [0.25, 0.22, 0.2]);
 		let mut queue = ToonDrawQueue::new();
@@ -291,7 +291,7 @@ impl Scene for ToonPostScene {
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let panel_list = [(PANEL_MODE_DEFAULT, "기본: 멀티샘플 없음, 9 탭 블룸"), (PANEL_MODE_MULTISAMPLE, "멀티샘플 4, 깊이 24, 다단 블룸 5 단"), (PANEL_MODE_LOW_DYNAMIC_RANGE, "LDR 길: 밝기 0.45, 밝힌 자리, 채도 0.6")];
 		for (panel_index, (panel_mode, label)) in panel_list.iter().enumerate() {
-			let panel_x = 20.0 + panel_index as f32 * 420.0;
+			let panel_x = 20.0 + panel_index as f64 * 420.0;
 			let panel_id = create_panel(node_tree, root_id, Rect::create(panel_x, 80.0, 400.0, 420.0), "#000000");
 			let mut panel_drawer = PanelDrawer::new(*panel_mode);
 			let toon_view = node_tree[panel_id].add_component(ToonView3D::new());

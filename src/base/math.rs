@@ -1,9 +1,9 @@
 //==============================================================================
 //! 수학 보조 함수. (원본 base/math.js)
-//! - 원본 수는 f64 이고 러스트 판은 엔진의 다른 값처럼 f32 다. random_int 만 i32 다.
+//! - 수는 원본 자바스크립트 수처럼 f64 다. random_int 만 i32 다.
 //! - 원본의 floor, ceil, sqrt, abs, sin, cos, tan, asin, acos, pow 를 같은 이름의 함수로 둔다. (쓰는 코드가 원본과 같게)
-//!   sin, cos, tan 은 원본처럼 크롬 Math.sin, cos, tan 과 같은 셈(바르게 반올림한 f64, base/trigonometry.rs)을 하고 f32 로 담는다. (시스템 libm 은 플랫폼마다 끝자리가 다르다)
-//!   round 는 반을 +무한대 쪽으로 올리는 점(-2.5 → -2)이 f32::round(-2.5 → -3)와 달라 원본 식 그대로 옮겼다.
+//!   sin, cos, tan 은 원본처럼 크롬 Math.sin, cos, tan 과 같은 셈(바르게 반올림한 f64, base/trigonometry.rs)이다. (시스템 libm 은 플랫폼마다 끝자리가 다르다)
+//!   round 는 반을 +무한대 쪽으로 올리는 점(-2.5 → -2)이 f64::round(-2.5 → -3)와 달라 원본 식 그대로 옮겼다.
 //! - 무작위는 엔진의 random(xorshift64*)을 쓴다. (원본 Math.random 자리)
 //! - 원본 shuffle 의 randomFunction 기본 인자는 shuffle(엔진 random), shuffle_with_random_function(넘긴 함수)으로 나눴다.
 //!
@@ -25,14 +25,14 @@ use crate::base::trigonometry;
 use std::cell::Cell;
 use web_time::{SystemTime, UNIX_EPOCH};
 
-/// 원주율. (std::f32::consts::PI)
-pub const PI: f32 = std::f32::consts::PI;
+/// 원주율. (std::f64::consts::PI)
+pub const PI: f64 = std::f64::consts::PI;
 
 /// 양의 무한대. (원본 PositiveInfinity)
-pub const POSITIVE_INFINITY: f32 = f32::INFINITY;
+pub const POSITIVE_INFINITY: f64 = f64::INFINITY;
 
 /// 음의 무한대. (원본 NegativeInfinity)
-pub const NEGATIVE_INFINITY: f32 = f32::NEG_INFINITY;
+pub const NEGATIVE_INFINITY: f64 = f64::NEG_INFINITY;
 
 thread_local! {
 	/// 난수 상태. (xorshift64*, 처음 쓸 때 시각으로 씨앗을 정한다)
@@ -40,7 +40,7 @@ thread_local! {
 }
 
 //==============================================================================
-/// 더 낮은 수. (원본처럼 left < right 가 아니면 right, NaN 이 끼면 f32::min 과 다르다)
+/// 더 낮은 수. (원본처럼 left < right 가 아니면 right, NaN 이 끼면 f64::min 과 다르다)
 ///
 /// # 인자
 /// - `left`: 첫째 수.
@@ -55,11 +55,11 @@ thread_local! {
 /// use vanilla::math;
 ///
 /// assert_eq!(math::min(2.0, 1.0), 1.0);
-/// assert_eq!(math::min(f32::NAN, 1.0), 1.0);
-/// assert!(math::min(1.0, f32::NAN).is_nan());
+/// assert_eq!(math::min(f64::NAN, 1.0), 1.0);
+/// assert!(math::min(1.0, f64::NAN).is_nan());
 /// ```
 //==============================================================================
-pub fn min(left: f32, right: f32) -> f32 {
+pub fn min(left: f64, right: f64) -> f64 {
 	if left < right {
 		left
 	}
@@ -78,7 +78,7 @@ pub fn min(left: f32, right: f32) -> f32 {
 /// # 돌려줌
 /// left > right 면 left, 아니면 right. (어느 쪽이든 NaN 이면 right)
 //==============================================================================
-pub fn max(left: f32, right: f32) -> f32 {
+pub fn max(left: f64, right: f64) -> f64 {
 	if left > right {
 		left
 	}
@@ -96,7 +96,7 @@ pub fn max(left: f32, right: f32) -> f32 {
 /// # 돌려줌
 /// value 이하에서 가장 큰 정수.
 //==============================================================================
-pub fn floor(value: f32) -> f32 {
+pub fn floor(value: f64) -> f64 {
 	value.floor()
 }
 
@@ -109,7 +109,7 @@ pub fn floor(value: f32) -> f32 {
 /// # 돌려줌
 /// value 이상에서 가장 작은 정수.
 //==============================================================================
-pub fn ceil(value: f32) -> f32 {
+pub fn ceil(value: f64) -> f64 {
 	value.ceil()
 }
 
@@ -130,10 +130,10 @@ pub fn ceil(value: f32) -> f32 {
 /// assert_eq!(math::round(2.5), 3.0);
 /// assert_eq!(math::round(-2.5), -2.0);
 /// assert_eq!(math::round(-2.6), -3.0);
-/// assert_eq!(math::round(f32::INFINITY), f32::INFINITY);
+/// assert_eq!(math::round(f64::INFINITY), f64::INFINITY);
 /// ```
 //==============================================================================
-pub fn round(value: f32) -> f32 {
+pub fn round(value: f64) -> f64 {
 	// 무한대는 그대로. (value % 1 이 NaN 이 된다)
 	if !value.is_finite() {
 		return value;
@@ -164,7 +164,7 @@ pub fn round(value: f32) -> f32 {
 /// # 돌려줌
 /// 제곱근. (음수면 NaN)
 //==============================================================================
-pub fn sqrt(value: f32) -> f32 {
+pub fn sqrt(value: f64) -> f64 {
 	value.sqrt()
 }
 
@@ -177,7 +177,7 @@ pub fn sqrt(value: f32) -> f32 {
 /// # 돌려줌
 /// 0 보다 작으면 -value, 아니면 value. (-0 과 NaN 은 그대로)
 //==============================================================================
-pub fn abs(value: f32) -> f32 {
+pub fn abs(value: f64) -> f64 {
 	if value < 0.0 {
 		return -value;
 	}
@@ -193,8 +193,8 @@ pub fn abs(value: f32) -> f32 {
 /// # 돌려줌
 /// 사인 값. (-1 ~ 1)
 //==============================================================================
-pub fn sin(value: f32) -> f32 {
-	trigonometry::sin(value as f64) as f32
+pub fn sin(value: f64) -> f64 {
+	trigonometry::sin(value)
 }
 
 //==============================================================================
@@ -206,8 +206,8 @@ pub fn sin(value: f32) -> f32 {
 /// # 돌려줌
 /// 코사인 값. (-1 ~ 1)
 //==============================================================================
-pub fn cos(value: f32) -> f32 {
-	trigonometry::cos(value as f64) as f32
+pub fn cos(value: f64) -> f64 {
+	trigonometry::cos(value)
 }
 
 //==============================================================================
@@ -219,8 +219,8 @@ pub fn cos(value: f32) -> f32 {
 /// # 돌려줌
 /// 탄젠트 값.
 //==============================================================================
-pub fn tan(value: f32) -> f32 {
-	trigonometry::tan(value as f64) as f32
+pub fn tan(value: f64) -> f64 {
+	trigonometry::tan(value)
 }
 
 //==============================================================================
@@ -232,7 +232,7 @@ pub fn tan(value: f32) -> f32 {
 /// # 돌려줌
 /// 각. (라디안, -PI / 2 ~ PI / 2, 범위 밖이면 NaN)
 //==============================================================================
-pub fn asin(value: f32) -> f32 {
+pub fn asin(value: f64) -> f64 {
 	value.asin()
 }
 
@@ -245,7 +245,7 @@ pub fn asin(value: f32) -> f32 {
 /// # 돌려줌
 /// 각. (라디안, 0 ~ PI, 범위 밖이면 NaN)
 //==============================================================================
-pub fn acos(value: f32) -> f32 {
+pub fn acos(value: f64) -> f64 {
 	value.acos()
 }
 
@@ -259,7 +259,7 @@ pub fn acos(value: f32) -> f32 {
 /// # 돌려줌
 /// base 의 exponent 제곱.
 //==============================================================================
-pub fn pow(base: f32, exponent: f32) -> f32 {
+pub fn pow(base: f64, exponent: f64) -> f64 {
 	base.powf(exponent)
 }
 
@@ -274,7 +274,7 @@ pub fn pow(base: f32, exponent: f32) -> f32 {
 /// # 돌려줌
 /// value 가 minimum 보다 작으면 minimum, maximum 보다 크면 maximum, 아니면 value. (minimum 을 먼저 본다)
 //==============================================================================
-pub fn clamp(value: f32, minimum: f32, maximum: f32) -> f32 {
+pub fn clamp(value: f64, minimum: f64, maximum: f64) -> f64 {
 	if value < minimum {
 		return minimum;
 	}
@@ -293,7 +293,7 @@ pub fn clamp(value: f32, minimum: f32, maximum: f32) -> f32 {
 /// # 돌려줌
 /// 0 ~ 1 로 자른 값.
 //==============================================================================
-pub fn clamp01(value: f32) -> f32 {
+pub fn clamp01(value: f64) -> f64 {
 	clamp(value, 0.0, 1.0)
 }
 
@@ -306,7 +306,7 @@ pub fn clamp01(value: f32) -> f32 {
 /// # 돌려줌
 /// 각. (라디안)
 //==============================================================================
-pub fn degree_to_radian(degree: f32) -> f32 {
+pub fn degree_to_radian(degree: f64) -> f64 {
 	degree * (PI / 180.0)
 }
 
@@ -319,7 +319,7 @@ pub fn degree_to_radian(degree: f32) -> f32 {
 /// # 돌려줌
 /// 각. (도)
 //==============================================================================
-pub fn radian_to_degree(radian: f32) -> f32 {
+pub fn radian_to_degree(radian: f64) -> f64 {
 	radian / (PI / 180.0)
 }
 
@@ -334,7 +334,7 @@ pub fn radian_to_degree(radian: f32) -> f32 {
 /// # 돌려줌
 /// from + (to - from) * time.
 //==============================================================================
-pub fn lerp(from: f32, to: f32, time: f32) -> f32 {
+pub fn lerp(from: f64, to: f64, time: f64) -> f64 {
 	from + (to - from) * time
 }
 
@@ -344,7 +344,7 @@ pub fn lerp(from: f32, to: f32, time: f32) -> f32 {
 /// # 돌려줌
 /// 0 이상 1 미만 난수. (2 의 -24 제곱 단위, 스레드마다 상태를 따로 둔다)
 //==============================================================================
-pub fn random() -> f32 {
+pub fn random() -> f64 {
 	RANDOM_STATE.with(|random_state| {
 		let mut state = random_state.get();
 		if state == 0 {
@@ -356,7 +356,7 @@ pub fn random() -> f32 {
 		state ^= state >> 27;
 		random_state.set(state);
 		let mixed = state.wrapping_mul(0x2545F4914F6CDD1D);
-		((mixed >> 40) as f32) / ((1u64 << 24) as f32)
+		((mixed >> 40) as f64) / ((1u64 << 24) as f64)
 	})
 }
 
@@ -370,7 +370,7 @@ pub fn random() -> f32 {
 /// # 돌려줌
 /// minimum + (maximum - minimum) * random().
 //==============================================================================
-pub fn random_range(minimum: f32, maximum: f32) -> f32 {
+pub fn random_range(minimum: f64, maximum: f64) -> f64 {
 	let random_value = random();
 	minimum + (maximum - minimum) * random_value
 }
@@ -396,7 +396,7 @@ pub fn random_range(minimum: f32, maximum: f32) -> f32 {
 /// ```
 //==============================================================================
 pub fn random_int(minimum: i32, maximum: i32) -> i32 {
-	let random_value = random() as f64;
+	let random_value = random();
 	let offset = (random_value * (maximum as f64 - minimum as f64 + 1.0)).floor();
 	(minimum as f64 + offset) as i32
 }
@@ -443,7 +443,7 @@ pub fn pick_random<T>(array: &[T]) -> Option<&T> {
 /// - `array`: 섞을 슬라이스. (제자리에서 바뀐다)
 //==============================================================================
 pub fn shuffle<T>(array: &mut [T]) {
-	shuffle_with_random_function(array, || random() as f64);
+	shuffle_with_random_function(array, || random());
 }
 
 //==============================================================================
@@ -505,7 +505,7 @@ pub fn shuffle_with_random_function<T>(array: &mut [T], mut random_function: imp
 /// assert!(camera_x > 99.0 && camera_x < 100.0);
 /// ```
 //==============================================================================
-pub fn approach(current_value: f32, target_value: f32, rate: f32, time_delta: f32) -> f32 {
+pub fn approach(current_value: f64, target_value: f64, rate: f64, time_delta: f64) -> f64 {
 	let blend_ratio = 1.0 - (-rate * time_delta).exp();
 	current_value + (target_value - current_value) * blend_ratio
 }
@@ -531,7 +531,7 @@ pub fn approach(current_value: f32, target_value: f32, rate: f32, time_delta: f3
 /// assert_eq!(math::move_towards(9.0, 10.0, 3.0), 10.0);
 /// ```
 //==============================================================================
-pub fn move_towards(current_value: f32, target_value: f32, maximum_delta: f32) -> f32 {
+pub fn move_towards(current_value: f64, target_value: f64, maximum_delta: f64) -> f64 {
 	let difference = target_value - current_value;
 	if difference.abs() <= maximum_delta {
 		return target_value;
@@ -553,7 +553,7 @@ pub fn move_towards(current_value: f32, target_value: f32, maximum_delta: f32) -
 /// # 돌려줌
 /// 1 - (1 - time) * (1 - time). (0 이면 0, 1 이면 1)
 //==============================================================================
-pub fn ease_out_quad(time: f32) -> f32 {
+pub fn ease_out_quad(time: f64) -> f64 {
 	1.0 - (1.0 - time) * (1.0 - time)
 }
 
@@ -568,18 +568,18 @@ mod tests {
 	fn minimum_maximum_and_round() {
 		assert_eq!(min(2.0, 1.0), 1.0);
 		assert_eq!(max(2.0, 1.0), 2.0);
-		assert!(min(1.0, f32::NAN).is_nan());
-		assert_eq!(min(f32::NAN, 1.0), 1.0);
-		assert_eq!(max(f32::NAN, 1.0), 1.0);
-		let case_list: [(f32, f32); 9] = [(2.5, 3.0), (-2.5, -2.0), (-2.6, -3.0), (-2.4, -2.0), (0.5, 1.0), (-0.5, 0.0), (1.5, 2.0), (-1.5, -1.0), (7.0, 7.0)];
+		assert!(min(1.0, f64::NAN).is_nan());
+		assert_eq!(min(f64::NAN, 1.0), 1.0);
+		assert_eq!(max(f64::NAN, 1.0), 1.0);
+		let case_list: [(f64, f64); 9] = [(2.5, 3.0), (-2.5, -2.0), (-2.6, -3.0), (-2.4, -2.0), (0.5, 1.0), (-0.5, 0.0), (1.5, 2.0), (-1.5, -1.0), (7.0, 7.0)];
 		for (value, expected_value) in case_list {
 			assert_eq!(round(value), expected_value, "{}", value);
 		}
-		assert_eq!(round(f32::INFINITY), f32::INFINITY);
-		assert_eq!(round(f32::NEG_INFINITY), f32::NEG_INFINITY);
-		assert!(round(f32::NAN).is_nan());
-		assert_eq!(POSITIVE_INFINITY, f32::INFINITY);
-		assert_eq!(NEGATIVE_INFINITY, f32::NEG_INFINITY);
+		assert_eq!(round(f64::INFINITY), f64::INFINITY);
+		assert_eq!(round(f64::NEG_INFINITY), f64::NEG_INFINITY);
+		assert!(round(f64::NAN).is_nan());
+		assert_eq!(POSITIVE_INFINITY, f64::INFINITY);
+		assert_eq!(NEGATIVE_INFINITY, f64::NEG_INFINITY);
 	}
 
 	//==============================================================================
@@ -631,7 +631,7 @@ mod tests {
 	fn approach_and_move_towards() {
 		assert_eq!(approach(0.0, 10.0, 5.0, 0.0), 0.0);
 		let approached_value = approach(0.0, 10.0, 1.0, 1.0);
-		assert!((approached_value - 10.0 * (1.0 - (-1.0f32).exp())).abs() < 1e-5);
+		assert!((approached_value - 10.0 * (1.0 - (-1.0f64).exp())).abs() < 1e-5);
 		assert_eq!(move_towards(0.0, 10.0, 3.0), 3.0);
 		assert_eq!(move_towards(0.0, -10.0, 3.0), -3.0);
 		assert_eq!(move_towards(9.0, 10.0, 3.0), 10.0);
@@ -645,8 +645,8 @@ mod tests {
 	fn standard_functions_follow_original() {
 		assert_eq!(floor(-1.5), -2.0);
 		assert_eq!(ceil(-1.5), -1.0);
-		assert_eq!(floor(f32::INFINITY), f32::INFINITY);
-		assert_eq!(ceil(f32::NEG_INFINITY), f32::NEG_INFINITY);
+		assert_eq!(floor(f64::INFINITY), f64::INFINITY);
+		assert_eq!(ceil(f64::NEG_INFINITY), f64::NEG_INFINITY);
 		assert_eq!(sqrt(1e6), 1000.0);
 		assert!(sqrt(-1.0).is_nan());
 		assert_eq!(abs(-3.0), 3.0);

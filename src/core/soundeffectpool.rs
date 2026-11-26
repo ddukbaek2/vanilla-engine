@@ -56,11 +56,11 @@ pub const DEFAULT_VOICE_COUNT: usize = 6;
 pub struct SoundEffectPool {
 	player_list: Vec<AudioPlayer>,
 	/// 플레이어마다 마지막 재생의 음량. (풀의 음량을 곱하기 전)
-	player_volume_list: Vec<f32>,
+	player_volume_list: Vec<f64>,
 	next_index: usize,
 	is_muted: bool,
 	/// 풀 전체의 음량. (0 ~ 1)
-	volume: f32,
+	volume: f64,
 }
 
 impl SoundEffectPool {
@@ -107,7 +107,7 @@ impl SoundEffectPool {
 	/// - `audio_asset`: 틀 효과음 애셋.
 	/// - `volume`: 이 재생의 음량. (0 ~ 1, 풀의 음량을 곱한 뒤 0 ~ 1 로 자른다)
 	//==============================================================================
-	pub fn play(&mut self, audio_asset: &Rc<AudioAsset>, volume: f32) {
+	pub fn play(&mut self, audio_asset: &Rc<AudioAsset>, volume: f64) {
 		if self.is_muted || self.player_list.is_empty() {
 			return;
 		}
@@ -160,7 +160,7 @@ impl SoundEffectPool {
 	/// # 인자
 	/// - `volume`: 풀 전체의 음량. (0 ~ 1 로 자른다, 유한하지 않으면 1)
 	//==============================================================================
-	pub fn set_volume(&mut self, volume: f32) {
+	pub fn set_volume(&mut self, volume: f64) {
 		self.volume = clamp_volume(volume);
 		for (audio_player, player_volume) in self.player_list.iter_mut().zip(self.player_volume_list.iter()) {
 			audio_player.set_volume(player_volume * self.volume);
@@ -173,7 +173,7 @@ impl SoundEffectPool {
 	/// # 돌려줌
 	/// 풀 전체의 음량. (0 ~ 1, 기본 1)
 	//==============================================================================
-	pub fn get_volume(&self) -> f32 {
+	pub fn get_volume(&self) -> f64 {
 		self.volume
 	}
 
@@ -243,7 +243,7 @@ mod tests {
 		sound_effect_pool.set_volume(0.5);
 		assert!((sound_effect_pool.player_list[0].get_volume() - 0.25).abs() < 1e-6);
 		assert!((sound_effect_pool.player_list[1].get_volume() - 0.5).abs() < 1e-6);
-		sound_effect_pool.set_volume(f32::NAN);
+		sound_effect_pool.set_volume(f64::NAN);
 		assert_eq!(sound_effect_pool.get_volume(), 1.0);
 	}
 

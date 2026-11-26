@@ -37,7 +37,7 @@ use crate::core::node::worldnode::NodeTransform;
 //==============================================================================
 pub struct Mask {
 	component_base: ComponentBase,
-	round_size: f32,
+	round_size: f64,
 }
 
 #[crate::reflect]
@@ -78,7 +78,7 @@ impl Mask {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn begin_clip(transform: &NodeTransform, round_size: f32, graphic: &mut Graphic) {
+	pub fn begin_clip(transform: &NodeTransform, round_size: f64, graphic: &mut Graphic) {
 		let content_size = transform.get_content_size();
 		let clip_rect = Rect::create(0.0, 0.0, content_size.x, content_size.y);
 		graphic.begin_clip_rect(clip_rect, round_size);
@@ -101,7 +101,7 @@ impl Mask {
 	/// # 인자
 	/// - `round_size`: 자르는 사각형의 귀퉁이 둥근 크기. (노드 좌표, 0 이면 곧은 사각형, 처음 0)
 	//==============================================================================
-	pub fn set_round_size(&mut self, round_size: f32) {
+	pub fn set_round_size(&mut self, round_size: f64) {
 		self.round_size = round_size;
 	}
 
@@ -111,7 +111,7 @@ impl Mask {
 	/// # 돌려줌
 	/// 자르는 사각형의 귀퉁이 둥근 크기. (노드 좌표)
 	//==============================================================================
-	pub fn get_round_size(&self) -> f32 {
+	pub fn get_round_size(&self) -> f64 {
 		self.round_size
 	}
 }
@@ -167,7 +167,7 @@ impl Component for Mask {
 	/// 자식 출력을 자를 둥근 크기. (늘 Some(round_size), NodeTree 가 보고 begin_clip 을 부른다)
 	//==============================================================================
 	#[reflect(skip)]
-	fn get_clip_round_size(&self) -> Option<f32> {
+	fn get_clip_round_size(&self) -> Option<f64> {
 		Some(self.round_size)
 	}
 }

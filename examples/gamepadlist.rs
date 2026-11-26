@@ -18,7 +18,7 @@ fn main() {
 	let start_instant = Instant::now();
 	while start_instant.elapsed() < run_duration {
 		let time_delta = frame_interval.as_secs_f32();
-		gamepad_manager.tick(time_delta);
+		gamepad_manager.tick(time_delta as f64);
 		std::thread::sleep(frame_interval);
 	}
 

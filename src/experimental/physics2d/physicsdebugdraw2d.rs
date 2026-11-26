@@ -27,7 +27,7 @@ const SENSOR_COLOR: Color = Color::create(0.30, 0.80, 0.90, 1.0);
 /// 관절 색.
 const JOINT_COLOR: Color = Color::create(0.85, 0.85, 0.85, 1.0);
 /// 채우기는 선 색을 이만큼 옅게.
-const FILL_ALPHA: f32 = 0.45;
+const FILL_ALPHA: f64 = 0.45;
 
 //==============================================================================
 /// 2D 물리 그리기 도구. (정적 함수 묶음)
@@ -54,7 +54,7 @@ impl PhysicsDebugDraw2D {
 	/// - `graphic`: 그릴 그래픽.
 	/// - `line_width`: 선 굵기. (그래픽 좌표 단위)
 	//==============================================================================
-	pub fn draw(world: &PhysicsWorld2D, graphic: &mut Graphic, line_width: f32) {
+	pub fn draw(world: &PhysicsWorld2D, graphic: &mut Graphic, line_width: f64) {
 		let mut world_shape = WorldShape::new();
 		for body_data in world.body_list.iter().flatten() {
 			let body_color = if body_data.body_type == BodyType2D::Static {
@@ -89,8 +89,8 @@ impl PhysicsDebugDraw2D {
 			let (Some(body_a), Some(body_b)) = (world.body_list[joint_data.body_index_a].as_ref(), world.body_list[joint_data.body_index_b].as_ref()) else {
 				continue;
 			};
-			let anchor_a = Vector2::create((body_a.rotation_cosine * joint_data.local_anchor_a_x - body_a.rotation_sine * joint_data.local_anchor_a_y + body_a.position_x) as f32, (body_a.rotation_sine * joint_data.local_anchor_a_x + body_a.rotation_cosine * joint_data.local_anchor_a_y + body_a.position_y) as f32);
-			let anchor_b = Vector2::create((body_b.rotation_cosine * joint_data.local_anchor_b_x - body_b.rotation_sine * joint_data.local_anchor_b_y + body_b.position_x) as f32, (body_b.rotation_sine * joint_data.local_anchor_b_x + body_b.rotation_cosine * joint_data.local_anchor_b_y + body_b.position_y) as f32);
+			let anchor_a = Vector2::create(body_a.rotation_cosine * joint_data.local_anchor_a_x - body_a.rotation_sine * joint_data.local_anchor_a_y + body_a.position_x, body_a.rotation_sine * joint_data.local_anchor_a_x + body_a.rotation_cosine * joint_data.local_anchor_a_y + body_a.position_y);
+			let anchor_b = Vector2::create(body_b.rotation_cosine * joint_data.local_anchor_b_x - body_b.rotation_sine * joint_data.local_anchor_b_y + body_b.position_x, body_b.rotation_sine * joint_data.local_anchor_b_x + body_b.rotation_cosine * joint_data.local_anchor_b_y + body_b.position_y);
 			graphic.draw_line(&[anchor_a, anchor_b], line_width);
 			graphic.set_fill_color(JOINT_COLOR);
 			graphic.draw_circle(anchor_a, line_width * 1.5);
@@ -101,28 +101,28 @@ impl PhysicsDebugDraw2D {
 	//==============================================================================
 	/// 월드 모양 하나 그리기.
 	//==============================================================================
-	fn draw_world_shape(graphic: &mut Graphic, world_shape: &WorldShape, rotation_cosine: f64, rotation_sine: f64, fill_color: Color, line_color: Color, line_width: f32) {
+	fn draw_world_shape(graphic: &mut Graphic, world_shape: &WorldShape, rotation_cosine: f64, rotation_sine: f64, fill_color: Color, line_color: Color, line_width: f64) {
 		graphic.set_stroke_color(line_color);
 		if world_shape.shape_type == ShapeType2D::Circle {
-			let center = Vector2::create(world_shape.center_x as f32, world_shape.center_y as f32);
-			let radius = world_shape.radius as f32;
+			let center = Vector2::create(world_shape.center_x, world_shape.center_y);
+			let radius = world_shape.radius;
 			graphic.set_fill_color(fill_color);
 			graphic.draw_circle(center, radius);
 			graphic.draw_stroke_circle(center, radius, line_width);
-			let edge = Vector2::create((world_shape.center_x + rotation_cosine * world_shape.radius) as f32, (world_shape.center_y + rotation_sine * world_shape.radius) as f32);
+			let edge = Vector2::create(world_shape.center_x + rotation_cosine * world_shape.radius, world_shape.center_y + rotation_sine * world_shape.radius);
 			graphic.draw_line(&[center, edge], line_width);
 			return;
 		}
 		if world_shape.shape_type == ShapeType2D::Segment {
-			let point1 = Vector2::create(world_shape.vertex_x[0] as f32, world_shape.vertex_y[0] as f32);
-			let point2 = Vector2::create(world_shape.vertex_x[1] as f32, world_shape.vertex_y[1] as f32);
+			let point1 = Vector2::create(world_shape.vertex_x[0], world_shape.vertex_y[0]);
+			let point2 = Vector2::create(world_shape.vertex_x[1], world_shape.vertex_y[1]);
 			graphic.draw_line(&[point1, point2], line_width);
 			return;
 		}
 		let mut positions = Vec::new();
 		if world_shape.radius <= 0.0 {
 			for index in 0..world_shape.count {
-				positions.push(Vector2::create(world_shape.vertex_x[index] as f32, world_shape.vertex_y[index] as f32));
+				positions.push(Vector2::create(world_shape.vertex_x[index], world_shape.vertex_y[index]));
 			}
 		}
 		else {
@@ -136,7 +136,7 @@ impl PhysicsDebugDraw2D {
 				}
 				for segment_index in 0..=CORNER_SEGMENT_COUNT {
 					let angle = start_angle + sweep_angle * segment_index as f64 / CORNER_SEGMENT_COUNT as f64;
-					positions.push(Vector2::create((world_shape.vertex_x[index] + world_shape.radius * angle.cos()) as f32, (world_shape.vertex_y[index] + world_shape.radius * angle.sin()) as f32));
+					positions.push(Vector2::create(world_shape.vertex_x[index] + world_shape.radius * angle.cos(), world_shape.vertex_y[index] + world_shape.radius * angle.sin()));
 				}
 			}
 		}

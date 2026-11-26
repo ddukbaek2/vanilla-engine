@@ -119,8 +119,8 @@ impl Future for NextFrame {
 //==============================================================================
 /// 원본 setTimeout 의 지연 밀리초. (초 x 1000 을 WebIDL long 으로 바꾸듯 ToInt32 로 감고, 음수는 0. NaN 과 무한은 0)
 //==============================================================================
-fn convert_to_timeout_milliseconds(seconds: f32) -> u64 {
-	let milliseconds = seconds as f64 * 1000.0;
+fn convert_to_timeout_milliseconds(seconds: f64) -> u64 {
+	let milliseconds = seconds * 1000.0;
 	if !milliseconds.is_finite() {
 		return 0;
 	}
@@ -162,7 +162,7 @@ fn convert_to_timeout_milliseconds(seconds: f32) -> u64 {
 /// }
 /// ```
 //==============================================================================
-pub fn seconds(seconds: f32) -> WaitSeconds {
+pub fn seconds(seconds: f64) -> WaitSeconds {
 	WaitSeconds {
 		deadline_instant: Instant::now() + Duration::from_millis(convert_to_timeout_milliseconds(seconds)),
 		created_poll_frame_number: read_poll_frame_number(),
@@ -193,8 +193,8 @@ mod tests {
 		assert_eq!(convert_to_timeout_milliseconds(1.5), 1500);
 		assert_eq!(convert_to_timeout_milliseconds(0.0009), 0);
 		assert_eq!(convert_to_timeout_milliseconds(-1.0), 0);
-		assert_eq!(convert_to_timeout_milliseconds(f32::NAN), 0);
-		assert_eq!(convert_to_timeout_milliseconds(f32::INFINITY), 0);
+		assert_eq!(convert_to_timeout_milliseconds(f64::NAN), 0);
+		assert_eq!(convert_to_timeout_milliseconds(f64::INFINITY), 0);
 		assert_eq!(convert_to_timeout_milliseconds(2147483.5), 2147483500);
 		assert_eq!(convert_to_timeout_milliseconds(2147483.75), 0);
 		assert_eq!(convert_to_timeout_milliseconds(4294968.0), 704);

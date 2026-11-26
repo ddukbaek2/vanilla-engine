@@ -21,9 +21,9 @@ pub(crate) struct TextAreaLine {
 	pub start: usize,
 	pub end: usize,
 	/// 줄 위 y. (글 영역 기준)
-	pub top: f32,
+	pub top: f64,
 	/// 줄 안 글자 경계 x. (offsets[i] 는 start + i 자리의 x, 길이는 end - start + 1)
-	pub offsets: Vec<f32>,
+	pub offsets: Vec<f64>,
 	/// 줄 안 글자 묶음 경계. (start 기준 문자 자리, 0 과 end - start 를 넣는다. 누른 자리는 이 경계에만 선다)
 	pub grapheme_boundary_list: Vec<usize>,
 	/// 줄바꿈 문자로 끝났는지. (아니면 폭으로 나뉘었거나 글 끝)
@@ -36,13 +36,13 @@ pub(crate) struct TextAreaLine {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct TextAreaLayout {
 	pub line_list: Vec<TextAreaLine>,
-	pub line_height: f32,
+	pub line_height: f64,
 }
 
 //==============================================================================
 /// 탭을 넣어 폭 재기. (start_x 에서 시작해 끝 x, 탭은 다음 탭 자리로)
 //==============================================================================
-pub(crate) fn measure_with_tabs(text: &str, start_x: f32, tab_width: f32, measure_width: &dyn Fn(&str) -> f32) -> f32 {
+pub(crate) fn measure_with_tabs(text: &str, start_x: f64, tab_width: f64, measure_width: &dyn Fn(&str) -> f64) -> f64 {
 	let mut x = start_x;
 	let mut is_first = true;
 	for piece in text.split('\t') {
@@ -60,7 +60,7 @@ pub(crate) fn measure_with_tabs(text: &str, start_x: f32, tab_width: f32, measur
 //==============================================================================
 /// 다음 탭 자리. (지금 x 보다 큰 첫 배수, 탭 폭이 0 이면 그대로)
 //==============================================================================
-fn advance_to_tab_stop(x: f32, tab_width: f32) -> f32 {
+fn advance_to_tab_stop(x: f64, tab_width: f64) -> f64 {
 	if tab_width <= 0.0 {
 		return x;
 	}
@@ -215,7 +215,7 @@ fn trim_hanging_spaces(text: &str) -> &str {
 //==============================================================================
 /// 줄 배치 짓기. (폭이 0 이하면 줄바꿈 문자로만 나눈다)
 //==============================================================================
-pub(crate) fn build_text_area_layout(text: &str, wrap_width: f32, line_height: f32, tab_width: f32, measure_width: &dyn Fn(&str) -> f32) -> TextAreaLayout {
+pub(crate) fn build_text_area_layout(text: &str, wrap_width: f64, line_height: f64, tab_width: f64, measure_width: &dyn Fn(&str) -> f64) -> TextAreaLayout {
 	let mut line_list: Vec<TextAreaLine> = Vec::new();
 	let mut paragraph_start_character = 0;
 	let paragraph_list: Vec<&str> = text.split('\n').collect();
@@ -267,7 +267,7 @@ pub(crate) fn build_text_area_layout(text: &str, wrap_width: f32, line_height: f
 			let piece_text = &paragraph[piece_start..piece_end];
 			let start = paragraph_start_character + paragraph[..piece_start].chars().count();
 			let character_count = piece_text.chars().count();
-			let mut offsets: Vec<f32> = Vec::with_capacity(character_count + 1);
+			let mut offsets: Vec<f64> = Vec::with_capacity(character_count + 1);
 			offsets.push(0.0);
 			for (byte_index, character) in piece_text.char_indices() {
 				let prefix_end = byte_index + character.len_utf8();
@@ -277,7 +277,7 @@ pub(crate) fn build_text_area_layout(text: &str, wrap_width: f32, line_height: f
 			line_list.push(TextAreaLine {
 				start,
 				end: start + character_count,
-				top: line_index as f32 * line_height,
+				top: line_index as f64 * line_height,
 				offsets,
 				grapheme_boundary_list: crate::core::textinput::collect_grapheme_boundaries(piece_text),
 				is_hard_break: piece_index + 1 == piece_count && !is_last_paragraph,
@@ -295,8 +295,8 @@ impl TextAreaLayout {
 	//==============================================================================
 	/// 글 높이. (줄 수 x 줄 높이)
 	//==============================================================================
-	pub(crate) fn get_content_height(&self) -> f32 {
-		self.line_list.len() as f32 * self.line_height
+	pub(crate) fn get_content_height(&self) -> f64 {
+		self.line_list.len() as f64 * self.line_height
 	}
 
 	//==============================================================================
@@ -324,7 +324,7 @@ impl TextAreaLayout {
 	//==============================================================================
 	/// 자리의 x. (그 줄의 글자 경계)
 	//==============================================================================
-	pub(crate) fn get_x_in_line(&self, line_index: usize, character_index: usize) -> f32 {
+	pub(crate) fn get_x_in_line(&self, line_index: usize, character_index: usize) -> f64 {
 		match self.line_list.get(line_index) {
 			Some(line) => {
 				let local_index = character_index.clamp(line.start, line.end) - line.start;
@@ -339,7 +339,7 @@ impl TextAreaLayout {
 	//==============================================================================
 	/// 커서 자리. ((x, 줄 위 y), 글 영역 기준)
 	//==============================================================================
-	pub(crate) fn get_caret_position(&self, character_index: usize, is_upstream: bool) -> (f32, f32) {
+	pub(crate) fn get_caret_position(&self, character_index: usize, is_upstream: bool) -> (f64, f64) {
 		let line_index = self.find_line_index(character_index, is_upstream);
 		let top = self.line_list.get(line_index).map(|line| line.top).unwrap_or(0.0);
 		(self.get_x_in_line(line_index, character_index), top)
@@ -348,7 +348,7 @@ impl TextAreaLayout {
 	//==============================================================================
 	/// 줄 안 x 에 가까운 자리. ((자리, is_upstream), 줄 끝을 넘으면 줄 끝이고 폭으로 나뉜 줄이면 이 줄에 남게 is_upstream)
 	//==============================================================================
-	pub(crate) fn find_character_index_in_line(&self, line_index: usize, x: f32) -> (usize, bool) {
+	pub(crate) fn find_character_index_in_line(&self, line_index: usize, x: f64) -> (usize, bool) {
 		let line = match self.line_list.get(line_index) {
 			Some(line) => {
 				line
@@ -366,7 +366,7 @@ impl TextAreaLayout {
 	//==============================================================================
 	/// 글 영역 (x, y) 에 가까운 자리. (위로 넘으면 첫 줄, 아래로 넘으면 마지막 줄)
 	//==============================================================================
-	pub(crate) fn find_character_index_at(&self, x: f32, y: f32) -> (usize, bool) {
+	pub(crate) fn find_character_index_at(&self, x: f64, y: f64) -> (usize, bool) {
 		if self.line_list.is_empty() || self.line_height <= 0.0 {
 			return (0, false);
 		}
@@ -377,7 +377,7 @@ impl TextAreaLayout {
 	//==============================================================================
 	/// 줄 위아래로 옮긴 자리. (line_delta 만큼, 가로 자리는 preferred_x. 첫 줄 위는 글 앞, 마지막 줄 아래는 글 끝)
 	//==============================================================================
-	pub(crate) fn move_vertically(&self, character_index: usize, is_upstream: bool, preferred_x: f32, line_delta: isize) -> (usize, bool) {
+	pub(crate) fn move_vertically(&self, character_index: usize, is_upstream: bool, preferred_x: f64, line_delta: isize) -> (usize, bool) {
 		if self.line_list.is_empty() {
 			return (0, false);
 		}
@@ -493,8 +493,8 @@ mod tests {
 	}
 
 	// 글자마다 10 인 고정폭 재기.
-	fn measure_fixed(text: &str) -> f32 {
-		text.chars().count() as f32 * 10.0
+	fn measure_fixed(text: &str) -> f64 {
+		text.chars().count() as f64 * 10.0
 	}
 
 	//==============================================================================

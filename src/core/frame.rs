@@ -13,7 +13,7 @@
 //! let image = Image::create_from_pixels(64, 16, vec![0u8; 64 * 16 * 4]);
 //! let mut frame_list = Vec::new();
 //! for index in 0..4 {
-//! 	let cell_rect = Rect::create(index as f32 * 16.0, 0.0, 16.0, 16.0);
+//! 	let cell_rect = Rect::create(index as f64 * 16.0, 0.0, 16.0, 16.0);
 //! 	frame_list.push(Frame::new(image.clone(), Some(cell_rect)));
 //! }
 //! assert_eq!(frame_list.len(), 4);
@@ -66,8 +66,8 @@ impl Frame {
 				rect
 			}
 			None => {
-				let image_width = image.get_width() as f32;
-				let image_height = image.get_height() as f32;
+				let image_width = image.get_width() as f64;
+				let image_height = image.get_height() as f64;
 				Rect::create(0.0, 0.0, image_width, image_height)
 			}
 		};

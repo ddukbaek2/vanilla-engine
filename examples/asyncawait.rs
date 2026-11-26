@@ -24,17 +24,17 @@ use vanilla::{wait, Engine, EngineConfiguration, GameScene, GameSceneBase, NodeI
 // 전역 상수 목록.
 //==============================================================================
 const EXAMPLE_ASSET_DIRECTORY: &str = "examples/assets";
-const VIEW_WIDTH: f32 = 1280.0;
-const VIEW_HEIGHT: f32 = 720.0;
+const VIEW_WIDTH: f64 = 1280.0;
+const VIEW_HEIGHT: f64 = 720.0;
 const BACKGROUND_COLOR: &str = "#151821";
 const TEXT_COLOR: &str = "#e8ebf2";
 const CAPTION_COLOR: &str = "#9aa2b2";
 const ACCENT_COLOR: &str = "#ffcc33";
 const ICON_FRAME_NAMES: [&str; 5] = ["star", "heart", "leaf", "gem", "coin"];
-const ICON_SIZE: f32 = 96.0;
-const ICON_START_X: f32 = 240.0;
-const ICON_END_X: f32 = 1040.0;
-const ICON_Y: f32 = 300.0;
+const ICON_SIZE: f64 = 96.0;
+const ICON_START_X: f64 = 240.0;
+const ICON_END_X: f64 = 1040.0;
+const ICON_Y: f64 = 300.0;
 const ICON_MOVE_FRAME_COUNT: u32 = 60;
 // 원본 JS 와 러스트를 나란히 보이는 줄. (원본, 러스트)
 const CODE_PAIR_LIST: [(&str, &str); 4] = [
@@ -47,7 +47,7 @@ const CODE_PAIR_LIST: [(&str, &str); 4] = [
 //==============================================================================
 // 글 노드 만들기. (왼쪽 위 피벗)
 //==============================================================================
-fn create_text_node(node_tree: &mut NodeTree, parent_id: NodeId, x: f32, y: f32, width: f32, text: &str, font_size: f32, color: &str) -> NodeId {
+fn create_text_node(node_tree: &mut NodeTree, parent_id: NodeId, x: f64, y: f64, width: f64, text: &str, font_size: f64, color: &str) -> NodeId {
 	let text_id = node_tree.create_child(parent_id, "text");
 	let text_node = &mut node_tree[text_id];
 	text_node.set_pivot(Pivot::TOP_LEFT);
@@ -108,7 +108,7 @@ impl AsyncAwaitScene {
 	//==============================================================================
 	// 아이콘 옮기기. (0 이면 왼쪽 끝, 1 이면 오른쪽 끝)
 	//==============================================================================
-	fn move_icon(&mut self, progress: f32) {
+	fn move_icon(&mut self, progress: f64) {
 		let icon_node_id = match self.icon_node_id {
 			Some(icon_node_id) => {
 				icon_node_id
@@ -158,7 +158,7 @@ impl AsyncAwaitScene {
 		create_text_node(node_tree, parent_id, 60.0, 110.0, 560.0, "원본 JS", 18.0, CAPTION_COLOR);
 		create_text_node(node_tree, parent_id, 640.0, 110.0, 600.0, "러스트", 18.0, CAPTION_COLOR);
 		for (pair_index, (original_line, rust_line)) in CODE_PAIR_LIST.iter().enumerate() {
-			let line_y = 140.0 + pair_index as f32 * 30.0;
+			let line_y = 140.0 + pair_index as f64 * 30.0;
 			create_text_node(node_tree, parent_id, 60.0, line_y, 560.0, original_line, 18.0, TEXT_COLOR);
 			create_text_node(node_tree, parent_id, 640.0, line_y, 600.0, rust_line, 18.0, ACCENT_COLOR);
 		}
@@ -208,7 +208,7 @@ impl GameScene for AsyncAwaitScene {
 
 				scene_context.with(|scene, _engine| scene.set_status("아이콘을 한 프레임씩 옮김 (wait::next_frame)"));
 				for move_frame in 0..ICON_MOVE_FRAME_COUNT {
-					let progress = move_frame as f32 / (ICON_MOVE_FRAME_COUNT - 1) as f32;
+					let progress = move_frame as f64 / (ICON_MOVE_FRAME_COUNT - 1) as f64;
 					scene_context.with(|scene, _engine| scene.move_icon(progress));
 					wait::next_frame().await;
 				}

@@ -350,7 +350,7 @@ impl vanilla::Scene for DesktopPaneScene {
 	//==============================================================================
 	// 갱신. (60 프레임에 왼쪽 리사이저를 오른쪽으로 80 끈다)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut vanilla::Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut vanilla::Engine, time_delta: f64) {
 		self.frame_count += 1;
 		let resizer_x = self.left_pane.as_ref().map(|left_pane| {
 			let left_size = self.scene_base.get_node_tree()[left_pane.get_container()].get_content_size();

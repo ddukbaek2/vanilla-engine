@@ -20,7 +20,7 @@
 //! ```rust,no_run
 //! use vanilla::{Camera2D, Colors, Graphic, Rect, Vector2};
 //!
-//! fn draw_world(camera: &mut Camera2D, graphic: &mut Graphic, view_size: Vector2, hero_position: Vector2, time_delta: f32) {
+//! fn draw_world(camera: &mut Camera2D, graphic: &mut Graphic, view_size: Vector2, hero_position: Vector2, time_delta: f64) {
 //! 	camera.set_view_size(view_size);
 //! 	camera.follow(&[hero_position], 6.0, time_delta);
 //! 	camera.tick(time_delta);
@@ -43,10 +43,10 @@ use crate::core::graphic::Graphic;
 struct CameraTweenState {
 	from_position: Vector2,
 	to_position: Vector2,
-	from_zoom: f32,
-	to_zoom: f32,
-	duration: f32,
-	elapsed_seconds: f32,
+	from_zoom: f64,
+	to_zoom: f64,
+	duration: f64,
+	elapsed_seconds: f64,
 }
 
 //==============================================================================
@@ -81,20 +81,20 @@ struct CameraTweenState {
 #[derive(Clone, Debug)]
 pub struct Camera2D {
 	position: Vector2,
-	zoom: f32,
-	rotation: f32,
+	zoom: f64,
+	rotation: f64,
 	view_size: Vector2,
 	world_bounds: Option<Rect>,
 	velocity: Vector2,
-	inertia_damping: f32,
-	minimum_zoom: f32,
-	maximum_zoom: f32,
+	inertia_damping: f64,
+	minimum_zoom: f64,
+	maximum_zoom: f64,
 	tween_state: Option<CameraTweenState>,
 }
 
 impl Camera2D {
 	/// tween_to 의 기본 길이. (초, 원본 duration = 0.4)
-	pub const DEFAULT_TWEEN_DURATION: f32 = 0.4;
+	pub const DEFAULT_TWEEN_DURATION: f64 = 0.4;
 
 	//==============================================================================
 	/// 생성. (위치 0, 배율 1, 회전 0, 뷰 960x640, 경계 없음, 관성 감쇠 6, 배율 범위 0.1 ~ 8)
@@ -125,7 +125,7 @@ impl Camera2D {
 	/// # 인자
 	/// - `time_delta`: 지난 프레임부터 흐른 시간. (초)
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		// 관성.
 		if self.velocity.x != 0.0 || self.velocity.y != 0.0 {
 			self.position = Vector2::create(self.position.x + self.velocity.x * time_delta, self.position.y + self.velocity.y * time_delta);
@@ -180,7 +180,7 @@ impl Camera2D {
 	/// assert!((position.y - 100.0).abs() < 0.01);
 	/// ```
 	//==============================================================================
-	pub fn follow(&mut self, target_positions: &[Vector2], rate: f32, time_delta: f32) {
+	pub fn follow(&mut self, target_positions: &[Vector2], rate: f64, time_delta: f64) {
 		if target_positions.is_empty() {
 			return;
 		}
@@ -190,7 +190,7 @@ impl Camera2D {
 			center_x += target_position.x;
 			center_y += target_position.y;
 		}
-		let target_count = target_positions.len() as f32;
+		let target_count = target_positions.len() as f64;
 		center_x /= target_count;
 		center_y /= target_count;
 		let position_x = math::approach(self.position.x, center_x, rate, time_delta);
@@ -217,7 +217,7 @@ impl Camera2D {
 	/// assert_eq!(camera.get_position(), Vector2::create(-20.0, 0.0));
 	/// ```
 	//==============================================================================
-	pub fn pan_by_screen(&mut self, screen_delta_x: f32, screen_delta_y: f32) {
+	pub fn pan_by_screen(&mut self, screen_delta_x: f64, screen_delta_y: f64) {
 		let world_delta = self.convert_screen_delta_to_world(screen_delta_x, screen_delta_y);
 		self.position = Vector2::create(self.position.x - world_delta.x, self.position.y - world_delta.y);
 		self.clamp_to_bounds();
@@ -242,7 +242,7 @@ impl Camera2D {
 	/// assert!(camera.get_position().x < 0.0);
 	/// ```
 	//==============================================================================
-	pub fn fling(&mut self, screen_velocity_x: f32, screen_velocity_y: f32) {
+	pub fn fling(&mut self, screen_velocity_x: f64, screen_velocity_y: f64) {
 		let world_velocity = self.convert_screen_delta_to_world(screen_velocity_x, screen_velocity_y);
 		self.velocity = Vector2::create(-world_velocity.x, -world_velocity.y);
 	}
@@ -257,7 +257,7 @@ impl Camera2D {
 	/// # 돌려줌
 	/// 같은 이동을 월드 좌표로 잰 양. (위치는 더하지 않는다)
 	//==============================================================================
-	pub fn convert_screen_delta_to_world(&self, screen_delta_x: f32, screen_delta_y: f32) -> Vector2 {
+	pub fn convert_screen_delta_to_world(&self, screen_delta_x: f64, screen_delta_y: f64) -> Vector2 {
 		let radian = math::degree_to_radian(self.rotation);
 		let cosine = radian.cos();
 		let sine = radian.sin();
@@ -288,7 +288,7 @@ impl Camera2D {
 	/// assert_eq!(camera.screen_to_world(anchor_screen), anchor_world);
 	/// ```
 	//==============================================================================
-	pub fn zoom_at(&mut self, anchor_screen: Vector2, zoom_factor: f32) {
+	pub fn zoom_at(&mut self, anchor_screen: Vector2, zoom_factor: f64) {
 		let previous_zoom = self.zoom;
 		let next_zoom = math::clamp(previous_zoom * zoom_factor, self.minimum_zoom, self.maximum_zoom);
 		if next_zoom == previous_zoom {
@@ -326,7 +326,7 @@ impl Camera2D {
 	/// assert!((camera.get_zoom() - 2.0).abs() < 0.001);
 	/// ```
 	//==============================================================================
-	pub fn tween_to(&mut self, target_position: Vector2, target_zoom: f32, duration: f32) {
+	pub fn tween_to(&mut self, target_position: Vector2, target_zoom: f64, duration: f64) {
 		self.velocity = Vector2::zero();
 		self.tween_state = Some(CameraTweenState {
 			from_position: self.position,
@@ -483,7 +483,7 @@ impl Camera2D {
 	/// # 인자
 	/// - `zoom`: 확대 배율. (1 이 원래 크기)
 	//==============================================================================
-	pub fn set_zoom(&mut self, zoom: f32) {
+	pub fn set_zoom(&mut self, zoom: f64) {
 		self.zoom = math::clamp(zoom, self.minimum_zoom, self.maximum_zoom);
 		self.clamp_to_bounds();
 	}
@@ -494,7 +494,7 @@ impl Camera2D {
 	/// # 돌려줌
 	/// 확대 배율.
 	//==============================================================================
-	pub fn get_zoom(&self) -> f32 {
+	pub fn get_zoom(&self) -> f64 {
 		self.zoom
 	}
 
@@ -504,7 +504,7 @@ impl Camera2D {
 	/// # 인자
 	/// - `rotation`: 회전 각도. (도, 범위로 자르지 않는다)
 	//==============================================================================
-	pub fn set_rotation(&mut self, rotation: f32) {
+	pub fn set_rotation(&mut self, rotation: f64) {
 		self.rotation = rotation;
 		self.clamp_to_bounds();
 	}
@@ -515,7 +515,7 @@ impl Camera2D {
 	/// # 돌려줌
 	/// 회전 각도. (도)
 	//==============================================================================
-	pub fn get_rotation(&self) -> f32 {
+	pub fn get_rotation(&self) -> f64 {
 		self.rotation
 	}
 
@@ -568,7 +568,7 @@ impl Camera2D {
 	/// - `minimum_zoom`: 가장 작은 배율. (기본 0.1)
 	/// - `maximum_zoom`: 가장 큰 배율. (기본 8)
 	//==============================================================================
-	pub fn set_zoom_range(&mut self, minimum_zoom: f32, maximum_zoom: f32) {
+	pub fn set_zoom_range(&mut self, minimum_zoom: f64, maximum_zoom: f64) {
 		self.minimum_zoom = minimum_zoom;
 		self.maximum_zoom = maximum_zoom;
 		let zoom = self.zoom;
@@ -581,7 +581,7 @@ impl Camera2D {
 	/// # 인자
 	/// - `inertia_damping`: 초당 지수 감쇠율. (기본 6, tick 마다 속도에 e^(-inertia_damping * time_delta) 를 곱한다)
 	//==============================================================================
-	pub fn set_inertia_damping(&mut self, inertia_damping: f32) {
+	pub fn set_inertia_damping(&mut self, inertia_damping: f64) {
 		self.inertia_damping = inertia_damping;
 	}
 
@@ -622,7 +622,7 @@ mod tests {
 	//==============================================================================
 	/// 두 값이 거의 같은지.
 	//==============================================================================
-	fn is_near(left: f32, right: f32) -> bool {
+	fn is_near(left: f64, right: f64) -> bool {
 		(left - right).abs() < 0.001
 	}
 
@@ -634,7 +634,7 @@ mod tests {
 		let mut camera = Camera2D::new();
 		let target_positions = [Vector2::create(100.0, 0.0), Vector2::create(300.0, 200.0)];
 		camera.follow(&target_positions, 6.0, 0.1);
-		let expected_ratio = 1.0 - (-0.6f32).exp();
+		let expected_ratio = 1.0 - (-0.6f64).exp();
 		let position = camera.get_position();
 		assert!(is_near(position.x, 200.0 * expected_ratio));
 		assert!(is_near(position.y, 100.0 * expected_ratio));

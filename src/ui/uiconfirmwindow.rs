@@ -33,17 +33,17 @@ use crate::ui::uiwindow::{UIWindow, UIWindowBehavior, UIWindowEvent, UIWindowPar
 use std::any::Any;
 
 /// 기본 모양. (판 안쪽 여백, 줄 사이, 제목 높이와 글 크기, 글 크기와 줄 간격, 단추 높이와 사이, 둥근 정도)
-const CONFIRM_PADDING: f32 = 24.0;
-const CONFIRM_ROW_GAP: f32 = 16.0;
-const CONFIRM_TITLE_HEIGHT: f32 = 32.0;
-const CONFIRM_TITLE_FONT_SIZE: f32 = 22.0;
-const CONFIRM_MESSAGE_FONT_SIZE: f32 = 17.0;
-const CONFIRM_LINE_SPACING: f32 = 1.35;
-const CONFIRM_BUTTON_HEIGHT: f32 = 52.0;
-const CONFIRM_BUTTON_GAP: f32 = 12.0;
-const CONFIRM_BUTTON_ROUND_SIZE: f32 = 12.0;
+const CONFIRM_PADDING: f64 = 24.0;
+const CONFIRM_ROW_GAP: f64 = 16.0;
+const CONFIRM_TITLE_HEIGHT: f64 = 32.0;
+const CONFIRM_TITLE_FONT_SIZE: f64 = 22.0;
+const CONFIRM_MESSAGE_FONT_SIZE: f64 = 17.0;
+const CONFIRM_LINE_SPACING: f64 = 1.35;
+const CONFIRM_BUTTON_HEIGHT: f64 = 52.0;
+const CONFIRM_BUTTON_GAP: f64 = 12.0;
+const CONFIRM_BUTTON_ROUND_SIZE: f64 = 12.0;
 /// 글 칸이 영역에 비해 아무리 좁아도 지키는 세로. (넘는 것은 스크롤)
-const CONFIRM_MINIMUM_MESSAGE_HEIGHT: f32 = 40.0;
+const CONFIRM_MINIMUM_MESSAGE_HEIGHT: f64 = 40.0;
 
 //==============================================================================
 /// 확인 창 설정. (원본 options = { title = "", message = "", cancelText = "취소", confirmText = "확인" })
@@ -496,7 +496,7 @@ impl UIConfirmWindow {
 	//==============================================================================
 	/// 글 노드 만들기. (UILabel, 흰 글)
 	//==============================================================================
-	fn create_text_node(node_tree: &mut NodeTree, parent_id: NodeId, node_name: &str, text: &str, font_size: f32) -> NodeId {
+	fn create_text_node(node_tree: &mut NodeTree, parent_id: NodeId, node_name: &str, text: &str, font_size: f64) -> NodeId {
 		let text_id = UIConfirmWindow::create_box_node(node_tree, parent_id, node_name);
 		if let Some(label) = node_tree.add_component(text_id, UILabel::new()) {
 			label.set_text(text);
@@ -544,7 +544,7 @@ impl UIConfirmWindow {
 	//==============================================================================
 	/// 그 너비로 줄을 바꾼 묻는 글의 세로. (글꼴로 재고, 잴 수 없으면 그린 결과를, 그것도 없으면 한 줄과 false)
 	//==============================================================================
-	fn measure_message_height(&self, node_tree: &mut NodeTree, text_width: f32) -> (f32, bool) {
+	fn measure_message_height(&self, node_tree: &mut NodeTree, text_width: f64) -> (f64, bool) {
 		let message_label = match self.message_id.and_then(|message_id| node_tree.get_node_mut(message_id)).and_then(|message_node| message_node.get_component_mut::<UILabel>()) {
 			Some(message_label) => {
 				message_label
@@ -557,11 +557,11 @@ impl UIConfirmWindow {
 		let message_text = message_label.get_text_component_mut();
 		let line_height = message_text.get_font_size() * message_text.get_line_spacing();
 		if let Some(line_list) = message_text.wrap_lines_without_graphic(text_width) {
-			return ((line_list.len().max(1) as f32 * line_height).ceil(), true);
+			return ((line_list.len().max(1) as f64 * line_height).ceil(), true);
 		}
 		match message_text.get_measured_line_count() {
 			Some(line_count) => {
-				((line_count as f32 * line_height).ceil(), true)
+				((line_count as f64 * line_height).ceil(), true)
 			}
 			None => {
 				(line_height.ceil(), false)
@@ -626,7 +626,7 @@ impl UIWindowBehavior for UIConfirmWindow {
 	//==============================================================================
 	/// 내용 놓기. (제목 → 글 스크롤 칸 → 두 단추, 판의 세로를 돌려준다)
 	//==============================================================================
-	fn layout_content(&mut self, node_tree: &mut NodeTree, parts: &UIWindowParts, panel_width: f32) -> f32 {
+	fn layout_content(&mut self, node_tree: &mut NodeTree, parts: &UIWindowParts, panel_width: f64) -> f64 {
 		let inner_width = (panel_width - CONFIRM_PADDING * 2.0).max(1.0);
 		self.apply_text_direction(node_tree);
 		let mut top = CONFIRM_PADDING;

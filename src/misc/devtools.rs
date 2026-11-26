@@ -59,7 +59,7 @@
 //! 		self.dev_tools.set_root_nodes(vec![self.scene_base.get_root_id()]);
 //! 	}
 //!
-//! 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+//! 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 //! 		let is_capturing_input = self.dev_tools.is_visible() && self.dev_tools.is_pointer_inside_panel(engine);
 //! 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 //! 		if !is_capturing_input {
@@ -107,24 +107,24 @@ use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind};
 //==============================================================================
 /// 고정 레이아웃 상수.
 //==============================================================================
-const TITLE_HEIGHT: f32 = 28.0;
-const TAB_HEIGHT: f32 = 24.0;
-const ITEM_HEIGHT: f32 = 20.0;
-const INDENT_WIDTH: f32 = 14.0;
-const SCROLL_BAR_WIDTH: f32 = 6.0;
-const GIZMO_CHECKBOX_SIZE: f32 = 12.0;
-const GIZMO_CHECKBOX_MARGIN: f32 = 4.0;
-const PADDING: f32 = 7.0;
-const LABEL_COLUMN_WIDTH: f32 = 144.0;
-const RESIZE_HANDLE_SIZE: f32 = 10.0;
-const SPLITTER_HIT_SIZE: f32 = 8.0;
-const MIN_PANEL_WIDTH: f32 = 300.0;
-const MIN_PANEL_HEIGHT: f32 = 200.0;
-const MIN_LEFT_WIDTH: f32 = 80.0;
+const TITLE_HEIGHT: f64 = 28.0;
+const TAB_HEIGHT: f64 = 24.0;
+const ITEM_HEIGHT: f64 = 20.0;
+const INDENT_WIDTH: f64 = 14.0;
+const SCROLL_BAR_WIDTH: f64 = 6.0;
+const GIZMO_CHECKBOX_SIZE: f64 = 12.0;
+const GIZMO_CHECKBOX_MARGIN: f64 = 4.0;
+const PADDING: f64 = 7.0;
+const LABEL_COLUMN_WIDTH: f64 = 144.0;
+const RESIZE_HANDLE_SIZE: f64 = 10.0;
+const SPLITTER_HIT_SIZE: f64 = 8.0;
+const MIN_PANEL_WIDTH: f64 = 300.0;
+const MIN_PANEL_HEIGHT: f64 = 200.0;
+const MIN_LEFT_WIDTH: f64 = 80.0;
 const TABS: [&str; 4] = ["Statistics", "Node Hierarchy", "Local Storage", "Settings"];
-const DEFAULT_PANEL_WIDTH: f32 = 810.0;
-const DEFAULT_PANEL_HEIGHT: f32 = 520.0;
-const DEFAULT_LEFT_WIDTH: f32 = 405.0;
+const DEFAULT_PANEL_WIDTH: f64 = 810.0;
+const DEFAULT_PANEL_HEIGHT: f64 = 520.0;
+const DEFAULT_LEFT_WIDTH: f64 = 405.0;
 const SETTINGS_STORAGE_KEY: &str = "hierarchy.settings";
 
 /// 글꼴. (원본 FONT_SIZE 12 로 짓는 `${FONT_SIZE}px monospace`, `bold ...`, `${FONT_SIZE - 1}px ...`)
@@ -133,13 +133,13 @@ const BOLD_FONT_STRING: &str = "bold 12px monospace";
 const SMALL_FONT_STRING: &str = "11px monospace";
 
 /// 로컬 스토리지 탭의 단추와 칸.
-const LOCAL_STORAGE_BUTTON_WIDTH: f32 = 48.0;
-const LOCAL_STORAGE_DELETE_COLUMN_WIDTH: f32 = 24.0;
-const CONTEXT_MENU_HEIGHT: f32 = ITEM_HEIGHT + 8.0;
+const LOCAL_STORAGE_BUTTON_WIDTH: f64 = 48.0;
+const LOCAL_STORAGE_DELETE_COLUMN_WIDTH: f64 = 24.0;
+const CONTEXT_MENU_HEIGHT: f64 = ITEM_HEIGHT + 8.0;
 const CONTEXT_BUTTON_TEXTS: [&str; 4] = ["Edit Key", "Edit Value", "Duplicate", "Remove"];
 
 /// 세팅 탭 줄. (글, 칸의 x 오프셋)
-const SETTINGS_ROWS: [(&str, f32); 5] = [
+const SETTINGS_ROWS: [(&str, f64); 5] = [
 	("Dim Background", 120.0),
 	("Show All Gizmos", 120.0),
 	("Show Height Aspect Guide", 168.0),
@@ -201,7 +201,7 @@ const COLOR_WIDTH_ASPECT_GUIDE: Color = create_color(240.0, 180.0, 80.0, 1.0);
 //==============================================================================
 /// 0 ~ 255 색 값으로 색 만들기. (알파는 0 ~ 1)
 //==============================================================================
-const fn create_color(red: f32, green: f32, blue: f32, alpha: f32) -> Color {
+const fn create_color(red: f64, green: f64, blue: f64, alpha: f64) -> Color {
 	Color::create(red / 255.0, green / 255.0, blue / 255.0, alpha)
 }
 
@@ -364,27 +364,27 @@ struct LocalStorageDialogRequest {
 pub struct DevTools {
 	root_ids: Vec<NodeId>,
 	is_visible: bool,
-	panel_x: f32,
-	panel_y: f32,
-	panel_width: f32,
-	panel_height: f32,
-	left_width: f32,
+	panel_x: f64,
+	panel_y: f64,
+	panel_width: f64,
+	panel_height: f64,
+	left_width: f64,
 	is_dragging_panel: bool,
-	drag_start_mouse_x: f32,
-	drag_start_mouse_y: f32,
-	drag_start_panel_x: f32,
-	drag_start_panel_y: f32,
+	drag_start_mouse_x: f64,
+	drag_start_mouse_y: f64,
+	drag_start_panel_x: f64,
+	drag_start_panel_y: f64,
 	resize_mode: ResizeMode,
-	resize_drag_start_mouse_x: f32,
-	resize_drag_start_mouse_y: f32,
-	resize_drag_start_panel_x: f32,
-	resize_drag_start_panel_y: f32,
-	resize_drag_start_panel_width: f32,
-	resize_drag_start_panel_height: f32,
-	resize_drag_start_left_width: f32,
+	resize_drag_start_mouse_x: f64,
+	resize_drag_start_mouse_y: f64,
+	resize_drag_start_panel_x: f64,
+	resize_drag_start_panel_y: f64,
+	resize_drag_start_panel_width: f64,
+	resize_drag_start_panel_height: f64,
+	resize_drag_start_left_width: f64,
 	selected_node_id: Option<NodeId>,
-	tree_scroll_y: f32,
-	inspector_scroll_y: f32,
+	tree_scroll_y: f64,
+	inspector_scroll_y: f64,
 	previous_is_key_f2: bool,
 	flat_list: Vec<DevToolsFlatItem>,
 	expanded_node_ids: HashSet<NodeId>,
@@ -394,16 +394,16 @@ pub struct DevTools {
 	/// &mut self 게터가 있는 컴포넌트의 게터 값. (고른 노드, 컴포넌트 차례 → 게터 목록. tick 이 트리를 쥐고 &mut 갈래로 읽어 둔다)
 	mutable_getter_cache: Vec<(NodeId, usize, Vec<ReflectedGetter>)>,
 	is_tree_scroll_dragging: bool,
-	tree_scroll_drag_start_mouse_y: f32,
-	tree_scroll_drag_start_scroll_y: f32,
+	tree_scroll_drag_start_mouse_y: f64,
+	tree_scroll_drag_start_scroll_y: f64,
 	is_inspector_scroll_dragging: bool,
-	inspector_scroll_drag_start_mouse_y: f32,
-	inspector_scroll_drag_start_scroll_y: f32,
+	inspector_scroll_drag_start_mouse_y: f64,
+	inspector_scroll_drag_start_scroll_y: f64,
 	active_tab: usize,
-	local_storage_scroll_y: f32,
+	local_storage_scroll_y: f64,
 	is_local_storage_scroll_dragging: bool,
-	local_storage_scroll_drag_start_mouse_y: f32,
-	local_storage_scroll_drag_start_scroll_y: f32,
+	local_storage_scroll_drag_start_mouse_y: f64,
+	local_storage_scroll_drag_start_scroll_y: f64,
 	selected_local_storage_key: Option<String>,
 	is_dim_enabled: bool,
 	is_all_gizmos_visible: bool,
@@ -413,10 +413,10 @@ pub struct DevTools {
 	/// 로컬 스토리지 선택 메뉴 단추 자리. (원본 ctxButtonRects, 그릴 때 정한다)
 	context_button_rects: Vec<Rect>,
 	selected_statistics_key: Option<String>,
-	statistics_scroll_y: f32,
+	statistics_scroll_y: f64,
 	is_statistics_scroll_dragging: bool,
-	statistics_scroll_drag_start_mouse_y: f32,
-	statistics_scroll_drag_start_scroll_y: f32,
+	statistics_scroll_drag_start_mouse_y: f64,
+	statistics_scroll_drag_start_scroll_y: f64,
 	/// 인스펙터의 컴포넌트 속성과 노드 종류 이름을 읽는 문서. (처음은 엔진 컴포넌트와 에디터 종류가 등록된 것, set_ui_document 로 게임 문서를 건다)
 	ui_document: UIDocument,
 	/// tick 끝이나 다음 draw 첫머리에 Graphic 에 걸 모든 기즈모 강제 표시 값.
@@ -674,7 +674,7 @@ impl DevTools {
 	/// - `node_tree`: 트리에 보일 노드 트리. (A, G 칸을 누르면 노드의 액티브와 기즈모를 바꾼다)
 	/// - `_time_delta`: 지난 프레임부터 흐른 시간. (초, 쓰지 않는다. 원본처럼 시간 배율을 거치지 않은 값을 넘긴다)
 	//==============================================================================
-	pub fn tick(&mut self, engine: &mut Engine, node_tree: &mut NodeTree, _time_delta: f32) {
+	pub fn tick(&mut self, engine: &mut Engine, node_tree: &mut NodeTree, _time_delta: f64) {
 		self.tick_panel(engine, node_tree);
 		if let Some(graphic) = engine.get_graphic_mut() {
 			self.apply_pending_force_gizmos_visible(graphic);
@@ -828,7 +828,7 @@ impl DevTools {
 	//==============================================================================
 	/// 리사이즈 드래그 시작.
 	//==============================================================================
-	fn start_resize(&mut self, resize_mode: ResizeMode, touch_x: f32, touch_y: f32) {
+	fn start_resize(&mut self, resize_mode: ResizeMode, touch_x: f64, touch_y: f64) {
 		self.resize_mode = resize_mode;
 		self.resize_drag_start_mouse_x = touch_x;
 		self.resize_drag_start_mouse_y = touch_y;
@@ -842,7 +842,7 @@ impl DevTools {
 	//==============================================================================
 	/// 눌림 처리.
 	//==============================================================================
-	fn handle_press(&mut self, engine: &Engine, node_tree: &mut NodeTree, touch_x: f32, touch_y: f32) {
+	fn handle_press(&mut self, engine: &Engine, node_tree: &mut NodeTree, touch_x: f64, touch_y: f64) {
 		let panel_x = self.panel_x;
 		let panel_y = self.panel_y;
 		let panel_width = self.panel_width;
@@ -916,7 +916,7 @@ impl DevTools {
 
 		// 탭바 영역.
 		if touch_y <= panel_y + TITLE_HEIGHT + TAB_HEIGHT {
-			let tab_width = panel_width / TABS.len() as f32;
+			let tab_width = panel_width / TABS.len() as f64;
 			let tab_index = ((touch_x - panel_x) / tab_width).floor();
 			if tab_index >= 0.0 && (tab_index as usize) < TABS.len() {
 				self.active_tab = tab_index as usize;
@@ -972,7 +972,7 @@ impl DevTools {
 				// 기즈모 체크박스 클릭 감지.
 				let checkbox_right_x = panel_x + left_width - SCROLL_BAR_WIDTH - GIZMO_CHECKBOX_MARGIN;
 				let checkbox_x = checkbox_right_x - GIZMO_CHECKBOX_SIZE;
-				let item_top_y = tree_items_y + clicked_index as f32 * ITEM_HEIGHT - self.tree_scroll_y;
+				let item_top_y = tree_items_y + clicked_index as f64 * ITEM_HEIGHT - self.tree_scroll_y;
 				let item_middle_y = item_top_y + ITEM_HEIGHT * 0.5;
 				let checkbox_y = item_middle_y - GIZMO_CHECKBOX_SIZE * 0.5;
 				let checkbox_rect = Rect::create(checkbox_x, checkbox_y, GIZMO_CHECKBOX_SIZE, GIZMO_CHECKBOX_SIZE);
@@ -1042,7 +1042,7 @@ impl DevTools {
 	//==============================================================================
 	/// 이동 처리.
 	//==============================================================================
-	fn handle_move(&mut self, touch_x: f32, touch_y: f32) {
+	fn handle_move(&mut self, touch_x: f64, touch_y: f64) {
 		// 패널 드래그.
 		if self.is_dragging_panel {
 			let delta_x = touch_x - self.drag_start_mouse_x;
@@ -1130,7 +1130,7 @@ impl DevTools {
 	//==============================================================================
 	/// 뗌 처리.
 	//==============================================================================
-	fn handle_release(&mut self, _touch_x: f32, _touch_y: f32) {
+	fn handle_release(&mut self, _touch_x: f64, _touch_y: f64) {
 		self.is_dragging_panel = false;
 		self.resize_mode = ResizeMode::None;
 		self.is_tree_scroll_dragging = false;
@@ -1142,7 +1142,7 @@ impl DevTools {
 	//==============================================================================
 	/// 로컬 스토리지 탭 눌림 처리.
 	//==============================================================================
-	fn handle_local_storage_press(&mut self, touch_x: f32, touch_y: f32, panel_x: f32, panel_y: f32, panel_width: f32, panel_height: f32) {
+	fn handle_local_storage_press(&mut self, touch_x: f64, touch_y: f64, panel_x: f64, panel_y: f64, panel_width: f64, panel_height: f64) {
 		let button_height = ITEM_HEIGHT - 4.0;
 		let button_y = panel_y + 2.0;
 		let clear_button_x = panel_x + panel_width - PADDING - LOCAL_STORAGE_BUTTON_WIDTH;
@@ -1507,8 +1507,8 @@ impl DevTools {
 			graphic.push_state();
 			graphic.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
 			graphic.set_fill_color(COLOR_DIM);
-			let drawing_buffer_width = graphic.get_drawing_buffer_width() as f32;
-			let drawing_buffer_height = graphic.get_drawing_buffer_height() as f32;
+			let drawing_buffer_width = graphic.get_drawing_buffer_width() as f64;
+			let drawing_buffer_height = graphic.get_drawing_buffer_height() as f64;
 			graphic.draw_rect(Rect::create(0.0, 0.0, drawing_buffer_width, drawing_buffer_height));
 			graphic.pop_state();
 		}
@@ -1550,9 +1550,9 @@ impl DevTools {
 		graphic.draw_line(&[Vector2::create(panel_x, panel_y + TITLE_HEIGHT + 0.5), Vector2::create(panel_x + panel_width, panel_y + TITLE_HEIGHT + 0.5)], 1.0);
 
 		// 탭바.
-		let tab_width = panel_width / TABS.len() as f32;
+		let tab_width = panel_width / TABS.len() as f64;
 		for (tab_index, tab_text) in TABS.iter().enumerate() {
-			let tab_x = panel_x + tab_index as f32 * tab_width;
+			let tab_x = panel_x + tab_index as f64 * tab_width;
 			let is_active_tab = tab_index == self.active_tab;
 			if is_active_tab {
 				graphic.set_fill_color(COLOR_SECTION_HEADER_BACKGROUND);
@@ -1638,7 +1638,7 @@ impl DevTools {
 	//==============================================================================
 	/// FPS 표시 상자. (창 왼쪽 위에서 여백만큼 띄우고, 너비는 글 너비에 좌우 여백, 높이는 줄 높이)
 	//==============================================================================
-	fn calculate_frame_per_second_rect(text_width: f32) -> Rect {
+	fn calculate_frame_per_second_rect(text_width: f64) -> Rect {
 		let box_width = text_width.ceil() + PADDING * 2.0;
 		Rect::create(PADDING, PADDING, box_width, ITEM_HEIGHT)
 	}
@@ -1674,7 +1674,7 @@ impl DevTools {
 	//==============================================================================
 	/// 트리 패널 출력.
 	//==============================================================================
-	fn draw_tree_panel(&mut self, node_tree: &NodeTree, graphic: &mut Graphic, panel_x: f32, panel_y: f32, panel_width: f32, panel_height: f32) {
+	fn draw_tree_panel(&mut self, node_tree: &NodeTree, graphic: &mut Graphic, panel_x: f64, panel_y: f64, panel_width: f64, panel_height: f64) {
 		graphic.begin_clip_rect(Rect::create(panel_x, panel_y, panel_width, panel_height), 0.0);
 
 		// 트리 패널 제목.
@@ -1707,7 +1707,7 @@ impl DevTools {
 
 		let items_y = panel_y + ITEM_HEIGHT * 2.0;
 		let items_height = panel_height - ITEM_HEIGHT * 2.0;
-		let total_items_height = self.flat_list.len() as f32 * ITEM_HEIGHT;
+		let total_items_height = self.flat_list.len() as f64 * ITEM_HEIGHT;
 
 		if total_items_height > items_height {
 			let maximum_tree_scroll_y = total_items_height - items_height;
@@ -1721,7 +1721,7 @@ impl DevTools {
 		graphic.begin_clip_rect(Rect::create(panel_x, items_y, panel_width, items_height), 0.0);
 
 		for (item_index, flat_item) in self.flat_list.iter().enumerate() {
-			let item_y = items_y + item_index as f32 * ITEM_HEIGHT - self.tree_scroll_y;
+			let item_y = items_y + item_index as f64 * ITEM_HEIGHT - self.tree_scroll_y;
 
 			if item_y + ITEM_HEIGHT < items_y || item_y > items_y + items_height {
 				continue;
@@ -1746,7 +1746,7 @@ impl DevTools {
 				graphic.draw_rect(Rect::create(panel_x, item_y, panel_width, ITEM_HEIGHT));
 			}
 
-			let indent_x = panel_x + PADDING + flat_item.depth as f32 * INDENT_WIDTH;
+			let indent_x = panel_x + PADDING + flat_item.depth as f64 * INDENT_WIDTH;
 
 			if has_children {
 				let triangle_text = if is_expanded {
@@ -1818,7 +1818,7 @@ impl DevTools {
 	//==============================================================================
 	/// 인스펙터 패널 출력.
 	//==============================================================================
-	fn draw_inspector_panel(&mut self, node_tree: &NodeTree, graphic: &mut Graphic, panel_x: f32, panel_y: f32, panel_width: f32, panel_height: f32) {
+	fn draw_inspector_panel(&mut self, node_tree: &NodeTree, graphic: &mut Graphic, panel_x: f64, panel_y: f64, panel_width: f64, panel_height: f64) {
 		graphic.begin_clip_rect(Rect::create(panel_x, panel_y, panel_width, panel_height), 0.0);
 
 		let selected_node_id = match self.selected_node_id.filter(|selected_node_id| node_tree.contains(*selected_node_id)) {
@@ -1838,7 +1838,7 @@ impl DevTools {
 		};
 
 		self.build_inspector_lines(node_tree, selected_node_id);
-		let total_content_height = self.cached_inspector_lines.len() as f32 * ITEM_HEIGHT;
+		let total_content_height = self.cached_inspector_lines.len() as f64 * ITEM_HEIGHT;
 
 		if total_content_height > panel_height {
 			let maximum_inspector_scroll_y = total_content_height - panel_height;
@@ -1849,7 +1849,7 @@ impl DevTools {
 		}
 
 		for (line_index, line) in self.cached_inspector_lines.iter().enumerate() {
-			let line_y = panel_y + line_index as f32 * ITEM_HEIGHT - self.inspector_scroll_y;
+			let line_y = panel_y + line_index as f64 * ITEM_HEIGHT - self.inspector_scroll_y;
 
 			if line_y + ITEM_HEIGHT < panel_y || line_y > panel_y + panel_height {
 				continue;
@@ -1945,7 +1945,7 @@ impl DevTools {
 	//==============================================================================
 	/// 로컬 스토리지 패널 출력.
 	//==============================================================================
-	fn draw_local_storage_panel(&mut self, graphic: &mut Graphic, panel_x: f32, panel_y: f32, panel_width: f32, panel_height: f32) {
+	fn draw_local_storage_panel(&mut self, graphic: &mut Graphic, panel_x: f64, panel_y: f64, panel_width: f64, panel_height: f64) {
 		graphic.begin_clip_rect(Rect::create(panel_x, panel_y, panel_width, panel_height), 0.0);
 
 		// 헤더 배경과 타이틀.
@@ -1997,7 +1997,7 @@ impl DevTools {
 			0.0
 		};
 		let items_height = panel_height - ITEM_HEIGHT * 2.0 - context_menu_space;
-		let total_items_height = keys.len() as f32 * ITEM_HEIGHT;
+		let total_items_height = keys.len() as f64 * ITEM_HEIGHT;
 
 		if total_items_height > items_height {
 			let maximum_scroll_y = total_items_height - items_height;
@@ -2013,7 +2013,7 @@ impl DevTools {
 		let maximum_key_characters = (key_column_width / 7.0).floor() as usize;
 		let maximum_value_characters = (value_column_width / 7.0).floor() as usize;
 		for (key_index, key) in keys.iter().enumerate() {
-			let item_y = items_y + key_index as f32 * ITEM_HEIGHT - self.local_storage_scroll_y;
+			let item_y = items_y + key_index as f64 * ITEM_HEIGHT - self.local_storage_scroll_y;
 
 			if item_y + ITEM_HEIGHT < items_y || item_y > items_y + items_height {
 				continue;
@@ -2082,8 +2082,8 @@ impl DevTools {
 			let context_button_text_padding = 10.0;
 			graphic.set_font_string(SMALL_FONT_STRING);
 			// 텍스트 크기 기반으로 각 버튼 너비 계산.
-			let context_button_widths: Vec<f32> = CONTEXT_BUTTON_TEXTS.iter().map(|context_button_text| graphic.measure_text(context_button_text).width.ceil() + context_button_text_padding * 2.0).collect();
-			let total_context_button_width = context_button_gap * (CONTEXT_BUTTON_TEXTS.len() as f32 - 1.0) + context_button_widths.iter().sum::<f32>();
+			let context_button_widths: Vec<f64> = CONTEXT_BUTTON_TEXTS.iter().map(|context_button_text| graphic.measure_text(context_button_text).width.ceil() + context_button_text_padding * 2.0).collect();
+			let total_context_button_width = context_button_gap * (CONTEXT_BUTTON_TEXTS.len() as f64 - 1.0) + context_button_widths.iter().sum::<f64>();
 			let context_button_start_x = panel_x + panel_width - PADDING - total_context_button_width;
 			let context_button_y = context_menu_y + (CONTEXT_MENU_HEIGHT - context_button_height) * 0.5;
 			graphic.set_text_baseline(TextBaseline::Middle);
@@ -2158,8 +2158,8 @@ impl DevTools {
 	//==============================================================================
 	/// 세팅 줄의 체크 칸 자리.
 	//==============================================================================
-	fn calculate_setting_checkbox_rect(row_index: usize, panel_x: f32, panel_y: f32) -> Rect {
-		let row_y = panel_y + ITEM_HEIGHT * (row_index as f32 + 1.0);
+	fn calculate_setting_checkbox_rect(row_index: usize, panel_x: f64, panel_y: f64) -> Rect {
+		let row_y = panel_y + ITEM_HEIGHT * (row_index as f64 + 1.0);
 		let row_middle_y = row_y + ITEM_HEIGHT * 0.5;
 		let checkbox_x = panel_x + PADDING + SETTINGS_ROWS[row_index].1;
 		let checkbox_y = (row_middle_y - GIZMO_CHECKBOX_SIZE * 0.5).floor();
@@ -2169,7 +2169,7 @@ impl DevTools {
 	//==============================================================================
 	/// 세팅 패널 출력.
 	//==============================================================================
-	fn draw_settings_panel(&self, graphic: &mut Graphic, panel_x: f32, panel_y: f32, panel_width: f32, panel_height: f32) {
+	fn draw_settings_panel(&self, graphic: &mut Graphic, panel_x: f64, panel_y: f64, panel_width: f64, panel_height: f64) {
 		graphic.begin_clip_rect(Rect::create(panel_x, panel_y, panel_width, panel_height), 0.0);
 
 		// 헤더 배경과 타이틀.
@@ -2178,7 +2178,7 @@ impl DevTools {
 		// 항목. (글과 체크 칸, 켜졌으면 초록, 꺼졌으면 강조색 테두리의 빈 칸)
 		let setting_values = self.get_setting_values();
 		for (row_index, (row_text, _)) in SETTINGS_ROWS.iter().enumerate() {
-			let row_middle_y = panel_y + ITEM_HEIGHT * (row_index as f32 + 1.0) + ITEM_HEIGHT * 0.5;
+			let row_middle_y = panel_y + ITEM_HEIGHT * (row_index as f64 + 1.0) + ITEM_HEIGHT * 0.5;
 			graphic.set_fill_color(COLOR_TEXT);
 			graphic.set_font_string(FONT_STRING);
 			graphic.set_text_align(TextAlign::Left);
@@ -2202,7 +2202,7 @@ impl DevTools {
 	//==============================================================================
 	/// 세팅 탭 눌림 처리.
 	//==============================================================================
-	fn handle_settings_press(&mut self, touch_x: f32, touch_y: f32, panel_x: f32, panel_y: f32) {
+	fn handle_settings_press(&mut self, touch_x: f64, touch_y: f64, panel_x: f64, panel_y: f64) {
 		let hit_row_index = (0..SETTINGS_ROWS.len()).find(|row_index| is_point_in_rect(touch_x, touch_y, DevTools::calculate_setting_checkbox_rect(*row_index, panel_x, panel_y)));
 		match hit_row_index {
 			Some(0) => {
@@ -2347,7 +2347,7 @@ impl DevTools {
 	//==============================================================================
 	/// 통계 패널 출력.
 	//==============================================================================
-	fn draw_statistics_panel(&mut self, engine: &Engine, graphic: &mut Graphic, panel_x: f32, panel_y: f32, panel_width: f32, panel_height: f32) {
+	fn draw_statistics_panel(&mut self, engine: &Engine, graphic: &mut Graphic, panel_x: f64, panel_y: f64, panel_width: f64, panel_height: f64) {
 		graphic.begin_clip_rect(Rect::create(panel_x, panel_y, panel_width, panel_height), 0.0);
 
 		// 헤더 배경과 타이틀.
@@ -2359,7 +2359,7 @@ impl DevTools {
 		let statistics_items = self.gather_statistics_items(engine);
 		let items_y = panel_y + ITEM_HEIGHT;
 		let items_height = panel_height - ITEM_HEIGHT;
-		let total_items_height = statistics_items.len() as f32 * ITEM_HEIGHT;
+		let total_items_height = statistics_items.len() as f64 * ITEM_HEIGHT;
 
 		if total_items_height > items_height {
 			let maximum_statistics_scroll_y = total_items_height - items_height;
@@ -2377,7 +2377,7 @@ impl DevTools {
 		graphic.begin_clip_rect(Rect::create(panel_x, items_y, panel_width, items_height), 0.0);
 
 		for (item_index, statistics_item) in statistics_items.iter().enumerate() {
-			let item_y = items_y + item_index as f32 * ITEM_HEIGHT - self.statistics_scroll_y;
+			let item_y = items_y + item_index as f64 * ITEM_HEIGHT - self.statistics_scroll_y;
 
 			if item_y + ITEM_HEIGHT < items_y || item_y > items_y + items_height {
 				continue;
@@ -2444,7 +2444,7 @@ impl DevTools {
 	//==============================================================================
 	/// 통계 탭 눌림 처리.
 	//==============================================================================
-	fn handle_statistics_press(&mut self, engine: &Engine, touch_y: f32, panel_y: f32) {
+	fn handle_statistics_press(&mut self, engine: &Engine, touch_y: f64, panel_y: f64) {
 		let statistics_items = self.gather_statistics_items(engine);
 		let items_y = panel_y + ITEM_HEIGHT;
 		let local_y = touch_y - items_y + self.statistics_scroll_y;
@@ -2485,14 +2485,14 @@ impl Default for DevTools {
 //==============================================================================
 /// 점이 사각형 안(경계 포함)에 있는지. (원본의 >= / <= 비교)
 //==============================================================================
-fn is_point_in_rect(x: f32, y: f32, rect: Rect) -> bool {
+fn is_point_in_rect(x: f64, y: f64, rect: Rect) -> bool {
 	x >= rect.position.x && x <= rect.position.x + rect.size.x && y >= rect.position.y && y <= rect.position.y + rect.size.y
 }
 
 //==============================================================================
 /// 체크 칸 출력. (테두리 색으로 채우고, 꺼졌으면 속을 빈 칸 색으로 덮는다)
 //==============================================================================
-fn draw_checkbox(graphic: &mut Graphic, checkbox_x: f32, checkbox_y: f32, border_color: Color, is_checked: bool) {
+fn draw_checkbox(graphic: &mut Graphic, checkbox_x: f64, checkbox_y: f64, border_color: Color, is_checked: bool) {
 	graphic.set_fill_color(border_color);
 	graphic.draw_rect(Rect::create(checkbox_x, checkbox_y, GIZMO_CHECKBOX_SIZE, GIZMO_CHECKBOX_SIZE));
 	if !is_checked {
@@ -2504,7 +2504,7 @@ fn draw_checkbox(graphic: &mut Graphic, checkbox_x: f32, checkbox_y: f32, border
 //==============================================================================
 /// 탭 내용의 제목 줄 출력. (Local Storage, Settings, Statistics 의 헤더 배경과 타이틀)
 //==============================================================================
-fn draw_section_title(graphic: &mut Graphic, title: &str, panel_x: f32, panel_y: f32, panel_width: f32) {
+fn draw_section_title(graphic: &mut Graphic, title: &str, panel_x: f64, panel_y: f64, panel_width: f64) {
 	graphic.set_fill_color(COLOR_SECTION_HEADER_BACKGROUND);
 	graphic.draw_rect(Rect::create(panel_x, panel_y, panel_width, ITEM_HEIGHT));
 	graphic.set_fill_color(COLOR_ACCENT);
@@ -2517,7 +2517,7 @@ fn draw_section_title(graphic: &mut Graphic, title: &str, panel_x: f32, panel_y:
 //==============================================================================
 /// 세로 스크롤바 출력. (막대 높이는 보이는 비율, 최소 20)
 //==============================================================================
-fn draw_scroll_bar(graphic: &mut Graphic, bar_x: f32, area_y: f32, area_height: f32, total_height: f32, scroll_y: f32) {
+fn draw_scroll_bar(graphic: &mut Graphic, bar_x: f64, area_y: f64, area_height: f64, total_height: f64, scroll_y: f64) {
 	let maximum_scroll_y = total_height - area_height;
 	let scroll_ratio = scroll_y / maximum_scroll_y;
 	let bar_height = (area_height * area_height / total_height).max(20.0);
@@ -2647,16 +2647,16 @@ fn format_property_value(value: &ReflectValue, read_node_type_name: &dyn Fn(Node
 			format_quoted_text(text)
 		}
 		ReflectValue::Vector2(vector) => {
-			format!("({}, {})", format_fixed(vector.x as f64, 2), format_fixed(vector.y as f64, 2))
+			format!("({}, {})", format_fixed(vector.x, 2), format_fixed(vector.y, 2))
 		}
 		ReflectValue::Rect(rect) => {
-			format!("({}, {}, {}, {})", format_fixed(rect.position.x as f64, 1), format_fixed(rect.position.y as f64, 1), format_fixed(rect.size.x as f64, 1), format_fixed(rect.size.y as f64, 1))
+			format!("({}, {}, {}, {})", format_fixed(rect.position.x, 1), format_fixed(rect.position.y, 1), format_fixed(rect.size.x, 1), format_fixed(rect.size.y, 1))
 		}
 		ReflectValue::Color(color) => {
-			let red = (color.red as f64 * 255.0).round();
-			let green = (color.green as f64 * 255.0).round();
-			let blue = (color.blue as f64 * 255.0).round();
-			format!("rgba({}, {}, {}, {})", red, green, blue, format_fixed(color.alpha as f64, 2))
+			let red = (color.red * 255.0).round();
+			let green = (color.green * 255.0).round();
+			let blue = (color.blue * 255.0).round();
+			format!("rgba({}, {}, {}, {})", red, green, blue, format_fixed(color.alpha, 2))
 		}
 		ReflectValue::Node(node_id) => {
 			format!("[{}]", read_node_type_name(*node_id))

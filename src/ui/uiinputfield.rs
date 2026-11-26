@@ -82,41 +82,41 @@ use crate::core::textinput::{collect_grapheme_boundaries, convert_character_inde
 use crate::ui::textarealayout::{build_text_area_layout, TextAreaLayout};
 use crate::ui::uicontrol::UIControl;
 use crate::ui::uiview::is_view_position_inside_node;
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 //==============================================================================
 // 전역 상수 목록.
 //==============================================================================
 /// 커서 깜빡임 주기. (초)
-const CURSOR_BLINK_SECONDS: f32 = 0.5;
+const CURSOR_BLINK_SECONDS: f64 = 0.5;
 /// 손가락 길게 누르기. (크롬 데스크탑 aura: long_press_time 500 에 show_press_delay 150 을 더한 650ms, 허용 거리 max_touch_move_in_pixels_for_click 15 + 0.05)
 #[cfg(not(target_arch = "wasm32"))]
-const LONG_PRESS_SECONDS: f32 = 0.65;
-const LONG_PRESS_TOUCH_SLOP: f32 = 15.05;
+const LONG_PRESS_SECONDS: f64 = 0.65;
+const LONG_PRESS_TOUCH_SLOP: f64 = 15.05;
 /// 빠른 메뉴는 손가락을 뗀 뒤 100ms 에 뜬다. (크롬 kQuickMenuDelayInMs)
 #[cfg(not(target_arch = "wasm32"))]
-const QUICK_MENU_DELAY_SECONDS: f32 = 0.1;
+const QUICK_MENU_DELAY_SECONDS: f64 = 0.1;
 /// 터치 선택 손잡이. (크롬 touch_handle_drawable_aura: 왼쪽과 오른쪽 32, 가운데 39 DIP, 누름 판정은 좌우와 아래 6 더, 색 kColorSysPrimary #0B57D0, 불투명도 0.8)
-const TOUCH_HANDLE_SIZE: f32 = 32.0;
-const TOUCH_CENTER_HANDLE_SIZE: f32 = 39.0;
-const TOUCH_HANDLE_PADDING: f32 = 6.0;
+const TOUCH_HANDLE_SIZE: f64 = 32.0;
+const TOUCH_CENTER_HANDLE_SIZE: f64 = 39.0;
+const TOUCH_HANDLE_PADDING: f64 = 6.0;
 const TOUCH_HANDLE_COLOR: Color = Color::create(11.0 / 255.0, 87.0 / 255.0, 208.0 / 255.0, 0.8);
 /// 이어 누르기 거리. (크롬 aura ui/events/event.cc 의 MouseEvent::IsRepeatedClickEvent: kDoubleClickWidth, kDoubleClickHeight 4 의 반, DIP)
 #[cfg(not(target_arch = "wasm32"))]
-const REPEATED_CLICK_SLOP: f32 = 2.0;
+const REPEATED_CLICK_SLOP: f64 = 2.0;
 /// 여러 줄 필드의 탭 크기. (공백 몇 개 폭, CSS tab-size 기본 8)
-const DEFAULT_TAB_SIZE: f32 = 8.0;
+const DEFAULT_TAB_SIZE: f64 = 8.0;
 /// 여러 줄 필드의 얹는 스크롤 막대 썸. (맥 얹는 막대 설정, PaneStyle 과 같다. 클래식 막대는 web/pane.rs 의 크롬 치수)
-const TEXT_AREA_SCROLLBAR_THICKNESS: f32 = 8.0;
-const TEXT_AREA_SCROLLBAR_MINIMUM_THUMB_LENGTH: f32 = 20.0;
+const TEXT_AREA_SCROLLBAR_THICKNESS: f64 = 8.0;
+const TEXT_AREA_SCROLLBAR_MINIMUM_THUMB_LENGTH: f64 = 20.0;
 /// 폰트 이름을 정하지 않았을 때 쓰는 이름. (엔진 기본 폰트, 원본 SYSTEM_FONT_STRING 자리)
 const DEFAULT_FONT_FAMILY: &str = "default";
 /// 문맥 메뉴 크기. (원본 UIInputFieldContextMenu 와 같다: 폭 140, 위아래 여백 4, 항목 위아래 여백 8, 글자 14px)
-const CONTEXT_MENU_WIDTH: f32 = 140.0;
-const CONTEXT_MENU_PADDING_Y: f32 = 4.0;
-const CONTEXT_MENU_ITEM_HEIGHT: f32 = 34.0;
-const CONTEXT_MENU_ITEM_PADDING_X: f32 = 16.0;
+const CONTEXT_MENU_WIDTH: f64 = 140.0;
+const CONTEXT_MENU_PADDING_Y: f64 = 4.0;
+const CONTEXT_MENU_ITEM_HEIGHT: f64 = 34.0;
+const CONTEXT_MENU_ITEM_PADDING_X: f64 = 16.0;
 const CONTEXT_MENU_FONT_STRING: &str = "14px default";
 
 /// 필드 id. (엔진 글 입력 줄에서 필드를 가리킨다. 0 은 "포커스를 가진 필드"라 1 부터)
@@ -693,7 +693,7 @@ impl TextEditBuffer {
 /// # 돌려줌
 /// 가장 가까운 글자 경계의 자리. (0 ~ 글자 수)
 //==============================================================================
-pub fn find_character_index_at_offset(character_offsets: &[f32], target_x: f32) -> usize {
+pub fn find_character_index_at_offset(character_offsets: &[f64], target_x: f64) -> usize {
 	let character_count = character_offsets.len().saturating_sub(1);
 	if character_count == 0 || target_x <= 0.0 {
 		return 0;
@@ -715,12 +715,12 @@ pub fn find_character_index_at_offset(character_offsets: &[f32], target_x: f32) 
 /// 글자 묶음 경계 가운데 누른 x 에 가까운 자리 찾기. (크롬처럼 커서는 글자 묶음 경계에만 선다)
 /// - `character_offsets[i]` 는 앞 i 글자의 폭이다. `boundary_list` 는 0 과 글자 수를 넣은 경계 자리 목록이다. (오름차순)
 //==============================================================================
-pub(crate) fn find_boundary_index_at_offset(character_offsets: &[f32], boundary_list: &[usize], target_x: f32) -> usize {
+pub(crate) fn find_boundary_index_at_offset(character_offsets: &[f64], boundary_list: &[usize], target_x: f64) -> usize {
 	let last_boundary = boundary_list.last().copied().unwrap_or(0);
 	if boundary_list.len() < 2 || target_x <= 0.0 {
 		return 0;
 	}
-	let read_offset = |boundary: usize| -> f32 {
+	let read_offset = |boundary: usize| -> f64 {
 		match character_offsets.get(boundary) {
 			Some(character_offset) => {
 				*character_offset
@@ -757,7 +757,7 @@ pub(crate) fn find_boundary_index_at_offset(character_offsets: &[f32], boundary_
 /// 이번 누름의 수. (1 ~ 3)
 //==============================================================================
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-fn count_repeated_clicks(previous_click: Option<(f32, Vector2, u32)>, position: Vector2, interval_seconds: f32, slop: f32) -> u32 {
+fn count_repeated_clicks(previous_click: Option<(f64, Vector2, u32)>, position: Vector2, interval_seconds: f64, slop: f64) -> u32 {
 	match previous_click {
 		Some((elapsed_seconds, previous_position, previous_count)) => {
 			let is_repeated = elapsed_seconds <= interval_seconds && (position.x - previous_position.x).abs() <= slop && (position.y - previous_position.y).abs() <= slop;
@@ -901,30 +901,30 @@ pub struct UIInputField {
 	drag_start_index: Option<usize>,
 	is_focused: bool,
 	focus_serial: u64,
-	blink_timer: f32,
+	blink_timer: f64,
 	is_cursor_visible: bool,
 	use_dom_input: bool,
 	use_touch_end_focus: bool,
 	use_direct_touch: bool,
 	is_attached: bool,
-	font_size: f32,
+	font_size: f64,
 	font_family: String,
-	padding: f32,
+	padding: f64,
 	placeholder: String,
 	background_paint: Paint,
 	cursor_color: Color,
 	composition_underline_color: Color,
 	focus_border_color: Color,
-	focus_border_width: f32,
+	focus_border_width: f64,
 	selection_color: Color,
 	value_text: Text,
 	placeholder_text: Text,
 	change_event: Option<UIInputFieldEvent>,
 	submit_event: Option<UIInputFieldEvent>,
-	character_offsets: Vec<f32>,
+	character_offsets: Vec<f64>,
 	measured_value: String,
 	measured_font_string: String,
-	caret_local_x: f32,
+	caret_local_x: f64,
 	value_revision: u64,
 	context_menu_node_id: Option<NodeId>,
 	/// 이번 tick 에 문맥 메뉴 요청으로 메뉴를 열었는지. (그 요청을 낸 오른쪽 누름이 같은 프레임의 touch_press 로 메뉴를 닫고 선택을 지우지 않게)
@@ -933,28 +933,28 @@ pub struct UIInputField {
 	/// 글 라벨을 마지막으로 놓은 노드 크기. (원본 refreshTextPositions 가 tick 에서 크기가 있을 때만 놓는다. 처음은 0, UI 문서가 원본 자식 꼴로 적는다)
 	text_layout_size: Vector2,
 	/// 커서의 줄 위와 높이. (IME 후보 창 자리, 한 줄 필드는 0 과 노드 높이)
-	caret_local_top: f32,
-	caret_local_height: f32,
+	caret_local_top: f64,
+	caret_local_height: f64,
 	/// 여러 줄인지. (크롬 textarea: Enter 가 줄을 넣고, 폭에 맞춰 나누고, 위아래로 옮기고, 넘치면 스크롤한다)
 	is_multiline: bool,
 	/// 여러 줄 배치와 그 열쇠. (보인 글, 폰트, 폭, 줄 높이, 탭 크기)
 	text_area_layout: TextAreaLayout,
-	text_area_layout_key: Option<(String, String, f32, f32, f32)>,
+	text_area_layout_key: Option<(String, String, f64, f64, f64)>,
 	/// 줄 높이. (None 이면 CSS normal, 크롬처럼 첫째 글꼴의 위아래 길이와 줄 사이로 셈한다)
-	line_height: Option<f32>,
-	tab_size: f32,
+	line_height: Option<f64>,
+	tab_size: f64,
 	/// 위로 굴려 넘긴 만큼. (원본 textarea scrollTop)
-	scroll_top: f32,
+	scroll_top: f64,
 	/// 클래식 스크롤 막대가 차지한 폭. (여러 줄 필드, 얹는 막대거나 넘치지 않으면 0)
-	text_area_scrollbar_gutter: f32,
+	text_area_scrollbar_gutter: f64,
 	/// 위아래 이동이 지키는 가로 자리. (블링크 x_pos_for_vertical_arrow_navigation, 다른 선택 바뀜에 지운다)
-	preferred_caret_x: Option<f32>,
+	preferred_caret_x: Option<f64>,
 	/// 폭으로 나뉜 자리의 커서를 앞 줄 끝에 보일지. (블링크의 위쪽 친화)
 	is_caret_upstream: bool,
 	/// 다음 배치에서 커서가 보이게 스크롤할지. (블링크 RevealSelection)
 	caret_reveal_request: Option<CaretRevealKind>,
 	/// 썸을 끄는 중이면 (누른 y, 그때 scroll_top).
-	scrollbar_drag_start: Option<(f32, f32)>,
+	scrollbar_drag_start: Option<(f64, f64)>,
 	/// 손가락 길게 누르기. (데스크탑, DOM 입력을 직접 누르게 한 필드)
 	long_press_state: Option<LongPressState>,
 	/// 터치 선택 손잡이를 보이는지와 손잡이 끝점들. ((노드 좌표 끝점, 앞인지, 커서 손잡이인지), 그릴 때 둔다)
@@ -963,12 +963,12 @@ pub struct UIInputField {
 	dragging_touch_handle: Option<TouchHandleDrag>,
 	/// 빠른 메뉴. (크롬 quick_menu_requested_, 뗀 뒤 남은 시간, 띄운 노드)
 	is_quick_menu_requested: bool,
-	quick_menu_delay: Option<f32>,
+	quick_menu_delay: Option<f64>,
 	quick_menu_node_id: Option<NodeId>,
 	#[cfg(not(target_arch = "wasm32"))]
 	pending_quick_menu_command: Option<crate::ui::uiinputfieldmenu::QuickMenuCommand>,
 	/// 노드 한 단위의 창 픽셀. (손잡이와 빠른 메뉴 크기)
-	window_pixel_per_unit: f32,
+	window_pixel_per_unit: f64,
 	/// 지난 마우스 누름. ((시각, 창 DIP 자리, 이어 누른 수), 데스크탑이 이어 누른 수를 센다)
 	#[cfg(not(target_arch = "wasm32"))]
 	last_click: Option<(web_time::Instant, Vector2, u32)>,
@@ -992,7 +992,7 @@ enum SelectionGranularity {
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 struct LongPressState {
 	start_view_position: Vector2,
-	elapsed: f32,
+	elapsed: f64,
 	is_fired: bool,
 }
 
@@ -1253,7 +1253,7 @@ impl UIInputField {
 	/// - `line_height`: 줄 높이. (내용 크기 단위, None 이면 CSS normal)
 	//==============================================================================
 	#[reflect(skip)]
-	pub fn set_line_height(&mut self, line_height: Option<f32>) {
+	pub fn set_line_height(&mut self, line_height: Option<f64>) {
 		self.line_height = line_height;
 		self.text_area_layout_key = None;
 	}
@@ -1265,7 +1265,7 @@ impl UIInputField {
 	/// 줄 높이. (정하지 않았으면 CSS normal 로 잰 값, 글꼴을 하나도 읽지 못했으면 글꼴 크기의 1.2 배를 반올림한 값)
 	//==============================================================================
 	#[reflect(skip)]
-	pub fn get_line_height(&self) -> f32 {
+	pub fn get_line_height(&self) -> f64 {
 		match self.line_height {
 			Some(line_height) => {
 				line_height
@@ -1284,7 +1284,7 @@ impl UIInputField {
 	/// - `tab_size`: 탭 크기. (공백 몇 개 폭, 음수는 0, 기본 8)
 	//==============================================================================
 	#[reflect(skip)]
-	pub fn set_tab_size(&mut self, tab_size: f32) {
+	pub fn set_tab_size(&mut self, tab_size: f64) {
 		self.tab_size = tab_size.max(0.0);
 		self.text_area_layout_key = None;
 	}
@@ -1296,7 +1296,7 @@ impl UIInputField {
 	/// 탭 크기. (공백 몇 개 폭)
 	//==============================================================================
 	#[reflect(skip)]
-	pub fn get_tab_size(&self) -> f32 {
+	pub fn get_tab_size(&self) -> f64 {
 		self.tab_size
 	}
 
@@ -1307,7 +1307,7 @@ impl UIInputField {
 	/// 위로 넘긴 만큼. (내용 크기 단위)
 	//==============================================================================
 	#[reflect(skip)]
-	pub fn get_scroll_top(&self) -> f32 {
+	pub fn get_scroll_top(&self) -> f64 {
 		self.scroll_top
 	}
 
@@ -1318,7 +1318,7 @@ impl UIInputField {
 	/// - `scroll_top`: 위로 넘길 만큼. (내용 크기 단위, 음수는 0)
 	//==============================================================================
 	#[reflect(skip)]
-	pub fn set_scroll_top(&mut self, scroll_top: f32) {
+	pub fn set_scroll_top(&mut self, scroll_top: f64) {
 		self.scroll_top = scroll_top.max(0.0);
 	}
 
@@ -1440,7 +1440,7 @@ impl UIInputField {
 	/// # 인자
 	/// - `font_size`: 글자 크기. (내용 크기 단위, 기본 28)
 	//==============================================================================
-	pub fn set_font_size(&mut self, font_size: f32) {
+	pub fn set_font_size(&mut self, font_size: f64) {
 		self.font_size = font_size;
 		self.value_text.set_font_size(font_size);
 		self.placeholder_text.set_font_size(font_size);
@@ -1452,7 +1452,7 @@ impl UIInputField {
 	/// # 돌려줌
 	/// 글자 크기.
 	//==============================================================================
-	pub fn get_font_size(&self) -> f32 {
+	pub fn get_font_size(&self) -> f64 {
 		self.font_size
 	}
 
@@ -1484,7 +1484,7 @@ impl UIInputField {
 	/// # 인자
 	/// - `padding`: 왼쪽과 오른쪽 안쪽 여백. (내용 크기 단위, 기본 16, 여러 줄 필드는 위아래에도)
 	//==============================================================================
-	pub fn set_padding(&mut self, padding: f32) {
+	pub fn set_padding(&mut self, padding: f64) {
 		self.padding = padding;
 	}
 
@@ -1494,7 +1494,7 @@ impl UIInputField {
 	/// # 돌려줌
 	/// 왼쪽과 오른쪽 안쪽 여백.
 	//==============================================================================
-	pub fn get_padding(&self) -> f32 {
+	pub fn get_padding(&self) -> f64 {
 		self.padding
 	}
 
@@ -1524,7 +1524,7 @@ impl UIInputField {
 	/// # 인자
 	/// - `round_size`: 배경과 포커스 테두리의 모서리 반지름. (기본 8)
 	//==============================================================================
-	pub fn set_round_size(&mut self, round_size: f32) {
+	pub fn set_round_size(&mut self, round_size: f64) {
 		self.background_paint.set_round_size(round_size);
 	}
 
@@ -1534,7 +1534,7 @@ impl UIInputField {
 	/// # 돌려줌
 	/// 배경의 모서리 반지름.
 	//==============================================================================
-	pub fn get_round_size(&self) -> f32 {
+	pub fn get_round_size(&self) -> f64 {
 		self.background_paint.get_round_size()
 	}
 
@@ -1616,7 +1616,7 @@ impl UIInputField {
 	/// # 인자
 	/// - `focus_border_width`: 포커스 테두리 두께. (0 이하면 그리지 않는다, 기본 3)
 	//==============================================================================
-	pub fn set_focus_border_width(&mut self, focus_border_width: f32) {
+	pub fn set_focus_border_width(&mut self, focus_border_width: f64) {
 		self.focus_border_width = focus_border_width;
 	}
 
@@ -2009,7 +2009,7 @@ impl UIInputField {
 	/// # 돌려줌
 	/// 그 자리에 가장 가까운 글자 묶음 경계. (UTF-16 단위, 0 ~ 값 길이, 아직 그려 재지 않았으면 값 길이)
 	//==============================================================================
-	pub fn measure_index_at_local_x(&self, local_x: f32) -> usize {
+	pub fn measure_index_at_local_x(&self, local_x: f64) -> usize {
 		let character_index = self.measure_character_index_at_local_x(local_x);
 		self.convert_to_utf16_index(character_index)
 	}
@@ -2017,7 +2017,7 @@ impl UIInputField {
 	//==============================================================================
 	/// 노드 x(content 영역 기준) → 문자 자리. (draw 때 재 둔 글자 경계로 찾는다. 아직 재지 않았으면 글 끝)
 	//==============================================================================
-	fn measure_character_index_at_local_x(&self, local_x: f32) -> usize {
+	fn measure_character_index_at_local_x(&self, local_x: f64) -> usize {
 		let value = self.edit_buffer.get_text();
 		if value.is_empty() {
 			return 0;
@@ -2032,7 +2032,7 @@ impl UIInputField {
 	//==============================================================================
 	/// 뷰 좌표 → 이 노드의 content 영역 x.
 	//==============================================================================
-	fn convert_view_position_to_local_x(&self, context: &ComponentContext, view_input_position: Vector2) -> f32 {
+	fn convert_view_position_to_local_x(&self, context: &ComponentContext, view_input_position: Vector2) -> f64 {
 		let node_id = context.get_node_id();
 		match context.get_node_tree().convert_view_position_to_node_position(node_id, view_input_position) {
 			Some(local_position) => {
@@ -2418,7 +2418,7 @@ impl UIInputField {
 		menu_node.set_pivot(Pivot::TOP_LEFT);
 		menu_node.set_anchor(Vector2::zero());
 		menu_node.set_local_position(local_position);
-		menu_node.set_content_size(Vector2::create(CONTEXT_MENU_WIDTH, CONTEXT_MENU_PADDING_Y * 2.0 + CONTEXT_MENU_ITEM_HEIGHT * CONTEXT_MENU_ITEM_LIST.len() as f32));
+		menu_node.set_content_size(Vector2::create(CONTEXT_MENU_WIDTH, CONTEXT_MENU_PADDING_Y * 2.0 + CONTEXT_MENU_ITEM_HEIGHT * CONTEXT_MENU_ITEM_LIST.len() as f64));
 		node_tree.add_component(menu_id, UIInputFieldContextMenu::new(owner_node_id, is_selection_available, is_text_available));
 		self.context_menu_node_id = Some(menu_id);
 	}
@@ -2479,8 +2479,8 @@ impl UIInputField {
 				Vector2::create(local_rect.position.x, local_rect.position.y + local_rect.size.y),
 				Vector2::create(local_rect.position.x + local_rect.size.x, local_rect.position.y + local_rect.size.y),
 			];
-			let mut minimum_position = Vector2::create(f32::MAX, f32::MAX);
-			let mut maximum_position = Vector2::create(f32::MIN, f32::MIN);
+			let mut minimum_position = Vector2::create(f64::MAX, f64::MAX);
+			let mut maximum_position = Vector2::create(f64::MIN, f64::MIN);
 			for corner in corner_list.iter() {
 				let view_position = world_matrix.transform_point(corner.x, corner.y);
 				let canvas_x = view_native_rect.position.x + view_position.x * target_resolution_scale;
@@ -2533,7 +2533,7 @@ impl UIInputField {
 		if self.measured_value == value && self.measured_font_string == font_string && !self.character_offsets.is_empty() {
 			return;
 		}
-		let mut character_offsets: Vec<f32> = Vec::with_capacity(value.len() + 1);
+		let mut character_offsets: Vec<f64> = Vec::with_capacity(value.len() + 1);
 		character_offsets.push(0.0);
 		for (byte_index, character) in value.char_indices() {
 			let prefix_end = byte_index + character.len_utf8();
@@ -2547,7 +2547,7 @@ impl UIInputField {
 	//==============================================================================
 	/// 글자 경계 x. (재 둔 것이 없으면 0)
 	//==============================================================================
-	fn get_character_offset(&self, character_index: usize) -> f32 {
+	fn get_character_offset(&self, character_index: usize) -> f64 {
 		match self.character_offsets.get(character_index) {
 			Some(character_offset) => {
 				*character_offset
@@ -2610,7 +2610,7 @@ impl UIInputField {
 	/// - 크롬 textarea 는 overflow: auto 라, 클래식 스크롤 막대(윈도우, 리눅스, 맥 클래식 설정)는 넘칠 때 테두리 안쪽의 막대 두께만큼 글 폭을 줄인다.
 	///   막대 없이 지어 보고 넘치면 막대 자리를 덜고 다시 짓는다. (crate::web::pane::read_classic_scrollbar_metrics)
 	//==============================================================================
-	fn ensure_text_area_layout(&mut self, content_size: Vector2, measure_width: &dyn Fn(&str) -> f32) {
+	fn ensure_text_area_layout(&mut self, content_size: Vector2, measure_width: &dyn Fn(&str) -> f64) {
 		let display_text = self.edit_buffer.build_display_text();
 		let font_string = self.build_font_string();
 		let scrollbar_thickness = crate::web::pane::read_classic_scrollbar_metrics(false).map(|metrics| metrics.thickness).unwrap_or(0.0);
@@ -2651,13 +2651,13 @@ impl UIInputField {
 	fn ensure_text_area_layout_without_graphic(&mut self, content_size: Vector2) {
 		let font_string = self.build_font_string();
 		let font_size = self.font_size;
-		let measure_width = move |measured_text: &str| -> f32 {
+		let measure_width = move |measured_text: &str| -> f64 {
 			match crate::core::textstringtexturecache::measure_text_without_graphic(&font_string, measured_text) {
 				Some(text_metrics) => {
 					text_metrics.width
 				}
 				None => {
-					measured_text.chars().count() as f32 * font_size * 0.55
+					measured_text.chars().count() as f64 * font_size * 0.55
 				}
 			}
 		};
@@ -2667,14 +2667,14 @@ impl UIInputField {
 	//==============================================================================
 	/// 스크롤할 수 있는 끝. (글 높이 + 위아래 안쪽 여백 - 노드 높이)
 	//==============================================================================
-	fn get_maximum_scroll_top(&self, content_height: f32) -> f32 {
+	fn get_maximum_scroll_top(&self, content_height: f64) -> f64 {
 		(self.text_area_layout.get_content_height() + self.padding * 2.0 - content_height).max(0.0)
 	}
 
 	//==============================================================================
 	/// 커서가 보이게 스크롤. (블링크 RevealSelection: 맥이 아니면 IfNeeded 는 가장자리, Always 는 맨 위. 맥은 가운데)
 	//==============================================================================
-	fn apply_caret_reveal(&mut self, content_height: f32) {
+	fn apply_caret_reveal(&mut self, content_height: f64) {
 		let reveal_kind = match self.caret_reveal_request.take() {
 			Some(reveal_kind) => {
 				reveal_kind
@@ -2994,8 +2994,8 @@ impl UIInputField {
 			let window_position = Vector2::create(view_input_position.x * view_scale.x, view_input_position.y * view_scale.y);
 			let now = web_time::Instant::now();
 			let interval_seconds = crate::platform::desktop::systemfont::read_double_click_seconds();
-			let previous_click = self.last_click.map(|(time, position, click_count)| (now.duration_since(time).as_secs_f32(), position, click_count));
-			let click_count = count_repeated_clicks(previous_click, window_position, interval_seconds, REPEATED_CLICK_SLOP);
+			let previous_click = self.last_click.map(|(time, position, click_count)| (now.duration_since(time).as_secs_f64(), position, click_count));
+			let click_count = count_repeated_clicks(previous_click, window_position, interval_seconds as f64, REPEATED_CLICK_SLOP);
 			self.last_click = Some((now, window_position, click_count));
 			click_count
 		}
@@ -3091,7 +3091,7 @@ impl UIInputField {
 	/// 길게 누르기 셈. (누른 채 650ms 이면 낱말을 고르고 손잡이를 보인다. 윈도우가 아니면 메뉴도 이때 정한다)
 	//==============================================================================
 	#[cfg(not(target_arch = "wasm32"))]
-	fn update_long_press(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn update_long_press(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let mut long_press_state = match self.long_press_state {
 			Some(long_press_state) if !long_press_state.is_fired => {
 				long_press_state
@@ -3141,7 +3141,7 @@ impl UIInputField {
 	/// 빠른 메뉴 띄우고 닫기. (부탁이 있고, 손가락이 떨어져 있고, 손잡이를 끌지 않을 때 100ms 뒤 띄운다)
 	//==============================================================================
 	#[cfg(not(target_arch = "wasm32"))]
-	fn update_quick_menu(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn update_quick_menu(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		if let Some(quick_menu_node_id) = self.quick_menu_node_id {
 			if !context.get_node_tree().contains(quick_menu_node_id) {
 				self.quick_menu_node_id = None;
@@ -3189,8 +3189,8 @@ impl UIInputField {
 	#[cfg(not(target_arch = "wasm32"))]
 	fn read_selection_bound_view_rect(&self, context: &ComponentContext) -> Rect {
 		let world_matrix = context.get_node_tree().calculate_world_matrix(context.get_node_id());
-		let mut minimum_position = Vector2::create(f32::MAX, f32::MAX);
-		let mut maximum_position = Vector2::create(f32::MIN, f32::MIN);
+		let mut minimum_position = Vector2::create(f64::MAX, f64::MAX);
+		let mut maximum_position = Vector2::create(f64::MIN, f64::MIN);
 		for (focus_point, _, _) in self.touch_handle_list.iter() {
 			for point in [Vector2::create(focus_point.x, focus_point.y - self.read_touch_line_height()), *focus_point] {
 				let view_point = world_matrix.transform_point(point.x, point.y);
@@ -3207,7 +3207,7 @@ impl UIInputField {
 	//==============================================================================
 	/// 선택 경계 선분의 높이. (한 줄은 선택 사각형 높이, 여러 줄은 줄 높이)
 	//==============================================================================
-	fn read_touch_line_height(&self) -> f32 {
+	fn read_touch_line_height(&self) -> f64 {
 		if self.is_multiline {
 			self.text_area_layout.line_height
 		}
@@ -3350,7 +3350,7 @@ impl UIInputField {
 				point_list.push(Vector2::create(origin.x + 19.5 * unit, origin.y));
 				let start_angle = -PI * 0.25;
 				for step_index in 0..=step_count {
-					let angle = start_angle + PI * 1.5 * step_index as f32 / step_count as f32;
+					let angle = start_angle + PI * 1.5 * step_index as f64 / step_count as f64;
 					point_list.push(Vector2::create(center.x + 16.0 * unit * angle.cos(), center.y + 16.0 * unit * angle.sin()));
 				}
 			}
@@ -3366,7 +3366,7 @@ impl UIInputField {
 				};
 				point_list.push(corner);
 				for step_index in 0..=step_count {
-					let angle = start_angle + PI * 1.5 * step_index as f32 / step_count as f32;
+					let angle = start_angle + PI * 1.5 * step_index as f64 / step_count as f64;
 					point_list.push(Vector2::create(center.x + radius * angle.cos(), center.y + radius * angle.sin()));
 				}
 			}
@@ -3381,8 +3381,8 @@ impl UIInputField {
 fn read_node_view_rect(node_tree: &NodeTree, node_id: NodeId) -> Option<Rect> {
 	let content_size = node_tree.get_node(node_id)?.get_content_size();
 	let world_matrix = node_tree.calculate_world_matrix(node_id);
-	let mut minimum_position = Vector2::create(f32::MAX, f32::MAX);
-	let mut maximum_position = Vector2::create(f32::MIN, f32::MIN);
+	let mut minimum_position = Vector2::create(f64::MAX, f64::MAX);
+	let mut maximum_position = Vector2::create(f64::MIN, f64::MIN);
 	for (corner_x, corner_y) in [(0.0, 0.0), (content_size.x, 0.0), (0.0, content_size.y), (content_size.x, content_size.y)] {
 		let view_point = world_matrix.transform_point(corner_x, corner_y);
 		minimum_position = Vector2::create(minimum_position.x.min(view_point.x), minimum_position.y.min(view_point.y));
@@ -3394,7 +3394,7 @@ fn read_node_view_rect(node_tree: &NodeTree, node_id: NodeId) -> Option<Rect> {
 //==============================================================================
 /// page 이동 거리. (블링크 move_commands.cc 와 cc ScrollUtils::CalculatePageStep: 높이의 87.5% 와 높이 - 겹침 상한 가운데 큰 쪽, 겹침 상한은 맥 40, 그 밖은 없음)
 //==============================================================================
-fn calculate_page_step(visible_height: f32) -> f32 {
+fn calculate_page_step(visible_height: f64) -> f64 {
 	let page_step = visible_height * 0.875;
 	if cfg!(target_os = "macos") {
 		page_step.max(visible_height - 40.0)
@@ -3446,7 +3446,7 @@ impl Component for UIInputField {
 	//==============================================================================
 	/// 갱신. (문맥 메뉴 항목, 포커스 넘기기, 글 입력 줄에서 이 필드 몫 꺼내기, 길게 누르기와 빠른 메뉴, 커서 깜빡임, 플랫폼에 올릴 상태)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		// 문맥 메뉴에서 고른 항목.
 		if let Some(menu_action) = self.pending_menu_action.take() {
 			self.perform_menu_action(context, menu_action);
@@ -3988,7 +3988,7 @@ impl Component for UIInputFieldContextMenu {
 	//==============================================================================
 	/// 갱신. (필드가 포커스를 잃었거나 메뉴 밖을 누르면 닫고, 마우스 아래 항목을 둔다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		let is_owner_ready = match context.get_node_tree().get_node(self.owner_node_id).and_then(|owner_node| owner_node.get_component::<UIInputField>()) {
 			Some(owner_field) => {
 				owner_field.is_focused() && owner_field.is_attached()
@@ -4065,7 +4065,7 @@ impl Component for UIInputFieldContextMenu {
 		graphic.set_text_align(TextAlign::Left);
 		graphic.set_text_baseline(TextBaseline::Middle);
 		for (item_index, (item_text, menu_action)) in CONTEXT_MENU_ITEM_LIST.iter().enumerate() {
-			let item_top = CONTEXT_MENU_PADDING_Y + item_index as f32 * CONTEXT_MENU_ITEM_HEIGHT;
+			let item_top = CONTEXT_MENU_PADDING_Y + item_index as f64 * CONTEXT_MENU_ITEM_HEIGHT;
 			let is_enabled = self.is_item_enabled(*menu_action);
 			if is_enabled && self.hovered_item_index == Some(item_index) {
 				graphic.set_fill_color("#eef2ff");
@@ -4258,7 +4258,7 @@ mod tests {
 			let mut character_offsets = vec![0.0];
 			for (byte_index, character) in value.char_indices() {
 				let prefix_end = byte_index + character.len_utf8();
-				character_offsets.push(crate::core::textstringtexturecache::measure_text_without_graphic(&font_string, &value[..prefix_end]).map(|text_metrics| text_metrics.width).unwrap_or(prefix_end as f32 * 11.0));
+				character_offsets.push(crate::core::textstringtexturecache::measure_text_without_graphic(&font_string, &value[..prefix_end]).map(|text_metrics| text_metrics.width).unwrap_or(prefix_end as f64 * 11.0));
 			}
 			field.character_offsets = character_offsets;
 			field.measured_value = value;
@@ -4739,7 +4739,7 @@ mod tests {
 			let field = get_field(&mut node_tree, field_id);
 			field.set_text("hello world again");
 			let value = field.edit_buffer.get_text().to_string();
-			field.character_offsets = (0..=value.chars().count()).map(|character_index| character_index as f32 * 10.0).collect();
+			field.character_offsets = (0..=value.chars().count()).map(|character_index| character_index as f64 * 10.0).collect();
 			field.measured_value = value;
 			field.measured_font_string = field.build_font_string();
 		}
@@ -4924,7 +4924,7 @@ mod tests {
 			field.set_text("line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8");
 		}
 		run_frame(&mut node_tree, &mut engine);
-		let press = |node_tree: &mut NodeTree, engine: &mut Engine, key: TextInputKey, is_shift: bool| -> (usize, usize, f32) {
+		let press = |node_tree: &mut NodeTree, engine: &mut Engine, key: TextInputKey, is_shift: bool| -> (usize, usize, f64) {
 			push_event(engine, key_event(key, is_shift));
 			run_frame(node_tree, engine);
 			let field = get_field(node_tree, field_id);

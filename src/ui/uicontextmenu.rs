@@ -30,8 +30,8 @@ use crate::ui::uibutton::UIButton;
 use crate::ui::uilabel::UILabel;
 
 /// 부모 크기를 모를 때 쓰는 영역. (원본과 같다)
-const DEFAULT_AREA_WIDTH: f32 = 960.0;
-const DEFAULT_AREA_HEIGHT: f32 = 640.0;
+const DEFAULT_AREA_WIDTH: f64 = 960.0;
+const DEFAULT_AREA_HEIGHT: f64 = 640.0;
 
 //==============================================================================
 /// 컨텍스트 메뉴 설정. (원본 options = { menu_width = 168, item_height = 28, font_size = 12, panel_color?, text_color? })
@@ -60,11 +60,11 @@ const DEFAULT_AREA_HEIGHT: f32 = 640.0;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UIContextMenuOptions {
 	/// 메뉴 판 가로. (기본 168)
-	pub menu_width: f32,
+	pub menu_width: f64,
 	/// 항목 행 높이. (기본 28, 판 세로는 항목 수 x 행 높이 + 8)
-	pub item_height: f32,
+	pub item_height: f64,
 	/// 항목 글 크기. (기본 12)
-	pub font_size: f32,
+	pub font_size: f64,
 	/// 메뉴 판 색.
 	pub panel_color: Color,
 	/// 누를 수 있는 항목의 글 색. (누를 수 없는 항목은 회색)
@@ -290,7 +290,7 @@ impl UIContextMenu {
 			node_tree.destroy_node(row_node_id);
 		}
 		let options = self.options;
-		let panel_height = item_list.len() as f32 * options.item_height + 8.0;
+		let panel_height = item_list.len() as f64 * options.item_height + 8.0;
 		node_tree[panel_id].set_content_size(Vector2::create(options.menu_width, panel_height));
 		for (item_index, item_data) in item_list.into_iter().enumerate() {
 			let row_name = format!("ContextMenuItem{}", item_index);
@@ -299,7 +299,7 @@ impl UIContextMenu {
 			row_node.set_pivot(Pivot::TOP_LEFT);
 			row_node.set_anchor(Pivot::TOP_LEFT);
 			row_node.set_content_size(Vector2::create(options.menu_width - 8.0, options.item_height));
-			row_node.set_local_position(Vector2::create(4.0, 4.0 + item_index as f32 * options.item_height));
+			row_node.set_local_position(Vector2::create(4.0, 4.0 + item_index as f64 * options.item_height));
 			row_node.set_interactable(true);
 			let row_paint = row_node.add_component(Paint::create_with_color(Color::transparent()));
 			row_paint.set_round_size(6.0);

@@ -66,13 +66,13 @@ pub enum BeepWaveform {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeepTone {
 	/// 주파수. (Hz)
-	pub frequency: f32,
+	pub frequency: f64,
 	/// 길이. (초)
 	pub duration: f64,
 	/// 파형.
 	pub waveform: BeepWaveform,
 	/// 이 톤만의 음량 배율.
-	pub volume_scale: f32,
+	pub volume_scale: f64,
 }
 
 impl BeepTone {
@@ -86,7 +86,7 @@ impl BeepTone {
 	/// # 돌려줌
 	/// 사인파, 음량 배율 1 인 톤.
 	//==============================================================================
-	pub const fn create(frequency: f32, duration: f64) -> BeepTone {
+	pub const fn create(frequency: f64, duration: f64) -> BeepTone {
 		BeepTone {
 			frequency,
 			duration,
@@ -107,7 +107,7 @@ impl BeepTone {
 	/// # 돌려줌
 	/// 받은 값을 그대로 든 톤.
 	//==============================================================================
-	pub const fn create_with_waveform(frequency: f32, duration: f64, waveform: BeepWaveform, volume_scale: f32) -> BeepTone {
+	pub const fn create_with_waveform(frequency: f64, duration: f64, waveform: BeepWaveform, volume_scale: f64) -> BeepTone {
 		BeepTone {
 			frequency,
 			duration,
@@ -122,17 +122,17 @@ impl BeepTone {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BeepEnvelope {
-	pub(crate) frequency: f32,
+	pub(crate) frequency: f64,
 	pub(crate) waveform: BeepWaveform,
 	pub(crate) delay_seconds: f64,
 	pub(crate) duration_seconds: f64,
 	pub(crate) attack_seconds: f64,
 	pub(crate) release_seconds: f64,
-	pub(crate) peak_volume: f32,
+	pub(crate) peak_volume: f64,
 }
 
 /// 엔벨로프의 바닥 음량. (원본 0.0001, 지수 램프는 0 으로 갈 수 없다)
-pub(crate) const BEEP_FLOOR_VOLUME: f32 = 0.0001;
+pub(crate) const BEEP_FLOOR_VOLUME: f64 = 0.0001;
 /// 오실레이터를 엔벨로프 끝보다 조금 더 돌리는 시간. (초, 원본 stop(end_time + 0.01))
 pub(crate) const BEEP_STOP_MARGIN_SECONDS: f64 = 0.01;
 
@@ -140,7 +140,7 @@ impl BeepEnvelope {
 	//==============================================================================
 	/// 생성. (원본 playTone 의 attack, release, peak 계산)
 	//==============================================================================
-	pub(crate) fn create(frequency: f32, duration_seconds: f64, waveform: BeepWaveform, delay_seconds: f64, volume: f32, volume_scale: f32) -> BeepEnvelope {
+	pub(crate) fn create(frequency: f64, duration_seconds: f64, waveform: BeepWaveform, delay_seconds: f64, volume: f64, volume_scale: f64) -> BeepEnvelope {
 		BeepEnvelope {
 			frequency,
 			waveform,
@@ -242,13 +242,13 @@ pub(crate) struct BeepSchedule {
 //==============================================================================
 pub struct BeepPlayer {
 	audio_manager_state: Rc<RefCell<AudioManagerState>>,
-	volume: f32,
+	volume: f64,
 	is_muted: bool,
 }
 
 impl BeepPlayer {
 	/// 원본 생성자의 기본 음량.
-	pub const DEFAULT_VOLUME: f32 = 0.35;
+	pub const DEFAULT_VOLUME: f64 = 0.35;
 
 	//==============================================================================
 	/// 생성. (volume: 0 ~ 1. 원본처럼 매니저를 참조로 든다)
@@ -260,7 +260,7 @@ impl BeepPlayer {
 	/// # 돌려줌
 	/// 음소거가 꺼진 새 재생기.
 	//==============================================================================
-	pub fn new(audio_manager: &AudioManager, volume: f32) -> BeepPlayer {
+	pub fn new(audio_manager: &AudioManager, volume: f64) -> BeepPlayer {
 		let audio_manager_state = audio_manager.get_shared_state();
 		BeepPlayer {
 			audio_manager_state,
@@ -293,7 +293,7 @@ impl BeepPlayer {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn play_tone(&self, frequency: f32, duration_seconds: f64, waveform: BeepWaveform, delay_seconds: f64, volume_scale: f32) {
+	pub fn play_tone(&self, frequency: f64, duration_seconds: f64, waveform: BeepWaveform, delay_seconds: f64, volume_scale: f64) {
 		if self.is_muted {
 			return;
 		}
@@ -377,7 +377,7 @@ impl BeepPlayer {
 	/// # 인자
 	/// - `volume`: 기본 음량. (0 ~ 1 로 자른다)
 	//==============================================================================
-	pub fn set_volume(&mut self, volume: f32) {
+	pub fn set_volume(&mut self, volume: f64) {
 		self.volume = volume.clamp(0.0, 1.0);
 	}
 
@@ -387,7 +387,7 @@ impl BeepPlayer {
 	/// # 돌려줌
 	/// 기본 음량. (set_volume 을 거쳤으면 0 ~ 1)
 	//==============================================================================
-	pub fn get_volume(&self) -> f32 {
+	pub fn get_volume(&self) -> f64 {
 		self.volume
 	}
 

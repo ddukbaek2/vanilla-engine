@@ -10,7 +10,7 @@
 // - 실행: cargo run --example toonfx
 //==============================================================================
 use glow::HasContext;
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 use vanilla::{
 	create_box_geometry, create_cylinder_geometry, create_octahedron_geometry, create_part_matrix, create_rounded_box_geometry, create_sphere_geometry, create_torus_geometry, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ToonDrawOptions, ToonGeometry, ToonInstance, ToonLineDrawOptions, ToonMesh, ToonOutlineWidthUnit, ToonPartOptions, ToonRenderer, ToonScreenOutline, ToonBeamOptions, ToonDecalOptions, ToonFireballOptions, ToonGlintOptions, ToonLightningOptions, ToonParticleOptions, ToonPlumeOptions, ToonRibbonOptions, ToonShockwaveOptions, ToonFlashOptions, ToonVfx, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange, ToonVfxShape, ToonVfxSlot, Vector2, Vector3, TOON_VFX_DEFAULT_PARTICLE_CAPACITY,
 };
@@ -20,8 +20,8 @@ use vanilla::{
 //==============================================================================
 struct PlacedToon {
 	mesh: ToonMesh,
-	position: [f32; 3],
-	spin: f32,
+	position: [f64; 3],
+	spin: f64,
 }
 
 struct ToonFxScene {
@@ -29,12 +29,12 @@ struct ToonFxScene {
 	renderer: Option<ToonRenderer>,
 	screen_outline: Option<ToonScreenOutline>,
 	vfx: Option<ToonVfx>,
-	next_burst_seconds: f32,
+	next_burst_seconds: f64,
 	ground_mesh: Option<ToonMesh>,
 	rock_mesh: Option<ToonMesh>,
 	placed_list: Vec<PlacedToon>,
 	rock_instance_list: Vec<ToonInstance>,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 }
 
 impl ToonFxScene {
@@ -70,7 +70,7 @@ impl ToonFxScene {
 		renderer.set_band_count(3);
 		renderer.set_light([-0.5, -1.0, -0.35], [0.85, 0.8, 0.75], [0.55, 0.6, 0.7], [0.25, 0.22, 0.2]);
 		self.ground_mesh = ToonFxScene::build_mesh(&renderer, gl, &create_box_geometry(8.0, 0.2, 5.0), &create_part_matrix(None, [0.0, -0.1, 0.0], None, None), "#c9c2b4");
-		let shape_list: [(ToonGeometry, Matrix4, &str, [f32; 3], f32); 5] = [
+		let shape_list: [(ToonGeometry, Matrix4, &str, [f64; 3], f64); 5] = [
 			(create_box_geometry(1.0, 1.0, 1.0), create_part_matrix(None, [0.0, 0.5, 0.0], None, None), "#ff8844", [-2.4, 0.0, -0.8], 0.5),
 			(create_rounded_box_geometry(1.0, 1.0, 1.0, 3, 0.2), create_part_matrix(None, [0.0, 0.5, 0.0], None, None), "#45b585", [-1.35, 0.0, -0.8], 0.3),
 			(create_sphere_geometry(0.55, 24, 16, PI), create_part_matrix(None, [0.0, 0.55, 0.0], None, None), "#ffd257", [0.2, 0.0, -0.9], 0.0),
@@ -84,8 +84,8 @@ impl ToonFxScene {
 		}
 		self.rock_mesh = ToonFxScene::build_mesh(&renderer, gl, &create_octahedron_geometry(0.22), &create_part_matrix(None, [0.0, 0.15, 0.0], None, Some([1.0, 0.7, 1.0])), "#a89a88");
 		for rock_index in 0..14 {
-			let mut model_matrix = Matrix4::create_translation(-3.0 + rock_index as f32 * 0.46, 0.0, 1.3 + (rock_index % 2) as f32 * 0.25);
-			model_matrix.rotate_y(rock_index as f32 * 0.9);
+			let mut model_matrix = Matrix4::create_translation(-3.0 + rock_index as f64 * 0.46, 0.0, 1.3 + (rock_index % 2) as f64 * 0.25);
+			model_matrix.rotate_y(rock_index as f64 * 0.9);
 			let line_id = if rock_index < 7 { Some(100 + rock_index) } else { None };
 			self.rock_instance_list.push(ToonInstance { model_matrix, line_id, ..ToonInstance::default() });
 		}
@@ -105,7 +105,7 @@ impl ToonFxScene {
 		];
 		let ramp_list: Vec<Vec<&str>> = ramp_text_list.iter().map(|ramp_texts| ramp_texts.to_vec()).collect();
 		vfx.set_ramps(&ramp_list);
-		vfx.set_floor_height_reader(Some(Box::new(|x: f32, z: f32| if x.abs() <= 4.0 && z.abs() <= 2.5 { 0.0 } else { -1.0 })));
+		vfx.set_floor_height_reader(Some(Box::new(|x: f64, z: f64| if x.abs() <= 4.0 && z.abs() <= 2.5 { 0.0 } else { -1.0 })));
 		vfx.prepare(gl);
 		self.vfx = Some(vfx);
 		self.renderer = Some(renderer);
@@ -136,22 +136,22 @@ impl ToonFxScene {
 	//==============================================================================
 	// 이번 프레임에만 그리는 효과. (빔 겉집과 심, 번개, 리본, 빛 점)
 	//==============================================================================
-	fn queue_frame_effects(vfx: &mut ToonVfx, elapsed_seconds: f32) {
+	fn queue_frame_effects(vfx: &mut ToonVfx, elapsed_seconds: f64) {
 		vfx.queue_beam(&ToonBeamOptions { start: [1.4, 5.0, 0.5], end: [1.4, 0.0, 0.5], radius: 0.28, is_core: false, alpha: 1.0, brightness: 1.3, ramp: 1, wobble: 0.14, flow_speed: 8.0, grain_repeat: 1.4, ..ToonBeamOptions::default() });
 		vfx.queue_beam(&ToonBeamOptions { start: [1.4, 5.0, 0.5], end: [1.4, 0.0, 0.5], radius: 0.1, is_core: true, alpha: 1.0, brightness: 1.5, ramp: 1, wobble: 0.05, flow_speed: 14.0, grain_repeat: 2.0, ..ToonBeamOptions::default() });
 		vfx.queue_lightning(&ToonLightningOptions { start: [-2.4, 1.1, -0.8], end: [0.2, 1.2, -0.9], radius: 0.12, count: 2, width: 0.07, turns: 1.5, ramp: 2, brightness: 1.4, seed: Some(3.0), ..ToonLightningOptions::default() });
-		let arc_points: Vec<[f32; 3]> = (0..=24).map(|index| {
-			let ratio = index as f32 / 24.0;
+		let arc_points: Vec<[f64; 3]> = (0..=24).map(|index| {
+			let ratio = index as f64 / 24.0;
 			[2.7 - ratio * 3.0, 0.3 + (ratio * PI).sin() * 1.4, -0.4 + ratio * 1.8]
 		}).collect();
 		vfx.queue_ribbon(ToonRibbonOptions { points: arc_points, width: 0.14, taper: 0.5, ramp: 2, brightness: 1.2, ..ToonRibbonOptions::default() });
-		let glow_points: Vec<[f32; 3]> = (0..=24).map(|index| {
-			let ratio = index as f32 / 24.0;
+		let glow_points: Vec<[f64; 3]> = (0..=24).map(|index| {
+			let ratio = index as f64 / 24.0;
 			[-3.4 + ratio * 1.6, 0.4 + ratio * 1.6, 1.4 + (ratio * PI * 2.0 + elapsed_seconds * 2.0).sin() * 0.25]
 		}).collect();
 		vfx.queue_ribbon(ToonRibbonOptions { points: glow_points, width: 0.22, taper: 0.4, brightness: 1.2, glow: Some([1.0, 0.45, 0.8]), ..ToonRibbonOptions::default() });
 		for glint_index in 0..12 {
-			let angle = glint_index as f32 / 12.0 * PI * 2.0 + elapsed_seconds;
+			let angle = glint_index as f64 / 12.0 * PI * 2.0 + elapsed_seconds;
 			let look = if glint_index % 2 == 0 { ToonVfxLook::Star } else { ToonVfxLook::Soft };
 			vfx.queue_glint(&ToonGlintOptions { position: [0.2 + angle.cos() * 0.75, 0.55 + (angle * 2.0).sin() * 0.1, -0.9 + angle.sin() * 0.75], size: 0.22, color: [0.6, 1.0, 1.0], look, brightness: 1.3, rim: if glint_index % 2 == 0 { 1.0 } else { 0.0 }, ..ToonGlintOptions::default() });
 		}
@@ -171,7 +171,7 @@ impl Scene for ToonFxScene {
 		self.scene_base.set_scene_background_color("#21242b");
 	}
 
-	fn tick(&mut self, _engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, _engine: &mut Engine, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 		let vfx = match self.vfx.as_mut() {
 			Some(vfx) => {

@@ -12,7 +12,7 @@
 //! - 삼각형의 감기는 꼭짓점 노멀을 보고 바깥이 앞면이 되게 맞춘다. (뒷면 가리기와 바깥선이 감기에 기댄다)
 //==============================================================================
 use std::collections::HashMap;
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 
 use serde_json::Value;
 
@@ -24,11 +24,11 @@ pub const VERTEX_FLOAT_COUNT: usize = 15;
 /// 뼈대가 있는 모형의 꼭짓점마다 따로 담는 수 개수. (뼈대 번호 4, 무게 4)
 pub const SKIN_FLOAT_COUNT: usize = 8;
 /// 바깥선의 기본 굵기.
-pub const DEFAULT_OUTLINE_WIDTH: f32 = 0.02;
+pub const DEFAULT_OUTLINE_WIDTH: f64 = 0.02;
 /// 바깥선을 모서리에서 더 밀 때 쓰는 가장 작은 코사인. (뾰족한 끝이 굵기의 1.18 배보다 튀지 않게)
-const MINIMUM_OUTLINE_MITER_COSINE: f32 = 0.85;
+const MINIMUM_OUTLINE_MITER_COSINE: f64 = 0.85;
 /// 감기를 맞출 때 넓이가 이보다 작은 삼각형은 그대로 둔다. (구의 극처럼 겹친 점)
-const DEGENERATE_AREA: f32 = 1e-12;
+const DEGENERATE_AREA: f64 = 1e-12;
 
 //==============================================================================
 /// 기본 도형. (가운데가 원점인 자리, 노멀, 꼭짓점 번호)
@@ -50,22 +50,22 @@ const DEGENERATE_AREA: f32 = 1e-12;
 #[derive(Clone, Debug, Default)]
 pub struct ToonGeometry {
 	/// 점마다 자리 셋.
-	pub positions: Vec<f32>,
+	pub positions: Vec<f64>,
 	/// 점마다 단위 노멀 셋.
-	pub normals: Vec<f32>,
+	pub normals: Vec<f64>,
 	/// 삼각형마다 점 번호 셋.
 	pub indices: Vec<u32>,
 	/// 점마다 텍스처 좌표 둘. (상자와 구만 짓는다, 비면 없음)
-	pub uvs: Vec<f32>,
+	pub uvs: Vec<f64>,
 	/// 점마다 2 번 텍스처 좌표 둘. (비면 없음)
-	pub uvs1: Vec<f32>,
+	pub uvs1: Vec<f64>,
 }
 
 impl ToonGeometry {
 	//==============================================================================
 	/// 점 하나 담기. (자리와 노멀)
 	//==============================================================================
-	fn push_point(&mut self, position: [f32; 3], normal: [f32; 3]) {
+	fn push_point(&mut self, position: [f64; 3], normal: [f64; 3]) {
 		self.positions.extend_from_slice(&position);
 		self.normals.extend_from_slice(&normal);
 	}
@@ -73,7 +73,7 @@ impl ToonGeometry {
 	//==============================================================================
 	/// 점 하나의 텍스처 좌표 담기.
 	//==============================================================================
-	fn push_uv(&mut self, u: f32, v: f32) {
+	fn push_uv(&mut self, u: f64, v: f64) {
 		self.uvs.push(u);
 		self.uvs.push(v);
 	}
@@ -92,7 +92,7 @@ impl ToonGeometry {
 /// # 예제
 /// 빛나는 눈과 바깥선 없는 그림자 판
 /// ```rust
-/// use std::f32::consts::PI;
+/// use std::f64::consts::PI;
 /// use vanilla::{create_cylinder_geometry, create_sphere_geometry, Matrix4, MeshBuilder, ToonPartOptions};
 ///
 /// let mut builder = MeshBuilder::new();
@@ -106,13 +106,13 @@ impl ToonGeometry {
 #[derive(Clone, Copy, Debug)]
 pub struct ToonPartOptions {
 	/// 빛남의 세기. (꼭짓점의 재질 첫 칸, 0 이면 빛나지 않음)
-	pub glow: f32,
+	pub glow: f64,
 	/// 빛을 받지 않음. (꼭짓점의 재질 둘째 칸, 그늘 없이 제 색)
 	pub is_unlit: bool,
 	/// 바깥선 껍데기를 담을지.
 	pub has_outline: bool,
 	/// 바깥선 굵기. (기본 DEFAULT_OUTLINE_WIDTH)
-	pub outline_width: f32,
+	pub outline_width: f64,
 }
 
 impl Default for ToonPartOptions {
@@ -148,9 +148,9 @@ impl Default for ToonPartOptions {
 #[derive(Clone, Copy, Debug)]
 pub struct ToonQuad {
 	/// 네 점. ([x, y, z], 둘레 차례)
-	pub corners: [[f32; 3]; 4],
+	pub corners: [[f64; 3]; 4],
 	/// 면의 바깥쪽 노멀. ([x, y, z])
-	pub normal: [f32; 3],
+	pub normal: [f64; 3],
 }
 
 //==============================================================================
@@ -240,11 +240,11 @@ pub struct ToonMaterialRange {
 	/// glTF 의 alphaMode. ("OPAQUE", "MASK", "BLEND", GLB 에 없으면 "OPAQUE")
 	pub alpha_mode: String,
 	/// MASK 의 문턱. (GLB 에 없으면 0.5)
-	pub alpha_cutoff: f32,
+	pub alpha_cutoff: f64,
 	/// 바탕색 배. (선형 [r, g, b, a], GLB 에 없으면 1)
-	pub base_color_factor: [f32; 4],
+	pub base_color_factor: [f64; 4],
 	/// 빛남 색. (선형 [r, g, b], GLB 에 없으면 0)
-	pub emissive_factor: [f32; 3],
+	pub emissive_factor: [f64; 3],
 	/// 바탕색 텍스처의 그림 차례. (read_glb_images 의 차례, 없으면 None)
 	pub base_color_image: Option<usize>,
 	/// 빛남 텍스처의 그림 차례. (read_glb_images 의 차례, 없으면 None)
@@ -279,7 +279,7 @@ pub struct ToonMeshPiece<'a> {
 	/// 이을 배열. (read_arrays 나 read_glb_arrays 의 결과)
 	pub arrays: &'a ToonMeshArrays,
 	/// 자리에 더할 옮김. ([x, y, z])
-	pub offset: [f32; 3],
+	pub offset: [f64; 3],
 }
 
 //==============================================================================
@@ -291,10 +291,10 @@ pub struct ToonMeshPiece<'a> {
 /// # 돌려줌
 /// [r, g, b] sRGB. (0 ~ 1, 읽지 못하면 흰색)
 //==============================================================================
-pub fn read_color_values(color_text: &str) -> [f32; 3] {
+pub fn read_color_values(color_text: &str) -> [f64; 3] {
 	let hex_text = color_text.trim_start_matches('#');
 	let value = u32::from_str_radix(hex_text, 16).unwrap_or(0xffffff);
-	[((value >> 16) & 255) as f32 / 255.0, ((value >> 8) & 255) as f32 / 255.0, (value & 255) as f32 / 255.0]
+	[((value >> 16) & 255) as f64 / 255.0, ((value >> 8) & 255) as f64 / 255.0, (value & 255) as f64 / 255.0]
 }
 
 //==============================================================================
@@ -309,7 +309,7 @@ pub fn read_color_values(color_text: &str) -> [f32; 3] {
 /// # 돌려줌
 /// 부모 x 자리 x 돌림 x 크기 행렬. (새 행렬)
 //==============================================================================
-pub fn create_part_matrix(parent_matrix: Option<&Matrix4>, position: [f32; 3], rotation: Option<[f32; 3]>, scale: Option<[f32; 3]>) -> Matrix4 {
+pub fn create_part_matrix(parent_matrix: Option<&Matrix4>, position: [f64; 3], rotation: Option<[f64; 3]>, scale: Option<[f64; 3]>) -> Matrix4 {
 	let mut matrix = match parent_matrix {
 		Some(parent_matrix) => {
 			*parent_matrix
@@ -341,15 +341,15 @@ pub fn create_part_matrix(parent_matrix: Option<&Matrix4>, position: [f32; 3], r
 /// # 돌려줌
 /// { positions, normals, indices, uvs } 도형. (면마다 UV 0 ~ 1)
 //==============================================================================
-pub fn create_box_geometry(width: f32, height: f32, depth: f32) -> ToonGeometry {
+pub fn create_box_geometry(width: f64, height: f64, depth: f64) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
 	let half_sizes = [width * 0.5, height * 0.5, depth * 0.5];
 	for axis_index in 0..3 {
-		for sign in [-1.0f32, 1.0] {
+		for sign in [-1.0f64, 1.0] {
 			let first_axis = (axis_index + 1) % 3;
 			let second_axis = (axis_index + 2) % 3;
 			let start_index = geometry.get_point_count();
-			for (first_sign, second_sign) in [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+			for (first_sign, second_sign) in [(-1.0f64, -1.0f64), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
 				let mut point = [0.0; 3];
 				point[axis_index] = half_sizes[axis_index] * sign;
 				point[first_axis] = half_sizes[first_axis] * first_sign;
@@ -378,26 +378,26 @@ pub fn create_box_geometry(width: f32, height: f32, depth: f32) -> ToonGeometry 
 /// # 돌려줌
 /// { positions, normals, indices } 도형.
 //==============================================================================
-pub fn create_rounded_box_geometry(width: f32, height: f32, depth: f32, segments: u32, radius: f32) -> ToonGeometry {
+pub fn create_rounded_box_geometry(width: f64, height: f64, depth: f64, segments: u32, radius: f64) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
 	let half_sizes = [width * 0.5, height * 0.5, depth * 0.5];
 	let inner_sizes = half_sizes.map(|half_size| (half_size - radius).max(0.0));
 	let segments = segments.max(1);
 	// 축마다 격자의 자리. (둥근 곳은 마디 수만큼, 가운데 평평한 곳은 한 칸)
-	let axis_samples: Vec<Vec<f32>> = (0..3).map(|axis_index| {
+	let axis_samples: Vec<Vec<f64>> = (0..3).map(|axis_index| {
 		let half_size = half_sizes[axis_index];
 		let inner_size = inner_sizes[axis_index];
 		let mut samples = Vec::new();
 		for segment_index in 0..=segments {
-			samples.push(-half_size + (half_size - inner_size) * segment_index as f32 / segments as f32);
+			samples.push(-half_size + (half_size - inner_size) * segment_index as f64 / segments as f64);
 		}
 		for segment_index in 0..=segments {
-			samples.push(inner_size + (half_size - inner_size) * segment_index as f32 / segments as f32);
+			samples.push(inner_size + (half_size - inner_size) * segment_index as f64 / segments as f64);
 		}
 		samples
 	}).collect();
 	for axis_index in 0..3 {
-		for sign in [-1.0f32, 1.0] {
+		for sign in [-1.0f64, 1.0] {
 			let first_axis = (axis_index + 1) % 3;
 			let second_axis = (axis_index + 2) % 3;
 			let first_samples = &axis_samples[first_axis];
@@ -443,13 +443,13 @@ pub fn create_rounded_box_geometry(width: f32, height: f32, depth: f32, segments
 /// # 돌려줌
 /// { positions, normals, indices } 도형.
 //==============================================================================
-pub fn create_cylinder_geometry(radius_top: f32, radius_bottom: f32, height: f32, radial_segments: u32) -> ToonGeometry {
+pub fn create_cylinder_geometry(radius_top: f64, radius_bottom: f64, height: f64, radial_segments: u32) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
 	let half_height = height * 0.5;
 	let slope = (radius_bottom - radius_top) / height;
 	let normal_length = (1.0 + slope * slope).sqrt();
 	for segment_index in 0..=radial_segments {
-		let angle = segment_index as f32 / radial_segments as f32 * PI * 2.0;
+		let angle = segment_index as f64 / radial_segments as f64 * PI * 2.0;
 		let (sine, cosine) = angle.sin_cos();
 		let normal = [sine / normal_length, slope / normal_length, cosine / normal_length];
 		geometry.push_point([radius_top * sine, half_height, radius_top * cosine], normal);
@@ -459,14 +459,14 @@ pub fn create_cylinder_geometry(radius_top: f32, radius_bottom: f32, height: f32
 		let top = segment_index * 2;
 		geometry.indices.extend_from_slice(&[top, top + 1, top + 3, top, top + 3, top + 2]);
 	}
-	for (radius, sign) in [(radius_top, 1.0f32), (radius_bottom, -1.0f32)] {
+	for (radius, sign) in [(radius_top, 1.0f64), (radius_bottom, -1.0f64)] {
 		if radius <= 0.0 {
 			continue;
 		}
 		let center_index = geometry.get_point_count();
 		geometry.push_point([0.0, half_height * sign, 0.0], [0.0, sign, 0.0]);
 		for segment_index in 0..=radial_segments {
-			let angle = segment_index as f32 / radial_segments as f32 * PI * 2.0;
+			let angle = segment_index as f64 / radial_segments as f64 * PI * 2.0;
 			geometry.push_point([radius * angle.sin(), half_height * sign, radius * angle.cos()], [0.0, sign, 0.0]);
 		}
 		for segment_index in 0..radial_segments {
@@ -488,15 +488,15 @@ pub fn create_cylinder_geometry(radius_top: f32, radius_bottom: f32, height: f32
 /// # 돌려줌
 /// { positions, normals, indices, uvs } 도형. (UV 는 경도와 위도로 0 ~ 1)
 //==============================================================================
-pub fn create_sphere_geometry(radius: f32, width_segments: u32, height_segments: u32, theta_length: f32) -> ToonGeometry {
+pub fn create_sphere_geometry(radius: f64, width_segments: u32, height_segments: u32, theta_length: f64) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
 	for height_index in 0..=height_segments {
-		let theta = height_index as f32 / height_segments as f32 * theta_length;
+		let theta = height_index as f64 / height_segments as f64 * theta_length;
 		for width_index in 0..=width_segments {
-			let phi = width_index as f32 / width_segments as f32 * PI * 2.0;
+			let phi = width_index as f64 / width_segments as f64 * PI * 2.0;
 			let normal = [theta.sin() * phi.sin(), theta.cos(), theta.sin() * phi.cos()];
 			geometry.push_point([normal[0] * radius, normal[1] * radius, normal[2] * radius], normal);
-			geometry.push_uv(width_index as f32 / width_segments as f32, height_index as f32 / height_segments as f32);
+			geometry.push_uv(width_index as f64 / width_segments as f64, height_index as f64 / height_segments as f64);
 		}
 	}
 	let row_length = width_segments + 1;
@@ -519,10 +519,10 @@ pub fn create_sphere_geometry(radius: f32, width_segments: u32, height_segments:
 /// # 돌려줌
 /// { positions, normals, indices } 도형.
 //==============================================================================
-pub fn create_lathe_geometry(points: &[[f32; 2]], segments: u32) -> ToonGeometry {
+pub fn create_lathe_geometry(points: &[[f64; 2]], segments: u32) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
 	let point_count = points.len();
-	let profile_normals: Vec<[f32; 2]> = (0..point_count).map(|point_index| {
+	let profile_normals: Vec<[f64; 2]> = (0..point_count).map(|point_index| {
 		let previous = points[point_index.saturating_sub(1)];
 		let next = points[(point_index + 1).min(point_count - 1)];
 		let tangent_x = next[0] - previous[0];
@@ -531,7 +531,7 @@ pub fn create_lathe_geometry(points: &[[f32; 2]], segments: u32) -> ToonGeometry
 		if length <= 0.0 { [1.0, 0.0] } else { [tangent_y / length, -tangent_x / length] }
 	}).collect();
 	for segment_index in 0..=segments {
-		let phi = segment_index as f32 / segments as f32 * PI * 2.0;
+		let phi = segment_index as f64 / segments as f64 * PI * 2.0;
 		let (sine, cosine) = phi.sin_cos();
 		for point_index in 0..point_count {
 			let point = points[point_index];
@@ -561,15 +561,15 @@ pub fn create_lathe_geometry(points: &[[f32; 2]], segments: u32) -> ToonGeometry
 /// # 돌려줌
 /// { positions, normals, indices } 도형.
 //==============================================================================
-pub fn create_capsule_geometry(radius: f32, length: f32, cap_segments: u32, radial_segments: u32) -> ToonGeometry {
+pub fn create_capsule_geometry(radius: f64, length: f64, cap_segments: u32, radial_segments: u32) -> ToonGeometry {
 	let mut points = Vec::new();
 	let half_length = length * 0.5;
 	for segment_index in 0..=cap_segments {
-		let angle = -PI * 0.5 + segment_index as f32 / cap_segments as f32 * PI * 0.5;
+		let angle = -PI * 0.5 + segment_index as f64 / cap_segments as f64 * PI * 0.5;
 		points.push([angle.cos() * radius, -half_length + angle.sin() * radius]);
 	}
 	for segment_index in 0..=cap_segments {
-		let angle = segment_index as f32 / cap_segments as f32 * PI * 0.5;
+		let angle = segment_index as f64 / cap_segments as f64 * PI * 0.5;
 		points.push([angle.cos() * radius, half_length + angle.sin() * radius]);
 	}
 	create_lathe_geometry(&points, radial_segments)
@@ -588,12 +588,12 @@ pub fn create_capsule_geometry(radius: f32, length: f32, cap_segments: u32, radi
 /// # 돌려줌
 /// { positions, normals, indices } 도형.
 //==============================================================================
-pub fn create_torus_geometry(radius: f32, tube: f32, radial_segments: u32, tubular_segments: u32, arc: f32) -> ToonGeometry {
+pub fn create_torus_geometry(radius: f64, tube: f64, radial_segments: u32, tubular_segments: u32, arc: f64) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
 	for radial_index in 0..=radial_segments {
-		let tube_angle = radial_index as f32 / radial_segments as f32 * PI * 2.0;
+		let tube_angle = radial_index as f64 / radial_segments as f64 * PI * 2.0;
 		for tubular_index in 0..=tubular_segments {
-			let ring_angle = tubular_index as f32 / tubular_segments as f32 * arc;
+			let ring_angle = tubular_index as f64 / tubular_segments as f64 * arc;
 			let center_x = radius * ring_angle.cos();
 			let center_y = radius * ring_angle.sin();
 			let normal = [tube_angle.cos() * ring_angle.cos(), tube_angle.cos() * ring_angle.sin(), tube_angle.sin()];
@@ -619,12 +619,12 @@ pub fn create_torus_geometry(radius: f32, tube: f32, radial_segments: u32, tubul
 /// # 돌려줌
 /// { positions, normals, indices } 도형.
 //==============================================================================
-pub fn create_octahedron_geometry(radius: f32) -> ToonGeometry {
+pub fn create_octahedron_geometry(radius: f64) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
-	let normal_length = 3.0f32.sqrt();
-	for sign_x in [-1.0f32, 1.0] {
-		for sign_y in [-1.0f32, 1.0] {
-			for sign_z in [-1.0f32, 1.0] {
+	let normal_length = 3.0f64.sqrt();
+	for sign_x in [-1.0f64, 1.0] {
+		for sign_y in [-1.0f64, 1.0] {
+			for sign_z in [-1.0f64, 1.0] {
 				let corners = [[radius * sign_x, 0.0, 0.0], [0.0, radius * sign_y, 0.0], [0.0, 0.0, radius * sign_z]];
 				let start_index = geometry.get_point_count();
 				for corner in corners {
@@ -649,12 +649,12 @@ pub fn create_octahedron_geometry(radius: f32) -> ToonGeometry {
 /// # 돌려줌
 /// { positions, normals, indices }
 //==============================================================================
-pub fn create_faceted_chunk_geometry(radius: f32, vertex_scales: &[f32], axis_scale: [f32; 3]) -> ToonGeometry {
+pub fn create_faceted_chunk_geometry(radius: f64, vertex_scales: &[f64], axis_scale: [f64; 3]) -> ToonGeometry {
 	let mut geometry = ToonGeometry::default();
-	let golden = (1.0 + 5.0f32.sqrt()) / 2.0;
-	let base_corners: [[f32; 3]; 12] = [[-1.0, golden, 0.0], [1.0, golden, 0.0], [-1.0, -golden, 0.0], [1.0, -golden, 0.0], [0.0, -1.0, golden], [0.0, 1.0, golden], [0.0, -1.0, -golden], [0.0, 1.0, -golden], [golden, 0.0, -1.0], [golden, 0.0, 1.0], [-golden, 0.0, -1.0], [-golden, 0.0, 1.0]];
+	let golden = (1.0 + 5.0f64.sqrt()) / 2.0;
+	let base_corners: [[f64; 3]; 12] = [[-1.0, golden, 0.0], [1.0, golden, 0.0], [-1.0, -golden, 0.0], [1.0, -golden, 0.0], [0.0, -1.0, golden], [0.0, 1.0, golden], [0.0, -1.0, -golden], [0.0, 1.0, -golden], [golden, 0.0, -1.0], [golden, 0.0, 1.0], [-golden, 0.0, -1.0], [-golden, 0.0, 1.0]];
 	let faces: [[usize; 3]; 20] = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
-	let mut corners = [[0.0f32; 3]; 12];
+	let mut corners = [[0.0f64; 3]; 12];
 	for (corner_index, corner) in base_corners.iter().enumerate() {
 		let length = (corner[0] * corner[0] + corner[1] * corner[1] + corner[2] * corner[2]).sqrt();
 		let vertex_scale = if vertex_scales.is_empty() { 1.0 } else { vertex_scales[corner_index % vertex_scales.len()] };
@@ -694,7 +694,7 @@ pub fn create_faceted_chunk_geometry(radius: f32, vertex_scales: &[f32], axis_sc
 /// # 돌려줌
 /// 노멀에 곱할 3x3 의 수 9. (행 차례, 행렬식이 0 에 가까우면 단위 행렬)
 //==============================================================================
-pub fn read_normal_matrix(elements: &[f32; 16]) -> [f32; 9] {
+pub fn read_normal_matrix(elements: &[f64; 16]) -> [f64; 9] {
 	let m00 = elements[0];
 	let m10 = elements[1];
 	let m20 = elements[2];
@@ -729,8 +729,8 @@ pub fn read_normal_matrix(elements: &[f32; 16]) -> [f32; 9] {
 //==============================================================================
 /// 자리와 노멀을 행렬로 옮기기. (자리 배열, 단위 노멀 배열)
 //==============================================================================
-fn transform_points(positions: &[f32], normals: &[f32], matrix: &Matrix4) -> (Vec<f32>, Vec<f32>) {
-	let normal_matrix = read_normal_matrix(matrix.get_elements());
+fn transform_points(positions: &[f64], normals: &[f64], matrix: &Matrix4) -> (Vec<f64>, Vec<f64>) {
+	let normal_matrix = read_normal_matrix(&matrix.read_elements());
 	let mut world_positions = Vec::with_capacity(positions.len());
 	let mut world_normals = Vec::with_capacity(positions.len());
 	for point_index in (0..positions.len()).step_by(3) {
@@ -753,7 +753,7 @@ fn transform_points(positions: &[f32], normals: &[f32], matrix: &Matrix4) -> (Ve
 //==============================================================================
 /// 세 점의 면 노멀. (넓이의 두 배 길이)
 //==============================================================================
-fn read_face_normal(first: [f32; 3], second: [f32; 3], third: [f32; 3]) -> [f32; 3] {
+fn read_face_normal(first: [f64; 3], second: [f64; 3], third: [f64; 3]) -> [f64; 3] {
 	let first_edge = [second[0] - first[0], second[1] - first[1], second[2] - first[2]];
 	let second_edge = [third[0] - first[0], third[1] - first[1], third[2] - first[2]];
 	[first_edge[1] * second_edge[2] - first_edge[2] * second_edge[1], first_edge[2] * second_edge[0] - first_edge[0] * second_edge[2], first_edge[0] * second_edge[1] - first_edge[1] * second_edge[0]]
@@ -762,7 +762,7 @@ fn read_face_normal(first: [f32; 3], second: [f32; 3], third: [f32; 3]) -> [f32;
 //==============================================================================
 /// 배열에서 점 하나의 세 수 읽기.
 //==============================================================================
-fn read_point(values: &[f32], point_index: u32) -> [f32; 3] {
+fn read_point(values: &[f64], point_index: u32) -> [f64; 3] {
 	let offset = point_index as usize * 3;
 	[values[offset], values[offset + 1], values[offset + 2]]
 }
@@ -770,21 +770,21 @@ fn read_point(values: &[f32], point_index: u32) -> [f32; 3] {
 //==============================================================================
 /// 세 수 벡터의 내적.
 //==============================================================================
-fn dot(first: [f32; 3], second: [f32; 3]) -> f32 {
+fn dot(first: [f64; 3], second: [f64; 3]) -> f64 {
 	first[0] * second[0] + first[1] * second[1] + first[2] * second[2]
 }
 
 //==============================================================================
 /// 자리를 1e-4 로 반올림한 열쇠. (같은 자리의 점을 함께 민다)
 //==============================================================================
-fn read_point_key(point: [f32; 3]) -> (i64, i64, i64) {
+fn read_point_key(point: [f64; 3]) -> (i64, i64, i64) {
 	((point[0] * 10000.0).round() as i64, (point[1] * 10000.0).round() as i64, (point[2] * 10000.0).round() as i64)
 }
 
 //==============================================================================
 /// 노멀을 1e-3 으로 반올림한 열쇠. (같은 자리에 같은 법선을 두 번 더하지 않는다)
 //==============================================================================
-fn read_normal_key(normal: [f32; 3]) -> (i64, i64, i64) {
+fn read_normal_key(normal: [f64; 3]) -> (i64, i64, i64) {
 	((normal[0] * 1000.0).round() as i64, (normal[1] * 1000.0).round() as i64, (normal[2] * 1000.0).round() as i64)
 }
 
@@ -794,7 +794,7 @@ fn read_normal_key(normal: [f32; 3]) -> (i64, i64, i64) {
 /// # 예제
 /// 바퀴 부위가 든 자리를 적어 두기
 /// ```rust
-/// use std::f32::consts::PI;
+/// use std::f64::consts::PI;
 /// use vanilla::{create_box_geometry, create_cylinder_geometry, create_part_matrix, Matrix4, MeshBuilder, ToonPartOptions};
 ///
 /// let mut builder = MeshBuilder::new();
@@ -808,7 +808,7 @@ fn read_normal_key(normal: [f32; 3]) -> (i64, i64, i64) {
 ///
 /// 부품 여럿을 한 메시로 짓고 몸의 한 부위만 따로 그리기
 /// ```rust,no_run
-/// use std::f32::consts::PI;
+/// use std::f64::consts::PI;
 /// use vanilla::{create_rounded_box_geometry, create_sphere_geometry, Camera3D, Matrix4, MeshBuilder, ToonDrawOptions, ToonPartOptions, ToonRenderer, Vector3};
 ///
 /// fn draw_lamp(gl: &glow::Context, renderer: &mut ToonRenderer, camera: &mut Camera3D) {
@@ -832,20 +832,20 @@ fn read_normal_key(normal: [f32; 3]) -> (i64, i64, i64) {
 #[derive(Default)]
 pub struct MeshBuilder {
 	/// 꼭짓점의 수. (VERTEX_FLOAT_COUNT 씩)
-	vertices: Vec<f32>,
+	vertices: Vec<f64>,
 	indices: Vec<u32>,
 	/// 바깥선 껍데기의 자리. (3 씩)
-	outline_positions: Vec<f32>,
+	outline_positions: Vec<f64>,
 	/// 바깥선 껍데기의 점마다 밀기 전 몸의 자리. (3 씩, 받은 껍데기는 그 자리 그대로)
-	outline_base_positions: Vec<f32>,
+	outline_base_positions: Vec<f64>,
 	outline_indices: Vec<u32>,
 	/// 꼭짓점마다 뼈대 번호 넷과 무게 넷. (뼈대가 있는 모형만, SKIN_FLOAT_COUNT 씩)
-	skin_values: Vec<f32>,
-	outline_skin_values: Vec<f32>,
+	skin_values: Vec<f64>,
+	outline_skin_values: Vec<f64>,
 	/// 꼭짓점마다 텍스처 좌표 둘. (UV 를 준 꼭짓점이 있을 때만, 없는 꼭짓점은 0)
-	uv_values: Vec<f32>,
+	uv_values: Vec<f64>,
 	/// 꼭짓점마다 2 번 텍스처 좌표 둘. (같은 꼴)
-	uv1_values: Vec<f32>,
+	uv1_values: Vec<f64>,
 	/// 재질 범위. (add_material_range 로 담은 차례)
 	material_ranges: Vec<ToonMaterialRange>,
 }
@@ -946,7 +946,7 @@ impl MeshBuilder {
 	/// - `pattern_color`: [r, g, b] 무늬 색. (없으면 None)
 	/// - `is_unlit`: 빛을 받지 않음.
 	//==============================================================================
-	pub fn add_quad(&mut self, corners: [[f32; 3]; 4], normal: [f32; 3], color: [f32; 3], pattern: f32, pattern_color: Option<[f32; 3]>, is_unlit: bool) {
+	pub fn add_quad(&mut self, corners: [[f64; 3]; 4], normal: [f64; 3], color: [f64; 3], pattern: f64, pattern_color: Option<[f64; 3]>, is_unlit: bool) {
 		let start_index = self.get_vertex_count();
 		let pattern_color = pattern_color.unwrap_or([0.0; 3]);
 		let unlit = if is_unlit { 1.0 } else { 0.0 };
@@ -980,8 +980,8 @@ impl MeshBuilder {
 	/// - `quads`: 네모 면들. (네 점과 바깥쪽 노멀)
 	/// - `outline_width`: 껍데기 굵기. (꼭짓점 좌표 길이)
 	//==============================================================================
-	pub fn add_quad_shell(&mut self, quads: &[ToonQuad], outline_width: f32) {
-		let mut point_normals: HashMap<(i64, i64, i64), (Vec<(i64, i64, i64)>, [f32; 3])> = HashMap::new();
+	pub fn add_quad_shell(&mut self, quads: &[ToonQuad], outline_width: f64) {
+		let mut point_normals: HashMap<(i64, i64, i64), (Vec<(i64, i64, i64)>, [f64; 3])> = HashMap::new();
 		for quad in quads {
 			let normal_key = read_normal_key(quad.normal);
 			for corner in quad.corners {
@@ -1023,7 +1023,7 @@ impl MeshBuilder {
 	/// - `joints`: 꼭짓점마다 뼈대 번호 넷. (없으면 None)
 	/// - `weights`: 꼭짓점마다 무게 넷.
 	//==============================================================================
-	pub fn add_triangles(&mut self, positions: &[f32], normals: &[f32], indices: &[u32], matrix: &Matrix4, color: [f32; 3], glow: f32, is_unlit: bool, joints: Option<&[f32]>, weights: Option<&[f32]>) {
+	pub fn add_triangles(&mut self, positions: &[f64], normals: &[f64], indices: &[u32], matrix: &Matrix4, color: [f64; 3], glow: f64, is_unlit: bool, joints: Option<&[f64]>, weights: Option<&[f64]>) {
 		self.add_triangles_with_uvs(positions, normals, indices, matrix, color, glow, is_unlit, joints, weights, None, None);
 	}
 
@@ -1043,7 +1043,7 @@ impl MeshBuilder {
 	/// - `uvs`: 꼭짓점마다 텍스처 좌표 둘. (없으면 None)
 	/// - `uvs1`: 꼭짓점마다 2 번 텍스처 좌표 둘. (없으면 None)
 	//==============================================================================
-	pub fn add_triangles_with_uvs(&mut self, positions: &[f32], normals: &[f32], indices: &[u32], matrix: &Matrix4, color: [f32; 3], glow: f32, is_unlit: bool, joints: Option<&[f32]>, weights: Option<&[f32]>, uvs: Option<&[f32]>, uvs1: Option<&[f32]>) {
+	pub fn add_triangles_with_uvs(&mut self, positions: &[f64], normals: &[f64], indices: &[u32], matrix: &Matrix4, color: [f64; 3], glow: f64, is_unlit: bool, joints: Option<&[f64]>, weights: Option<&[f64]>, uvs: Option<&[f64]>, uvs1: Option<&[f64]>) {
 		let unlit = if is_unlit { 1.0 } else { 0.0 };
 		let start_index = self.get_vertex_count();
 		let (world_positions, world_normals) = transform_points(positions, normals, matrix);
@@ -1061,7 +1061,7 @@ impl MeshBuilder {
 	//==============================================================================
 	/// 방금 담은 꼭짓점들의 텍스처 좌표 담기. (uvs 가 None 이면 UV 가 이미 있을 때만 0 으로 채운다, 앞 꼭짓점의 빈자리도 0 으로)
 	//==============================================================================
-	fn push_uv_values(&mut self, uvs: Option<&[f32]>, vertex_count: usize) {
+	fn push_uv_values(&mut self, uvs: Option<&[f64]>, vertex_count: usize) {
 		let start_vertex = self.vertices.len() / VERTEX_FLOAT_COUNT - vertex_count;
 		MeshBuilder::push_uv_target(&mut self.uv_values, uvs, vertex_count, start_vertex);
 	}
@@ -1069,7 +1069,7 @@ impl MeshBuilder {
 	//==============================================================================
 	/// 방금 담은 꼭짓점들의 2 번 텍스처 좌표 담기. (push_uv_values 와 같은 꼴)
 	//==============================================================================
-	fn push_uv1_values(&mut self, uvs1: Option<&[f32]>, vertex_count: usize) {
+	fn push_uv1_values(&mut self, uvs1: Option<&[f64]>, vertex_count: usize) {
 		let start_vertex = self.vertices.len() / VERTEX_FLOAT_COUNT - vertex_count;
 		MeshBuilder::push_uv_target(&mut self.uv1_values, uvs1, vertex_count, start_vertex);
 	}
@@ -1077,7 +1077,7 @@ impl MeshBuilder {
 	//==============================================================================
 	/// 텍스처 좌표 칸에 담기. (값이 None 이고 칸이 비면 아무것도 하지 않는다, 앞 꼭짓점의 빈자리는 0)
 	//==============================================================================
-	fn push_uv_target(target: &mut Vec<f32>, uvs: Option<&[f32]>, vertex_count: usize, start_vertex: usize) {
+	fn push_uv_target(target: &mut Vec<f64>, uvs: Option<&[f64]>, vertex_count: usize, start_vertex: usize) {
 		if uvs.is_none() && target.is_empty() {
 			return;
 		}
@@ -1108,7 +1108,7 @@ impl MeshBuilder {
 	/// - `joints`: 꼭짓점마다 뼈대 번호 넷. (없으면 None)
 	/// - `weights`: 꼭짓점마다 무게 넷. (없으면 None)
 	//==============================================================================
-	pub fn add_outline_triangles(&mut self, positions: &[f32], indices: &[u32], matrix: &Matrix4, joints: Option<&[f32]>, weights: Option<&[f32]>) {
+	pub fn add_outline_triangles(&mut self, positions: &[f64], indices: &[u32], matrix: &Matrix4, joints: Option<&[f64]>, weights: Option<&[f64]>) {
 		let start_index = self.get_outline_point_count();
 		for point_index in (0..positions.len()).step_by(3) {
 			let transformed_point = matrix.transform_point(positions[point_index], positions[point_index + 1], positions[point_index + 2]);
@@ -1132,7 +1132,7 @@ impl MeshBuilder {
 	/// - `joints`: 꼭짓점마다 뼈대 번호 넷. (없으면 None)
 	/// - `weights`: 꼭짓점마다 무게 넷. (없으면 None)
 	//==============================================================================
-	pub fn add_triangle_shell(&mut self, positions: &[f32], normals: &[f32], indices: &[u32], matrix: &Matrix4, outline_width: f32, joints: Option<&[f32]>, weights: Option<&[f32]>) {
+	pub fn add_triangle_shell(&mut self, positions: &[f64], normals: &[f64], indices: &[u32], matrix: &Matrix4, outline_width: f64, joints: Option<&[f64]>, weights: Option<&[f64]>) {
 		let (world_positions, world_normals) = transform_points(positions, normals, matrix);
 		self.push_outline_shell(&world_positions, &world_normals, indices, None, outline_width);
 		MeshBuilder::push_skin_values(&mut self.outline_skin_values, joints, weights, positions.len() / 3);
@@ -1141,7 +1141,7 @@ impl MeshBuilder {
 	//==============================================================================
 	/// 바깥선 껍데기의 점과 삼각형 담기.
 	//==============================================================================
-	fn push_outline_shell(&mut self, world_positions: &[f32], world_normals: &[f32], indices: &[u32], flips: Option<&[bool]>, outline_width: f32) {
+	fn push_outline_shell(&mut self, world_positions: &[f64], world_normals: &[f64], indices: &[u32], flips: Option<&[bool]>, outline_width: f64) {
 		let offsets = MeshBuilder::read_outline_offsets(world_positions, world_normals, outline_width);
 		let start_index = self.get_outline_point_count();
 		for point_index in (0..world_positions.len()).step_by(3) {
@@ -1154,7 +1154,7 @@ impl MeshBuilder {
 	//==============================================================================
 	/// 뼈대 번호와 무게 담기. (뼈대가 없으면 담지 않는다)
 	//==============================================================================
-	fn push_skin_values(target: &mut Vec<f32>, joints: Option<&[f32]>, weights: Option<&[f32]>, vertex_count: usize) {
+	fn push_skin_values(target: &mut Vec<f64>, joints: Option<&[f64]>, weights: Option<&[f64]>, vertex_count: usize) {
 		let (joints, weights) = match (joints, weights) {
 			(Some(joints), Some(weights)) => {
 				(joints, weights)
@@ -1189,18 +1189,18 @@ impl MeshBuilder {
 			uv1_data.resize(vertex_count * 2, 0.0);
 		}
 		ToonMeshArrays {
-			vertex_data: self.vertices.clone(),
+			vertex_data: to_float32_list(&self.vertices),
 			index_data: self.indices.clone(),
-			outline_vertex_data: self.outline_positions.clone(),
+			outline_vertex_data: to_float32_list(&self.outline_positions),
 			outline_index_data: self.outline_indices.clone(),
-			outline_base_data: self.outline_base_positions.clone(),
-			skin_data: self.skin_values.clone(),
-			outline_skin_data: self.outline_skin_values.clone(),
+			outline_base_data: to_float32_list(&self.outline_base_positions),
+			skin_data: to_float32_list(&self.skin_values),
+			outline_skin_data: to_float32_list(&self.outline_skin_values),
 			skeleton: None,
 			inner_outline_ranges: Vec::new(),
 			inner_body_ranges: Vec::new(),
-			uv_data,
-			uv1_data,
+			uv_data: to_float32_list(&uv_data),
+			uv1_data: to_float32_list(&uv1_data),
 			material_ranges: self.material_ranges.clone(),
 		}
 	}
@@ -1208,7 +1208,7 @@ impl MeshBuilder {
 	//==============================================================================
 	/// 삼각형마다 감기를 뒤집을지. (면 노멀이 꼭짓점 노멀의 합과 반대면 뒤집는다)
 	//==============================================================================
-	fn read_triangle_flips(indices: &[u32], world_positions: &[f32], world_normals: &[f32]) -> Vec<bool> {
+	fn read_triangle_flips(indices: &[u32], world_positions: &[f64], world_normals: &[f64]) -> Vec<bool> {
 		indices.chunks(3).map(|triangle| {
 			let face_normal = read_face_normal(read_point(world_positions, triangle[0]), read_point(world_positions, triangle[1]), read_point(world_positions, triangle[2]));
 			if dot(face_normal, face_normal) < DEGENERATE_AREA {
@@ -1241,7 +1241,7 @@ impl MeshBuilder {
 	/// 바깥선 껍데기의 삼각형 담기. (뒤집을 것은 둘째와 셋째를 바꾸고, 밀고 나서 면이 뒤집힌 삼각형은 뺀다)
 	/// - 오목한 곳에서 굵기보다 좁게 굽은 면은 밀면 껍데기가 접혀 면이 뒤집힌다. 그런 면은 몸 위에 짙은 줄로 비치므로 뺀다.
 	//==============================================================================
-	fn push_shell_triangles(target: &mut Vec<u32>, indices: &[u32], flips: Option<&[bool]>, start_index: u32, world_positions: &[f32], offsets: &[f32]) {
+	fn push_shell_triangles(target: &mut Vec<u32>, indices: &[u32], flips: Option<&[bool]>, start_index: u32, world_positions: &[f64], offsets: &[f64]) {
 		let read_shell_point = |point_index: u32| {
 			let point = read_point(world_positions, point_index);
 			let offset = read_point(offsets, point_index);
@@ -1276,10 +1276,10 @@ impl MeshBuilder {
 	/// # 돌려줌
 	/// 점마다 밀어낼 [x, y, z]. (3 씩)
 	//==============================================================================
-	pub fn read_outline_offsets(world_positions: &[f32], world_normals: &[f32], outline_width: f32) -> Vec<f32> {
+	pub fn read_outline_offsets(world_positions: &[f64], world_normals: &[f64], outline_width: f64) -> Vec<f64> {
 		let point_count = world_positions.len() / 3;
 		let mut point_keys = Vec::with_capacity(point_count);
-		let mut point_normals: HashMap<(i64, i64, i64), (Vec<(i64, i64, i64)>, Vec<[f32; 3]>)> = HashMap::new();
+		let mut point_normals: HashMap<(i64, i64, i64), (Vec<(i64, i64, i64)>, Vec<[f64; 3]>)> = HashMap::new();
 		for point_index in 0..point_count as u32 {
 			let point_key = read_point_key(read_point(world_positions, point_index));
 			let normal = read_point(world_normals, point_index);
@@ -1292,9 +1292,9 @@ impl MeshBuilder {
 			entry.0.push(normal_key);
 			entry.1.push(normal);
 		}
-		let mut point_offsets: HashMap<(i64, i64, i64), Option<[f32; 3]>> = HashMap::new();
+		let mut point_offsets: HashMap<(i64, i64, i64), Option<[f64; 3]>> = HashMap::new();
 		for (point_key, (_, normals)) in point_normals.iter() {
-			let mut sum = [0.0f32; 3];
+			let mut sum = [0.0f64; 3];
 			for normal in normals {
 				sum[0] += normal[0];
 				sum[1] += normal[1];
@@ -1306,7 +1306,7 @@ impl MeshBuilder {
 				continue;
 			}
 			let direction = [sum[0] / sum_length, sum[1] / sum_length, sum[2] / sum_length];
-			let minimum_cosine = normals.iter().map(|normal| dot(direction, *normal)).fold(1.0f32, f32::min);
+			let minimum_cosine = normals.iter().map(|normal| dot(direction, *normal)).fold(1.0f64, f64::min);
 			let distance = outline_width / minimum_cosine.max(MINIMUM_OUTLINE_MITER_COSINE);
 			point_offsets.insert(*point_key, Some([direction[0] * distance, direction[1] * distance, direction[2] * distance]));
 		}
@@ -1352,7 +1352,7 @@ impl MeshBuilder {
 				let start = combined.vertex_data.len();
 				combined.vertex_data.extend_from_slice(vertex);
 				for axis in 0..3.min(vertex.len()) {
-					combined.vertex_data[start + axis] += offset[axis];
+					combined.vertex_data[start + axis] += (offset[axis]) as f32;
 				}
 			}
 			combined.index_data.extend(arrays.index_data.iter().map(|index| index + start_vertex));
@@ -1372,8 +1372,8 @@ impl MeshBuilder {
 			let outline_base_data = if arrays.outline_base_data.len() == arrays.outline_vertex_data.len() { &arrays.outline_base_data } else { &arrays.outline_vertex_data };
 			for (point_index, point) in arrays.outline_vertex_data.chunks(3).enumerate() {
 				for axis in 0..point.len() {
-					combined.outline_vertex_data.push(point[axis] + offset[axis]);
-					combined.outline_base_data.push(outline_base_data[point_index * 3 + axis] + offset[axis]);
+					combined.outline_vertex_data.push(point[axis] + (offset[axis]) as f32);
+					combined.outline_base_data.push(outline_base_data[point_index * 3 + axis] + (offset[axis]) as f32);
 				}
 			}
 			combined.outline_index_data.extend(arrays.outline_index_data.iter().map(|index| index + start_outline_vertex));
@@ -1382,6 +1382,13 @@ impl MeshBuilder {
 		}
 		combined
 	}
+}
+
+//==============================================================================
+/// 수 목록을 GPU 로 가는 f32 목록으로. (원본 new Float32Array(목록), 짓는 동안의 셈은 f64 로 한다)
+//==============================================================================
+fn to_float32_list(values: &[f64]) -> Vec<f32> {
+	values.iter().map(|value| *value as f32).collect()
 }
 
 #[cfg(test)]

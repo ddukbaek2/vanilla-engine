@@ -59,9 +59,9 @@ const LOOP_ONCE: &str = "once";
 #[derive(Clone, Debug, Default)]
 pub struct ToonOutlineOptions {
 	/// 껍데기 굵기. (모형 좌표, 0 이면 껍데기를 하나도 짓지 않는다)
-	pub width: f32,
+	pub width: f64,
 	/// 부품(노드 이름)마다 따로 준 굵기.
-	pub part_widths: HashMap<String, f32>,
+	pub part_widths: HashMap<String, f64>,
 	/// ".outline" 짝이 없어도 껍데기를 지을 부품. (노드 이름)
 	pub added_parts: Vec<String>,
 	/// 안쪽 껍데기를 하나 더 지을 부품. (노드 이름, inner_width 가 0 보다 클 때)
@@ -69,7 +69,7 @@ pub struct ToonOutlineOptions {
 	/// inner_parts 위에 얹힌 부품. (노드 이름, 몸이 든 자리만 inner_body_ranges 로)
 	pub inner_over_parts: Vec<String>,
 	/// 안쪽 껍데기 굵기. (0 이면 짓지 않는다)
-	pub inner_width: f32,
+	pub inner_width: f64,
 }
 
 //==============================================================================
@@ -84,7 +84,7 @@ pub struct ToonOutlineOptions {
 /// let root = ToonSkeletonNode { name: String::from("root"), parent_index: None, translation: [0.0, 1.0, 0.0], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: None };
 /// let arm = ToonSkeletonNode { name: String::from("arm"), parent_index: Some(0), translation: [0.5, 0.0, 0.0], rotation: [0.0, 0.0, 0.0, 1.0], scale: [2.0; 3], matrix: None };
 /// let skeleton = ToonSkeleton { joints: vec![0, 1], inverse_bind_matrices: Vec::new(), nodes: vec![root, arm], animations: HashMap::new() };
-/// let mut joint_matrices = vec![0.0; skeleton.joints.len() * 16];
+/// let mut joint_matrices = vec![0.0f32; skeleton.joints.len() * 16];
 /// write_skin_pose(&skeleton, "Idle", 0.0, &mut joint_matrices, None, None);
 /// assert!((joint_matrices[16] - 2.0).abs() < 0.0001);
 /// assert!((joint_matrices[28] - 0.5).abs() < 0.0001 && (joint_matrices[29] - 1.0).abs() < 0.0001);
@@ -97,13 +97,13 @@ pub struct ToonSkeletonNode {
 	/// 부모 노드의 차례. (뿌리면 None)
 	pub parent_index: Option<usize>,
 	/// 자리. ([x, y, z])
-	pub translation: [f32; 3],
+	pub translation: [f64; 3],
 	/// 돌림 사원수. ([x, y, z, w])
-	pub rotation: [f32; 4],
+	pub rotation: [f64; 4],
 	/// 크기. ([x, y, z])
-	pub scale: [f32; 3],
+	pub scale: [f64; 3],
 	/// glTF 의 matrix. (있으면 자리, 돌림, 크기 대신 쓰고 움직임을 받지 않는다)
-	pub matrix: Option<[f32; 16]>,
+	pub matrix: Option<[f64; 16]>,
 }
 
 //==============================================================================
@@ -148,9 +148,9 @@ pub struct ToonAnimationChannel {
 	/// 바꾸는 것. (자리, 돌림, 크기 가운데 하나)
 	pub path: ToonChannelPath,
 	/// 열쇠 시각. (초)
-	pub times: Vec<f32>,
+	pub times: Vec<f64>,
 	/// 열쇠마다의 값. (돌림은 넷, 자리와 크기는 셋씩)
-	pub values: Vec<f32>,
+	pub values: Vec<f64>,
 	/// interpolation 이 STEP 인지. (사이를 섞지 않고 앞 키)
 	pub is_step: bool,
 }
@@ -176,7 +176,7 @@ pub struct ToonAnimationChannel {
 #[derive(Clone, Debug)]
 pub struct ToonAnimation {
 	/// 길이. (갈래들의 가장 늦은 열쇠 시각, 초)
-	pub duration: f32,
+	pub duration: f64,
 	/// 갈래들.
 	pub channels: Vec<ToonAnimationChannel>,
 	/// 움직임의 extras. (loop 가 "once" 면 한 번만 튼다, 없으면 빈 것)
@@ -197,7 +197,7 @@ pub struct ToonAnimation {
 /// let lift = ToonAnimationChannel { node_index: 0, path: ToonChannelPath::Translation, times: vec![0.0, 1.0], values: vec![0.0, 0.0, 0.0, 0.0, 2.0, 0.0], is_step: false };
 /// let animation = ToonAnimation { duration: 1.0, channels: vec![lift], extras: serde_json::Value::Null };
 /// let skeleton = ToonSkeleton { joints: vec![0, 1], inverse_bind_matrices: Vec::new(), nodes: vec![root, arm], animations: HashMap::from([(String::from("Lift"), animation)]) };
-/// let mut joint_matrices = vec![0.0; skeleton.joints.len() * 16];
+/// let mut joint_matrices = vec![0.0f32; skeleton.joints.len() * 16];
 /// write_skin_pose(&skeleton, "Lift", 0.5, &mut joint_matrices, None, None);
 /// assert!((joint_matrices[16 + 12] - 1.0).abs() < 0.0001);
 /// assert!((joint_matrices[16 + 13] - 1.0).abs() < 0.0001);
@@ -207,12 +207,12 @@ pub struct ToonAnimation {
 /// ```rust,no_run
 /// use vanilla::{read_glb_arrays, write_skin_pose};
 ///
-/// fn read_pose(bytes: &[u8], time: f32) -> Result<Vec<f32>, String> {
+/// fn read_pose(bytes: &[u8], time: f64) -> Result<Vec<f32>, String> {
 /// 	let arrays = read_glb_arrays(bytes, None)?;
 /// 	let Some(skeleton) = arrays.skeleton.as_ref() else {
 /// 		return Ok(Vec::new());
 /// 	};
-/// 	let mut joint_matrices = vec![0.0; skeleton.joints.len() * 16];
+/// 	let mut joint_matrices = vec![0.0f32; skeleton.joints.len() * 16];
 /// 	write_skin_pose(skeleton, "Survey", time, &mut joint_matrices, None, None);
 /// 	Ok(joint_matrices)
 /// }
@@ -238,7 +238,7 @@ pub struct ToonSkeleton {
 /// ```rust,no_run
 /// use vanilla::{read_glb_node_arrays, ToonMesh, ToonOutlineOptions, ToonRenderer};
 ///
-/// fn create_part_meshes(gl: &glow::Context, renderer: &ToonRenderer, bytes: &[u8]) -> Result<Vec<(String, ToonMesh, f32)>, String> {
+/// fn create_part_meshes(gl: &glow::Context, renderer: &ToonRenderer, bytes: &[u8]) -> Result<Vec<(String, ToonMesh, f64)>, String> {
 /// 	let outline_options = ToonOutlineOptions { width: 1.5, added_parts: vec![String::from("vanguard_Mesh"), String::from("vanguard_visor")], ..ToonOutlineOptions::default() };
 /// 	let part_arrays = read_glb_node_arrays(bytes, Some(&outline_options))?;
 /// 	let mut meshes = Vec::new();
@@ -261,7 +261,7 @@ pub struct ToonPartArrays {
 	/// 노드 extras. (없으면 빈 것)
 	pub extras: Value,
 	/// 비치는 재질(alphaMode BLEND)의 가장 작은 불투명도. (없으면 1)
-	pub alpha: f32,
+	pub alpha: f64,
 }
 
 //==============================================================================
@@ -272,7 +272,7 @@ pub struct ToonPartArrays {
 /// ```rust,no_run
 /// use vanilla::{read_glb_arrays, read_glb_node_infos, write_skin_pose, Matrix4};
 ///
-/// fn read_visor_position(bytes: &[u8]) -> Result<Option<[f32; 3]>, String> {
+/// fn read_visor_position(bytes: &[u8]) -> Result<Option<[f64; 3]>, String> {
 /// 	let arrays = read_glb_arrays(bytes, None)?;
 /// 	let node_infos = read_glb_node_infos(bytes)?;
 /// 	let (Some(skeleton), Some(visor_info)) = (arrays.skeleton.as_ref(), node_infos.get("vanguard_visor")) else {
@@ -281,7 +281,7 @@ pub struct ToonPartArrays {
 /// 	let Some(joint_index) = visor_info.joint_index else {
 /// 		return Ok(Some(visor_info.center));
 /// 	};
-/// 	let mut joint_matrices = vec![0.0; skeleton.joints.len() * 16];
+/// 	let mut joint_matrices = vec![0.0f32; skeleton.joints.len() * 16];
 /// 	write_skin_pose(skeleton, "Walk", 0.25, &mut joint_matrices, None, None);
 /// 	let mut joint_matrix = Matrix4::create_identity();
 /// 	joint_matrix.elements.copy_from_slice(&joint_matrices[joint_index * 16..joint_index * 16 + 16]);
@@ -295,7 +295,7 @@ pub struct ToonNodeInfo {
 	/// 노드 extras. (없으면 빈 것)
 	pub extras: Value,
 	/// 꼭짓점 범위의 가운데. (모형 좌표, 꼭짓점이 없으면 원점)
-	pub center: [f32; 3],
+	pub center: [f64; 3],
 	/// 가장 무겁게 딸린 본의 skin 안 차례. (뼈대로 움직이지 않으면 None)
 	pub joint_index: Option<usize>,
 }
@@ -311,12 +311,12 @@ pub struct ToonNodeInfo {
 /// use vanilla::{write_skin_pose, ToonPoseBlend};
 ///
 /// # let node = ToonSkeletonNode { name: String::from("body"), parent_index: None, translation: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: None };
-/// # let create_hold = |height: f32| ToonAnimation { duration: 1.0, channels: vec![ToonAnimationChannel { node_index: 0, path: ToonChannelPath::Translation, times: vec![0.0], values: vec![0.0, height, 0.0], is_step: false }], extras: serde_json::Value::Null };
+/// # let create_hold = |height: f64| ToonAnimation { duration: 1.0, channels: vec![ToonAnimationChannel { node_index: 0, path: ToonChannelPath::Translation, times: vec![0.0], values: vec![0.0, height, 0.0], is_step: false }], extras: serde_json::Value::Null };
 /// # let skeleton = ToonSkeleton { joints: vec![0], inverse_bind_matrices: Vec::new(), nodes: vec![node], animations: HashMap::from([(String::from("Survey"), create_hold(0.0)), (String::from("Run"), create_hold(2.0))]) };
 /// let blend_duration = 0.2;
 /// let time_since_change = 0.05;
 /// let blend = ToonPoseBlend { animation_name: "Survey", time: 1.4, weight: 1.0 - time_since_change / blend_duration };
-/// let mut joint_matrices = vec![0.0; skeleton.joints.len() * 16];
+/// let mut joint_matrices = vec![0.0f32; skeleton.joints.len() * 16];
 /// write_skin_pose(&skeleton, "Run", time_since_change, &mut joint_matrices, Some(blend), None);
 /// assert!((joint_matrices[13] - 0.5).abs() < 0.0001);
 /// ```
@@ -326,15 +326,15 @@ pub struct ToonPoseBlend<'a> {
 	/// 앞 움직임의 이름.
 	pub animation_name: &'a str,
 	/// 앞 움직임의 시각. (초)
-	pub time: f32,
+	pub time: f64,
 	/// 앞 자세의 무게. (0 이면 섞지 않음, 1 이면 앞 자세 그대로)
-	pub weight: f32,
+	pub weight: f64,
 }
 
 //==============================================================================
 /// 노드마다의 흔들림 배율. (움직임 이름 → (노드 차례, 배율) 목록, 1 이면 그대로, 0 이면 쉬는 자세)
 //==============================================================================
-pub type ToonSwingScales = HashMap<String, Vec<(usize, f32)>>;
+pub type ToonSwingScales = HashMap<String, Vec<(usize, f64)>>;
 
 //==============================================================================
 /// GLB 의 JSON 과 바이너리.
@@ -388,7 +388,7 @@ fn read_glb_chunks(bytes: &[u8]) -> Result<GlbChunks, String> {
 //==============================================================================
 /// 접근자 하나를 수 목록으로 읽기. (촘촘한 것과 byteStride 로 띄운 것, normalized 정수는 0 ~ 1 로)
 //==============================================================================
-fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f32> {
+fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f64> {
 	let accessor = &chunks.json["accessors"][accessor_index];
 	let component_count = match accessor["type"].as_str().unwrap_or("SCALAR") {
 		"VEC2" => {
@@ -441,26 +441,26 @@ fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f32> {
 			};
 			let value = match component_type {
 				5120 => {
-					let raw = bytes[0] as i8 as f32;
+					let raw = bytes[0] as i8 as f64;
 					if is_normalized { (raw / 127.0).max(-1.0) } else { raw }
 				}
 				5121 => {
-					let raw = bytes[0] as f32;
+					let raw = bytes[0] as f64;
 					if is_normalized { raw / 255.0 } else { raw }
 				}
 				5122 => {
-					let raw = i16::from_le_bytes([bytes[0], bytes[1]]) as f32;
+					let raw = i16::from_le_bytes([bytes[0], bytes[1]]) as f64;
 					if is_normalized { (raw / 32767.0).max(-1.0) } else { raw }
 				}
 				5123 => {
-					let raw = u16::from_le_bytes([bytes[0], bytes[1]]) as f32;
+					let raw = u16::from_le_bytes([bytes[0], bytes[1]]) as f64;
 					if is_normalized { raw / 65535.0 } else { raw }
 				}
 				5125 => {
-					u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f32
+					u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
 				}
 				_ => {
-					f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+					f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
 				}
 			};
 			values.push(value);
@@ -472,7 +472,7 @@ fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f32> {
 //==============================================================================
 /// 무게 접근자 읽기. (정수로 담겼으면 normalized 가 없어도 0 ~ 1 로)
 //==============================================================================
-fn read_weight_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f32> {
+fn read_weight_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f64> {
 	let values = read_accessor(chunks, accessor_index);
 	let accessor = &chunks.json["accessors"][accessor_index];
 	if accessor["normalized"].as_bool().unwrap_or(false) {
@@ -508,11 +508,11 @@ fn read_indices(chunks: &GlbChunks, primitive: &Value, point_count: usize) -> Ve
 //==============================================================================
 /// JSON 수 배열을 COUNT 개 읽기. (배열이 아니거나 모자라거나 수가 아닌 칸은 fallback)
 //==============================================================================
-fn read_float_array<const COUNT: usize>(value: &Value, fallback: [f32; COUNT]) -> [f32; COUNT] {
+fn read_float_array<const COUNT: usize>(value: &Value, fallback: [f64; COUNT]) -> [f64; COUNT] {
 	let mut result = fallback;
 	if let Some(array) = value.as_array() {
 		for (component_index, component) in array.iter().take(COUNT).enumerate() {
-			result[component_index] = component.as_f64().unwrap_or(fallback[component_index] as f64) as f32;
+			result[component_index] = component.as_f64().unwrap_or(fallback[component_index]);
 		}
 	}
 	result
@@ -521,7 +521,7 @@ fn read_float_array<const COUNT: usize>(value: &Value, fallback: [f32; COUNT]) -
 //==============================================================================
 /// 자리, 돌림(사원수), 크기로 행렬 짓기.
 //==============================================================================
-fn create_transform_matrix(translation: [f32; 3], rotation: [f32; 4], scale: [f32; 3]) -> Matrix4 {
+fn create_transform_matrix(translation: [f64; 3], rotation: [f64; 4], scale: [f64; 3]) -> Matrix4 {
 	let mut matrix = Matrix4::create_translation(translation[0], translation[1], translation[2]);
 	let rotation_matrix = Matrix4::create_rotation_from_quaternion(Quaternion::create(rotation[0], rotation[1], rotation[2], rotation[3]));
 	matrix.multiply(&rotation_matrix);
@@ -535,7 +535,7 @@ fn create_transform_matrix(translation: [f32; 3], rotation: [f32; 4], scale: [f3
 fn read_node_matrix(node: &Value) -> Matrix4 {
 	if node["matrix"].is_array() {
 		let mut matrix = Matrix4::default();
-		matrix.elements = read_float_array(&node["matrix"], matrix.elements);
+		matrix.elements = read_float_array(&node["matrix"], matrix.read_elements()).map(|value| value as f32);
 		return matrix;
 	}
 	create_transform_matrix(read_float_array(&node["translation"], [0.0; 3]), read_float_array(&node["rotation"], [0.0, 0.0, 0.0, 1.0]), read_float_array(&node["scale"], [1.0; 3]))
@@ -624,7 +624,7 @@ fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, pr
 		index_count: builder.get_index_count() - index_start,
 		extras: if material["extras"].is_object() { material["extras"].clone() } else { Value::Object(serde_json::Map::new()) },
 		alpha_mode: String::from(material["alphaMode"].as_str().unwrap_or("OPAQUE")),
-		alpha_cutoff: material["alphaCutoff"].as_f64().unwrap_or(0.5) as f32,
+		alpha_cutoff: material["alphaCutoff"].as_f64().unwrap_or(0.5),
 		base_color_factor: base_color,
 		emissive_factor: read_float_array(&material["emissiveFactor"], [0.0; 3]),
 		base_color_image: read_texture_image(chunks, &material["pbrMetallicRoughness"]["baseColorTexture"]),
@@ -722,7 +722,7 @@ pub fn decode_glb_image(image: &ToonGlbImage) -> Result<(u32, u32, Vec<u8>), Str
 //==============================================================================
 /// 몸으로 새로 지을 바깥선 껍데기의 굵기. (".outline" 짝도 added_parts 도 없거나 굵기가 0 이하면 None)
 //==============================================================================
-fn read_rebuilt_outline_width(node: &Value, node_names: &HashSet<String>, outline_options: &ToonOutlineOptions) -> Option<f32> {
+fn read_rebuilt_outline_width(node: &Value, node_names: &HashSet<String>, outline_options: &ToonOutlineOptions) -> Option<f64> {
 	let node_name = read_node_name(node);
 	let outline_name = format!("{}{}", node_name, OUTLINE_NODE_SUFFIX);
 	if !node_names.contains(&outline_name) && !outline_options.added_parts.contains(&node_name) {
@@ -735,7 +735,7 @@ fn read_rebuilt_outline_width(node: &Value, node_names: &HashSet<String>, outlin
 //==============================================================================
 /// 노드의 몸으로 바깥선 껍데기 짓기. (색마다 나뉜 프리미티브를 이어 붙여 한 번에 넘긴다, 바깥선 재질과 노멀이 없는 것은 뺀다)
 //==============================================================================
-fn add_rebuilt_outline(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, matrix: &Matrix4, outline_width: f32) {
+fn add_rebuilt_outline(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, matrix: &Matrix4, outline_width: f64) {
 	let mut positions = Vec::new();
 	let mut normals = Vec::new();
 	let mut indices = Vec::new();
@@ -812,13 +812,13 @@ fn read_skeleton(chunks: &GlbChunks) -> Option<ToonSkeleton> {
 			translation: read_float_array(&node["translation"], [0.0; 3]),
 			rotation: read_float_array(&node["rotation"], [0.0, 0.0, 0.0, 1.0]),
 			scale: read_float_array(&node["scale"], [1.0; 3]),
-			matrix: if node["matrix"].is_array() { Some(read_float_array(&node["matrix"], Matrix4::default().elements)) } else { None },
+			matrix: if node["matrix"].is_array() { Some(read_float_array(&node["matrix"], Matrix4::default().read_elements())) } else { None },
 		}
 	}).collect();
 	let joints: Vec<usize> = skin["joints"].as_array()?.iter().filter_map(|joint| joint.as_u64().map(|joint| joint as usize)).collect();
 	let inverse_bind_matrices = match skin["inverseBindMatrices"].as_u64() {
 		Some(accessor_index) => {
-			read_accessor(chunks, accessor_index as usize)
+			read_accessor(chunks, accessor_index as usize).iter().map(|value| *value as f32).collect()
 		}
 		None => {
 			joints.iter().flat_map(|_| Matrix4::default().elements).collect()
@@ -827,7 +827,7 @@ fn read_skeleton(chunks: &GlbChunks) -> Option<ToonSkeleton> {
 	let mut animations = HashMap::new();
 	for animation in chunks.json["animations"].as_array().cloned().unwrap_or_default() {
 		let mut channels = Vec::new();
-		let mut duration = 0.0f32;
+		let mut duration = 0.0f64;
 		for channel in animation["channels"].as_array().cloned().unwrap_or_default() {
 			let sampler = &animation["samplers"][channel["sampler"].as_u64().unwrap_or(0) as usize];
 			let times = read_accessor(chunks, sampler["input"].as_u64().unwrap_or(0) as usize);
@@ -983,7 +983,7 @@ pub fn read_glb_node_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOp
 	let chunks = read_glb_chunks(bytes)?;
 	let mut builders: HashMap<String, MeshBuilder> = HashMap::new();
 	let mut part_extras: HashMap<String, Value> = HashMap::new();
-	let mut part_alphas: HashMap<String, f32> = HashMap::new();
+	let mut part_alphas: HashMap<String, f64> = HashMap::new();
 	let is_outline_rebuilt = outline_options.is_some();
 	let node_names = read_node_names(&chunks);
 	visit_mesh_nodes(&chunks, &mut |node: &Value, matrix: &Matrix4| {
@@ -1036,9 +1036,9 @@ pub fn read_glb_node_infos(bytes: &[u8]) -> Result<HashMap<String, ToonNodeInfo>
 		if node_name.ends_with(OUTLINE_NODE_SUFFIX) {
 			return;
 		}
-		let mut minimum = [f32::MAX; 3];
-		let mut maximum = [f32::MIN; 3];
-		let mut joint_weights: HashMap<usize, f32> = HashMap::new();
+		let mut minimum = [f64::MAX; 3];
+		let mut maximum = [f64::MIN; 3];
+		let mut joint_weights: HashMap<usize, f64> = HashMap::new();
 		for primitive in read_primitives(&chunks, node).iter() {
 			let attributes = &primitive["attributes"];
 			let position_accessor = match attributes["POSITION"].as_u64() {
@@ -1084,7 +1084,7 @@ pub fn read_glb_node_infos(bytes: &[u8]) -> Result<HashMap<String, ToonNodeInfo>
 //==============================================================================
 /// 움직임의 한 갈래를 그 시각에서 읽기. (LINEAR 는 사이를 섞고 돌림은 사원수를 가까운 쪽으로 섞어 정규화, STEP 은 앞 키)
 //==============================================================================
-fn sample_channel(channel: &ToonAnimationChannel, time: f32) -> Vec<f32> {
+fn sample_channel(channel: &ToonAnimationChannel, time: f64) -> Vec<f64> {
 	let times = &channel.times;
 	let component_count = if channel.path == ToonChannelPath::Rotation { 4 } else { 3 };
 	let values = &channel.values;
@@ -1110,16 +1110,16 @@ fn sample_channel(channel: &ToonAnimationChannel, time: f32) -> Vec<f32> {
 	let ratio = (time - times[key_index]) / (times[key_index + 1] - times[key_index]);
 	let mut sign = 1.0;
 	if component_count == 4 {
-		let dot: f32 = (0..4).map(|component_index| values[start_offset + component_index] * values[end_offset + component_index]).sum();
+		let dot: f64 = (0..4).map(|component_index| values[start_offset + component_index] * values[end_offset + component_index]).sum();
 		sign = if dot < 0.0 { -1.0 } else { 1.0 };
 	}
-	let mut result: Vec<f32> = (0..component_count).map(|component_index| {
+	let mut result: Vec<f64> = (0..component_count).map(|component_index| {
 		let start_value = values[start_offset + component_index];
 		let end_value = values[end_offset + component_index] * sign;
 		start_value + (end_value - start_value) * ratio
 	}).collect();
 	if component_count == 4 {
-		let length = result.iter().map(|value| value * value).sum::<f32>().sqrt();
+		let length = result.iter().map(|value| value * value).sum::<f64>().sqrt();
 		if length > 0.0 {
 			for value in result.iter_mut() {
 				*value /= length;
@@ -1132,11 +1132,11 @@ fn sample_channel(channel: &ToonAnimationChannel, time: f32) -> Vec<f32> {
 //==============================================================================
 /// 두 돌림 섞기. (가까운 쪽으로 섞어 정규화, ratio 가 1 이면 other)
 //==============================================================================
-fn mix_rotation(rotation: [f32; 4], other_rotation: [f32; 4], ratio: f32) -> [f32; 4] {
-	let dot: f32 = (0..4).map(|component_index| rotation[component_index] * other_rotation[component_index]).sum();
+fn mix_rotation(rotation: [f64; 4], other_rotation: [f64; 4], ratio: f64) -> [f64; 4] {
+	let dot: f64 = (0..4).map(|component_index| rotation[component_index] * other_rotation[component_index]).sum();
 	let sign = if dot < 0.0 { -1.0 } else { 1.0 };
-	let mixed: [f32; 4] = [0, 1, 2, 3].map(|component_index| rotation[component_index] + (other_rotation[component_index] * sign - rotation[component_index]) * ratio);
-	let length = mixed.iter().map(|value| value * value).sum::<f32>().sqrt();
+	let mixed: [f64; 4] = [0, 1, 2, 3].map(|component_index| rotation[component_index] + (other_rotation[component_index] * sign - rotation[component_index]) * ratio);
+	let length = mixed.iter().map(|value| value * value).sum::<f64>().sqrt();
 	if length <= 0.0 {
 		return rotation;
 	}
@@ -1146,7 +1146,7 @@ fn mix_rotation(rotation: [f32; 4], other_rotation: [f32; 4], ratio: f32) -> [f3
 //==============================================================================
 /// 움직임을 그 시각에서 읽은 노드마다의 자리, 돌림, 크기. (움직임이 없으면 쉬는 자세)
 //==============================================================================
-fn read_animation_locals(skeleton: &ToonSkeleton, animation_name: &str, time: f32, swing_scales: Option<&ToonSwingScales>) -> Vec<ToonSkeletonNode> {
+fn read_animation_locals(skeleton: &ToonSkeleton, animation_name: &str, time: f64, swing_scales: Option<&ToonSwingScales>) -> Vec<ToonSkeletonNode> {
 	let mut locals = skeleton.nodes.clone();
 	let animation = match skeleton.animations.get(animation_name) {
 		Some(animation) => {
@@ -1217,7 +1217,7 @@ fn read_animation_locals(skeleton: &ToonSkeleton, animation_name: &str, time: f3
 /// # 돌려줌
 /// 쉬는 자세에서 가장 벗어난 각. (라디안, 없으면 0)
 //==============================================================================
-pub fn read_animation_swing(skeleton: &ToonSkeleton, animation_name: &str, node_index: usize) -> f32 {
+pub fn read_animation_swing(skeleton: &ToonSkeleton, animation_name: &str, node_index: usize) -> f64 {
 	let (animation, node) = match (skeleton.animations.get(animation_name), skeleton.nodes.get(node_index)) {
 		(Some(animation), Some(node)) => {
 			(animation, node)
@@ -1226,7 +1226,7 @@ pub fn read_animation_swing(skeleton: &ToonSkeleton, animation_name: &str, node_
 			return 0.0;
 		}
 	};
-	let mut largest_angle = 0.0f32;
+	let mut largest_angle = 0.0f64;
 	for channel in animation.channels.iter() {
 		if channel.node_index != node_index || channel.path != ToonChannelPath::Rotation {
 			continue;
@@ -1235,7 +1235,7 @@ pub fn read_animation_swing(skeleton: &ToonSkeleton, animation_name: &str, node_
 			if rotation.len() < 4 {
 				continue;
 			}
-			let dot: f32 = (0..4).map(|component_index| rotation[component_index] * node.rotation[component_index]).sum();
+			let dot: f64 = (0..4).map(|component_index| rotation[component_index] * node.rotation[component_index]).sum();
 			largest_angle = largest_angle.max(2.0 * dot.abs().min(1.0).acos());
 		}
 	}
@@ -1245,7 +1245,7 @@ pub fn read_animation_swing(skeleton: &ToonSkeleton, animation_name: &str, node_
 //==============================================================================
 /// 두 자세 섞기. (자리와 크기는 곧게, 돌림은 가까운 쪽으로 섞어 정규화, ratio 가 1 이면 other)
 //==============================================================================
-fn mix_locals(locals: &mut [ToonSkeletonNode], other_locals: &[ToonSkeletonNode], ratio: f32) {
+fn mix_locals(locals: &mut [ToonSkeletonNode], other_locals: &[ToonSkeletonNode], ratio: f64) {
 	for (local, other) in locals.iter_mut().zip(other_locals.iter()) {
 		if local.matrix.is_some() {
 			continue;
@@ -1271,7 +1271,7 @@ fn mix_locals(locals: &mut [ToonSkeletonNode], other_locals: &[ToonSkeletonNode]
 /// - `blend`: 섞을 앞 자세와 그 무게. (None 이면 섞지 않음)
 /// - `swing_scales`: 움직임 이름마다 (노드 차례, 배율) 목록의 흔들림 배율. (1 이면 그대로, 0 이면 쉬는 자세, None 이면 없음)
 //==============================================================================
-pub fn write_skin_pose(skeleton: &ToonSkeleton, animation_name: &str, time: f32, target: &mut [f32], blend: Option<ToonPoseBlend>, swing_scales: Option<&ToonSwingScales>) {
+pub fn write_skin_pose(skeleton: &ToonSkeleton, animation_name: &str, time: f64, target: &mut [f32], blend: Option<ToonPoseBlend>, swing_scales: Option<&ToonSwingScales>) {
 	let mut locals = read_animation_locals(skeleton, animation_name, time, swing_scales);
 	if let Some(blend) = blend {
 		if blend.weight > 0.0 {
@@ -1290,7 +1290,7 @@ pub fn write_skin_pose(skeleton: &ToonSkeleton, animation_name: &str, time: f32,
 		let local = &locals[node_index];
 		let local_matrix = match local.matrix {
 			Some(elements) => {
-				Matrix4 { elements }
+				Matrix4 { elements: elements.map(|value| value as f32) }
 			}
 			None => {
 				create_transform_matrix(local.translation, local.rotation, local.scale)

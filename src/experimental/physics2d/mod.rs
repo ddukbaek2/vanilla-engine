@@ -5,7 +5,7 @@
 //! - 기준은 Box2D 3(Erin Catto 의 강연과 공개 글)과 유니티 2D 물리(Rigidbody2D, Collider2D)의 기능이다. 남의 코드를 옮기지 않고 공개된 셈법으로 짰다.
 //! - 원본 vanilla.js 의 Experimental 이름 공간 물리와 같은 API, 같은 셈이다. 셈은 두 엔진 모두 f64 이고 삼각 함수는 직접 짜서,
 //!   같은 차례로 만들고 같은 step 을 부르면 결과가 비트까지 같다. (시험 comparison_matches_vanilla_js 가 원본이 쓴 덤프와 견준다)
-//! - 원본과 다른 점: 벡터는 f64 의 PhysicsVector2 다. (러스트 엔진 Vector2 는 f32) 사용자 값은 Rc<dyn Any> 를 감싼 PhysicsUserData2D 다. (견줌은 Rc::ptr_eq 로 원본 === 와 같은 뜻)
+//! - 원본과 다른 점: 벡터는 PhysicsVector2 다. (엔진 Vector2 와 같은 f64, From 으로 오간다) 사용자 값은 Rc<dyn Any> 를 감싼 PhysicsUserData2D 다. (견줌은 Rc::ptr_eq 로 원본 === 와 같은 뜻)
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 

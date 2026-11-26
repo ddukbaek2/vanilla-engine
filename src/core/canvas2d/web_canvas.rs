@@ -1259,13 +1259,13 @@ impl Canvas2D {
 		match self.context.measure_text(text) {
 			Ok(text_metrics) => {
 				TextMetrics {
-					width: text_metrics.width() as f32,
-					font_ascent: text_metrics.font_bounding_box_ascent() as f32,
-					font_descent: text_metrics.font_bounding_box_descent() as f32,
-					actual_bounding_box_left: text_metrics.actual_bounding_box_left() as f32,
-					actual_bounding_box_right: text_metrics.actual_bounding_box_right() as f32,
-					actual_bounding_box_ascent: text_metrics.actual_bounding_box_ascent() as f32,
-					actual_bounding_box_descent: text_metrics.actual_bounding_box_descent() as f32,
+					width: (text_metrics.width() as f32) as f64,
+					font_ascent: (text_metrics.font_bounding_box_ascent() as f32) as f64,
+					font_descent: (text_metrics.font_bounding_box_descent() as f32) as f64,
+					actual_bounding_box_left: (text_metrics.actual_bounding_box_left() as f32) as f64,
+					actual_bounding_box_right: (text_metrics.actual_bounding_box_right() as f32) as f64,
+					actual_bounding_box_ascent: (text_metrics.actual_bounding_box_ascent() as f32) as f64,
+					actual_bounding_box_descent: (text_metrics.actual_bounding_box_descent() as f32) as f64,
 				}
 			}
 			Err(_) => {

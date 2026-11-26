@@ -13,7 +13,7 @@
 //!   밝힌 바탕과 흰 테를 자식 노드로 두지 않는다. (원본은 맨 밑 자식 둘, 러스트 예제처럼 글이 같은 노드의 컴포넌트면 자식이 글을 덮는다)
 //==============================================================================
 use std::cell::RefCell;
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 use std::rc::Rc;
 
 use crate::base::color::Color;
@@ -28,17 +28,17 @@ use crate::ui::uibutton::{ButtonState, UIButton};
 use crate::ui::uiscrollview::UIScrollView;
 use crate::ui::uiview::is_view_position_inside_node;
 
-const RELEASE_SECONDS: f32 = 0.15;
+const RELEASE_SECONDS: f64 = 0.15;
 /// 밝힐 때 바탕을 흰색 쪽으로 섞는 비와 안쪽 테의 굵기와 색.
-const LIT_LIGHTEN: f32 = 0.1;
-const LIT_RING_WIDTH: f32 = 2.0;
+const LIT_LIGHTEN: f64 = 0.1;
+const LIT_RING_WIDTH: f64 = 2.0;
 const LIT_RING_COLOR: Color = Color::create(1.0, 1.0, 1.0, 0.4);
 /// 누를 수 없을 때 좌우로 흔들리는 폭과 초, 왕복 수.
-const SHAKE_DISTANCE: f32 = 2.0;
-const SHAKE_SECONDS: f32 = 0.25;
-const SHAKE_COUNT: f32 = 3.0;
+const SHAKE_DISTANCE: f64 = 2.0;
+const SHAKE_SECONDS: f64 = 0.25;
+const SHAKE_COUNT: f64 = 3.0;
 /// 크기가 이만큼 보통에 가까우면 다 돌아온 것으로 본다.
-const SCALE_EPSILON: f32 = 0.001;
+const SCALE_EPSILON: f64 = 0.001;
 
 /// 밝힘을 맡는 함수. (문맥, 밝히는지, 누르는 중인지)
 pub type ButtonLitHandler = Box<dyn FnMut(&mut ComponentContext, bool, bool)>;
@@ -64,11 +64,11 @@ crate::core::reflection::impl_reflect_names!(ButtonMotionStyle, [
 /// 꼴마다의 값. (올렸을 때, 누르는 동안의 크기와 그리로 가는 초, 떼었을 때 통 튀는 크기, 올렸을 때 밝히는지)
 //==============================================================================
 struct MotionValues {
-	hover_scale: f32,
-	hover_seconds: f32,
-	press_scale: f32,
-	press_seconds: f32,
-	release_scale: f32,
+	hover_scale: f64,
+	hover_seconds: f64,
+	press_scale: f64,
+	press_seconds: f64,
+	release_scale: f64,
 	is_hover_lit: bool,
 }
 
@@ -232,9 +232,9 @@ pub fn set_button_motion_area(node_tree: &mut NodeTree, node_id: NodeId, style: 
 //==============================================================================
 pub struct ButtonMotion {
 	component_base: ComponentBase,
-	scale: f32,
-	release_seconds: f32,
-	shake_seconds: f32,
+	scale: f64,
+	release_seconds: f64,
+	shake_seconds: f64,
 	was_pressed: bool,
 	is_moving: bool,
 	base_position: Option<Vector2>,
@@ -242,7 +242,7 @@ pub struct ButtonMotion {
 	style: Option<ButtonMotionStyle>,
 	base_paint_color: Option<Color>,
 	applied_lit_color: Option<Color>,
-	lit_round_size: f32,
+	lit_round_size: f64,
 	is_lit: bool,
 	pressed_tint_color: Option<Color>,
 	is_press_tint_muted: bool,
@@ -495,7 +495,7 @@ impl ButtonMotion {
 	//==============================================================================
 	/// 노드를 가운데를 두고 그 크기로 놓기. (커진 만큼 피봇에 맞춰 자리를 옮긴다, 그 사이 다시 놓았으면 그 자리를 새 기준으로)
 	//==============================================================================
-	fn place_around(&mut self, context: &mut ComponentContext, scale: f32, shake_offset: f32) {
+	fn place_around(&mut self, context: &mut ComponentContext, scale: f64, shake_offset: f64) {
 		let transform = context.get_transform_mut();
 		let local_position = transform.get_local_position();
 		if self.applied_position != Some(local_position) || self.base_position.is_none() {
@@ -568,7 +568,7 @@ impl Component for ButtonMotion {
 	//==============================================================================
 	/// 단추 따라 움직이기. (단추 상태로 목표 크기를 정해 다가가고, 통 튐과 흔들림을 더해 노드의 가운데를 두고 놓는다, 반응이 없으면 노드를 건드리지 않는다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let button_state = match context.get_node().get_component::<UIButton>() {
 			Some(button) => {
 				button.get_button_state()

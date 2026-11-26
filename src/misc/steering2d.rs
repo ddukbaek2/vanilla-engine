@@ -30,7 +30,7 @@ pub struct Steering2D;
 
 impl Steering2D {
 	/// orbit_at_range 의 기본 선회 파형 각속도. (원본 strafeRate = 1.7)
-	pub const DEFAULT_STRAFE_RATE: f32 = 1.7;
+	pub const DEFAULT_STRAFE_RATE: f64 = 1.7;
 
 	//==============================================================================
 	/// 목표를 향해 다가가는 속도. (거의 같은 자리면 0)
@@ -43,7 +43,7 @@ impl Steering2D {
 	/// # 돌려줌
 	/// 목표 쪽으로 길이가 speed 인 속도 벡터. 두 위치 사이 거리가 0.000001 보다 작으면 (0, 0).
 	//==============================================================================
-	pub fn seek(position: Vector2, target_position: Vector2, speed: f32) -> Vector2 {
+	pub fn seek(position: Vector2, target_position: Vector2, speed: f64) -> Vector2 {
 		let difference_x = target_position.x - position.x;
 		let difference_y = target_position.y - position.y;
 		let distance = (difference_x * difference_x + difference_y * difference_y).sqrt();
@@ -81,7 +81,7 @@ impl Steering2D {
 	/// assert!((near_velocity.x + 5.0).abs() < 0.0001);
 	/// ```
 	//==============================================================================
-	pub fn orbit_at_range(position: Vector2, target_position: Vector2, preferred_range: f32, speed: f32, elapsed_seconds: f32, strafe_rate: f32) -> Vector2 {
+	pub fn orbit_at_range(position: Vector2, target_position: Vector2, preferred_range: f64, speed: f64, elapsed_seconds: f64, strafe_rate: f64) -> Vector2 {
 		let difference_x = target_position.x - position.x;
 		let difference_y = target_position.y - position.y;
 		let distance = (difference_x * difference_x + difference_y * difference_y).sqrt();
@@ -142,7 +142,7 @@ mod tests {
 		assert!(is_near(near_velocity, Vector2::create(-5.0, 0.0)));
 		let resting_velocity = Steering2D::orbit_at_range(Vector2::create(0.0, 0.0), target_position, 100.0, 5.0, 0.0, Steering2D::DEFAULT_STRAFE_RATE);
 		assert_eq!(resting_velocity, Vector2::zero());
-		let strafe_seconds = std::f32::consts::FRAC_PI_2 / Steering2D::DEFAULT_STRAFE_RATE;
+		let strafe_seconds = std::f64::consts::FRAC_PI_2 / Steering2D::DEFAULT_STRAFE_RATE;
 		let strafe_velocity = Steering2D::orbit_at_range(Vector2::create(0.0, 0.0), target_position, 100.0, 5.0, strafe_seconds, Steering2D::DEFAULT_STRAFE_RATE);
 		assert!(is_near(strafe_velocity, Vector2::create(0.0, 5.0)));
 		let same_velocity = Steering2D::orbit_at_range(target_position, target_position, 100.0, 5.0, 0.0, Steering2D::DEFAULT_STRAFE_RATE);

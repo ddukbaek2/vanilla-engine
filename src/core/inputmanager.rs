@@ -414,7 +414,7 @@ pub struct TouchPoint {
 /// 		input_manager.set_touch_from_left_button_only(true);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 /// 		self.scene_base.tick(engine, time_delta);
 /// 		let input_manager = engine.get_input_manager();
 /// 		if input_manager.is_key_just_pressed(KeyCode::SPACE) {
@@ -448,8 +448,8 @@ pub struct InputManager {
 	is_touch_down: bool,
 	canvas_native_input_position: Vector2,
 	view_input_position: Vector2,
-	wheel_delta_x: f32,
-	wheel_delta_y: f32,
+	wheel_delta_x: f64,
+	wheel_delta_y: f64,
 	gamepad_manager: GamepadManager,
 	text_input: TextInput,
 	mouse_buttons_down: [bool; 3],
@@ -521,7 +521,7 @@ impl InputManager {
 	/// # 인자
 	/// - `time_delta`: 지난 프레임 뒤로 흐른 초. (입력 동작의 반복 시간에 쓴다)
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		let gamepad_manager = self.get_gamepad_manager_mut();
 		gamepad_manager.tick(time_delta);
 		let active_gamepad_kind = gamepad_manager.get_active_gamepad_id().map(read_gamepad_kind);
@@ -535,7 +535,7 @@ impl InputManager {
 	//==============================================================================
 	/// 입력 동작 갱신. (동작이 입력 매니저를 읽고 마지막 장치를 적을 수 있게 잠깐 꺼낸다)
 	//==============================================================================
-	pub(crate) fn update_input_actions(&mut self, time_delta: f32) {
+	pub(crate) fn update_input_actions(&mut self, time_delta: f64) {
 		let mut input_actions = std::mem::take(&mut self.input_actions);
 		input_actions.update(self, time_delta);
 		self.input_actions = input_actions;
@@ -584,7 +584,7 @@ impl InputManager {
 	/// assert!(!input_manager.has_wheel_delta());
 	/// ```
 	//==============================================================================
-	pub fn add_wheel_delta(&mut self, delta_x: f32, delta_y: f32) {
+	pub fn add_wheel_delta(&mut self, delta_x: f64, delta_y: f64) {
 		self.wheel_delta_x += delta_x;
 		self.wheel_delta_y += delta_y;
 	}
@@ -595,7 +595,7 @@ impl InputManager {
 	/// # 돌려줌
 	/// 이번 프레임에 쌓인 가로 이동량. (픽셀, 오른쪽으로 넘기면 양수)
 	//==============================================================================
-	pub fn get_wheel_delta_x(&self) -> f32 {
+	pub fn get_wheel_delta_x(&self) -> f64 {
 		self.wheel_delta_x
 	}
 
@@ -605,7 +605,7 @@ impl InputManager {
 	/// # 돌려줌
 	/// 이번 프레임에 쌓인 세로 이동량. (픽셀, 내용을 아래로 넘기면 양수)
 	//==============================================================================
-	pub fn get_wheel_delta_y(&self) -> f32 {
+	pub fn get_wheel_delta_y(&self) -> f64 {
 		self.wheel_delta_y
 	}
 

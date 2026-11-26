@@ -30,17 +30,17 @@ use crate::base::vector2::Vector2;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TransformMatrix {
 	/// x 축 벡터의 x. (새 x = a * x + c * y + e)
-	pub a: f32,
+	pub a: f64,
 	/// x 축 벡터의 y. (새 y = b * x + d * y + f)
-	pub b: f32,
+	pub b: f64,
 	/// y 축 벡터의 x.
-	pub c: f32,
+	pub c: f64,
 	/// y 축 벡터의 y.
-	pub d: f32,
+	pub d: f64,
 	/// 이동 x.
-	pub e: f32,
+	pub e: f64,
 	/// 이동 y.
-	pub f: f32,
+	pub f: f64,
 }
 
 impl Default for TransformMatrix {
@@ -81,7 +81,7 @@ impl TransformMatrix {
 	/// - `e`: 이동 x.
 	/// - `f`: 이동 y.
 	//==============================================================================
-	pub fn set_transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
+	pub fn set_transform(&mut self, a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) {
 		self.a = a;
 		self.b = b;
 		self.c = c;
@@ -107,7 +107,7 @@ impl TransformMatrix {
 	/// - `x`: x 이동량. (지금 변환의 로컬 좌표)
 	/// - `y`: y 이동량. (지금 변환의 로컬 좌표)
 	//==============================================================================
-	pub fn translate(&mut self, x: f32, y: f32) {
+	pub fn translate(&mut self, x: f64, y: f64) {
 		self.e += self.a * x + self.c * y;
 		self.f += self.b * x + self.d * y;
 	}
@@ -130,7 +130,7 @@ impl TransformMatrix {
 	/// assert!((point.y - 1.0).abs() < 1e-6);
 	/// ```
 	//==============================================================================
-	pub fn rotate(&mut self, radian: f32) {
+	pub fn rotate(&mut self, radian: f64) {
 		if radian == 0.0 {
 			return;
 		}
@@ -153,7 +153,7 @@ impl TransformMatrix {
 	/// - `x`: x 배율. (1 이면 그대로)
 	/// - `y`: y 배율. (1 이면 그대로)
 	//==============================================================================
-	pub fn scale(&mut self, x: f32, y: f32) {
+	pub fn scale(&mut self, x: f64, y: f64) {
 		self.a *= x;
 		self.b *= x;
 		self.c *= y;
@@ -236,7 +236,7 @@ impl TransformMatrix {
 	/// # 돌려줌
 	/// 변환한 점. (a * x + c * y + e, b * x + d * y + f)
 	//==============================================================================
-	pub fn transform_point(&self, x: f32, y: f32) -> Vector2 {
+	pub fn transform_point(&self, x: f64, y: f64) -> Vector2 {
 		Vector2::create(self.a * x + self.c * y + self.e, self.b * x + self.d * y + self.f)
 	}
 
@@ -246,7 +246,7 @@ impl TransformMatrix {
 	/// # 돌려줌
 	/// x 축 벡터(a, b)와 y 축 벡터(c, d)의 길이 가운데 큰 값.
 	//==============================================================================
-	pub fn get_maximum_scale(&self) -> f32 {
+	pub fn get_maximum_scale(&self) -> f64 {
 		let scale_x = (self.a * self.a + self.b * self.b).sqrt();
 		let scale_y = (self.c * self.c + self.d * self.d).sqrt();
 		scale_x.max(scale_y)
@@ -271,14 +271,14 @@ impl TransformMatrix {
 	/// ```
 	//==============================================================================
 	pub fn write_to_float32_array(&self, array: &mut [f32; 9]) {
-		array[0] = self.a;
-		array[1] = self.b;
+		array[0] = self.a as f32;
+		array[1] = self.b as f32;
 		array[2] = 0.0;
-		array[3] = self.c;
-		array[4] = self.d;
+		array[3] = self.c as f32;
+		array[4] = self.d as f32;
 		array[5] = 0.0;
-		array[6] = self.e;
-		array[7] = self.f;
+		array[6] = self.e as f32;
+		array[7] = self.f as f32;
 		array[8] = 1.0;
 	}
 }

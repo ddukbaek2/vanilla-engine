@@ -102,7 +102,7 @@ pub mod emojipanel;
 pub type PlatformWindow = Rc<Window>;
 
 /// 휠 한 줄을 픽셀로 볼 때의 값. (브라우저 deltaMode 줄 단위 환산과 같은 자리)
-const WHEEL_LINE_PIXEL_SIZE: f32 = 40.0;
+const WHEEL_LINE_PIXEL_SIZE: f64 = 40.0;
 /// 두 프레임 사이에 벽시계가 단조 시계보다 이만큼 넘게 더 흐르면 시스템이 잠들었다 깬 것으로 본다. (초, 맥과 리눅스)
 #[cfg(not(target_os = "windows"))]
 const SYSTEM_SLEEP_GAP_SECONDS: f64 = 2.0;
@@ -272,7 +272,7 @@ fn create_window_state(window_event_loop: WindowEventLoop<'_>, engine: &Engine, 
 	};
 	let mut window_attributes = Window::default_attributes()
 		.with_title(engine_configuration.title.clone())
-		.with_inner_size(LogicalSize::new(window_size.x as f64, window_size.y as f64))
+		.with_inner_size(LogicalSize::new(window_size.x, window_size.y))
 		.with_resizable(engine_configuration.is_resizable)
 		.with_visible(is_visible)
 		.with_active(is_visible);
@@ -587,7 +587,7 @@ pub fn read_client_native_size() -> Option<Vector2> {
 ///   크롬 리눅스 웨이랜드는 text-input 으로 입력판을 띄우기만 하고 그 영역을 받지 않아 뷰포트를 줄이지 않는다. (wayland_input_method_context.cc OnInputPanelState)
 ///   엔진도 winit 의 IME 켜기(웨이랜드 text-input-v3 enable)로 같은 신호를 낸다.
 //==============================================================================
-fn read_virtual_keyboard_inset() -> f32 {
+fn read_virtual_keyboard_inset() -> f64 {
 	#[cfg(target_os = "windows")]
 	{
 		windowsinputpane::read_occluded_height()
@@ -606,7 +606,7 @@ fn read_virtual_keyboard_inset() -> f32 {
 /// # 돌려줌
 /// 늘 [0, 0, 0, 0]. (웹과 같은 차례 위, 오른쪽, 아래, 왼쪽)
 //==============================================================================
-pub fn read_safe_area_insets() -> [f32; 4] {
+pub fn read_safe_area_insets() -> [f64; 4] {
 	[0.0, 0.0, 0.0, 0.0]
 }
 
@@ -888,17 +888,17 @@ struct DesktopApplication {
 	/// 엔진에 알린 페이지 가려짐. (가려짐, 최소화, 앱 멈춤, 웨이랜드 프레임 콜백 가려짐 가운데 하나)
 	is_page_hidden: bool,
 	/// 창의 배율. (입력 좌표를 논리 좌표로 바꿀 때, 렌더 배율 상한과 상관없다)
-	window_scale_factor: f32,
+	window_scale_factor: f64,
 	/// 지금 렌더 크기에 건 배율 상한. (바뀌면 다시 맞춘다)
-	applied_max_render_pixel_ratio: f32,
+	applied_max_render_pixel_ratio: f64,
 	/// 줄인 렌더 영역을 창 크기로 늘이개. (처음 쓸 때 만든다)
 	render_scaler: Option<renderscaler::RenderScaler>,
 	/// 드로잉 버퍼 남기개. (preserve_drawing_buffer 일 때 처음 쓸 때 만든다)
 	preserved_drawing_buffer: Option<preserveddrawingbuffer::PreservedDrawingBuffer>,
 	/// 화면 키보드가 가린 창 아래. (논리 좌표, visualViewport 아래 인셋, 윈도우 터치 키보드만 0 이 아니다)
-	virtual_keyboard_inset: f32,
+	virtual_keyboard_inset: f64,
 	/// 마지막으로 맞춘 visualViewport 크기. (ignore_virtual_keyboard_resize 가 견준다, 원본 appliedClientNativeSize)
-	applied_client_size: Option<(f32, f32)>,
+	applied_client_size: Option<(f64, f64)>,
 	/// 윈도우 터치 키보드 제어. (창을 만들 때 만든다)
 	#[cfg(target_os = "windows")]
 	virtual_keyboard_controller: Option<windowsinputpane::VirtualKeyboardController>,
@@ -964,14 +964,14 @@ impl DesktopApplication {
 			}
 		};
 		let physical_size = window_state.window.inner_size();
-		let scale_factor = window_state.window.scale_factor() as f32;
+		let scale_factor = window_state.window.scale_factor();
 		if let (Some(width), Some(height)) = (NonZeroU32::new(physical_size.width), NonZeroU32::new(physical_size.height)) {
 			window_state.surface.resize(&window_state.context, width, height);
 		}
-		let client_width = physical_size.width as f32 / scale_factor;
-		let client_height = physical_size.height as f32 / scale_factor;
+		let client_width = physical_size.width as f64 / scale_factor;
+		let client_height = physical_size.height as f64 / scale_factor;
 		// 폰트 문자열의 뷰포트 단위(vw, vh)는 원본 window.innerWidth / innerHeight 처럼 창의 논리 크기에 댄다. (화면 키보드는 visualViewport 만 줄인다)
-		crate::core::textstringtexturecache::set_font_viewport_size(client_width, client_height);
+		crate::core::textstringtexturecache::set_font_viewport_size(client_width as f32, client_height as f32);
 		let engine_configuration = self.engine_runner.engine.get_engine_configuration();
 		let is_auto_resize = engine_configuration.auto_resize_on_window_resize;
 		let is_virtual_keyboard_ignored = engine_configuration.ignore_virtual_keyboard_resize;
@@ -1113,7 +1113,7 @@ impl DesktopApplication {
 		let window_scale_factor = self.window_scale_factor;
 		let canvas_client_position = read_canvas_client_position();
 		let engine = &mut self.engine_runner.engine;
-		let canvas_native_input_position = Vector2::create(physical_x as f32 / window_scale_factor - canvas_client_position.x, physical_y as f32 / window_scale_factor - canvas_client_position.y);
+		let canvas_native_input_position = Vector2::create(physical_x / window_scale_factor - canvas_client_position.x, physical_y / window_scale_factor - canvas_client_position.y);
 		let view_input_position = engine.get_view_manager().canvas_position_to_view_position(canvas_native_input_position);
 		let input_manager = engine.get_input_manager_mut();
 		input_manager.set_canvas_native_input_position(canvas_native_input_position);
@@ -1126,14 +1126,14 @@ impl DesktopApplication {
 	fn handle_touch(&mut self, touch: winit::event::Touch) {
 		let window_scale_factor = self.window_scale_factor;
 		let canvas_client_position = read_canvas_client_position();
-		let canvas_native_position = Vector2::create(touch.location.x as f32 / window_scale_factor - canvas_client_position.x, touch.location.y as f32 / window_scale_factor - canvas_client_position.y);
+		let canvas_native_position = Vector2::create(touch.location.x / window_scale_factor - canvas_client_position.x, touch.location.y / window_scale_factor - canvas_client_position.y);
 		let view_position = self.engine_runner.engine.get_view_manager().canvas_position_to_view_position(canvas_native_position);
 		let identifier = touch.id as i64;
 		let touch_points = self.engine_runner.engine.get_input_manager().get_touch_points();
 		let is_first_finger = touch_points.is_empty() || touch_points[0].identifier == identifier;
 		#[cfg(target_os = "windows")]
 		if touch.phase == TouchPhase::Started {
-			self.touch_started_position = Some(Vector2::create(touch.location.x as f32 / window_scale_factor, touch.location.y as f32 / window_scale_factor));
+			self.touch_started_position = Some(Vector2::create(touch.location.x as f64 / window_scale_factor, touch.location.y as f64 / window_scale_factor));
 		}
 		if is_first_finger {
 			self.update_input_position(touch.location.x, touch.location.y);
@@ -1529,10 +1529,10 @@ impl ApplicationHandler for DesktopApplication {
 				input_manager.set_last_input_device(InputDevice::Mouse);
 				match delta {
 					MouseScrollDelta::LineDelta(line_x, line_y) => {
-						input_manager.add_wheel_delta(-line_x * WHEEL_LINE_PIXEL_SIZE, -line_y * WHEEL_LINE_PIXEL_SIZE);
+						input_manager.add_wheel_delta(-line_x as f64 * WHEEL_LINE_PIXEL_SIZE, -line_y as f64 * WHEEL_LINE_PIXEL_SIZE);
 					}
 					MouseScrollDelta::PixelDelta(pixel_delta) => {
-						input_manager.add_wheel_delta(-pixel_delta.x as f32, -pixel_delta.y as f32);
+						input_manager.add_wheel_delta(-pixel_delta.x, -pixel_delta.y);
 					}
 				}
 			}
@@ -1574,11 +1574,11 @@ impl ApplicationHandler for DesktopApplication {
 				return;
 			}
 			let refresh_rate_millihertz = window_state.window.current_monitor().and_then(|monitor| monitor.refresh_rate_millihertz()).unwrap_or(60000);
-			maximum_frame_per_second = refresh_rate_millihertz as f32 / 1000.0;
+			maximum_frame_per_second = refresh_rate_millihertz as f64 / 1000.0;
 		}
 
 		// 차례가 된 프레임만 그린다. (한 프레임 넘게 밀렸으면 지금부터 다시 센다)
-		let frame_interval = Duration::from_secs_f64(1.0 / maximum_frame_per_second as f64);
+		let frame_interval = Duration::from_secs_f64(1.0 / maximum_frame_per_second);
 		let now = Instant::now();
 		if now >= self.next_frame_instant {
 			self.next_frame_instant += frame_interval;
@@ -1613,7 +1613,7 @@ fn create_custom_cursor_key(cursor_value: &CursorValue, scale_factor: f64) -> St
 /// - 윈도우, 리눅스: 그림의 픽셀 수가 화면 픽셀 수라 창 배율만큼 늘인다. 배율이 1 보다 크고 2 배 그림이 있으면 그것을 맞춰 쓰고 핫스팟도 배율만큼 옮긴다.
 ///   (브라우저가 그림 커서를 기기 배율로 늘이는 것과 같은 크기)
 //==============================================================================
-fn create_custom_cursor_source(image_path: &std::path::Path, image_path_2x: Option<&std::path::Path>, hotspot_x: f32, hotspot_y: f32, scale_factor: f64) -> Result<winit::window::CustomCursorSource, String> {
+fn create_custom_cursor_source(image_path: &std::path::Path, image_path_2x: Option<&std::path::Path>, hotspot_x: f64, hotspot_y: f64, scale_factor: f64) -> Result<winit::window::CustomCursorSource, String> {
 	let cursor_scale = if cfg!(target_os = "macos") {
 		1.0
 	}
@@ -1642,8 +1642,8 @@ fn create_custom_cursor_source(image_path: &std::path::Path, image_path_2x: Opti
 	else {
 		image::imageops::resize(&source_image, cursor_width, cursor_height, image::imageops::FilterType::Triangle)
 	};
-	let cursor_hotspot_x = ((hotspot_x as f64 * cursor_scale).round().max(0.0) as u32).min(cursor_width - 1);
-	let cursor_hotspot_y = ((hotspot_y as f64 * cursor_scale).round().max(0.0) as u32).min(cursor_height - 1);
+	let cursor_hotspot_x = ((hotspot_x * cursor_scale).round().max(0.0) as u32).min(cursor_width - 1);
+	let cursor_hotspot_y = ((hotspot_y * cursor_scale).round().max(0.0) as u32).min(cursor_height - 1);
 	CustomCursor::from_rgba(cursor_image.into_raw(), cursor_width as u16, cursor_height as u16, cursor_hotspot_x as u16, cursor_hotspot_y as u16).map_err(|error| error.to_string())
 }
 

@@ -4,7 +4,7 @@
 //! - 입자는 원본처럼 컴포넌트가 그리는 좌표(노드 content_size 영역의 왼쪽 위가 원점)의 원점에서 나온다. content_size 가 0 인 노드면 노드 자리다.
 //!   끌개 자리(set_attractor)도 원본처럼 같은 좌표다.
 //! - 낼 때 난수를 뽑는 차례와 셈의 차례도 원본과 같다. 같은 씨앗(set_random_seed)이면 원본과 같은 입자가 나온다.
-//!   (시드 난수는 원본과 비트까지 같은 수열이다. 입자 셈은 엔진의 다른 곳처럼 f32 라서 원본(f64)과 끝자리만 다르다)
+//!   (시드 난수는 원본과 비트까지 같은 수열이다. 입자 셈도 원본처럼 f64 다)
 //! - 정점마다 색을 실어 draw_colored_quads 로 그린다. image 모양도 원본처럼 색 곡선과 시작 색(r, g, b)을 쓰지 않고 시작 알파 x (1 - 수명 비율) 로만 흐려진다.
 //!   원본은 image 를 입자마다 따로 그리고, 러스트 판은 그림 텍스처로 한 번에 그린다. (그려지는 자리와 색은 같다)
 //! - 원본과 다른 것:
@@ -85,7 +85,7 @@ const RENDER_SHAPE_NAME_TABLE: [(ParticleRenderShape, &str); 4] = [
 crate::core::reflection::impl_reflect_names!(ParticleRenderShape, RENDER_SHAPE_NAME_TABLE);
 
 /// 쿼드 네 모서리의 텍스처 좌표. (왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래)
-const QUAD_TEXTURE_COORDINATES: [(f32, f32); 4] = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+const QUAD_TEXTURE_COORDINATES: [(f64, f64); 4] = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
 
 /// 쿼드 한 장의 정점 수. (삼각형 둘)
 const QUAD_VERTEX_COUNT: usize = 6;
@@ -94,7 +94,7 @@ const QUAD_VERTEX_COUNT: usize = 6;
 /// 버스트 하나. (재생 시작부터 time 초에 count 개를 한 번에 낸다. 반복이면 duration 주기마다)
 //==============================================================================
 struct ParticleBurst {
-	time: f32,
+	time: f64,
 	count: usize,
 	is_fired: bool,
 }
@@ -114,7 +114,7 @@ struct ParticleBurst {
 /// # 돌려줌
 /// 터질 횟수.
 //==============================================================================
-fn count_burst_fires(burst_time: f32, previous_time: f32, current_time: f32, is_start_included: bool, loop_duration: f32) -> usize {
+fn count_burst_fires(burst_time: f64, previous_time: f64, current_time: f64, is_start_included: bool, loop_duration: f64) -> usize {
 	if !(loop_duration > 0.0) {
 		let is_after_start = if is_start_included {
 			burst_time >= previous_time
@@ -139,20 +139,20 @@ fn count_burst_fires(burst_time: f32, previous_time: f32, current_time: f32, is_
 /// 입자 하나. (원본 입자 객체의 칸)
 //==============================================================================
 struct Particle {
-	x: f32,
-	y: f32,
-	velocity_x: f32,
-	velocity_y: f32,
-	age: f32,
-	lifetime: f32,
-	size: f32,
-	rotation: f32,
-	angular_velocity: f32,
-	wobble_phase: f32,
-	red: f32,
-	green: f32,
-	blue: f32,
-	alpha: f32,
+	x: f64,
+	y: f64,
+	velocity_x: f64,
+	velocity_y: f64,
+	age: f64,
+	lifetime: f64,
+	size: f64,
+	rotation: f64,
+	angular_velocity: f64,
+	wobble_phase: f64,
+	red: f64,
+	green: f64,
+	blue: f64,
+	alpha: f64,
 }
 
 //==============================================================================
@@ -194,50 +194,50 @@ pub struct ParticleSystem {
 	is_playing: bool,
 	is_looping: bool,
 	/// 루프 꺼짐일 때 방출이 이어지는 시간.
-	duration: f32,
-	play_elapsed_seconds: f32,
+	duration: f64,
+	play_elapsed_seconds: f64,
 	max_particle_count: usize,
 
 	/// 방출.
-	emission_rate: f32,
-	emission_accumulator: f32,
+	emission_rate: f64,
+	emission_accumulator: f64,
 	burst_list: Vec<ParticleBurst>,
 	emitter_shape: ParticleEmitterShape,
-	shape_radius: f32,
+	shape_radius: f64,
 	/// cone 전용 반각. (라디안)
-	cone_angle_radian: f32,
+	cone_angle_radian: f64,
 	box_size: Vector2,
-	edge_width: f32,
+	edge_width: f64,
 
 	/// 시작 범위.
-	start_lifetime_min: f32,
-	start_lifetime_max: f32,
-	start_speed_min: f32,
-	start_speed_max: f32,
-	start_size_min: f32,
-	start_size_max: f32,
-	start_rotation_min: f32,
-	start_rotation_max: f32,
+	start_lifetime_min: f64,
+	start_lifetime_max: f64,
+	start_speed_min: f64,
+	start_speed_max: f64,
+	start_size_min: f64,
+	start_size_max: f64,
+	start_rotation_min: f64,
+	start_rotation_max: f64,
 	start_color_a: Color,
 	start_color_b: Color,
 
 	/// 수명 동안 변화.
-	color_over_lifetime: Vec<(f32, Color)>,
-	size_over_lifetime_start: f32,
-	size_over_lifetime_end: f32,
-	angular_velocity_min: f32,
-	angular_velocity_max: f32,
+	color_over_lifetime: Vec<(f64, Color)>,
+	size_over_lifetime_start: f64,
+	size_over_lifetime_end: f64,
+	angular_velocity_min: f64,
+	angular_velocity_max: f64,
 
 	/// 물리.
 	gravity: Vector2,
-	damping: f32,
+	damping: f64,
 
 	/// 힘.
 	attractor_position: Option<Vector2>,
-	attractor_strength: f32,
-	attractor_swirl: f32,
-	wobble_amplitude: f32,
-	wobble_frequency: f32,
+	attractor_strength: f64,
+	attractor_swirl: f64,
+	wobble_amplitude: f64,
+	wobble_frequency: f64,
 
 	/// 렌더.
 	render_shape: ParticleRenderShape,
@@ -246,7 +246,7 @@ pub struct ParticleSystem {
 	#[cfg(target_arch = "wasm32")]
 	pending_image_load: Option<AssetLoadHandle>,
 	blend_mode: BlendMode,
-	streak_scale: f32,
+	streak_scale: f64,
 	is_world_space: bool,
 	/// 월드 공간에서 낼 때 더하는 노드 로컬 위치. (tick 에서 읽어 둔다)
 	node_position: Vector2,
@@ -451,7 +451,7 @@ impl ParticleSystem {
 	/// assert_eq!(particle_system.get_particle_count(), 5);
 	/// ```
 	//==============================================================================
-	pub fn simulate(&mut self, time_delta: f32) {
+	pub fn simulate(&mut self, time_delta: f64) {
 		// 방출.
 		if self.is_playing {
 			let previous_elapsed = self.play_elapsed_seconds;
@@ -606,7 +606,7 @@ impl ParticleSystem {
 	//==============================================================================
 	/// 수명 비율에 따른 색 계산. (시작 색에 색 곡선을 곱한다, 알파는 0 ~ 1)
 	//==============================================================================
-	fn evaluate_color(&self, particle: &Particle, life_ratio: f32) -> Color {
+	fn evaluate_color(&self, particle: &Particle, life_ratio: f64) -> Color {
 		let mut red = particle.red;
 		let mut green = particle.green;
 		let mut blue = particle.blue;
@@ -640,7 +640,7 @@ impl ParticleSystem {
 	/// # 인자
 	/// - `emission_rate`: 초당 내는 입자 수. (0 이하면 꾸준히 내지 않는다, 기본 20. 반복이 아니면 duration 동안만 낸다)
 	//==============================================================================
-	pub fn set_emission_rate(&mut self, emission_rate: f32) {
+	pub fn set_emission_rate(&mut self, emission_rate: f64) {
 		self.emission_rate = emission_rate;
 	}
 
@@ -650,7 +650,7 @@ impl ParticleSystem {
 	/// # 인자
 	/// - `burst_list`: (재생 시작부터 초, 개수) 목록. 이전 목록을 바꾸고 낸 표시를 지운다. 반복이면 duration 주기마다 다시 낸다.
 	//==============================================================================
-	pub fn set_burst_list(&mut self, burst_list: Vec<(f32, usize)>) {
+	pub fn set_burst_list(&mut self, burst_list: Vec<(f64, usize)>) {
 		self.burst_list = burst_list.into_iter().map(|(time, count)| ParticleBurst { time, count, is_fired: false }).collect();
 	}
 
@@ -670,7 +670,7 @@ impl ParticleSystem {
 	/// # 인자
 	/// - `shape_radius`: circle 과 cone 의 방출 반지름. (컴포넌트 좌표, 기본 0)
 	//==============================================================================
-	pub fn set_shape_radius(&mut self, shape_radius: f32) {
+	pub fn set_shape_radius(&mut self, shape_radius: f64) {
 		self.shape_radius = shape_radius;
 	}
 
@@ -680,7 +680,7 @@ impl ParticleSystem {
 	/// # 인자
 	/// - `cone_angle_radian`: 위쪽(-Y) 기준 부채꼴 반각. (라디안, 기본 0.5)
 	//==============================================================================
-	pub fn set_cone_angle(&mut self, cone_angle_radian: f32) {
+	pub fn set_cone_angle(&mut self, cone_angle_radian: f64) {
 		self.cone_angle_radian = cone_angle_radian;
 	}
 
@@ -691,7 +691,7 @@ impl ParticleSystem {
 	/// - `width`: 영역 너비. (컴포넌트 좌표, 기본 0)
 	/// - `height`: 영역 높이. (컴포넌트 좌표, 기본 0)
 	//==============================================================================
-	pub fn set_box_size(&mut self, width: f32, height: f32) {
+	pub fn set_box_size(&mut self, width: f64, height: f64) {
 		self.box_size = Vector2::create(width, height);
 	}
 
@@ -701,7 +701,7 @@ impl ParticleSystem {
 	/// # 인자
 	/// - `edge_width`: 가로 선분 길이. (컴포넌트 좌표, 원점이 가운데, 기본 0)
 	//==============================================================================
-	pub fn set_edge_width(&mut self, edge_width: f32) {
+	pub fn set_edge_width(&mut self, edge_width: f64) {
 		self.edge_width = edge_width;
 	}
 
@@ -712,7 +712,7 @@ impl ParticleSystem {
 	/// - `minimum_seconds`: 가장 짧은 수명. (초, 기본 1)
 	/// - `maximum_seconds`: 가장 긴 수명. (초, 기본 1, 최소와 같으면 고정)
 	//==============================================================================
-	pub fn set_start_lifetime(&mut self, minimum_seconds: f32, maximum_seconds: f32) {
+	pub fn set_start_lifetime(&mut self, minimum_seconds: f64, maximum_seconds: f64) {
 		self.start_lifetime_min = minimum_seconds;
 		self.start_lifetime_max = maximum_seconds;
 	}
@@ -724,7 +724,7 @@ impl ParticleSystem {
 	/// - `minimum_speed`: 가장 느린 속력. (컴포넌트 좌표 초당, 기본 60)
 	/// - `maximum_speed`: 가장 빠른 속력. (컴포넌트 좌표 초당, 기본 60)
 	//==============================================================================
-	pub fn set_start_speed(&mut self, minimum_speed: f32, maximum_speed: f32) {
+	pub fn set_start_speed(&mut self, minimum_speed: f64, maximum_speed: f64) {
 		self.start_speed_min = minimum_speed;
 		self.start_speed_max = maximum_speed;
 	}
@@ -736,7 +736,7 @@ impl ParticleSystem {
 	/// - `minimum_size`: 가장 작은 지름. (컴포넌트 좌표, 기본 6)
 	/// - `maximum_size`: 가장 큰 지름. (컴포넌트 좌표, 기본 6)
 	//==============================================================================
-	pub fn set_start_size(&mut self, minimum_size: f32, maximum_size: f32) {
+	pub fn set_start_size(&mut self, minimum_size: f64, maximum_size: f64) {
 		self.start_size_min = minimum_size;
 		self.start_size_max = maximum_size;
 	}
@@ -748,7 +748,7 @@ impl ParticleSystem {
 	/// - `minimum_radian`: 가장 작은 회전. (라디안, 기본 0)
 	/// - `maximum_radian`: 가장 큰 회전. (라디안, 기본 0)
 	//==============================================================================
-	pub fn set_start_rotation(&mut self, minimum_radian: f32, maximum_radian: f32) {
+	pub fn set_start_rotation(&mut self, minimum_radian: f64, maximum_radian: f64) {
 		self.start_rotation_min = minimum_radian;
 		self.start_rotation_max = maximum_radian;
 	}
@@ -771,7 +771,7 @@ impl ParticleSystem {
 	/// # 인자
 	/// - `gradient`: (수명 비율 0 ~ 1, 색) 목록. 비율 오름차순으로 준다. 사이는 선형으로 섞고 빈 목록이면 시작 색 그대로다. (image 렌더는 쓰지 않는다)
 	//==============================================================================
-	pub fn set_color_over_lifetime(&mut self, gradient: Vec<(f32, Color)>) {
+	pub fn set_color_over_lifetime(&mut self, gradient: Vec<(f64, Color)>) {
 		self.color_over_lifetime = gradient;
 	}
 
@@ -782,7 +782,7 @@ impl ParticleSystem {
 	/// - `start_scale`: 태어날 때 배율. (기본 1)
 	/// - `end_scale`: 수명 끝 배율. (기본 1)
 	//==============================================================================
-	pub fn set_size_over_lifetime(&mut self, start_scale: f32, end_scale: f32) {
+	pub fn set_size_over_lifetime(&mut self, start_scale: f64, end_scale: f64) {
 		self.size_over_lifetime_start = start_scale;
 		self.size_over_lifetime_end = end_scale;
 	}
@@ -794,7 +794,7 @@ impl ParticleSystem {
 	/// - `minimum_radian_per_second`: 가장 느린 회전 속도. (초당 라디안, 기본 0)
 	/// - `maximum_radian_per_second`: 가장 빠른 회전 속도. (초당 라디안, 기본 0)
 	//==============================================================================
-	pub fn set_angular_velocity(&mut self, minimum_radian_per_second: f32, maximum_radian_per_second: f32) {
+	pub fn set_angular_velocity(&mut self, minimum_radian_per_second: f64, maximum_radian_per_second: f64) {
 		self.angular_velocity_min = minimum_radian_per_second;
 		self.angular_velocity_max = maximum_radian_per_second;
 	}
@@ -806,7 +806,7 @@ impl ParticleSystem {
 	/// - `gravity_x`: 가로 가속도. (컴포넌트 좌표 초당 초당, 기본 0)
 	/// - `gravity_y`: 세로 가속도. (아래가 +, 기본 0)
 	//==============================================================================
-	pub fn set_gravity(&mut self, gravity_x: f32, gravity_y: f32) {
+	pub fn set_gravity(&mut self, gravity_x: f64, gravity_y: f64) {
 		self.gravity = Vector2::create(gravity_x, gravity_y);
 	}
 
@@ -816,7 +816,7 @@ impl ParticleSystem {
 	/// # 인자
 	/// - `damping`: 감쇠 계수. (simulate 마다 속도에 max(1 - 계수 x time_delta, 0) 을 곱한다. 0 이하면 없음, 기본 0)
 	//==============================================================================
-	pub fn set_damping(&mut self, damping: f32) {
+	pub fn set_damping(&mut self, damping: f64) {
 		self.damping = damping;
 	}
 
@@ -915,7 +915,7 @@ impl ParticleSystem {
 	/// - `strength`: 중심 쪽 가속. (초당 초당, 음수면 밀어낸다. 거리는 4 아래로 보지 않는다)
 	/// - `swirl`: 접선 쪽 가속. (초당 초당, 소용돌이)
 	//==============================================================================
-	pub fn set_attractor(&mut self, x: f32, y: f32, strength: f32, swirl: f32) {
+	pub fn set_attractor(&mut self, x: f64, y: f64, strength: f64, swirl: f64) {
 		self.attractor_position = Some(Vector2::create(x, y));
 		self.attractor_strength = strength;
 		self.attractor_swirl = swirl;
@@ -935,7 +935,7 @@ impl ParticleSystem {
 	/// - `amplitude`: 가로로 살랑이는 폭. (컴포넌트 좌표, 0 이하면 없음. 그릴 때만 더하고 자리에는 넣지 않는다)
 	/// - `frequency`: 살랑이는 각속도. (초당 라디안, 기본 4)
 	//==============================================================================
-	pub fn set_wobble(&mut self, amplitude: f32, frequency: f32) {
+	pub fn set_wobble(&mut self, amplitude: f64, frequency: f64) {
 		self.wobble_amplitude = amplitude;
 		self.wobble_frequency = frequency;
 	}
@@ -946,7 +946,7 @@ impl ParticleSystem {
 	/// # 인자
 	/// - `streak_scale`: 속력에 곱할 띠 길이 비율. (초, 기본 0.06)
 	//==============================================================================
-	pub fn set_streak_scale(&mut self, streak_scale: f32) {
+	pub fn set_streak_scale(&mut self, streak_scale: f64) {
 		self.streak_scale = streak_scale;
 	}
 
@@ -976,7 +976,7 @@ impl ParticleSystem {
 	/// # 인자
 	/// - `duration`: 방출 시간이자 버스트 반복 주기. (초, 기본 1)
 	//==============================================================================
-	pub fn set_duration(&mut self, duration: f32) {
+	pub fn set_duration(&mut self, duration: f64) {
 		self.duration = duration;
 	}
 
@@ -1023,11 +1023,11 @@ impl ParticleSystem {
 	/// ```
 	//==============================================================================
 	pub fn apply_description(&mut self, description: &serde_json::Value) {
-		let read_number = |name: &str| description.get(name).and_then(|value| value.as_f64()).map(|value| value as f32);
-		let read_pair = |name: &str| -> Option<(f32, f32)> {
+		let read_number = |name: &str| description.get(name).and_then(|value| value.as_f64()).map(|value| value);
+		let read_pair = |name: &str| -> Option<(f64, f64)> {
 			let array = description.get(name)?.as_array()?;
-			let first = array.first()?.as_f64()? as f32;
-			let second = array.get(1).and_then(|value| value.as_f64()).map(|value| value as f32).unwrap_or(first);
+			let first = array.first()?.as_f64()?;
+			let second = array.get(1).and_then(|value| value.as_f64()).map(|value| value).unwrap_or(first);
 			Some((first, second))
 		};
 		let shape_name = description.get("shape").and_then(|value| value.as_str());
@@ -1045,7 +1045,7 @@ impl ParticleSystem {
 		}
 		if let Some(burst_array) = description.get("bursts").and_then(|value| value.as_array()) {
 			let burst_list = burst_array.iter().map(|burst| {
-				let time = burst.get("time").and_then(|value| value.as_f64()).unwrap_or(0.0) as f32;
+				let time = burst.get("time").and_then(|value| value.as_f64()).unwrap_or(0.0);
 				let count = burst.get("count").and_then(|value| value.as_f64()).unwrap_or(0.0).max(0.0) as usize;
 				(time, count)
 			}).collect();
@@ -1089,7 +1089,7 @@ impl ParticleSystem {
 		}
 		if let Some(key_array) = description.get("colorOverLifetime").and_then(|value| value.as_array()) {
 			let gradient = key_array.iter().filter_map(|key| {
-				let time = key.get("time").and_then(|value| value.as_f64()).unwrap_or(0.0) as f32;
+				let time = key.get("time").and_then(|value| value.as_f64()).unwrap_or(0.0);
 				let color = key.get("color").and_then(read_description_color)?;
 				Some((time, color))
 			}).collect();
@@ -1106,7 +1106,7 @@ impl ParticleSystem {
 		}
 		match description.get("attractor") {
 			Some(serde_json::Value::Object(attractor)) => {
-				let read_attractor_number = |name: &str| attractor.get(name).and_then(|value| value.as_f64()).unwrap_or(0.0) as f32;
+				let read_attractor_number = |name: &str| attractor.get(name).and_then(|value| value.as_f64()).unwrap_or(0.0);
 				self.set_attractor(read_attractor_number("x"), read_attractor_number("y"), read_attractor_number("strength"), read_attractor_number("swirl"));
 			}
 			Some(serde_json::Value::Null) | Some(serde_json::Value::Bool(false)) => {
@@ -1116,8 +1116,8 @@ impl ParticleSystem {
 			}
 		}
 		if let Some(wobble_array) = description.get("wobble").and_then(|value| value.as_array()) {
-			let amplitude = wobble_array.first().and_then(|value| value.as_f64()).unwrap_or(0.0) as f32;
-			let frequency = wobble_array.get(1).and_then(|value| value.as_f64()).unwrap_or(4.0) as f32;
+			let amplitude = wobble_array.first().and_then(|value| value.as_f64()).unwrap_or(0.0);
+			let frequency = wobble_array.get(1).and_then(|value| value.as_f64()).unwrap_or(4.0);
 			self.set_wobble(amplitude, frequency);
 		}
 		if let Some(render_shape_name) = description.get("renderShape").and_then(|value| value.as_str()) {
@@ -1262,7 +1262,7 @@ impl ParticleSystem {
 	/// # 돌려줌
 	/// minimum_value 이상 maximum_value 미만의 무작위 수. (씨앗 난수면 수열이 하나 나아간다)
 	//==============================================================================
-	pub fn random_range(&mut self, minimum_value: f32, maximum_value: f32) -> f32 {
+	pub fn random_range(&mut self, minimum_value: f64, maximum_value: f64) -> f64 {
 		match self.random.as_mut() {
 			Some(random) => {
 				random.next_range(minimum_value, maximum_value)
@@ -1309,7 +1309,7 @@ impl Component for ParticleSystem {
 	//==============================================================================
 	/// 갱신. (노드 위치를 읽어 두고, 수동 tick 이면 진행은 건너뛴다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		self.node_position = context.get_transform().get_local_position();
 		if self.is_manual_tick {
 			return;
@@ -1392,7 +1392,7 @@ impl Component for ParticleSystem {
 				self.evaluate_color(particle, life_ratio)
 			};
 
-			let corners: [(f32, f32); 4] = if self.render_shape == ParticleRenderShape::Streak {
+			let corners: [(f64, f64); 4] = if self.render_shape == ParticleRenderShape::Streak {
 				// 속도 방향으로 길게 늘인 쿼드. (비, 유성)
 				let speed = (particle.velocity_x * particle.velocity_x + particle.velocity_y * particle.velocity_y).sqrt();
 				let safe_speed = speed.max(0.001);
@@ -1436,11 +1436,11 @@ impl Component for ParticleSystem {
 //==============================================================================
 /// 쿼드 한 장 넣기. (모서리 넷은 왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래 차례. 삼각형 둘 = 정점 여섯, 정점마다 색)
 //==============================================================================
-fn push_quad(vertex_values: &mut Vec<f32>, corners: [(f32, f32); 4], color: Color) {
+fn push_quad(vertex_values: &mut Vec<f32>, corners: [(f64, f64); 4], color: Color) {
 	for corner_index in [0usize, 1, 2, 0, 2, 3] {
 		let (corner_x, corner_y) = corners[corner_index];
 		let (corner_u, corner_v) = QUAD_TEXTURE_COORDINATES[corner_index];
-		vertex_values.extend_from_slice(&[corner_x, corner_y, corner_u, corner_v, color.red, color.green, color.blue, color.alpha]);
+		vertex_values.extend_from_slice(&[corner_x, corner_y, corner_u, corner_v, color.red, color.green, color.blue, color.alpha].map(|value| value as f32));
 	}
 }
 
@@ -1468,7 +1468,7 @@ pub(crate) fn draw_colored_quads_in_chunks(graphic: &mut Graphic, vertex_values:
 //==============================================================================
 fn read_description_color(value: &serde_json::Value) -> Option<Color> {
 	let channels = value.as_array()?;
-	let read_channel = |channel_index: usize, default_value: f32| channels.get(channel_index).and_then(|channel| channel.as_f64()).map(|channel| channel as f32).unwrap_or(default_value);
+	let read_channel = |channel_index: usize, default_value: f64| channels.get(channel_index).and_then(|channel| channel.as_f64()).map(|channel| channel).unwrap_or(default_value);
 	Some(Color::create(read_channel(0, 0.0), read_channel(1, 0.0), read_channel(2, 0.0), read_channel(3, 1.0)))
 }
 
@@ -1617,9 +1617,9 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 같은 씨앗이면 원본(vanilla.js)과 같은 입자 자리가 나온다. 모양마다 1/64 초씩 90 프레임. (1/64 는 f32 와 f64 에서 같은 값이라 방출 누적이 같은 프레임에 1 을 넘는다)
+	/// 같은 씨앗이면 원본(vanilla.js)과 같은 입자 자리가 나온다. 모양마다 1/64 초씩 90 프레임. (1/64 는 두 엔진에서 같은 값이라 방출 누적이 같은 프레임에 1 을 넘는다)
 	/// - 기대값은 원본 effect/particlesystem.js 를 node 로 같은 설정, 같은 씨앗으로 돌려 찍은 값이다. (손 계산이 아니다)
-	///   원본은 f64, 러스트 판은 f32 라 오차 한도를 둔다.
+	///   원본과 셈 차례가 다른 곳(삼각 함수 밖의 셈)이 있어 오차 한도를 둔다.
 	//==============================================================================
 	#[test]
 	fn same_seed_matches_original_positions() {
@@ -1665,7 +1665,7 @@ mod tests {
 	/// 원본에서 90 프레임 뒤 살아 있는 입자 수. (모양마다 같다)
 	const SAME_SEED_EXPECTED_COUNT: usize = 67;
 	/// 원본에서 찍은 0 번, 7 번, 마지막 입자 자리.
-	const SAME_SEED_EXPECTED: [(ParticleEmitterShape, [(f32, f32); 3]); 5] = [
+	const SAME_SEED_EXPECTED: [(ParticleEmitterShape, [(f64, f64); 3]); 5] = [
 		(ParticleEmitterShape::Point, [(84.489852, -7.793926), (6.721317, -1.527093), (-1.519028, 0.371066)]),
 		(ParticleEmitterShape::Circle, [(6.347870, 130.951176), (-16.560686, 32.686644), (-11.429110, -21.374512)]),
 		(ParticleEmitterShape::Cone, [(33.797671, -13.197808), (44.005587, -21.797820), (4.768423, -22.692181)]),

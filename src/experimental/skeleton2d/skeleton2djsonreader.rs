@@ -27,7 +27,7 @@ fn create_read_error(message: &str) -> String {
 fn read_number(source: &Map<String, Value>, key: &str, default_value: f64) -> f64 {
 	match source.get(key).and_then(|value| value.as_f64()) {
 		Some(number) => {
-			number as f64
+			number
 		}
 		None => {
 			default_value
@@ -68,7 +68,7 @@ fn read_number_array(source: &Map<String, Value>, key: &str, place: &str) -> Rea
 	for value in values {
 		match value.as_f64() {
 			Some(number) => {
-				numbers.push(number as f64);
+				numbers.push(number);
 			}
 			None => {
 				return Err(create_read_error(&format!("{} 의 {} 에 숫자가 아닌 값이 있다.", place, key)));
@@ -107,7 +107,7 @@ fn read_curve(key_json: &Map<String, Value>, place: &str) -> ReadResult<(Skeleto
 			Ok((Skeleton2DCurveType::Stepped, None))
 		}
 		Some(Value::Array(curve_values)) if curve_values.len() == 4 && curve_values.iter().all(|value| value.is_number()) => {
-			let read_value = |value_index: usize| -> f64 { curve_values[value_index].as_f64().unwrap_or(0.0) as f64 };
+			let read_value = |value_index: usize| -> f64 { curve_values[value_index].as_f64().unwrap_or(0.0) };
 			Ok((Skeleton2DCurveType::Bezier, Some([read_value(0), read_value(1), read_value(2), read_value(3)])))
 		}
 		Some(_) => {
@@ -226,7 +226,7 @@ fn read_slots(skeleton_data: &mut Skeleton2DData, json: &Map<String, Value>) -> 
 		let mut slot_data = Skeleton2DSlotData::new(skeleton_data.get_slots().len(), name, bone_index);
 		if let Some(color_text) = read_string(slot_object, "color") {
 			let color = read_skeleton2d_color(color_text, &format!("슬롯 \"{}\"", name))?;
-			slot_data.set_color(Color::create(color[0] as f32, color[1] as f32, color[2] as f32, color[3] as f32));
+			slot_data.set_color(Color::create(color[0] as f64, color[1] as f64, color[2] as f64, color[3] as f64));
 		}
 		slot_data.set_attachment_name(read_string(slot_object, "attachment"));
 		let blend_mode = read_string(slot_object, "blendMode").and_then(BlendMode::from_name).unwrap_or(BlendMode::Normal);
@@ -339,7 +339,7 @@ fn read_mesh_attachment(skeleton_data: &Skeleton2DData, world_matrices: &[f64], 
 				return Err(create_read_error(&format!("{} 의 꼭짓점 {} 무게는 [뼈 이름, 무게, ...] 꼴이어야 한다.", place, vertex_index)));
 			}
 		};
-		let total_weight: f64 = weight_values.iter().skip(1).step_by(2).map(|value| value.as_f64().unwrap_or(0.0) as f64).sum();
+		let total_weight: f64 = weight_values.iter().skip(1).step_by(2).map(|value| value.as_f64().unwrap_or(0.0)).sum();
 		if total_weight <= 0.0 {
 			return Err(create_read_error(&format!("{} 의 꼭짓점 {} 무게 합이 0 이다.", place, vertex_index)));
 		}
@@ -367,7 +367,7 @@ fn read_mesh_attachment(skeleton_data: &Skeleton2DData, world_matrices: &[f64], 
 			let difference_y = world_y - world_matrices[bone_offset + 5];
 			let bind_x = (bone_d * difference_x - bone_c * difference_y) / determinant;
 			let bind_y = (bone_a * difference_y - bone_b * difference_x) / determinant;
-			let weight = pair[1].as_f64().unwrap_or(0.0) as f64;
+			let weight = pair[1].as_f64().unwrap_or(0.0);
 			influence_bone_indices.push(bone_index);
 			influence_values.extend_from_slice(&[bind_x, bind_y, weight / total_weight]);
 		}

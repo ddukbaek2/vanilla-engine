@@ -31,14 +31,14 @@ use crate::ui::uibutton::UIButton;
 use crate::ui::uilabel::UILabel;
 
 /// 부모 크기를 모를 때 쓰는 영역. (원본과 같다)
-const DEFAULT_AREA_WIDTH: f32 = 960.0;
-const DEFAULT_AREA_HEIGHT: f32 = 640.0;
+const DEFAULT_AREA_WIDTH: f64 = 960.0;
+const DEFAULT_AREA_HEIGHT: f64 = 640.0;
 
 /// 단추 높이와 카드 안쪽 여백. (원본과 같다)
-const BUTTON_HEIGHT: f32 = 52.0;
-const PANEL_PADDING: f32 = 28.0;
-const BUTTON_GAP: f32 = 16.0;
-const BUTTON_BOTTOM_OFFSET: f32 = 76.0;
+const BUTTON_HEIGHT: f64 = 52.0;
+const PANEL_PADDING: f64 = 28.0;
+const BUTTON_GAP: f64 = 16.0;
+const BUTTON_BOTTOM_OFFSET: f64 = 76.0;
 
 //==============================================================================
 /// 대화 상자 설정. (원본 options = { width = 420, height = 240, confirm_text = "확인", cancel_text = "취소", panel_color?, accent_color?, text_color? })
@@ -64,9 +64,9 @@ const BUTTON_BOTTOM_OFFSET: f32 = 76.0;
 #[derive(Clone, Debug, PartialEq)]
 pub struct UIDialogOptions {
 	/// 카드 가로. (기본 420)
-	pub width: f32,
+	pub width: f64,
 	/// 카드 세로. (기본 240, 단추 윗변은 카드 아래에서 76 위)
-	pub height: f32,
+	pub height: f64,
 	/// 확인 단추 글. (기본 "확인")
 	pub confirm_text: String,
 	/// 취소 단추 글. (기본 "취소")
@@ -242,7 +242,7 @@ impl UIDialog {
 	//==============================================================================
 	/// 단추 노드 만들기. (둥근 Paint + UIButton + UILabel)
 	//==============================================================================
-	fn create_button_node(node_tree: &mut NodeTree, parent_id: NodeId, node_name: &str, label_text: &str, fill_color: Color, text_color: Color, button_width: f32) -> NodeId {
+	fn create_button_node(node_tree: &mut NodeTree, parent_id: NodeId, node_name: &str, label_text: &str, fill_color: Color, text_color: Color, button_width: f64) -> NodeId {
 		let button_id = node_tree.create_child(parent_id, node_name);
 		let button_node = &mut node_tree[button_id];
 		button_node.set_pivot(Pivot::TOP_LEFT);
@@ -636,7 +636,7 @@ impl Component for UIDialog {
 	//==============================================================================
 	/// 갱신. (미뤄 둔 닫기 → 전환기 → 노드에 반영 → 다 닫혔으면 호스트를 끈다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		self.node_id = Some(context.get_node_id());
 		if let Some(is_confirmed) = self.pending_dismiss.take() {
 			self.dismiss(context, is_confirmed);

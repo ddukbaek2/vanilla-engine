@@ -62,13 +62,13 @@ const ARROW_CLOSED_TEXT: &str = "▾";
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UIDropdownOptions {
 	/// 머리 단추 가로. (기본 180, 펼침 목록도 같은 가로)
-	pub width: f32,
+	pub width: f64,
 	/// 머리 단추 세로. (기본 30)
-	pub height: f32,
+	pub height: f64,
 	/// 선택지 행 높이.
-	pub option_height: f32,
+	pub option_height: f64,
 	/// 머리 글과 선택지 글의 크기. (기본 12)
-	pub font_size: f32,
+	pub font_size: f64,
 	/// 머리 단추 바탕색.
 	pub base_color: Color,
 	/// 펼침 목록 바탕색.
@@ -222,7 +222,7 @@ impl UIDropdown {
 
 		let content_size = node_tree[host_id].get_content_size();
 		let option_height = self.options.option_height;
-		let popup_height = self.option_list.len() as f32 * option_height + 8.0;
+		let popup_height = self.option_list.len() as f64 * option_height + 8.0;
 		node_tree[popup_id].set_content_size(Vector2::create(content_size.x, popup_height));
 		for option_index in 0..self.option_list.len() {
 			let row_name = format!("DropdownOption{}", option_index);
@@ -231,7 +231,7 @@ impl UIDropdown {
 			row_node.set_pivot(Pivot::TOP_LEFT);
 			row_node.set_anchor(Pivot::TOP_LEFT);
 			row_node.set_content_size(Vector2::create(content_size.x - 8.0, option_height));
-			row_node.set_local_position(Vector2::create(4.0, 4.0 + option_index as f32 * option_height));
+			row_node.set_local_position(Vector2::create(4.0, 4.0 + option_index as f64 * option_height));
 			row_node.set_interactable(true);
 			let row_paint = row_node.add_component(Paint::create_with_color(Color::transparent()));
 			row_paint.set_round_size(6.0);

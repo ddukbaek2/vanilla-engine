@@ -247,8 +247,8 @@ impl Pane {
 			(state.container_id, state.direction, state.children.clone(), state.resizer_list.clone())
 		};
 		if let Some(container_node) = node_tree.get_node_mut(container_id) {
-			container_node.set_local_position(Vector2::create(x as f32, y as f32));
-			container_node.set_content_size(Vector2::create(width as f32, height as f32));
+			container_node.set_local_position(Vector2::create(x, y));
+			container_node.set_content_size(Vector2::create(width, height));
 		}
 		if children.is_empty() {
 			self.fire_resize_callback();
@@ -268,8 +268,8 @@ impl Pane {
 				match layout_result.resizer_rect_list[index] {
 					Some(resizer_rect) => {
 						resizer_node.set_active(true);
-						resizer_node.set_local_position(Vector2::create(resizer_rect[0] as f32, resizer_rect[1] as f32));
-						resizer_node.set_content_size(Vector2::create(resizer_rect[2] as f32, resizer_rect[3] as f32));
+						resizer_node.set_local_position(Vector2::create(resizer_rect[0], resizer_rect[1]));
+						resizer_node.set_content_size(Vector2::create(resizer_rect[2], resizer_rect[3]));
 					}
 					None => {
 						resizer_node.set_active(false);
@@ -341,7 +341,7 @@ impl Pane {
 		};
 		let parent_size = node_tree[parent_id].get_content_size();
 		self.state.borrow_mut().attached_parent_size = Some(parent_size);
-		self.update_layout(node_tree, 0.0, 0.0, parent_size.x as f64, parent_size.y as f64);
+		self.update_layout(node_tree, 0.0, 0.0, parent_size.x, parent_size.y);
 	}
 
 	//==============================================================================
@@ -619,7 +619,7 @@ impl Component for PaneContainer {
 	//==============================================================================
 	/// 갱신. (attach_to 한 뿌리 패널은 부모 크기가 바뀌면 다시 놓는다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		let state = match self.state.upgrade() {
 			Some(state) => {
 				state
@@ -681,10 +681,10 @@ impl PaneResizerHandle {
 		let local_position = context.get_node_tree().convert_view_position_to_node_position(container_id, view_input_position)?;
 		Some(match direction {
 			PaneDirection::Horizontal => {
-				local_position.x as f64
+				local_position.x
 			}
 			PaneDirection::Vertical => {
-				local_position.y as f64
+				local_position.y
 			}
 		})
 	}
@@ -737,7 +737,7 @@ impl Component for PaneResizerHandle {
 	//==============================================================================
 	/// 갱신. (올려 두었는지 보고, 올려 두거나 끄는 동안 col-resize, row-resize 커서)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		if !self.can_resize {
 			return;
 		}
@@ -851,15 +851,15 @@ enum PaneDisplay {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum PaneLength {
 	Auto,
-	Pixel(f32),
-	Percent(f32),
+	Pixel(f64),
+	Percent(f64),
 }
 
 impl PaneLength {
 	//==============================================================================
 	/// 길이 셈. (auto 면 None, %는 부모 길이에 대고)
 	//==============================================================================
-	fn resolve(self, parent_length: f32) -> Option<f32> {
+	fn resolve(self, parent_length: f64) -> Option<f64> {
 		match self {
 			PaneLength::Auto => {
 				None
@@ -983,8 +983,8 @@ enum PaneTextAlign {
 }
 
 /// 스크롤 막대 두께와 가장 짧은 썸 길이. (얹는 막대)
-const SCROLLBAR_THICKNESS: f32 = 8.0;
-const SCROLLBAR_MINIMUM_THUMB_LENGTH: f32 = 20.0;
+const SCROLLBAR_THICKNESS: f64 = 8.0;
+const SCROLLBAR_MINIMUM_THUMB_LENGTH: f64 = 20.0;
 /// 스크롤 막대 썸 기본 색. (원본 에디터의 scrollbar-color 썸)
 const SCROLLBAR_DEFAULT_THUMB_COLOR: &str = "rgba(121, 121, 121, 0.4)";
 
@@ -1029,10 +1029,10 @@ pub struct PaneElement {
 	tag_name: String,
 	is_absolute: bool,
 	/// 자리. (absolute 요소, None 이면 auto)
-	left: Option<f32>,
-	top: Option<f32>,
-	right: Option<f32>,
-	bottom: Option<f32>,
+	left: Option<f64>,
+	top: Option<f64>,
+	right: Option<f64>,
+	bottom: Option<f64>,
 	width: PaneLength,
 	height: PaneLength,
 	minimum_width: PaneLength,
@@ -1046,23 +1046,23 @@ pub struct PaneElement {
 	flex_wrap: PaneFlexWrap,
 	align_content: PaneAlignContent,
 	/// 줄 사이와 칸 사이. (원본 gap 의 row-gap, column-gap)
-	row_gap: f32,
-	column_gap: f32,
-	flex_grow: f32,
-	flex_shrink: f32,
+	row_gap: f64,
+	column_gap: f64,
+	flex_grow: f64,
+	flex_shrink: f64,
 	flex_basis: PaneLength,
 	/// 위, 오른쪽, 아래, 왼쪽.
-	padding: [f32; 4],
-	margin: [f32; 4],
-	border_width_list: [f32; 4],
+	padding: [f64; 4],
+	margin: [f64; 4],
+	border_width_list: [f64; 4],
 	border_color_list: [Option<Color>; 4],
 	background_color: Option<Color>,
-	border_radius: f32,
+	border_radius: f64,
 	color: Color,
-	font_size: f32,
+	font_size: f64,
 	is_bold: bool,
 	font_family: String,
-	line_height: Option<f32>,
+	line_height: Option<f64>,
 	text_align: PaneTextAlign,
 	/// 글을 줄바꿈하지 않는지와 넘치면 말줄임표를 그릴지. (원본 white-space: nowrap 과 text-overflow: ellipsis)
 	is_nowrap_text: bool,
@@ -1083,7 +1083,7 @@ pub struct PaneElement {
 	is_button: bool,
 	is_pointer_cursor: bool,
 	/// CSS opacity. (준 적이 없으면 None, 노드 투명도와 투명도 층으로 옮긴다)
-	opacity: Option<f32>,
+	opacity: Option<f64>,
 	/// canvas 태그가 내용 상자에 그릴 렌더 타겟 색 텍스처. (원본은 그 자리에 미리보기 엔진의 캔버스가 들어간다)
 	canvas_texture: Option<GlTexture>,
 	is_hovered: bool,
@@ -1428,10 +1428,10 @@ impl PaneElement {
 				self.apply_flex_shorthand(value);
 			}
 			"flex-grow" => {
-				self.flex_grow = value.parse::<f32>().unwrap_or(0.0).max(0.0);
+				self.flex_grow = value.parse::<f64>().unwrap_or(0.0).max(0.0);
 			}
 			"flex-shrink" => {
-				self.flex_shrink = value.parse::<f32>().unwrap_or(1.0).max(0.0);
+				self.flex_shrink = value.parse::<f64>().unwrap_or(1.0).max(0.0);
 			}
 			"flex-basis" => {
 				self.flex_basis = parse_length(value);
@@ -1496,7 +1496,7 @@ impl PaneElement {
 					parse_pixel(value)
 				}
 				else {
-					value.parse::<f32>().ok().map(|multiplier| multiplier * self.font_size)
+					value.parse::<f64>().ok().map(|multiplier| multiplier * self.font_size)
 				};
 			}
 			"text-align" => {
@@ -1608,10 +1608,10 @@ impl PaneElement {
 			_ => {
 			}
 		}
-		let mut number_list: Vec<f32> = Vec::new();
+		let mut number_list: Vec<f64> = Vec::new();
 		let mut basis: Option<PaneLength> = None;
 		for part in value.split_whitespace() {
-			match part.parse::<f32>() {
+			match part.parse::<f64>() {
 				Ok(number) if number_list.len() < 2 => {
 					number_list.push(number.max(0.0));
 				}
@@ -1670,7 +1670,7 @@ impl PaneElement {
 	//==============================================================================
 	/// 줄 높이. (line-height 가 없으면 CSS normal: 크롬 SimpleFontData 처럼 첫째 글꼴의 위아래 길이와 줄 사이로 셈한다. 글꼴을 읽지 못하면 글꼴 크기의 1.2 배)
 	//==============================================================================
-	fn read_line_height(&self) -> f32 {
+	fn read_line_height(&self) -> f64 {
 		match self.line_height {
 			Some(line_height) => {
 				line_height
@@ -1697,7 +1697,7 @@ impl PaneElement {
 					text_metrics.width
 				}
 				None => {
-					self.text.chars().count() as f32 * self.font_size * 0.55
+					self.text.chars().count() as f64 * self.font_size * 0.55
 				}
 			}
 		};
@@ -1720,7 +1720,7 @@ impl PaneElement {
 	//==============================================================================
 	/// 주축의 칸 사이. (가로 flex 는 column-gap, 세로는 row-gap)
 	//==============================================================================
-	fn read_main_gap(&self) -> f32 {
+	fn read_main_gap(&self) -> f64 {
 		if self.flex_direction == PaneFlexDirection::Row {
 			self.column_gap
 		}
@@ -1732,7 +1732,7 @@ impl PaneElement {
 	//==============================================================================
 	/// 교차축의 줄 사이. (가로 flex 는 row-gap, 세로는 column-gap)
 	//==============================================================================
-	fn read_cross_gap(&self) -> f32 {
+	fn read_cross_gap(&self) -> f64 {
 		if self.flex_direction == PaneFlexDirection::Row {
 			self.row_gap
 		}
@@ -1831,7 +1831,7 @@ impl PaneElement {
 	//==============================================================================
 	/// 썸 끌기의 길이. ((썸 길이, 썸이 움직이는 칸 길이), 끈 거리를 넘길 거리로 바꾼다)
 	//==============================================================================
-	fn read_thumb_drag_lengths(&self, viewport_length: f32, extent_length: f32, is_vertical: bool) -> (f32, f32) {
+	fn read_thumb_drag_lengths(&self, viewport_length: f64, extent_length: f64, is_vertical: bool) -> (f64, f64) {
 		let gutter_thickness = if is_vertical {
 			self.scrollbar_gutter.x
 		}
@@ -1886,8 +1886,8 @@ fn measure_element_size(node_tree: &NodeTree, node_id: NodeId) -> Vector2 {
 		}
 	};
 	let text_size = element.measure_text_size();
-	let mut children_width: f32 = 0.0;
-	let mut children_height: f32 = 0.0;
+	let mut children_width: f64 = 0.0;
+	let mut children_height: f64 = 0.0;
 	let mut flow_count = 0;
 	for child_id in node_tree.get_child_ids(node_id).iter().copied() {
 		let child_element = match node_tree[child_id].get_component::<PaneElement>() {
@@ -1947,7 +1947,7 @@ fn measure_element_size(node_tree: &NodeTree, node_id: NodeId) -> Vector2 {
 //==============================================================================
 /// 줄넘김 가로 flex 의 높이. (테두리 상자 폭에서 CSS Flexbox 9.3 처럼 줄을 모은 높이, 줄넘김 가로 flex 가 아니거나 높이를 정했으면 None)
 //==============================================================================
-fn measure_wrapped_flex_height(node_tree: &NodeTree, node_id: NodeId, border_box_width: f32) -> Option<f32> {
+fn measure_wrapped_flex_height(node_tree: &NodeTree, node_id: NodeId, border_box_width: f64) -> Option<f64> {
 	let element = node_tree[node_id].get_component::<PaneElement>()?;
 	if element.display != PaneDisplay::Flex || element.flex_wrap == PaneFlexWrap::NoWrap || element.flex_direction != PaneFlexDirection::Row || element.height != PaneLength::Auto {
 		return None;
@@ -1956,9 +1956,9 @@ fn measure_wrapped_flex_height(node_tree: &NodeTree, node_id: NodeId, border_box
 	let content_main = (border_box_width - frame_size.x).max(0.0);
 	let main_gap = element.read_main_gap();
 	let cross_gap = element.read_cross_gap();
-	let mut line_cross_list: Vec<f32> = Vec::new();
+	let mut line_cross_list: Vec<f64> = Vec::new();
 	let mut used_main = 0.0;
-	let mut line_cross: f32 = 0.0;
+	let mut line_cross: f64 = 0.0;
 	let mut has_item = false;
 	for child_id in node_tree.get_child_ids(node_id).iter().copied() {
 		let child_element = match node_tree[child_id].get_component::<PaneElement>() {
@@ -1974,7 +1974,7 @@ fn measure_wrapped_flex_height(node_tree: &NodeTree, node_id: NodeId, border_box
 		}
 		let child_size = measure_element_size(node_tree, child_id);
 		let base_size = child_element.flex_basis.resolve(content_main).or_else(|| child_element.width.resolve(content_main)).unwrap_or(child_size.x);
-		let main_size = clamp_length(base_size, child_element.minimum_width.resolve(content_main).unwrap_or(0.0), child_element.maximum_width.resolve(content_main).unwrap_or(f32::INFINITY));
+		let main_size = clamp_length(base_size, child_element.minimum_width.resolve(content_main).unwrap_or(0.0), child_element.maximum_width.resolve(content_main).unwrap_or(f64::INFINITY));
 		let outer_main = main_size + child_element.margin[1] + child_element.margin[3];
 		let outer_cross = child_size.y + child_element.margin[0] + child_element.margin[2];
 		if has_item && used_main + main_gap + outer_main > content_main {
@@ -1996,7 +1996,7 @@ fn measure_wrapped_flex_height(node_tree: &NodeTree, node_id: NodeId, border_box
 	if has_item {
 		line_cross_list.push(line_cross);
 	}
-	let lines_height: f32 = line_cross_list.iter().sum::<f32>() + cross_gap * (line_cross_list.len() as f32 - 1.0).max(0.0);
+	let lines_height: f64 = line_cross_list.iter().sum::<f64>() + cross_gap * (line_cross_list.len() as f64 - 1.0).max(0.0);
 	let mut height = lines_height.max(element.measure_text_size().y) + frame_size.y;
 	if let PaneLength::Pixel(maximum_height) = element.maximum_height {
 		height = height.min(maximum_height);
@@ -2013,18 +2013,18 @@ fn measure_wrapped_flex_height(node_tree: &NodeTree, node_id: NodeId, border_box
 struct PaneFlexItem {
 	node_id: NodeId,
 	/// 주축과 교차축의 바깥 여백. (앞, 뒤)
-	main_margin: (f32, f32),
-	cross_margin: (f32, f32),
-	base_size: f32,
-	minimum_main: f32,
-	maximum_main: f32,
-	flex_grow: f32,
-	flex_shrink: f32,
-	main_size: f32,
-	cross_size: f32,
+	main_margin: (f64, f64),
+	cross_margin: (f64, f64),
+	base_size: f64,
+	minimum_main: f64,
+	maximum_main: f64,
+	flex_grow: f64,
+	flex_shrink: f64,
+	main_size: f64,
+	cross_size: f64,
 	/// 교차축 min, max 와 줄의 교차 크기로 늘일지. (align-items: stretch 이고 교차 크기가 auto)
-	cross_minimum: f32,
-	cross_maximum: f32,
+	cross_minimum: f64,
+	cross_maximum: f64,
 	is_cross_stretched: bool,
 }
 
@@ -2032,7 +2032,7 @@ struct PaneFlexItem {
 /// 남는 자리 나누기. ((처음 자리, 항목 사이에 더할 자리), CSS justify-content 와 align-content 의 늘어놓기)
 /// - space-between 은 남는 자리가 없거나 항목이 하나면 처음으로, space-around 와 space-evenly 는 남는 자리가 없으면 가운데로 모은다.
 //==============================================================================
-fn distribute_space(justify_content: PaneJustifyContent, remaining_space: f32, item_count: f32) -> (f32, f32) {
+fn distribute_space(justify_content: PaneJustifyContent, remaining_space: f64, item_count: f64) -> (f64, f64) {
 	match justify_content {
 		PaneJustifyContent::Start => {
 			(0.0, 0.0)
@@ -2074,7 +2074,7 @@ fn distribute_space(justify_content: PaneJustifyContent, remaining_space: f32, i
 /// 말줄임한 글. (글이 폭을 넘으면 글자 묶음 앞부분 + 말줄임표, 넘지 않으면 None)
 /// - CSS Overflow 3 의 text-overflow: ellipsis: 말줄임표가 들어갈 만큼 끝의 글자 묶음을 숨긴다. 줄의 첫 글자 묶음은 숨기지 않는다.
 //==============================================================================
-fn truncate_text_with_ellipsis(text: &str, available_width: f32, measure_width: &dyn Fn(&str) -> f32) -> Option<String> {
+fn truncate_text_with_ellipsis(text: &str, available_width: f64, measure_width: &dyn Fn(&str) -> f64) -> Option<String> {
 	use unicode_segmentation::UnicodeSegmentation;
 	if measure_width(text) <= available_width {
 		return None;
@@ -2118,14 +2118,14 @@ fn parse_flex_wrap(value: &str) -> PaneFlexWrap {
 //==============================================================================
 /// CSS opacity 값 읽기. (수나 백분율, 0 ~ 1 로 자른다. 못 읽으면 None)
 //==============================================================================
-fn parse_opacity(value: &str) -> Option<f32> {
+fn parse_opacity(value: &str) -> Option<f64> {
 	let value = value.trim();
 	let opacity = match value.strip_suffix('%') {
 		Some(percent_text) => {
-			percent_text.trim().parse::<f32>().ok()? / 100.0
+			percent_text.trim().parse::<f64>().ok()? / 100.0
 		}
 		None => {
-			value.parse::<f32>().ok()?
+			value.parse::<f64>().ok()?
 		}
 	};
 	Some(opacity.clamp(0.0, 1.0))
@@ -2134,7 +2134,7 @@ fn parse_opacity(value: &str) -> Option<f32> {
 //==============================================================================
 /// 요소의 CSS opacity 를 노드로 옮기기. (크롬처럼 요소와 자손을 묶어 한 번에 얹는다: 노드 투명도와 투명도 층)
 //==============================================================================
-fn apply_element_opacity(node_tree: &mut NodeTree, node_id: NodeId, opacity: Option<f32>) {
+fn apply_element_opacity(node_tree: &mut NodeTree, node_id: NodeId, opacity: Option<f64>) {
 	if let Some(opacity) = opacity {
 		if let Some(node) = node_tree.get_node_mut(node_id) {
 			node.set_local_opacity(opacity);
@@ -2143,15 +2143,15 @@ fn apply_element_opacity(node_tree: &mut NodeTree, node_id: NodeId, opacity: Opt
 	}
 }
 
-fn clamp_length(value: f32, minimum: f32, maximum: f32) -> f32 {
+fn clamp_length(value: f64, minimum: f64, maximum: f64) -> f64 {
 	value.min(maximum).max(minimum)
 }
 
 //==============================================================================
 /// "12px" 같은 값 읽기. (단위 없는 수도 받는다)
 //==============================================================================
-fn parse_pixel(value: &str) -> Option<f32> {
-	value.trim().trim_end_matches("px").trim().parse::<f32>().ok()
+fn parse_pixel(value: &str) -> Option<f64> {
+	value.trim().trim_end_matches("px").trim().parse::<f64>().ok()
 }
 
 //==============================================================================
@@ -2160,7 +2160,7 @@ fn parse_pixel(value: &str) -> Option<f32> {
 fn parse_length(value: &str) -> PaneLength {
 	let value = value.trim();
 	if let Some(percent_text) = value.strip_suffix('%') {
-		return percent_text.trim().parse::<f32>().map(PaneLength::Percent).unwrap_or(PaneLength::Auto);
+		return percent_text.trim().parse::<f64>().map(PaneLength::Percent).unwrap_or(PaneLength::Auto);
 	}
 	match parse_pixel(value) {
 		Some(pixel) => {
@@ -2175,8 +2175,8 @@ fn parse_length(value: &str) -> PaneLength {
 //==============================================================================
 /// 여백 줄임 꼴 읽기. (1 ~ 4 값 → 위, 오른쪽, 아래, 왼쪽)
 //==============================================================================
-fn parse_box_values(value: &str) -> [f32; 4] {
-	let value_list: Vec<f32> = value.split_whitespace().map(|part| parse_pixel(part).unwrap_or(0.0)).collect();
+fn parse_box_values(value: &str) -> [f64; 4] {
+	let value_list: Vec<f64> = value.split_whitespace().map(|part| parse_pixel(part).unwrap_or(0.0)).collect();
 	match value_list.len() {
 		1 => {
 			[value_list[0]; 4]
@@ -2232,7 +2232,7 @@ fn split_css_values(value: &str) -> Vec<String> {
 //==============================================================================
 /// 테두리 줄임 꼴 읽기. ("1px solid #444" → 굵기와 색, none 이면 0)
 //==============================================================================
-fn parse_border(value: &str) -> (f32, Option<Color>) {
+fn parse_border(value: &str) -> (f64, Option<Color>) {
 	if value.trim() == "none" || value.trim() == "0" {
 		return (0.0, None);
 	}
@@ -2252,7 +2252,7 @@ fn parse_border(value: &str) -> (f32, Option<Color>) {
 //==============================================================================
 /// 밝기 바꾼 색. (원본 filter: brightness)
 //==============================================================================
-fn scale_brightness(color: Color, brightness: f32) -> Color {
+fn scale_brightness(color: Color, brightness: f64) -> Color {
 	Color::create((color.red * brightness).min(1.0), (color.green * brightness).min(1.0), (color.blue * brightness).min(1.0), color.alpha)
 }
 
@@ -2291,7 +2291,7 @@ impl Component for PaneElement {
 	//==============================================================================
 	/// 갱신. (단추와 pointer 커서 요소의 올려 둠, absolute 요소의 자리와 크기, 자식 배치)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		let node_id = context.get_node_id();
 		// 올려 둠. (단추의 밝기와 pointer 커서)
 		if self.is_button || self.is_pointer_cursor {
@@ -2457,7 +2457,7 @@ impl Component for PaneElement {
 	//==============================================================================
 	/// 자식 출력을 자를지. (overflow 가 visible 이 아닌 축이 있으면 border-radius 의 둥근 크기로 자른다)
 	//==============================================================================
-	fn get_clip_round_size(&self) -> Option<f32> {
+	fn get_clip_round_size(&self) -> Option<f64> {
 		if self.is_clipping() {
 			Some(self.border_radius)
 		}
@@ -2597,7 +2597,7 @@ impl PaneElement {
 	/// absolute 요소의 자리와 크기. (부모 크기에 대고, left 와 right 가 다 있고 폭이 auto 면 그 사이를 채운다)
 	//==============================================================================
 	fn place_absolute(&self, parent_size: Vector2, intrinsic_size: Vector2) -> (Vector2, Vector2) {
-		let resolve_axis = |start: Option<f32>, end: Option<f32>, length: PaneLength, minimum: PaneLength, maximum: PaneLength, parent_length: f32, intrinsic_length: f32| -> (f32, f32) {
+		let resolve_axis = |start: Option<f64>, end: Option<f64>, length: PaneLength, minimum: PaneLength, maximum: PaneLength, parent_length: f64, intrinsic_length: f64| -> (f64, f64) {
 			let mut size = match (length.resolve(parent_length), start, end) {
 				(Some(size), _, _) => {
 					size
@@ -2609,7 +2609,7 @@ impl PaneElement {
 					intrinsic_length
 				}
 			};
-			size = clamp_length(size, minimum.resolve(parent_length).unwrap_or(0.0), maximum.resolve(parent_length).unwrap_or(f32::INFINITY));
+			size = clamp_length(size, minimum.resolve(parent_length).unwrap_or(0.0), maximum.resolve(parent_length).unwrap_or(f64::INFINITY));
 			let position = match (start, end) {
 				(Some(start), _) => {
 					start
@@ -2640,7 +2640,7 @@ impl PaneElement {
 		else {
 			0.0
 		};
-		let read_gutter = |overflow: PaneOverflow, is_overflowing: bool| -> f32 {
+		let read_gutter = |overflow: PaneOverflow, is_overflowing: bool| -> f64 {
 			if overflow == PaneOverflow::Scroll || (overflow == PaneOverflow::Auto && is_overflowing) {
 				scrollbar_thickness
 			}
@@ -2743,16 +2743,16 @@ impl PaneElement {
 				let base_size = child_element.flex_basis.resolve(content_main).or_else(|| main_length.resolve(content_main)).unwrap_or(main_intrinsic);
 				// 자동 최소: 넘침이 visible 인 항목은 제 크기(글이 줄바꿈하지 않아 min-content 와 같다), 스크롤 상자는 0.
 				let automatic_minimum = if main_overflow == PaneOverflow::Visible {
-					main_intrinsic.min(main_length.resolve(content_main).unwrap_or(f32::INFINITY))
+					main_intrinsic.min(main_length.resolve(content_main).unwrap_or(f64::INFINITY))
 				}
 				else {
 					0.0
 				};
 				let minimum_main = main_minimum.resolve(content_main).unwrap_or(automatic_minimum);
-				let maximum_main = main_maximum.resolve(content_main).unwrap_or(f32::INFINITY);
+				let maximum_main = main_maximum.resolve(content_main).unwrap_or(f64::INFINITY);
 				// 교차축 크기: 정한 값, 아니면 가정 크기(제 크기). stretch 는 줄의 교차 크기를 안 뒤에 늘린다. (CSS Flexbox 9.4)
 				let cross_minimum = cross_minimum.resolve(content_cross).unwrap_or(0.0);
-				let cross_maximum = cross_maximum.resolve(content_cross).unwrap_or(f32::INFINITY);
+				let cross_maximum = cross_maximum.resolve(content_cross).unwrap_or(f64::INFINITY);
 				let is_cross_stretched = cross_length.resolve(content_cross).is_none() && self.align_items == PaneAlignItems::Stretch;
 				let cross_size = clamp_length(cross_length.resolve(content_cross).unwrap_or(cross_intrinsic), cross_minimum, cross_maximum);
 				flex_item_list.push(PaneFlexItem {
@@ -2779,10 +2779,10 @@ impl PaneElement {
 				else {
 					intrinsic_size.x
 				};
-				let width = clamp_length(child_element.width.resolve(content_width).unwrap_or(auto_width), child_element.minimum_width.resolve(content_width).unwrap_or(0.0), child_element.maximum_width.resolve(content_width).unwrap_or(f32::INFINITY));
+				let width = clamp_length(child_element.width.resolve(content_width).unwrap_or(auto_width), child_element.minimum_width.resolve(content_width).unwrap_or(0.0), child_element.maximum_width.resolve(content_width).unwrap_or(f64::INFINITY));
 				// 높이가 auto 인 줄넘김 가로 flex 는 이 폭에서 모은 줄의 높이다. (제 크기는 한 줄로 잰 값이라)
 				let auto_height = measure_wrapped_flex_height(context.get_node_tree(), child_id, width).unwrap_or(intrinsic_size.y);
-				let height = clamp_length(child_element.height.resolve(content_height).unwrap_or(auto_height), child_element.minimum_height.resolve(content_height).unwrap_or(0.0), child_element.maximum_height.resolve(content_height).unwrap_or(f32::INFINITY));
+				let height = clamp_length(child_element.height.resolve(content_height).unwrap_or(auto_height), child_element.minimum_height.resolve(content_height).unwrap_or(0.0), child_element.maximum_height.resolve(content_height).unwrap_or(f64::INFINITY));
 				flow_y += margin[0];
 				placement_list.push((child_id, Some((Vector2::create(content_left + margin[3], flow_y), Vector2::create(width, height))), true));
 				flow_y += height + margin[2];
@@ -2821,19 +2821,19 @@ impl PaneElement {
 			}
 			// 3. 줄의 교차 크기. (9.4: 한 줄 상자는 상자의 안쪽 교차 크기, 여러 줄은 항목 바깥 교차 크기의 가장 큰 값, align-content: stretch 면 남는 자리를 줄마다 고루 더한다)
 			let is_single_line = self.flex_wrap == PaneFlexWrap::NoWrap;
-			let mut line_cross_list: Vec<f32> = line_list
+			let mut line_cross_list: Vec<f64> = line_list
 				.iter()
 				.map(|line| {
 					if is_single_line {
 						content_cross
 					}
 					else {
-						line.iter().map(|item| item.cross_size + item.cross_margin.0 + item.cross_margin.1).fold(0.0, f32::max)
+						line.iter().map(|item| item.cross_size + item.cross_margin.0 + item.cross_margin.1).fold(0.0, f64::max)
 					}
 				})
 				.collect();
-			let line_count = line_list.len() as f32;
-			let used_cross: f32 = line_cross_list.iter().sum::<f32>() + cross_gap * (line_count - 1.0);
+			let line_count = line_list.len() as f64;
+			let used_cross: f64 = line_cross_list.iter().sum::<f64>() + cross_gap * (line_count - 1.0);
 			let mut remaining_cross = content_cross - used_cross;
 			if !is_single_line && self.align_content == PaneAlignContent::Stretch && remaining_cross > 0.0 {
 				for line_cross in line_cross_list.iter_mut() {
@@ -2851,8 +2851,8 @@ impl PaneElement {
 			for (line_index, line) in line_list.iter_mut().enumerate() {
 				let line_cross = line_cross_list[line_index];
 				// 줄 안 주축 늘어놓기. (justify-content)
-				let line_used_main: f32 = line.iter().map(|item| item.main_size + item.main_margin.0 + item.main_margin.1).sum::<f32>() + main_gap * (line.len() as f32 - 1.0);
-				let (mut main_position, between_space) = distribute_space(self.justify_content, content_main - line_used_main, line.len() as f32);
+				let line_used_main: f64 = line.iter().map(|item| item.main_size + item.main_margin.0 + item.main_margin.1).sum::<f64>() + main_gap * (line.len() as f64 - 1.0);
+				let (mut main_position, between_space) = distribute_space(self.justify_content, content_main - line_used_main, line.len() as f64);
 				for item in line.iter_mut() {
 					// stretch 항목은 줄의 교차 크기를 채운다. (9.4 의 11)
 					if item.is_cross_stretched {
@@ -2933,15 +2933,15 @@ impl PaneElement {
 	//==============================================================================
 	/// flex 길이 정하기. (CSS Flexbox 9.7: 남는 자리는 grow 비로 나누고, 모자라면 shrink 와 기준 크기를 곱한 비로 줄인다. min, max 에 걸린 항목은 묶고 다시 나눈다)
 	//==============================================================================
-	fn resolve_flexible_lengths(&self, item_list: &mut [PaneFlexItem], content_main: f32) {
-		let gap_total = self.read_main_gap() * (item_list.len() as f32 - 1.0);
-		let read_outer = |item: &PaneFlexItem, size: f32| -> f32 {
+	fn resolve_flexible_lengths(&self, item_list: &mut [PaneFlexItem], content_main: f64) {
+		let gap_total = self.read_main_gap() * (item_list.len() as f64 - 1.0);
+		let read_outer = |item: &PaneFlexItem, size: f64| -> f64 {
 			size + item.main_margin.0 + item.main_margin.1
 		};
 		// 1. 키울지 줄일지. (가정 크기 합과 견준다)
-		let hypothetical_total: f32 = item_list.iter().map(|item| read_outer(item, item.main_size)).sum::<f32>() + gap_total;
+		let hypothetical_total: f64 = item_list.iter().map(|item| read_outer(item, item.main_size)).sum::<f64>() + gap_total;
 		let is_growing = hypothetical_total < content_main;
-		let read_factor = |item: &PaneFlexItem| -> f32 {
+		let read_factor = |item: &PaneFlexItem| -> f64 {
 			if is_growing {
 				item.flex_grow
 			}
@@ -2951,8 +2951,8 @@ impl PaneElement {
 		};
 		// 2. 늘지 않는 항목은 가정 크기로 묶는다.
 		let mut is_frozen_list: Vec<bool> = item_list.iter().map(|item| read_factor(item) == 0.0 || (is_growing && item.base_size > item.main_size) || (!is_growing && item.base_size < item.main_size)).collect();
-		let read_remaining_space = |item_list: &[PaneFlexItem], is_frozen_list: &[bool]| -> f32 {
-			let used_total: f32 = item_list
+		let read_remaining_space = |item_list: &[PaneFlexItem], is_frozen_list: &[bool]| -> f64 {
+			let used_total: f64 = item_list
 				.iter()
 				.zip(is_frozen_list.iter())
 				.map(|(item, is_frozen)| {
@@ -2963,7 +2963,7 @@ impl PaneElement {
 						read_outer(item, item.base_size)
 					}
 				})
-				.sum::<f32>() + gap_total;
+				.sum::<f64>() + gap_total;
 			content_main - used_total
 		};
 		// 3. 처음 남는 자리.
@@ -2974,15 +2974,15 @@ impl PaneElement {
 				break;
 			}
 			let mut remaining_space = read_remaining_space(item_list, &is_frozen_list);
-			let factor_total: f32 = item_list.iter().zip(is_frozen_list.iter()).filter(|(_, is_frozen)| !**is_frozen).map(|(item, _)| read_factor(item)).sum();
+			let factor_total: f64 = item_list.iter().zip(is_frozen_list.iter()).filter(|(_, is_frozen)| !**is_frozen).map(|(item, _)| read_factor(item)).sum();
 			if factor_total < 1.0 {
 				let limited_space = initial_free_space * factor_total;
 				if limited_space.abs() < remaining_space.abs() {
 					remaining_space = limited_space;
 				}
 			}
-			let scaled_shrink_total: f32 = item_list.iter().zip(is_frozen_list.iter()).filter(|(_, is_frozen)| !**is_frozen).map(|(item, _)| item.flex_shrink * item.base_size).sum();
-			let mut violation_list: Vec<f32> = vec![0.0; item_list.len()];
+			let scaled_shrink_total: f64 = item_list.iter().zip(is_frozen_list.iter()).filter(|(_, is_frozen)| !**is_frozen).map(|(item, _)| item.flex_shrink * item.base_size).sum();
+			let mut violation_list: Vec<f64> = vec![0.0; item_list.len()];
 			let mut total_violation = 0.0;
 			for (item_index, item) in item_list.iter_mut().enumerate() {
 				if is_frozen_list[item_index] {
@@ -3450,7 +3450,7 @@ mod tests {
 	#[test]
 	fn pane_flex_wrap_matches_chrome() {
 		let engine = Engine::new(EngineConfiguration::new());
-		let lay_out = |container_style: &[(&str, &str)], item_style_list: &[&[(&str, &str)]]| -> Vec<[f32; 4]> {
+		let lay_out = |container_style: &[(&str, &str)], item_style_list: &[&[(&str, &str)]]| -> Vec<[f64; 4]> {
 			let mut node_tree = NodeTree::new();
 			let root_id = node_tree.get_root_id();
 			node_tree[root_id].set_content_size(Vector2::create(800.0, 600.0));
@@ -3483,7 +3483,7 @@ mod tests {
 				})
 				.collect()
 		};
-		let assert_rects = |actual_list: Vec<[f32; 4]>, expected_list: &[[f32; 4]]| {
+		let assert_rects = |actual_list: Vec<[f64; 4]>, expected_list: &[[f64; 4]]| {
 			for (actual, expected) in actual_list.iter().zip(expected_list.iter()) {
 				for (actual_value, expected_value) in actual.iter().zip(expected.iter()) {
 					assert!((actual_value - expected_value).abs() < 0.01, "{:?} != {:?}", actual_list, expected_list);
@@ -3545,8 +3545,8 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn pane_text_ellipsis_truncates_like_css() {
-		let measure_fixed = |text: &str| -> f32 {
-			text.chars().count() as f32 * 10.0
+		let measure_fixed = |text: &str| -> f64 {
+			text.chars().count() as f64 * 10.0
 		};
 		assert_eq!(truncate_text_with_ellipsis("Hello", 50.0, &measure_fixed), None);
 		assert_eq!(truncate_text_with_ellipsis("Hello world", 50.0, &measure_fixed).as_deref(), Some("Hell\u{2026}"));

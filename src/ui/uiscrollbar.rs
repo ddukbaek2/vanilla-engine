@@ -23,7 +23,7 @@ use crate::core::node::worldnode::NodeTransform;
 use crate::ui::uiscrollview::UIScrollView;
 
 /// 트랙 / 썸 둥근 크기.
-const SCROLLBAR_ROUND_SIZE: f32 = 4.0;
+const SCROLLBAR_ROUND_SIZE: f64 = 4.0;
 
 //==============================================================================
 /// 스크롤바 축.
@@ -57,9 +57,9 @@ struct ScrollState {
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 struct ThumbMetrics {
-	thumb_length: f32,
-	scrollable_content: f32,
-	scrollable_track: f32,
+	thumb_length: f64,
+	scrollable_content: f64,
+	scrollable_track: f64,
 }
 
 //==============================================================================
@@ -98,7 +98,7 @@ pub struct UIScrollBar {
 	is_dragging_thumb: bool,
 	drag_start_view_position: Vector2,
 	drag_start_scroll_offset: Vector2,
-	min_thumb_size: f32,
+	min_thumb_size: f64,
 	auto_hide: bool,
 	/// 자동 숨김으로 숨겼는지. (노드는 켜 둔 채 보이지 않게만 해 tick 이 돌아 다시 보일 수 있다, 원본 isAutoHidden)
 	is_auto_hidden: bool,
@@ -258,7 +258,7 @@ impl UIScrollBar {
 	/// # 인자
 	/// - `min_thumb_size`: 썸이 축 방향으로 가질 가장 짧은 길이. (픽셀, 기본 24) 보이는 비율로 셈한 길이가 이보다 짧으면 이 길이를 쓴다.
 	//==============================================================================
-	pub fn set_min_thumb_size(&mut self, min_thumb_size: f32) {
+	pub fn set_min_thumb_size(&mut self, min_thumb_size: f64) {
 		self.min_thumb_size = min_thumb_size;
 	}
 
@@ -342,7 +342,7 @@ impl UIScrollBar {
 	//==============================================================================
 	/// 축 방향 값 고르기.
 	//==============================================================================
-	fn pick_axis(&self, vector: Vector2) -> f32 {
+	fn pick_axis(&self, vector: Vector2) -> f64 {
 		match self.axis {
 			ScrollBarAxis::Vertical => {
 				vector.y
@@ -555,7 +555,7 @@ impl Component for UIScrollBar {
 	//==============================================================================
 	/// 갱신. (대상 스크롤 상태로 썸을 맞춘다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		self.update_thumb(context);
 	}
 

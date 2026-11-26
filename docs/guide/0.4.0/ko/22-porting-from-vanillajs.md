@@ -31,7 +31,7 @@ cooldown.tick(0.5);
 assert!(cooldown.activate());
 ```
 
-- 수는 `f32` 입니다. 소수점 없는 정수 글자(`640`)는 `f32` 자리에 쓸 수 없으니 `640.0` 으로 씁니다. JS 수의 글을 그대로 내야 하는 곳(`Format`, `LocalStorage`)만 `f64` 입니다.
+- 수는 `f64` 입니다. 소수점 없는 정수 글자(`640`)는 `f64` 자리에 쓸 수 없으니 `640.0` 으로 씁니다. JS 수의 글을 그대로 내야 하는 곳(`Format`, `LocalStorage`)만 `f64` 입니다.
 - 색을 받는 함수는 대부분 `impl Into<Color>` 를 받아 `"#ffcc33"` 같은 글과 `Color::create(0.2, 0.25, 0.35, 1.0)` 을 함께 받습니다. 원본 `new Color(r, g, b, a)` 는 `Color::create(r, g, b, a)` 입니다.
 - 파일과 문서 안의 이름은 바꾸지 않습니다. UI 문서(`.scene.json`)의 `contentSize` 같은 키, 반사 저장의 `LineWidth` 같은 키는 원본 그대로라 두 엔진이 같은 파일을 읽습니다.
 
@@ -191,7 +191,7 @@ use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineConfigur
 
 struct Spin {
 	component_base: ComponentBase,
-	degrees_per_second: f32,
+	degrees_per_second: f64,
 }
 
 #[vanilla::reflect]
@@ -203,7 +203,7 @@ impl Spin {
 		}
 	}
 
-	pub fn set_degrees_per_second(&mut self, degrees_per_second: f32) {
+	pub fn set_degrees_per_second(&mut self, degrees_per_second: f64) {
 		self.degrees_per_second = degrees_per_second;
 	}
 }
@@ -222,7 +222,7 @@ impl Component for Spin {
 		"Spin"
 	}
 
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let transform = context.get_transform_mut();
 		let local_rotation = transform.get_local_rotation();
 		transform.set_local_rotation(local_rotation + self.degrees_per_second * time_delta);

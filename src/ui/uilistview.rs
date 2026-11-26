@@ -92,13 +92,13 @@ pub struct UIListView {
 	component_base: ComponentBase,
 	create_item_event: Option<UIListViewCreateItemEvent>,
 	item_count: usize,
-	item_size: f32,
-	spacing: f32,
+	item_size: f64,
+	spacing: f64,
 	is_horizontal: bool,
 	buffer_item_count: usize,
 	bind_item_event: Option<UIListViewBindItemEvent>,
 	reach_end_event: Option<UIListViewReachEndEvent>,
-	reach_end_threshold: f32,
+	reach_end_threshold: f64,
 	is_reach_end_armed: bool,
 	active_item_list: Vec<(usize, NodeId)>,
 	free_item_list: Vec<NodeId>,
@@ -339,7 +339,7 @@ impl UIListView {
 	/// # 인자
 	/// - `reach_end_threshold`: 끝까지 남은 길이가 이 값 이하면 알린다. (픽셀, 기본 120)
 	//==============================================================================
-	pub fn set_reach_end_threshold(&mut self, reach_end_threshold: f32) {
+	pub fn set_reach_end_threshold(&mut self, reach_end_threshold: f64) {
 		self.reach_end_threshold = reach_end_threshold;
 	}
 
@@ -348,7 +348,7 @@ impl UIListView {
 	/// # 인자
 	/// - `item_size`: 항목 하나의 진행 축 길이. (픽셀, 0 이하면 처음 만든 항목 노드의 content_size 를 읽는다)
 	//==============================================================================
-	pub fn set_item_size(&mut self, item_size: f32) {
+	pub fn set_item_size(&mut self, item_size: f64) {
 		self.item_size = item_size;
 		self.is_scroll_content_size_pending = true;
 	}
@@ -358,7 +358,7 @@ impl UIListView {
 	/// # 인자
 	/// - `spacing`: 항목 사이 간격. (픽셀, 기본 0)
 	//==============================================================================
-	pub fn set_spacing(&mut self, spacing: f32) {
+	pub fn set_spacing(&mut self, spacing: f64) {
 		self.spacing = spacing;
 		self.is_scroll_content_size_pending = true;
 	}
@@ -402,7 +402,7 @@ impl UIListView {
 	/// # 돌려줌
 	/// 항목 하나의 진행 축 길이. (픽셀, 아직 읽지 않았으면 0)
 	//==============================================================================
-	pub fn get_item_size(&self) -> f32 {
+	pub fn get_item_size(&self) -> f64 {
 		self.item_size
 	}
 
@@ -411,7 +411,7 @@ impl UIListView {
 	/// # 돌려줌
 	/// 항목 사이 간격. (픽셀)
 	//==============================================================================
-	pub fn get_spacing(&self) -> f32 {
+	pub fn get_spacing(&self) -> f64 {
 		self.spacing
 	}
 
@@ -436,7 +436,7 @@ impl UIListView {
 	//==============================================================================
 	/// 진행 축의 값 고르기.
 	//==============================================================================
-	fn select_axis(&self, vector: Vector2) -> f32 {
+	fn select_axis(&self, vector: Vector2) -> f64 {
 		if self.is_horizontal {
 			vector.x
 		}
@@ -451,7 +451,7 @@ impl UIListView {
 	fn calculate_scroll_content_size(&self, host_content_size: Vector2) -> Vector2 {
 		let pitch = self.item_size + self.spacing;
 		let total_length = if self.item_count > 0 {
-			self.item_count as f32 * pitch - self.spacing
+			self.item_count as f64 * pitch - self.spacing
 		}
 		else {
 			0.0
@@ -568,7 +568,7 @@ impl Component for UIListView {
 	//==============================================================================
 	/// 갱신. (미뤄 둔 스크롤 영역 / 다시 바인딩 → 보이는 범위 계산 → 회수 / 생성 → 끝 알림)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		if self.create_item_event.is_none() {
 			return;
 		}
@@ -665,10 +665,10 @@ impl Component for UIListView {
 				}
 			};
 			let item_position = if self.is_horizontal {
-				Vector2::create(current_index as f32 * pitch, 0.0)
+				Vector2::create(current_index as f64 * pitch, 0.0)
 			}
 			else {
-				Vector2::create(0.0, current_index as f32 * pitch)
+				Vector2::create(0.0, current_index as f64 * pitch)
 			};
 			let item_name = format!("Item{}", current_index);
 			let item_node = &mut node_tree[item_node_id];
@@ -683,7 +683,7 @@ impl Component for UIListView {
 
 		// 끝 근처 알림. (무한 스크롤)
 		if self.reach_end_event.is_some() && self.is_reach_end_armed && self.item_count > 0 {
-			let total_length = self.item_count as f32 * pitch - self.spacing;
+			let total_length = self.item_count as f64 * pitch - self.spacing;
 			let remain_length = total_length - (scrolled_length + view_length);
 			if remain_length <= self.reach_end_threshold {
 				self.is_reach_end_armed = false;
@@ -782,7 +782,7 @@ mod tests {
 
 		// 끝까지 갔다가 처음으로 돌아와도 만든 노드 수는 늘지 않는다.
 		for offset_step in 0..30 {
-			let offset_y = -(offset_step as f32) * 100.0;
+			let offset_y = -(offset_step as f64) * 100.0;
 			node_tree[list_id].get_component_mut::<UIScrollView>().expect("scroll view").set_scroll_offset(Vector2::create(0.0, offset_y));
 			node_tree.tick(&engine, 0.016);
 		}

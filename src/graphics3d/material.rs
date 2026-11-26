@@ -23,6 +23,7 @@ use crate::core::engine::Engine;
 use crate::core::graphic::GlTexture;
 use crate::core::shaderprogram::ShaderProgram;
 use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 use std::cell::{Cell, RefCell};
 use std::future::{Future, IntoFuture};
 use std::pin::Pin;
@@ -106,7 +107,7 @@ pub struct ImageDescription {
 	/// 색 데이터인지. (true 면 SRGB8_ALPHA8 로 올려 선형으로 샘플링, 노멀 같은 데이터 맵은 false)
 	pub is_color_data: bool,
 	/// 이방성 필터 단계. (0 이하면 쓰지 않음, 기기 최대치로 자른다, 확장이 없으면 무시)
-	pub anisotropy: f32,
+	pub anisotropy: f64,
 }
 
 //==============================================================================
@@ -131,7 +132,7 @@ pub struct ImageDescriptionOptions {
 	/// 색 데이터인지. (true 면 sRGB 로 올린다, 기본 false)
 	pub is_color_data: bool,
 	/// 이방성 필터 단계. (0 이면 쓰지 않음, 기본 0)
-	pub anisotropy: f32,
+	pub anisotropy: f64,
 }
 
 //==============================================================================
@@ -284,13 +285,13 @@ impl IntoFuture for ImageDescriptionLoadHandle {
 #[derive(Clone, Debug)]
 pub struct MaterialDescription {
 	/// 베이스 컬러 배율. (선형 rgb, 텍스처 색에 곱한다, 기본 흰색)
-	pub base_color_factor: [f32; 3],
+	pub base_color_factor: [f64; 3],
 	/// 메탈릭 배율. (0 ~ 1, 기본 0)
-	pub metallic_factor: f32,
+	pub metallic_factor: f64,
 	/// 러프니스 배율. (0 ~ 1, 기본 1)
-	pub roughness_factor: f32,
+	pub roughness_factor: f64,
 	/// 이미시브 배율. (선형 rgb, 이미시브 텍스처에 곱한다, 기본 검정)
-	pub emissive_factor: [f32; 3],
+	pub emissive_factor: [f64; 3],
 	/// 베이스 컬러 이미지. (None 이면 1x1 흰색)
 	pub base_color_image: Option<ImageDescription>,
 	/// 노멀 맵 이미지. (None 이면 1x1 (128, 128, 255) 평평한 노멀)
@@ -334,10 +335,10 @@ pub struct MaterialDescription {
 //==============================================================================
 pub struct Material {
 	shader_program: Rc<ShaderProgram>,
-	base_color_factor: Cell<[f32; 3]>,
-	metallic_factor: f32,
-	roughness_factor: f32,
-	emissive_factor: [f32; 3],
+	base_color_factor: Cell<[f64; 3]>,
+	metallic_factor: f64,
+	roughness_factor: f64,
+	emissive_factor: [f64; 3],
 	use_glossiness: bool,
 	use_alpha_cutout: Cell<bool>,
 	base_color_texture: Option<GlTexture>,
@@ -349,7 +350,7 @@ pub struct Material {
 	specular_texture: Option<GlTexture>,
 	opacity_texture: Option<GlTexture>,
 	extra_texture_bindings: RefCell<Vec<(String, u32, Option<GlTexture>)>>,
-	subsurface_factor: Cell<f32>,
+	subsurface_factor: Cell<f64>,
 	/// 기본 슬롯 텍스처를 이 머티리얼이 지었는지. (create_instance 로 갈라진 사본은 원본 것을 빌려 쓴다)
 	owns_textures: bool,
 	/// 이 머티리얼이 지은 기본 슬롯 텍스처의 GPU 바이트 수. (밉맵 포함)
@@ -554,8 +555,8 @@ impl Material {
 				let has_anisotropic_extension = gl.supported_extensions().iter().any(|extension_name| extension_name.contains("texture_filter_anisotropic"));
 				if has_anisotropic_extension {
 					let maximum_anisotropy = gl.get_parameter_f32(glow::MAX_TEXTURE_MAX_ANISOTROPY_EXT);
-					let anisotropy = image_description.anisotropy.min(maximum_anisotropy);
-					gl.tex_parameter_f32(glow::TEXTURE_2D, glow::TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
+					let anisotropy = image_description.anisotropy.min(maximum_anisotropy as f64);
+					gl.tex_parameter_f32(glow::TEXTURE_2D, glow::TEXTURE_MAX_ANISOTROPY_EXT, anisotropy as f32);
 				}
 			}
 			Ok((texture, compute_mipmap_byte_count(width, height)))
@@ -707,13 +708,13 @@ impl Material {
 		let base_color_factor = self.base_color_factor.get();
 		let emissive_factor = self.emissive_factor;
 		unsafe {
-			gl.uniform_3_f32(base_color_factor_location.as_ref(), base_color_factor[0], base_color_factor[1], base_color_factor[2]);
-			gl.uniform_1_f32(metallic_factor_location.as_ref(), self.metallic_factor);
-			gl.uniform_1_f32(roughness_factor_location.as_ref(), self.roughness_factor);
-			gl.uniform_3_f32(emissive_factor_location.as_ref(), emissive_factor[0], emissive_factor[1], emissive_factor[2]);
+			gl.uniform_3_f64(base_color_factor_location.as_ref(), base_color_factor[0], base_color_factor[1], base_color_factor[2]);
+			gl.uniform_1_f64(metallic_factor_location.as_ref(), self.metallic_factor);
+			gl.uniform_1_f64(roughness_factor_location.as_ref(), self.roughness_factor);
+			gl.uniform_3_f64(emissive_factor_location.as_ref(), emissive_factor[0], emissive_factor[1], emissive_factor[2]);
 			gl.uniform_1_i32(use_glossiness_location.as_ref(), i32::from(self.use_glossiness));
 			gl.uniform_1_i32(use_alpha_cutout_location.as_ref(), i32::from(self.use_alpha_cutout.get()));
-			gl.uniform_1_f32(subsurface_factor_location.as_ref(), self.subsurface_factor.get());
+			gl.uniform_1_f64(subsurface_factor_location.as_ref(), self.subsurface_factor.get());
 		}
 
 		let texture_bindings = self.get_texture_bindings();
@@ -746,7 +747,7 @@ impl Material {
 	/// # 돌려줌
 	/// 베이스 컬러 배율. (선형 rgb)
 	//==============================================================================
-	pub fn get_base_color_factor(&self) -> [f32; 3] {
+	pub fn get_base_color_factor(&self) -> [f64; 3] {
 		self.base_color_factor.get()
 	}
 
@@ -777,7 +778,7 @@ impl Material {
 	/// let _ = check;
 	/// ```
 	//==============================================================================
-	pub fn set_base_color_factor(&self, base_color_factor: [f32; 3]) {
+	pub fn set_base_color_factor(&self, base_color_factor: [f64; 3]) {
 		self.base_color_factor.set(base_color_factor);
 	}
 
@@ -829,7 +830,7 @@ impl Material {
 	/// # 돌려줌
 	/// 메탈릭 배율.
 	//==============================================================================
-	pub fn get_metallic_factor(&self) -> f32 {
+	pub fn get_metallic_factor(&self) -> f64 {
 		self.metallic_factor
 	}
 
@@ -839,7 +840,7 @@ impl Material {
 	/// # 돌려줌
 	/// 러프니스 배율.
 	//==============================================================================
-	pub fn get_roughness_factor(&self) -> f32 {
+	pub fn get_roughness_factor(&self) -> f64 {
 		self.roughness_factor
 	}
 
@@ -849,7 +850,7 @@ impl Material {
 	/// # 돌려줌
 	/// 이미시브 배율. (선형 rgb)
 	//==============================================================================
-	pub fn get_emissive_factor(&self) -> [f32; 3] {
+	pub fn get_emissive_factor(&self) -> [f64; 3] {
 		self.emissive_factor
 	}
 
@@ -869,7 +870,7 @@ impl Material {
 	/// # 인자
 	/// - `subsurface_factor`: 산란 마스크 배율. (기본 1, 0 이면 산란하지 않음)
 	//==============================================================================
-	pub fn set_subsurface_factor(&self, subsurface_factor: f32) {
+	pub fn set_subsurface_factor(&self, subsurface_factor: f64) {
 		self.subsurface_factor.set(subsurface_factor);
 	}
 
@@ -879,7 +880,7 @@ impl Material {
 	/// # 돌려줌
 	/// 서브서피스 팩터. (기본 1)
 	//==============================================================================
-	pub fn get_subsurface_factor(&self) -> f32 {
+	pub fn get_subsurface_factor(&self) -> f64 {
 		self.subsurface_factor.get()
 	}
 

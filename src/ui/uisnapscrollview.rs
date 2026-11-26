@@ -30,7 +30,7 @@ use crate::core::tween::easing_function;
 use crate::ui::uiscrollview::{ScrollMode, UIScrollView};
 
 /// 스냅 미끄러짐 시간. (초, 원본 트윈 0.3)
-const SNAP_TWEEN_DURATION: f32 = 0.3;
+const SNAP_TWEEN_DURATION: f64 = 0.3;
 
 //==============================================================================
 /// 스냅 미끄러짐 하나. (원본 #snap_tween 자리)
@@ -39,7 +39,7 @@ const SNAP_TWEEN_DURATION: f32 = 0.3;
 struct SnapTween {
 	start_offset: Vector2,
 	target_offset: Vector2,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 }
 
 //==============================================================================
@@ -64,7 +64,7 @@ struct SnapTween {
 /// for page_index in 0..5 {
 /// 	let page_id = node_tree.create_child(content_id, "page");
 /// 	node_tree[page_id].set_pivot(Pivot::TOP_LEFT);
-/// 	node_tree[page_id].set_rect(page_index as f32 * 200.0, 0.0, 200.0, 100.0);
+/// 	node_tree[page_id].set_rect(page_index as f64 * 200.0, 0.0, 200.0, 100.0);
 /// }
 ///
 /// node_tree.dispatch_touch(snap_id, &engine, TouchKind::Press, Vector2::create(150.0, 50.0));
@@ -88,10 +88,10 @@ pub struct UISnapScrollView {
 	snap_current_index: usize,
 	previous_is_dragging: bool,
 	is_snap_to_nearest: bool,
-	velocity_threshold: f32,
-	page_change_threshold: f32,
-	drag_velocity: f32,
-	previous_drag_axis_offset: f32,
+	velocity_threshold: f64,
+	page_change_threshold: f64,
+	drag_velocity: f64,
+	previous_drag_axis_offset: f64,
 }
 
 #[crate::reflect(base = scroll_view)]
@@ -276,7 +276,7 @@ impl UISnapScrollView {
 	/// # 인자
 	/// - `velocity_threshold`: 방향성 스냅 최소 속도. (픽셀/초, 기본 200)
 	//==============================================================================
-	pub fn set_velocity_threshold(&mut self, velocity_threshold: f32) {
+	pub fn set_velocity_threshold(&mut self, velocity_threshold: f64) {
 		self.velocity_threshold = velocity_threshold;
 	}
 
@@ -285,7 +285,7 @@ impl UISnapScrollView {
 	/// # 돌려줌
 	/// 방향성 스냅 최소 속도. (픽셀/초)
 	//==============================================================================
-	pub fn get_velocity_threshold(&self) -> f32 {
+	pub fn get_velocity_threshold(&self) -> f64 {
 		self.velocity_threshold
 	}
 
@@ -294,7 +294,7 @@ impl UISnapScrollView {
 	/// # 인자
 	/// - `page_change_threshold`: 끈 거리가 끈 쪽 다음 칸 크기의 이 비율 이상이면 그 칸으로 넘긴다. (0 ~ 1)
 	//==============================================================================
-	pub fn set_page_change_threshold(&mut self, page_change_threshold: f32) {
+	pub fn set_page_change_threshold(&mut self, page_change_threshold: f64) {
 		self.page_change_threshold = page_change_threshold;
 	}
 
@@ -303,7 +303,7 @@ impl UISnapScrollView {
 	/// # 돌려줌
 	/// 칸 넘김 비율.
 	//==============================================================================
-	pub fn get_page_change_threshold(&self) -> f32 {
+	pub fn get_page_change_threshold(&self) -> f64 {
 		self.page_change_threshold
 	}
 
@@ -313,7 +313,7 @@ impl UISnapScrollView {
 	/// # 돌려줌
 	/// 끄는 동안 스크롤 축 오프셋이 움직인 속도. (초당 픽셀, 다음 칸 쪽이 음수, 마지막으로 끈 tick 의 값이고 끌기를 시작하면 0)
 	//==============================================================================
-	pub fn get_drag_velocity(&self) -> f32 {
+	pub fn get_drag_velocity(&self) -> f64 {
 		self.drag_velocity
 	}
 
@@ -353,7 +353,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	/// 진행 축의 값 고르기.
 	//==============================================================================
-	fn select_axis(&self, vector: Vector2) -> f32 {
+	fn select_axis(&self, vector: Vector2) -> f64 {
 		if self.is_horizontal() {
 			vector.x
 		}
@@ -365,7 +365,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	/// 진행 축만 바꾼 오프셋. (다른 축은 지금 오프셋 그대로)
 	//==============================================================================
-	fn build_axis_offset(&self, axis_offset: f32) -> Vector2 {
+	fn build_axis_offset(&self, axis_offset: f64) -> Vector2 {
 		let current_offset = self.get_scroll_offset();
 		if self.is_horizontal() {
 			Vector2::create(axis_offset, current_offset.y)
@@ -408,7 +408,7 @@ impl UISnapScrollView {
 	/// for page_index in 0..3 {
 	/// 	let page_id = node_tree.create_child(content_id, "page");
 	/// 	node_tree[page_id].set_pivot(Pivot::TOP_LEFT);
-	/// 	node_tree[page_id].set_rect(page_index as f32 * 200.0, 0.0, 200.0, 100.0);
+	/// 	node_tree[page_id].set_rect(page_index as f64 * 200.0, 0.0, 200.0, 100.0);
 	/// }
 	///
 	/// let snap_view = node_tree[snap_id].get_component::<UISnapScrollView>().expect("snap view");
@@ -416,8 +416,8 @@ impl UISnapScrollView {
 	/// assert!(UISnapScrollView::new().compute_snap_offsets(&node_tree).is_empty());
 	/// ```
 	//==============================================================================
-	pub fn compute_snap_offsets(&self, node_tree: &NodeTree) -> Vec<f32> {
-		let mut snap_offsets: Vec<f32> = Vec::new();
+	pub fn compute_snap_offsets(&self, node_tree: &NodeTree) -> Vec<f64> {
+		let mut snap_offsets: Vec<f64> = Vec::new();
 		let viewport_size = match self.node_id.and_then(|node_id| node_tree.get_node(node_id)) {
 			Some(node) => {
 				node.get_content_size()
@@ -569,7 +569,7 @@ impl UISnapScrollView {
 	/// for page_index in 0..5 {
 	/// 	let page_id = node_tree.create_child(content_id, "page");
 	/// 	node_tree[page_id].set_pivot(Pivot::TOP_LEFT);
-	/// 	node_tree[page_id].set_rect(page_index as f32 * 200.0, 0.0, 200.0, 100.0);
+	/// 	node_tree[page_id].set_rect(page_index as f64 * 200.0, 0.0, 200.0, 100.0);
 	/// }
 	///
 	/// node_tree.with_component_mut::<UISnapScrollView, _>(snap_id, |snap_view, tree| {
@@ -635,7 +635,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	/// 미끄러짐 한 걸음. (원본 Tween.tick 과 같은 계산: 진행률 = 지난 시간 / 0.3, cubic.out, 다 차면 끝)
 	//==============================================================================
-	fn tick_snap_tween(&mut self, time_delta: f32) {
+	fn tick_snap_tween(&mut self, time_delta: f64) {
 		let mut snap_tween = match self.snap_tween {
 			Some(snap_tween) => {
 				snap_tween
@@ -731,7 +731,7 @@ impl Component for UISnapScrollView {
 	//==============================================================================
 	/// 갱신. (품은 뷰 → 드래그 시작이면 미끄러짐 취소 → 드래그 속도 → 끄는 중 칸 범위 자르기 → 놓았으면 스냅 시작 → 미끄러짐)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		self.node_id = Some(context.get_node_id());
 		let previous_is_dragging = self.previous_is_dragging;
 		self.scroll_view.tick(context, time_delta);
@@ -905,7 +905,7 @@ mod tests {
 			let page_id = node_tree.create_child(content_id, "page");
 			let page_node = &mut node_tree[page_id];
 			page_node.set_pivot(Pivot::TOP_LEFT);
-			page_node.set_local_position(Vector2::create(page_index as f32 * 200.0, 0.0));
+			page_node.set_local_position(Vector2::create(page_index as f64 * 200.0, 0.0));
 			page_node.set_content_size(Vector2::create(200.0, 100.0));
 		}
 		(node_tree, snap_id)
@@ -921,7 +921,7 @@ mod tests {
 	//==============================================================================
 	/// 끌고 놓기. (누름 → 이동 → tick → 뗌 → 0.5 초 동안 tick)
 	//==============================================================================
-	fn drag_and_release(node_tree: &mut NodeTree, engine: &Engine, snap_id: NodeId, from_x: f32, to_x: f32) {
+	fn drag_and_release(node_tree: &mut NodeTree, engine: &Engine, snap_id: NodeId, from_x: f64, to_x: f64) {
 		node_tree.dispatch_touch(snap_id, engine, TouchKind::Press, Vector2::create(from_x, 50.0));
 		node_tree.dispatch_touch(snap_id, engine, TouchKind::Moved, Vector2::create(to_x, 50.0));
 		node_tree.tick(engine, 0.016);

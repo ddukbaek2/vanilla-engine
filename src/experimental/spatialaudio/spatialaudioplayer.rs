@@ -139,7 +139,7 @@ impl SpatialAudioPlayer {
 	/// # 인자
 	/// - `volume`: 음량.
 	//==============================================================================
-	pub fn set_volume(&mut self, volume: f32) {
+	pub fn set_volume(&mut self, volume: f64) {
 		self.audio_player.set_volume(volume);
 	}
 
@@ -149,7 +149,7 @@ impl SpatialAudioPlayer {
 	/// # 돌려줌
 	/// 음량.
 	//==============================================================================
-	pub fn get_volume(&self) -> f32 {
+	pub fn get_volume(&self) -> f64 {
 		self.audio_player.get_volume()
 	}
 
@@ -332,8 +332,8 @@ impl SpatialAudioPlayer {
 	/// # 돌려줌
 	/// 거리 x 원뿔 이득.
 	//==============================================================================
-	pub fn calculate_gain(&self, listener: &SpatialAudioListener) -> f32 {
-		calculate_distance_cone_gain(&self.settings, self.position, self.orientation, listener.get_position())
+	pub fn calculate_gain(&self, listener: &SpatialAudioListener) -> f64 {
+		(calculate_distance_cone_gain(&self.settings, self.position, self.orientation, listener.get_position())) as f64
 	}
 }
 
@@ -357,7 +357,7 @@ mod tests {
 		assert_eq!(settings.maximum_distance, 50.0);
 		assert_eq!(settings.rolloff_factor, 1.0);
 		assert_eq!(settings.cone_outer_gain, 0.0);
-		player.set_position(Vector3::create(1.0, f32::NAN, 3.0));
+		player.set_position(Vector3::create(1.0, f64::NAN, 3.0));
 		assert_eq!(player.get_position(), Vector3::create(1.0, 0.0, 3.0));
 	}
 }

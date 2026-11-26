@@ -412,17 +412,17 @@ pub(crate) fn calculate_resized_size(previous_start: f64, next_end: f64, thickne
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ClassicScrollbarMetrics {
 	/// 막대 두께. (내용 상자에서 이만큼 덜어 낸다)
-	pub thickness: f32,
+	pub thickness: f64,
 	/// 양끝 단추 길이. (썸은 그 사이에서 움직인다, 없으면 0)
-	pub button_length: f32,
+	pub button_length: f64,
 	/// 썸 두께. (막대의 가로지르는 쪽)
-	pub thumb_thickness: f32,
+	pub thumb_thickness: f64,
 	/// 막대 안쪽에서 썸까지. (막대의 가로지르는 쪽)
-	pub thumb_cross_offset: f32,
+	pub thumb_cross_offset: f64,
 	/// 썸이 움직이는 칸의 가장 짧은 썸 길이.
-	pub thumb_minimum_length: f32,
+	pub thumb_minimum_length: f64,
 	/// 그린 썸이 칸 끝에서 떨어지는 만큼.
-	pub thumb_length_inset: f32,
+	pub thumb_length_inset: f64,
 }
 
 //==============================================================================
@@ -449,11 +449,11 @@ pub fn read_classic_scrollbar_metrics(is_thin: bool) -> Option<ClassicScrollbarM
 		}
 		let proportion = thickness / 15.0;
 		Some(ClassicScrollbarMetrics {
-			thickness,
-			button_length: (18.0 * proportion).floor(),
-			thumb_thickness: (9.0 * proportion).floor(),
-			thumb_cross_offset: ((thickness - (9.0 * proportion).floor()) * 0.5).floor(),
-			thumb_minimum_length: (17.0 * proportion).floor(),
+			thickness: thickness as f64,
+			button_length: ((18.0 * proportion).floor()) as f64,
+			thumb_thickness: ((9.0 * proportion).floor()) as f64,
+			thumb_cross_offset: (((thickness - (9.0 * proportion).floor()) * 0.5).floor()) as f64,
+			thumb_minimum_length: ((17.0 * proportion).floor()) as f64,
 			thumb_length_inset: 0.0,
 		})
 	}
@@ -490,14 +490,14 @@ pub fn read_classic_scrollbar_metrics(is_thin: bool) -> Option<ClassicScrollbarM
 		else {
 			1.0
 		};
-		let thickness = (15.0_f32 * proportion).floor();
-		let thumb_thickness = (9.0_f32 * proportion).floor();
+		let thickness = (15.0_f64 * proportion).floor();
+		let thumb_thickness = (9.0_f64 * proportion).floor();
 		Some(ClassicScrollbarMetrics {
 			thickness,
-			button_length: (18.0_f32 * proportion).floor(),
+			button_length: (18.0_f64 * proportion).floor(),
 			thumb_thickness,
 			thumb_cross_offset: ((thickness - thumb_thickness) * 0.5).floor(),
-			thumb_minimum_length: (17.0_f32 * proportion).floor(),
+			thumb_minimum_length: (17.0_f64 * proportion).floor(),
 			thumb_length_inset: 0.0,
 		})
 	}
@@ -517,7 +517,7 @@ pub fn read_classic_scrollbar_metrics(is_thin: bool) -> Option<ClassicScrollbarM
 /// # 돌려줌
 /// (썸 시작, 썸 길이). 내용이 0.5 를 넘게 넘치지 않거나, 썸 칸이 가장 짧은 썸 길이보다 짧거나, 보이는 길이가 0 이하면 None.
 //==============================================================================
-pub fn calculate_classic_thumb_span(metrics: &ClassicScrollbarMetrics, track_length: f32, viewport_length: f32, extent_length: f32, offset: f32) -> Option<(f32, f32)> {
+pub fn calculate_classic_thumb_span(metrics: &ClassicScrollbarMetrics, track_length: f64, viewport_length: f64, extent_length: f64, offset: f64) -> Option<(f64, f64)> {
 	let thumb_room = track_length - metrics.button_length * 2.0;
 	if extent_length <= viewport_length + 0.5 || thumb_room < metrics.thumb_minimum_length || viewport_length <= 0.0 {
 		return None;

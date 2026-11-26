@@ -1523,12 +1523,12 @@ impl<'a, T: FromReflectValue<'a>> FromReflectValue<'a> for Option<T> {
 }
 
 //==============================================================================
-/// 배열의 수 하나. (f32)
+/// 배열의 수 하나. (f64, 엔진 벡터와 색의 성분 꼴)
 //==============================================================================
-fn read_list_number(item_values: &[ReflectValue], item_index: usize) -> Option<f32> {
+fn read_list_number(item_values: &[ReflectValue], item_index: usize) -> Option<f64> {
 	match item_values.get(item_index) {
 		Some(ReflectValue::Number(number)) => {
-			Some(*number as f32)
+			Some(*number)
 		}
 		_ => {
 			None

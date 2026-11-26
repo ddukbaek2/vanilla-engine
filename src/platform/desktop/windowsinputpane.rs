@@ -14,7 +14,7 @@
 //!   - 사용자가 키보드를 손으로 닫거나 열면 그 상태를 따른다. (OnKeyboardHidden, OnKeyboardVisible 이 virtual_keyboard_shown_ 을 바꾼다)
 //! - 크롬의 navigator.virtualKeyboard.overlaysContent(키보드가 화면을 덮게 하는 웹 API)는 원본이 쓰지 않아 옮기지 않았다.
 //==============================================================================
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 use web_time::Instant;
@@ -31,8 +31,8 @@ const DEBOUNCE_MILLISECONDS: u64 = 300;
 const SHOW_MESSAGE: u32 = WM_APP + 0x5641;
 const HIDE_MESSAGE: u32 = WM_APP + 0x5642;
 
-/// 키보드가 가린 영역의 세로. (DIP, f32 비트, Showing 과 Hiding 이 적는다)
-static OCCLUDED_HEIGHT_BITS: AtomicU32 = AtomicU32::new(0);
+/// 키보드가 가린 영역의 세로. (DIP, f64 비트, Showing 과 Hiding 이 적는다)
+static OCCLUDED_HEIGHT_BITS: AtomicU64 = AtomicU64::new(0);
 /// 키보드가 떠 있는지. (Showing 과 Hiding 이 적는다)
 static IS_INPUT_PANE_VISIBLE: AtomicBool = AtomicBool::new(false);
 /// Showing, Hiding 이 온 횟수. (주 스레드가 바뀐 것을 알아챈다)
@@ -174,8 +174,8 @@ impl VirtualKeyboardController {
 //==============================================================================
 /// 키보드가 가린 영역의 세로. (DIP, 떠 있지 않으면 0, visualViewport 아래 인셋)
 //==============================================================================
-pub(super) fn read_occluded_height() -> f32 {
-	f32::from_bits(OCCLUDED_HEIGHT_BITS.load(Ordering::Acquire))
+pub(super) fn read_occluded_height() -> f64 {
+	f64::from_bits(OCCLUDED_HEIGHT_BITS.load(Ordering::Acquire))
 }
 
 //==============================================================================
@@ -250,13 +250,13 @@ fn create_input_pane(window_handle: HWND) -> Option<InputPane> {
 				0.0
 			}
 		};
-		OCCLUDED_HEIGHT_BITS.store(occluded_height.to_bits(), Ordering::Release);
+		OCCLUDED_HEIGHT_BITS.store((occluded_height as f64).to_bits(), Ordering::Release);
 		IS_INPUT_PANE_VISIBLE.store(true, Ordering::Release);
 		INPUT_PANE_EVENT_COUNT.fetch_add(1, Ordering::AcqRel);
 		Ok(())
 	});
 	let hiding_handler = TypedEventHandler::<InputPane, InputPaneVisibilityEventArgs>::new(|_input_pane, _arguments| {
-		OCCLUDED_HEIGHT_BITS.store(0.0f32.to_bits(), Ordering::Release);
+		OCCLUDED_HEIGHT_BITS.store(0.0f64.to_bits(), Ordering::Release);
 		IS_INPUT_PANE_VISIBLE.store(false, Ordering::Release);
 		INPUT_PANE_EVENT_COUNT.fetch_add(1, Ordering::AcqRel);
 		Ok(())

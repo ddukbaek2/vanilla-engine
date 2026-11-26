@@ -63,15 +63,15 @@ const BAKE_PADDING: i32 = 2;
 /// assert_eq!(blur_coverage(&coverage, width, height, 0.0), coverage);
 /// ```
 //==============================================================================
-pub fn blur_coverage(coverage: &[u8], width: i32, height: i32, radius: f32) -> Vec<u8> {
+pub fn blur_coverage(coverage: &[u8], width: i32, height: i32, radius: f64) -> Vec<u8> {
 	if radius <= 0.0 || width <= 0 || height <= 0 {
 		return coverage.to_vec();
 	}
 	// 가우시안의 표준편차를 상자 셋으로 나눈 반지름. (sigma ≈ radius / 2, 상자 너비 = sqrt(12 sigma² / 3 + 1))
 	let sigma = radius * 0.5;
 	let box_radius = (((12.0 * sigma * sigma / 3.0 + 1.0).sqrt() - 1.0) * 0.5).round().max(1.0) as i32;
-	let mut values: Vec<f32> = coverage.iter().map(|value| *value as f32).collect();
-	let mut scratch = vec![0.0f32; values.len()];
+	let mut values: Vec<f64> = coverage.iter().map(|value| *value as f64).collect();
+	let mut scratch = vec![0.0f64; values.len()];
 	for _ in 0..3 {
 		blur_axis(&values, &mut scratch, width, height, box_radius, true);
 		blur_axis(&scratch, &mut values, width, height, box_radius, false);
@@ -82,14 +82,14 @@ pub fn blur_coverage(coverage: &[u8], width: i32, height: i32, radius: f32) -> V
 //==============================================================================
 /// 한 축으로 상자 흐림. (밖은 0)
 //==============================================================================
-fn blur_axis(source: &[f32], target: &mut [f32], width: i32, height: i32, box_radius: i32, is_horizontal: bool) {
+fn blur_axis(source: &[f64], target: &mut [f64], width: i32, height: i32, box_radius: i32, is_horizontal: bool) {
 	let (line_count, line_length) = if is_horizontal { (height, width) } else { (width, height) };
-	let window = (box_radius * 2 + 1) as f32;
+	let window = (box_radius * 2 + 1) as f64;
 	for line_index in 0..line_count {
 		let read_index = |position: i32| -> usize {
 			if is_horizontal { (line_index * width + position) as usize } else { (position * width + line_index) as usize }
 		};
-		let mut sum = 0.0f32;
+		let mut sum = 0.0f64;
 		for position in -box_radius..=box_radius {
 			if position >= 0 && position < line_length {
 				sum += source[read_index(position)];
@@ -141,28 +141,28 @@ fn blur_axis(source: &[f32], target: &mut [f32], width: i32, height: i32, box_ra
 /// assert_eq!(pixels[11], 0);
 /// ```
 //==============================================================================
-pub fn compose_shadow_image(shape_coverage: &[u8], shape_pixels: Option<&[u8]>, width: i32, height: i32, shape_color: Color, shadow_color: Color, shadow_blur: f32, shadow_offset_y: i32) -> Rc<Image> {
+pub fn compose_shadow_image(shape_coverage: &[u8], shape_pixels: Option<&[u8]>, width: i32, height: i32, shape_color: Color, shadow_color: Color, shadow_blur: f64, shadow_offset_y: i32) -> Rc<Image> {
 	let shadow_coverage = blur_coverage(shape_coverage, width, height, shadow_blur);
 	let mut pixels = vec![0u8; (width * height * 4) as usize];
 	for y in 0..height {
 		for x in 0..width {
 			let pixel_index = (y * width + x) as usize;
 			let shadow_y = y - shadow_offset_y;
-			let shadow_alpha = if shadow_y >= 0 && shadow_y < height { shadow_coverage[(shadow_y * width + x) as usize] as f32 / 255.0 * shadow_color.alpha } else { 0.0 };
+			let shadow_alpha = if shadow_y >= 0 && shadow_y < height { shadow_coverage[(shadow_y * width + x) as usize] as f64 / 255.0 * shadow_color.alpha } else { 0.0 };
 			let (shape_red, shape_green, shape_blue, shape_alpha) = match shape_pixels {
 				Some(shape_pixels) => {
 					let offset = pixel_index * 4;
-					(shape_pixels[offset] as f32 / 255.0, shape_pixels[offset + 1] as f32 / 255.0, shape_pixels[offset + 2] as f32 / 255.0, shape_pixels[offset + 3] as f32 / 255.0)
+					(shape_pixels[offset] as f64 / 255.0, shape_pixels[offset + 1] as f64 / 255.0, shape_pixels[offset + 2] as f64 / 255.0, shape_pixels[offset + 3] as f64 / 255.0)
 				}
 				None => {
-					(shape_color.red, shape_color.green, shape_color.blue, shape_coverage[pixel_index] as f32 / 255.0 * shape_color.alpha)
+					(shape_color.red, shape_color.green, shape_color.blue, shape_coverage[pixel_index] as f64 / 255.0 * shape_color.alpha)
 				}
 			};
 			// 그림자 위에 모양을 얹는다. (곧은 알파의 over)
 			let alpha = shape_alpha + shadow_alpha * (1.0 - shape_alpha);
 			let offset = pixel_index * 4;
 			if alpha > 0.0 {
-				let mix_channel = |shape_value: f32, shadow_value: f32| ((shape_value * shape_alpha + shadow_value * shadow_alpha * (1.0 - shape_alpha)) / alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+				let mix_channel = |shape_value: f64, shadow_value: f64| ((shape_value * shape_alpha + shadow_value * shadow_alpha * (1.0 - shape_alpha)) / alpha * 255.0).round().clamp(0.0, 255.0) as u8;
 				pixels[offset] = mix_channel(shape_red, shadow_color.red);
 				pixels[offset + 1] = mix_channel(shape_green, shadow_color.green);
 				pixels[offset + 2] = mix_channel(shape_blue, shadow_color.blue);
@@ -182,8 +182,8 @@ fn compose_color_text_shape(coverage: &[u8], color_pixels: &[u8], text_color: Co
 	let mut shape_pixels = vec![0u8; coverage.len() * 4];
 	for (pixel_index, value) in coverage.iter().enumerate() {
 		let offset = pixel_index * 4;
-		let color_alpha = color_pixels[offset + 3] as f32 / 255.0 * text_color.alpha;
-		let text_alpha = *value as f32 / 255.0 * text_color.alpha * (1.0 - color_alpha);
+		let color_alpha = color_pixels[offset + 3] as f64 / 255.0 * text_color.alpha;
+		let text_alpha = *value as f64 / 255.0 * text_color.alpha * (1.0 - color_alpha);
 		let alpha = color_alpha + text_alpha;
 		shape_coverage.push((*value).max(color_pixels[offset + 3]));
 		if alpha <= 0.0 {
@@ -191,7 +191,7 @@ fn compose_color_text_shape(coverage: &[u8], color_pixels: &[u8], text_color: Co
 		}
 		let text_channel_list = [text_color.red, text_color.green, text_color.blue];
 		for channel_index in 0..3 {
-			let premultiplied = color_pixels[offset + channel_index] as f32 / 255.0 * text_color.alpha + text_channel_list[channel_index] * text_alpha;
+			let premultiplied = color_pixels[offset + channel_index] as f64 / 255.0 * text_color.alpha + text_channel_list[channel_index] * text_alpha;
 			shape_pixels[offset + channel_index] = (premultiplied / alpha * 255.0).round().clamp(0.0, 255.0) as u8;
 		}
 		shape_pixels[offset + 3] = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
@@ -204,13 +204,13 @@ fn compose_color_text_shape(coverage: &[u8], color_pixels: &[u8], text_color: Co
 //==============================================================================
 struct BakedText {
 	image: Rc<Image>,
-	scale: f32,
-	content_width: f32,
-	pen_offset_x: f32,
-	baseline_offset_y: f32,
-	advance_width: f32,
-	font_ascent: f32,
-	font_descent: f32,
+	scale: f64,
+	content_width: f64,
+	pen_offset_x: f64,
+	baseline_offset_y: f64,
+	advance_width: f64,
+	font_ascent: f64,
+	font_descent: f64,
 }
 
 //==============================================================================
@@ -243,7 +243,7 @@ pub struct ShadowText {
 	component_base: ComponentBase,
 	text: String,
 	font_family: String,
-	font_size: f32,
+	font_size: f64,
 	is_bold: bool,
 	is_italic: bool,
 	is_underline: bool,
@@ -252,9 +252,9 @@ pub struct ShadowText {
 	text_direction: TextDirection,
 	text_color: Color,
 	shadow_color: Color,
-	shadow_offset: f32,
-	shadow_blur: f32,
-	fit_minimum_ratio: f32,
+	shadow_offset: f64,
+	shadow_blur: f64,
+	fit_minimum_ratio: f64,
 	baked_text: Option<Rc<BakedText>>,
 	bake_key: String,
 	/// 세터로 바꾼 뒤 아직 굽지 않았는지. (화면 밖 거르기가 지난 한 장을 믿을지 가린다)
@@ -313,7 +313,7 @@ impl ShadowText {
 	/// assert_eq!(shadow_text.get_font_family(), "default");
 	/// ```
 	//==============================================================================
-	pub fn create_with_text(text: &str, font_size: f32) -> ShadowText {
+	pub fn create_with_text(text: &str, font_size: f64) -> ShadowText {
 		let mut shadow_text = ShadowText::new();
 		shadow_text.set_text(text);
 		shadow_text.font_size = font_size;
@@ -323,14 +323,14 @@ impl ShadowText {
 	//==============================================================================
 	/// Canvas2D font 꼴 문자열. (Text 와 같은 꼴)
 	//==============================================================================
-	fn build_font_string(&self, font_size: f32) -> String {
+	fn build_font_string(&self, font_size: f64) -> String {
 		build_font_string(&self.font_family, font_size, self.is_bold, self.is_italic)
 	}
 
 	//==============================================================================
 	/// 밑줄 / 취소선 두께. (Text 와 같이 max(1, 글자 크기 / 16))
 	//==============================================================================
-	fn calculate_decoration_line_width(font_size: f32) -> f32 {
+	fn calculate_decoration_line_width(font_size: f64) -> f64 {
 		(font_size / 16.0).max(1.0)
 	}
 
@@ -411,8 +411,8 @@ impl ShadowText {
 			}
 		};
 
-		let image_width = baked_text.image.get_width() as f32;
-		let image_height = baked_text.image.get_height() as f32;
+		let image_width = baked_text.image.get_width() as f64;
+		let image_height = baked_text.image.get_height() as f64;
 		let image = baked_text.image.clone();
 		let quad_rect = self.calculate_quad_rect(graphic, baked_text, content_size.x, content_size.y);
 		graphic.draw_image_with_source_and_destination(&image, 0.0, 0.0, image_width, image_height, quad_rect.position.x, quad_rect.position.y, quad_rect.size.x, quad_rect.size.y);
@@ -421,7 +421,7 @@ impl ShadowText {
 	//==============================================================================
 	/// 구운 한 장이 놓이는 사각형. (가로는 정렬대로, 세로는 가운데(middle 기준선)에 놓는다)
 	//==============================================================================
-	fn calculate_quad_rect(&self, graphic: &Graphic, baked_text: &BakedText, content_width: f32, content_height: f32) -> Rect {
+	fn calculate_quad_rect(&self, graphic: &Graphic, baked_text: &BakedText, content_width: f64, content_height: f64) -> Rect {
 		let (anchor_x, align_offset) = match graphic.resolve_text_align(self.text_align, self.resolve_shaping_text_direction()) {
 			TextAlign::Left => {
 				(0.0, 0.0)
@@ -435,15 +435,15 @@ impl ShadowText {
 		};
 		let quad_x = anchor_x + align_offset - baked_text.pen_offset_x;
 		let quad_y = content_height * 0.5 + (baked_text.font_ascent - baked_text.font_descent) * 0.5 - baked_text.baseline_offset_y;
-		let image_width = baked_text.image.get_width() as f32;
-		let image_height = baked_text.image.get_height() as f32;
+		let image_width = baked_text.image.get_width() as f64;
+		let image_height = baked_text.image.get_height() as f64;
 		Rect::create(quad_x, quad_y, image_width / baked_text.scale, image_height / baked_text.scale)
 	}
 
 	//==============================================================================
 	/// 굽기. (넘치면 줄이고, 모양을 받아 그림자를 깐 한 장으로)
 	//==============================================================================
-	fn bake(&self, graphic: &mut Graphic, fit_width: f32, bake_scale: f32) -> Option<BakedText> {
+	fn bake(&self, graphic: &mut Graphic, fit_width: f64, bake_scale: f64) -> Option<BakedText> {
 		let full_font_string = self.build_font_string(self.font_size);
 		let text_width = graphic.get_text_string_texture_cache().measure_text(&full_font_string, &self.text).width;
 		let mut font_size = self.font_size;
@@ -467,7 +467,7 @@ impl ShadowText {
 			padding += ((font_size * 0.25 + 2.0) * bake_scale).ceil() as i32;
 		}
 		// 원본은 글 색 그대로 Canvas2D 에 굽는다. (맥 데스크탑은 그 색 밝기로 감마 전보정)
-		let mut text_raster = graphic.get_text_string_texture_cache().rasterize_text_with_color(&self.text, &font_string, bake_scale, padding, self.resolve_shaping_text_direction().to_shaping_direction(), self.text_color)?;
+		let mut text_raster = graphic.get_text_string_texture_cache().rasterize_text_with_color(&self.text, &font_string, bake_scale as f32, padding, self.resolve_shaping_text_direction().to_shaping_direction(), self.text_color)?;
 		self.draw_decoration_lines(&mut text_raster, font_size, bake_scale);
 		let image = match text_raster.color_pixels.as_ref() {
 			Some(color_pixels) => {
@@ -495,31 +495,31 @@ impl ShadowText {
 	/// 브라우저 캔버스로 굽기. (웹, 원본 bakeText: 글자 색으로 fillText, 그림자는 캔버스의 shadowColor / shadowBlur / shadowOffsetY, 밑줄과 취소선은 fillRect)
 	//==============================================================================
 	#[cfg(target_arch = "wasm32")]
-	fn bake_with_browser(&self, font_string: &str, fit_width: f32, bake_scale: f32) -> Option<BakedText> {
+	fn bake_with_browser(&self, font_string: &str, fit_width: f64, bake_scale: f64) -> Option<BakedText> {
 		let font_description = crate::core::textstringtexturecache::parse_font_string(font_string);
-		let browser_bake = crate::platform::web::systemfont::bake_shadow_text(&self.text, &font_description, bake_scale, self.resolve_shaping_text_direction().to_shaping_direction(), self.text_color, self.shadow_color, self.shadow_offset, self.shadow_blur, self.is_underline, self.is_strikethrough)?;
+		let browser_bake = crate::platform::web::systemfont::bake_shadow_text(&self.text, &font_description, (bake_scale as f32) as f64, self.resolve_shaping_text_direction().to_shaping_direction(), self.text_color, self.shadow_color, (self.shadow_offset as f32) as f64, (self.shadow_blur as f32) as f64, self.is_underline, self.is_strikethrough)?;
 		Some(BakedText {
 			image: Image::create_from_pixels(browser_bake.bitmap.width, browser_bake.bitmap.height, browser_bake.bitmap.pixels),
 			scale: bake_scale,
 			content_width: fit_width,
-			pen_offset_x: browser_bake.pen_x / bake_scale,
-			baseline_offset_y: browser_bake.baseline_y / bake_scale,
-			advance_width: browser_bake.advance_width / bake_scale,
-			font_ascent: browser_bake.font_ascent / bake_scale,
-			font_descent: browser_bake.font_descent / bake_scale,
+			pen_offset_x: (browser_bake.pen_x / (bake_scale as f32) as f64) as f64,
+			baseline_offset_y: (browser_bake.baseline_y / (bake_scale as f32) as f64) as f64,
+			advance_width: (browser_bake.advance_width / (bake_scale as f32) as f64) as f64,
+			font_ascent: (browser_bake.font_ascent / (bake_scale as f32) as f64) as f64,
+			font_descent: (browser_bake.font_descent / (bake_scale as f32) as f64) as f64,
 		})
 	}
 
 	//==============================================================================
 	/// 밑줄 / 취소선을 글 모양 래스터에 긋기. (가운데 기준선 자리에서 Text 와 같은 오프셋, 길이는 전진폭)
 	//==============================================================================
-	fn draw_decoration_lines(&self, text_raster: &mut TextRaster, font_size: f32, bake_scale: f32) {
+	fn draw_decoration_lines(&self, text_raster: &mut TextRaster, font_size: f64, bake_scale: f64) {
 		if !self.is_underline && !self.is_strikethrough {
 			return;
 		}
 		let middle_y = text_raster.baseline_y - (text_raster.font_ascent - text_raster.font_descent) * 0.5;
 		let line_width = ShadowText::calculate_decoration_line_width(font_size) * bake_scale;
-		let mut center_y_list: Vec<f32> = Vec::new();
+		let mut center_y_list: Vec<f64> = Vec::new();
 		if self.is_underline {
 			center_y_list.push(middle_y + (font_size * 0.5 + 2.0) * bake_scale);
 		}
@@ -589,7 +589,7 @@ impl ShadowText {
 	/// # 돌려줌
 	/// 처음 글자 크기. (픽셀, 넘쳐 줄인 크기가 아니다)
 	//==============================================================================
-	pub fn get_font_size(&self) -> f32 {
+	pub fn get_font_size(&self) -> f64 {
 		self.font_size
 	}
 
@@ -669,7 +669,7 @@ impl ShadowText {
 	/// - `is_bold`: 굵게 그릴지.
 	/// - `text_color`: 글자 색. (Color 또는 "#rrggbb" 같은 문자열, 알파가 글자 불투명도)
 	//==============================================================================
-	pub fn set_text_style(&mut self, font_size: f32, is_bold: bool, text_color: impl Into<Color>) {
+	pub fn set_text_style(&mut self, font_size: f64, is_bold: bool, text_color: impl Into<Color>) {
 		self.font_size = font_size;
 		self.is_bold = is_bold;
 		self.text_color = text_color.into();
@@ -747,7 +747,7 @@ impl ShadowText {
 	/// - `shadow_offset`: 그림자가 아래로 내려가는 만큼. (노드 좌표, 처음 0)
 	/// - `shadow_blur`: 그림자가 번지는 만큼. (노드 좌표, 0 보다 작으면 0, 처음 0)
 	//==============================================================================
-	pub fn set_shadow(&mut self, shadow_color: impl Into<Color>, shadow_offset: f32, shadow_blur: f32) {
+	pub fn set_shadow(&mut self, shadow_color: impl Into<Color>, shadow_offset: f64, shadow_blur: f64) {
 		self.shadow_color = shadow_color.into();
 		self.shadow_offset = shadow_offset;
 		self.shadow_blur = shadow_blur.max(0.0);
@@ -773,7 +773,7 @@ impl ShadowText {
 	/// assert_eq!(shadow_text.get_fit_minimum_ratio(), 0.01);
 	/// ```
 	//==============================================================================
-	pub fn set_fit_minimum_ratio(&mut self, fit_minimum_ratio: f32) {
+	pub fn set_fit_minimum_ratio(&mut self, fit_minimum_ratio: f64) {
 		self.fit_minimum_ratio = fit_minimum_ratio.clamp(0.01, 1.0);
 		self.is_bake_dirty = true;
 	}
@@ -784,7 +784,7 @@ impl ShadowText {
 	/// # 돌려줌
 	/// 처음 글자 크기에 대한 가장 작은 비율. (0.01 ~ 1)
 	//==============================================================================
-	pub fn get_fit_minimum_ratio(&self) -> f32 {
+	pub fn get_fit_minimum_ratio(&self) -> f64 {
 		self.fit_minimum_ratio
 	}
 

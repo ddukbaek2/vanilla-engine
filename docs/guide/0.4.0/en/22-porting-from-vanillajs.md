@@ -31,7 +31,7 @@ cooldown.tick(0.5);
 assert!(cooldown.activate());
 ```
 
-- Numbers are `f32`. An integer literal without a decimal point (`640`) cannot be used where an `f32` is expected, so write `640.0`. Only places that must produce JS number text exactly (`Format`, `LocalStorage`) use `f64`.
+- Numbers are `f64`. An integer literal without a decimal point (`640`) cannot be used where an `f64` is expected, so write `640.0`. Only places that must produce JS number text exactly (`Format`, `LocalStorage`) use `f64`.
 - Most functions that take a color take `impl Into<Color>`, so they accept both text such as `"#ffcc33"` and `Color::create(0.2, 0.25, 0.35, 1.0)`. The original `new Color(r, g, b, a)` is `Color::create(r, g, b, a)`.
 - Names inside files and documents do not change. Keys such as `contentSize` in the UI document (`.scene.json`) and keys such as `LineWidth` in reflection saving stay as in the original, so both engines read the same files.
 
@@ -191,7 +191,7 @@ use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineConfigur
 
 struct Spin {
 	component_base: ComponentBase,
-	degrees_per_second: f32,
+	degrees_per_second: f64,
 }
 
 #[vanilla::reflect]
@@ -203,7 +203,7 @@ impl Spin {
 		}
 	}
 
-	pub fn set_degrees_per_second(&mut self, degrees_per_second: f32) {
+	pub fn set_degrees_per_second(&mut self, degrees_per_second: f64) {
 		self.degrees_per_second = degrees_per_second;
 	}
 }
@@ -222,7 +222,7 @@ impl Component for Spin {
 		"Spin"
 	}
 
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let transform = context.get_transform_mut();
 		let local_rotation = transform.get_local_rotation();
 		transform.set_local_rotation(local_rotation + self.degrees_per_second * time_delta);

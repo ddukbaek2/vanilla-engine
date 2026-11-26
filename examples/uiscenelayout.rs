@@ -19,7 +19,7 @@ use vanilla::{
 struct LayoutScene {
 	ui_scene_base: UISceneBase,
 	title_id: Option<NodeId>,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 	is_title_changed: bool,
 }
 
@@ -184,7 +184,7 @@ impl UIScene for LayoutScene {
 	//==============================================================================
 	// 갱신. (1 초 뒤 제목 글을 바꿔 자연 크기가 따라가는지 보인다)
 	//==============================================================================
-	fn tick(&mut self, _engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, _engine: &mut Engine, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 		if self.is_title_changed || self.elapsed_seconds < 1.0 {
 			return;

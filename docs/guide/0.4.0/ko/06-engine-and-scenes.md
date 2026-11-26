@@ -146,7 +146,7 @@ impl Scene for LifecycleScene {
 		println!("initialize");
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.tick_count += 1;
 		if self.tick_count == 1 {
@@ -330,7 +330,7 @@ impl Scene for MainScene {
 
 struct SplashScene {
 	scene_base: SceneBase,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 	is_leaving: bool,
 }
 
@@ -343,7 +343,7 @@ impl Scene for SplashScene {
 		&mut self.scene_base
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.elapsed_seconds += time_delta;
 		if self.is_leaving || self.elapsed_seconds < 0.5 {
@@ -401,7 +401,7 @@ fn main() {
 
 | 함수 | 내용 |
 | --- | --- |
-| `get_time_delta()` | 배율을 곱한 프레임 간격 (초, `f32`). 씬과 컴포넌트의 `tick` 이 받는 값 |
+| `get_time_delta()` | 배율을 곱한 프레임 간격 (초, `f64`). 씬과 컴포넌트의 `tick` 이 받는 값 |
 | `get_unscale_delta_time()` | 배율을 곱하기 전 프레임 간격 (초, 0 ~ 상한) |
 | `get_time()` | 상한으로 자른 간격을 더한 누적 시간 (초, `f64`, 배율을 곱하지 않음) |
 | `get_realtime_since_startup()` | 엔진 시작 뒤 경과 초 (마지막 갱신의 값, `f64`) |
@@ -453,7 +453,7 @@ impl Scene for TimeScene {
 		time_manager.set_maximum_time_delta(0.1);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		let time_manager = engine.get_time_manager();
 		let frame_per_second = time_manager.get_frame_per_second();
@@ -625,7 +625,7 @@ struct PausingScene {
 	scene_base: SceneBase,
 	is_paused: Rc<Cell<bool>>,
 	page_event_listener: Option<PageEventListener>,
-	play_seconds: f32,
+	play_seconds: f64,
 }
 
 impl Scene for PausingScene {
@@ -656,7 +656,7 @@ impl Scene for PausingScene {
 		println!("hidden at start {}", engine.is_page_hidden());
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		if self.is_paused.get() {
 			return;

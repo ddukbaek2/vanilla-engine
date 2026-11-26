@@ -500,7 +500,7 @@ impl TiledMapReader {
 			tileset.set_image_path(&TiledMapReader::resolve_path(tileset_path, image_name));
 		}
 		if let Some(tile_offset) = tileset_data.get("tileoffset").filter(|value| value.is_object()) {
-			tileset.set_tile_offset(Vector2::create(TiledMapReader::read_number(tile_offset, "x", 0.0) as f32, TiledMapReader::read_number(tile_offset, "y", 0.0) as f32));
+			tileset.set_tile_offset(Vector2::create(TiledMapReader::read_number(tile_offset, "x", 0.0), TiledMapReader::read_number(tile_offset, "y", 0.0)));
 		}
 		tileset.set_tile_render_size(if TiledMapReader::read_string(tileset_data, "tilerendersize", "tile") == "grid" {
 			TileRenderSize::Grid
@@ -534,7 +534,7 @@ impl TiledMapReader {
 					let rect_y = TiledMapReader::read_number(tile_entry, "y", 0.0);
 					let rect_width = TiledMapReader::read_number(tile_entry, "width", image_width);
 					let rect_height = TiledMapReader::read_number(tile_entry, "height", image_height);
-					tileset.set_tile_image_rect(tile_id, Some(Rect::create(rect_x as f32, rect_y as f32, rect_width as f32, rect_height as f32)));
+					tileset.set_tile_image_rect(tile_id, Some(Rect::create(rect_x, rect_y, rect_width, rect_height)));
 				}
 				let mut tile_type = TiledMapReader::read_string(tile_entry, "type", "");
 				if tile_type.is_empty() {
@@ -728,7 +728,7 @@ impl TiledMapReader {
 		if (hex_text.len() != 6 && hex_text.len() != 8) || !hex_text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
 			return None;
 		}
-		let read_byte = |start_index: usize| u8::from_str_radix(&hex_text[start_index..start_index + 2], 16).unwrap_or(0) as f32 / 255.0;
+		let read_byte = |start_index: usize| u8::from_str_radix(&hex_text[start_index..start_index + 2], 16).unwrap_or(0) as f64 / 255.0;
 		if hex_text.len() == 8 {
 			return Some(Color::create(read_byte(2), read_byte(4), read_byte(6), read_byte(0)));
 		}

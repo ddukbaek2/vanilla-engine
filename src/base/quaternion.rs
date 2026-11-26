@@ -6,7 +6,7 @@
 //! - create_from_euler(x, y, z) 는 라디안이고 qX x qY x qZ 와 같다. 행렬로는 Rx x Ry x Rz 라서 점에는 Z, Y, X 순서로 걸린다.
 //!   (three.js 의 'XYZ' 순서와 같은 식이다)
 //! - 원본은 x, y, z, w 를 감춘 필드와 프로퍼티로 두지만, 러스트 판은 공개 필드를 둔 Copy 값이다. 원본 clone 은 복사로 갈음한다.
-//! - 원본 수는 f64 이고 러스트 판은 f32 다.
+//! - 수는 원본 자바스크립트 수처럼 f64 다.
 //! - 원본에 없는 행렬에서 쿼터니언으로 바꾸기, 오일러로 되돌리기는 만들지 않았다. (행렬로는 Matrix4::create_rotation_from_quaternion)
 //==============================================================================
 use crate::base::math;
@@ -34,13 +34,13 @@ use crate::base::math;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Quaternion {
 	/// 벡터부 x. (회전 축 x 에 sin(각 / 2) 를 곱한 값)
-	pub x: f32,
+	pub x: f64,
 	/// 벡터부 y. (회전 축 y 에 sin(각 / 2) 를 곱한 값)
-	pub y: f32,
+	pub y: f64,
 	/// 벡터부 z. (회전 축 z 에 sin(각 / 2) 를 곱한 값)
-	pub z: f32,
+	pub z: f64,
 	/// 실수부. (cos(각 / 2))
-	pub w: f32,
+	pub w: f64,
 }
 
 impl Default for Quaternion {
@@ -65,7 +65,7 @@ impl Quaternion {
 	/// # 돌려줌
 	/// (x, y, z, w) 쿼터니언. (정규화하지 않는다)
 	//==============================================================================
-	pub const fn create(x: f32, y: f32, z: f32, w: f32) -> Quaternion {
+	pub const fn create(x: f64, y: f64, z: f64, w: f64) -> Quaternion {
 		Quaternion { x, y, z, w }
 	}
 
@@ -88,7 +88,7 @@ impl Quaternion {
 	/// - `z`: 넣을 벡터부 z.
 	/// - `w`: 넣을 실수부.
 	//==============================================================================
-	pub fn set(&mut self, x: f32, y: f32, z: f32, w: f32) {
+	pub fn set(&mut self, x: f64, y: f64, z: f64, w: f64) {
 		self.x = x;
 		self.y = y;
 		self.z = z;
@@ -164,7 +164,7 @@ impl Quaternion {
 	/// assert!((from_euler.w - multiplied.w).abs() < 1e-5);
 	/// ```
 	//==============================================================================
-	pub fn create_from_euler(x_radian: f32, y_radian: f32, z_radian: f32) -> Quaternion {
+	pub fn create_from_euler(x_radian: f64, y_radian: f64, z_radian: f64) -> Quaternion {
 		let half_x = x_radian * 0.5;
 		let half_y = y_radian * 0.5;
 		let half_z = z_radian * 0.5;
@@ -198,14 +198,14 @@ impl Quaternion {
 	/// ```rust
 	/// use vanilla::Quaternion;
 	///
-	/// let diagonal_component = std::f32::consts::FRAC_1_SQRT_2;
+	/// let diagonal_component = std::f64::consts::FRAC_1_SQRT_2;
 	/// let to = Quaternion::create(0.0, 0.0, -diagonal_component, -diagonal_component);
 	/// let middle = Quaternion::slerp(Quaternion::identity(), to, 0.5);
 	/// assert!((middle.z - 0.38268343).abs() < 1e-5);
 	/// assert!((middle.w - 0.9238795).abs() < 1e-5);
 	/// ```
 	//==============================================================================
-	pub fn slerp(from: Quaternion, to: Quaternion, normalized_time: f32) -> Quaternion {
+	pub fn slerp(from: Quaternion, to: Quaternion, normalized_time: f64) -> Quaternion {
 		let mut dot_product = from.x * to.x + from.y * to.y + from.z * to.z + from.w * to.w;
 		let mut to_x = to.x;
 		let mut to_y = to.y;
@@ -243,8 +243,8 @@ mod tests {
 	use super::*;
 	use crate::base::matrix4::Matrix4;
 
-	/// 원본(f64)과 러스트 판(f32)의 끝자리 차이를 받아 줄 허용 오차.
-	const TOLERANCE: f32 = 1.0e-5;
+	/// 셈 차례가 다른 기대값과의 끝자리 차이를 받아 줄 허용 오차.
+	const TOLERANCE: f64 = 1.0e-5;
 
 	//==============================================================================
 	/// 쿼터니언이 기대값(원본이 찍은 f64 값)과 허용 오차 안에서 같은지 확인한다.
@@ -252,8 +252,8 @@ mod tests {
 	fn assert_quaternion_near(actual: Quaternion, expected: [f64; 4]) {
 		let actual_values = [actual.x, actual.y, actual.z, actual.w];
 		for (index, (actual_value, expected_value)) in actual_values.iter().zip(expected.iter()).enumerate() {
-			let difference = (*actual_value as f64 - *expected_value).abs();
-			assert!(difference <= TOLERANCE as f64, "component {} = {}, expected {} (all: {:?})", index, actual_value, expected_value, actual);
+			let difference = (*actual_value - *expected_value).abs();
+			assert!(difference <= TOLERANCE, "component {} = {}, expected {} (all: {:?})", index, actual_value, expected_value, actual);
 		}
 	}
 
@@ -263,7 +263,7 @@ mod tests {
 	fn assert_matrix_near(actual: &Matrix4, expected: &Matrix4) {
 		for (index, (actual_value, expected_value)) in actual.elements.iter().zip(expected.elements.iter()).enumerate() {
 			let difference = (actual_value - expected_value).abs();
-			assert!(difference <= TOLERANCE, "elements[{}] = {}, expected {}", index, actual_value, expected_value);
+			assert!(difference <= TOLERANCE as f32, "elements[{}] = {}, expected {}", index, actual_value, expected_value);
 		}
 	}
 
@@ -294,7 +294,7 @@ mod tests {
 		let expected = [0.3469294607639313, 0.765047550201416, 0.5425330996513367, 0.0, -0.6816329956054688, 0.6030043959617615, -0.4144420027732849, 0.0, -0.6442176699638367, -0.22602632641792297, 0.7306816577911377, 0.0, 0.0, 0.0, 0.0, 1.0];
 		for (index, (actual_value, expected_value)) in matrix.elements.iter().zip(expected.iter()).enumerate() {
 			let difference = (*actual_value as f64 - *expected_value).abs();
-			assert!(difference <= TOLERANCE as f64, "elements[{}] = {}, expected {}", index, actual_value, expected_value);
+			assert!(difference <= TOLERANCE, "elements[{}] = {}, expected {}", index, actual_value, expected_value);
 		}
 	}
 
@@ -304,7 +304,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn euler_order_round_trip() {
-		let angles = [(0.3f32, -0.7f32, 1.1f32), (-1.2, 0.4, 2.5), (2.0, 1.0, -0.6)];
+		let angles = [(0.3f64, -0.7f64, 1.1f64), (-1.2, 0.4, 2.5), (2.0, 1.0, -0.6)];
 		for (x_radian, y_radian, z_radian) in angles {
 			let mut composed = Matrix4::create_identity();
 			composed.rotate_x(x_radian);
@@ -318,7 +318,7 @@ mod tests {
 			let quaternion_z = Quaternion::create_from_euler(0.0, 0.0, z_radian);
 			let multiplied = quaternion_x.multiply(quaternion_y).multiply(quaternion_z);
 			let from_euler = Quaternion::create_from_euler(x_radian, y_radian, z_radian);
-			assert_quaternion_near(multiplied, [from_euler.x as f64, from_euler.y as f64, from_euler.z as f64, from_euler.w as f64]);
+			assert_quaternion_near(multiplied, [from_euler.x, from_euler.y, from_euler.z, from_euler.w]);
 
 			let mut matrix_product = Matrix4::create_rotation_from_quaternion(quaternion_z);
 			matrix_product.multiply(&Matrix4::create_rotation_from_quaternion(quaternion_x));
@@ -334,13 +334,13 @@ mod tests {
 		let from = Quaternion::create_from_euler(0.1, 0.2, 0.3);
 		let to = Quaternion::create_from_euler(1.0, -0.5, 2.0);
 		assert_quaternion_near(Quaternion::slerp(from, to, 0.35), [0.07247359830822624, -0.13756324880336232, 0.3675390346169097, 0.9169182014551747]);
-		assert_quaternion_near(Quaternion::slerp(from, to, 0.0), [from.x as f64, from.y as f64, from.z as f64, from.w as f64]);
-		assert_quaternion_near(Quaternion::slerp(from, to, 1.0), [to.x as f64, to.y as f64, to.z as f64, to.w as f64]);
+		assert_quaternion_near(Quaternion::slerp(from, to, 0.0), [from.x, from.y, from.z, from.w]);
+		assert_quaternion_near(Quaternion::slerp(from, to, 1.0), [to.x, to.y, to.z, to.w]);
 
 		let near = Quaternion::slerp(Quaternion::identity(), Quaternion::create(0.01, 0.0, 0.0, 0.99995), 0.5);
 		assert_quaternion_near(near, [0.0050000624996093404, 0.0, 0.0, 0.9999874996093701]);
 
-		let flip = Quaternion::slerp(Quaternion::identity(), Quaternion::create(0.0, 0.0, -std::f32::consts::FRAC_1_SQRT_2, -std::f32::consts::FRAC_1_SQRT_2), 0.5);
+		let flip = Quaternion::slerp(Quaternion::identity(), Quaternion::create(0.0, 0.0, -std::f64::consts::FRAC_1_SQRT_2, -std::f64::consts::FRAC_1_SQRT_2), 0.5);
 		assert_quaternion_near(flip, [0.0, 0.0, 0.3826834323650898, 0.9238795325112867]);
 	}
 

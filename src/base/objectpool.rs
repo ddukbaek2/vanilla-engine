@@ -21,7 +21,7 @@ pub type ObjectResetHandler<T> = Box<dyn FnMut(&mut T)>;
 /// use vanilla::ObjectPool;
 ///
 /// struct Bullet {
-/// 	travel_distance: f32,
+/// 	travel_distance: f64,
 /// }
 ///
 /// let mut object_pool = ObjectPool::new(
@@ -138,7 +138,7 @@ mod tests {
 	#[derive(Debug, PartialEq)]
 	struct Bullet {
 		serial_number: u32,
-		travel_distance: f32,
+		travel_distance: f64,
 	}
 
 	//==============================================================================

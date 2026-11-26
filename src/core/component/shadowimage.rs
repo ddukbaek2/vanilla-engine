@@ -58,12 +58,12 @@ pub struct ShadowImage {
 	image_rect: Option<Rect>,
 	image_color: Option<Color>,
 	shadow_color: Color,
-	shadow_offset: f32,
-	shadow_blur: f32,
+	shadow_offset: f64,
+	shadow_blur: f64,
 	image_version: u32,
 	bake_image: Option<Rc<Image>>,
-	bake_scale: f32,
-	bake_padding: f32,
+	bake_scale: f64,
+	bake_padding: f64,
 	bake_key: String,
 	image_path: String,
 }
@@ -71,19 +71,19 @@ pub struct ShadowImage {
 //==============================================================================
 /// 그림의 조각을 그릴 크기로 바꾼 곧은 알파 RGBA. (줄일 때는 겹친 넓이로 고르게, 키울 때는 가까운 픽셀)
 //==============================================================================
-fn resample_image(image: &Image, source_rect: [f32; 4], target_width: i32, target_height: i32) -> Vec<u8> {
+fn resample_image(image: &Image, source_rect: [f64; 4], target_width: i32, target_height: i32) -> Vec<u8> {
 	let source_pixels = image.get_pixels();
 	let source_width = image.get_width() as i32;
 	let source_height = image.get_height() as i32;
 	let mut pixels = vec![0u8; (target_width * target_height * 4) as usize];
-	let step_x = source_rect[2] / target_width as f32;
-	let step_y = source_rect[3] / target_height as f32;
+	let step_x = source_rect[2] / target_width as f64;
+	let step_y = source_rect[3] / target_height as f64;
 	for target_y in 0..target_height {
-		let start_y = source_rect[1] + target_y as f32 * step_y;
+		let start_y = source_rect[1] + target_y as f64 * step_y;
 		for target_x in 0..target_width {
-			let start_x = source_rect[0] + target_x as f32 * step_x;
-			let mut sum = [0.0f32; 4];
-			let mut weight_sum = 0.0f32;
+			let start_x = source_rect[0] + target_x as f64 * step_x;
+			let mut sum = [0.0f64; 4];
+			let mut weight_sum = 0.0f64;
 			let sample_start_y = start_y.floor() as i32;
 			let sample_end_y = (start_y + step_y.max(1.0)).ceil() as i32;
 			let sample_start_x = start_x.floor() as i32;
@@ -92,22 +92,22 @@ fn resample_image(image: &Image, source_rect: [f32; 4], target_width: i32, targe
 				if sample_y < 0 || sample_y >= source_height {
 					continue;
 				}
-				let overlap_y = ((sample_y + 1) as f32).min(start_y + step_y.max(1.0)) - (sample_y as f32).max(start_y);
+				let overlap_y = ((sample_y + 1) as f64).min(start_y + step_y.max(1.0)) - (sample_y as f64).max(start_y);
 				for sample_x in sample_start_x..sample_end_x {
 					if sample_x < 0 || sample_x >= source_width {
 						continue;
 					}
-					let overlap_x = ((sample_x + 1) as f32).min(start_x + step_x.max(1.0)) - (sample_x as f32).max(start_x);
+					let overlap_x = ((sample_x + 1) as f64).min(start_x + step_x.max(1.0)) - (sample_x as f64).max(start_x);
 					let weight = overlap_x.max(0.0) * overlap_y.max(0.0);
 					if weight <= 0.0 {
 						continue;
 					}
 					let offset = ((sample_y * source_width + sample_x) * 4) as usize;
-					let alpha = source_pixels[offset + 3] as f32;
+					let alpha = source_pixels[offset + 3] as f64;
 					// 색은 알파를 곱해 섞어 가장자리가 검게 번지지 않게 한다.
-					sum[0] += source_pixels[offset] as f32 * alpha * weight;
-					sum[1] += source_pixels[offset + 1] as f32 * alpha * weight;
-					sum[2] += source_pixels[offset + 2] as f32 * alpha * weight;
+					sum[0] += source_pixels[offset] as f64 * alpha * weight;
+					sum[1] += source_pixels[offset + 1] as f64 * alpha * weight;
+					sum[2] += source_pixels[offset + 2] as f64 * alpha * weight;
 					sum[3] += alpha * weight;
 					weight_sum += weight;
 				}
@@ -174,7 +174,7 @@ impl ShadowImage {
 				[image_rect.position.x, image_rect.position.y, image_rect.size.x, image_rect.size.y]
 			}
 			None => {
-				[0.0, 0.0, image.get_width() as f32, image.get_height() as f32]
+				[0.0, 0.0, image.get_width() as f64, image.get_height() as f64]
 			}
 		};
 		let content_size = transform.get_content_size();
@@ -202,7 +202,7 @@ impl ShadowImage {
 			}
 			self.bake_image = bake_image;
 			self.bake_scale = bake_scale;
-			self.bake_padding = ShadowImage::calculate_bake_padding(self.shadow_blur, bake_scale) as f32 / bake_scale;
+			self.bake_padding = ShadowImage::calculate_bake_padding(self.shadow_blur, bake_scale) as f64 / bake_scale;
 			self.bake_key = bake_key;
 		}
 		let bake_image = match &self.bake_image {
@@ -215,22 +215,22 @@ impl ShadowImage {
 		};
 		let quad_x = (content_size.x - image_width) * 0.5 - self.bake_padding;
 		let quad_y = (content_size.y - image_height) * 0.5 - self.bake_padding;
-		let bake_width = bake_image.get_width() as f32;
-		let bake_height = bake_image.get_height() as f32;
+		let bake_width = bake_image.get_width() as f64;
+		let bake_height = bake_image.get_height() as f64;
 		graphic.draw_image_with_source_and_destination(&bake_image, 0.0, 0.0, bake_width, bake_height, quad_x, quad_y, bake_width / self.bake_scale, bake_height / self.bake_scale);
 	}
 
 	//==============================================================================
 	/// 굽기. (그릴 크기로 바꾼 그림을 가장자리를 둘러 놓고, 그 모양으로 그림자를 깐다)
 	//==============================================================================
-	fn bake(&self, image: &Image, source_rect: [f32; 4], image_width: f32, image_height: f32, bake_scale: f32) -> Option<Rc<Image>> {
+	fn bake(&self, image: &Image, source_rect: [f64; 4], image_width: f64, image_height: f64, bake_scale: f64) -> Option<Rc<Image>> {
 		let scaled_width = ((image_width * bake_scale).round() as i32).max(1);
 		let scaled_height = ((image_height * bake_scale).round() as i32).max(1);
 		// 웹: 원본처럼 캔버스의 drawImage(imageSmoothingQuality high)로 줄이고 캔버스 그림자를 깐다.
 		if cfg!(target_arch = "wasm32") {
 			#[cfg(target_arch = "wasm32")]
 			{
-				let browser_bake = crate::platform::web::systemfont::bake_shadow_image(&image.get_pixels(), image.get_width(), image.get_height(), source_rect, scaled_width as u32, scaled_height as u32, self.image_color, self.shadow_color, self.shadow_offset * bake_scale, self.shadow_blur * bake_scale)?;
+				let browser_bake = crate::platform::web::systemfont::bake_shadow_image(&image.get_pixels(), image.get_width(), image.get_height(), source_rect, scaled_width as u32, scaled_height as u32, self.image_color, self.shadow_color, ((self.shadow_offset * bake_scale) as f32) as f64, ((self.shadow_blur * bake_scale) as f32) as f64)?;
 				return Some(Image::create_from_pixels(browser_bake.width, browser_bake.height, browser_bake.pixels));
 			}
 		}
@@ -253,7 +253,7 @@ impl ShadowImage {
 						shape_pixels[target_offset] = (image_color.red * 255.0).round() as u8;
 						shape_pixels[target_offset + 1] = (image_color.green * 255.0).round() as u8;
 						shape_pixels[target_offset + 2] = (image_color.blue * 255.0).round() as u8;
-						shape_pixels[target_offset + 3] = (alpha as f32 * image_color.alpha).round() as u8;
+						shape_pixels[target_offset + 3] = (alpha as f64 * image_color.alpha).round() as u8;
 					}
 					None => {
 						shape_pixels[target_offset..target_offset + 4].copy_from_slice(&scaled_pixels[source_offset..source_offset + 4]);
@@ -268,7 +268,7 @@ impl ShadowImage {
 	//==============================================================================
 	/// 구운 그림의 가장자리 여유. (픽셀, 번지는 그림자가 잘리지 않게 번지는 만큼 넓힌다)
 	//==============================================================================
-	fn calculate_bake_padding(shadow_blur: f32, bake_scale: f32) -> i32 {
+	fn calculate_bake_padding(shadow_blur: f64, bake_scale: f64) -> i32 {
 		let scaled_blur = shadow_blur * bake_scale;
 		if cfg!(target_arch = "wasm32") {
 			// 웹: 원본 bakeImage 와 같다. (캔버스 그림자의 번짐)
@@ -282,7 +282,7 @@ impl ShadowImage {
 	//==============================================================================
 	/// 구운 그림이 그림자 내림으로 아래로 늘어나는 만큼. (픽셀, 웹은 원본처럼 올림, 데스크탑은 반올림한 내림만큼 옮겨 셈한다)
 	//==============================================================================
-	fn calculate_bake_offset(shadow_offset: f32, bake_scale: f32) -> i32 {
+	fn calculate_bake_offset(shadow_offset: f64, bake_scale: f64) -> i32 {
 		let scaled_offset = (shadow_offset * bake_scale).max(0.0);
 		if cfg!(target_arch = "wasm32") {
 			scaled_offset.ceil() as i32
@@ -393,7 +393,7 @@ impl ShadowImage {
 	/// - `shadow_offset`: 그림자가 아래로 내려가는 만큼. (노드 좌표, 처음 0)
 	/// - `shadow_blur`: 그림자가 번지는 만큼. (노드 좌표, 0 보다 작으면 0, 처음 0)
 	//==============================================================================
-	pub fn set_shadow(&mut self, shadow_color: impl Into<Color>, shadow_offset: f32, shadow_blur: f32) {
+	pub fn set_shadow(&mut self, shadow_color: impl Into<Color>, shadow_offset: f64, shadow_blur: f64) {
 		self.shadow_color = shadow_color.into();
 		self.shadow_offset = shadow_offset;
 		self.shadow_blur = shadow_blur.max(0.0);
@@ -469,8 +469,8 @@ impl Component for ShadowImage {
 			return None;
 		}
 		let bake_scale = graphic.calculate_text_bake_scale();
-		let padding = ShadowImage::calculate_bake_padding(self.shadow_blur, bake_scale) as f32 / bake_scale;
-		let offset = ShadowImage::calculate_bake_offset(self.shadow_offset, bake_scale) as f32 / bake_scale;
+		let padding = ShadowImage::calculate_bake_padding(self.shadow_blur, bake_scale) as f64 / bake_scale;
+		let offset = ShadowImage::calculate_bake_offset(self.shadow_offset, bake_scale) as f64 / bake_scale;
 		Some(Rect::create(-padding, -padding, content_size.x + padding * 2.0, content_size.y + padding * 2.0 + offset))
 	}
 

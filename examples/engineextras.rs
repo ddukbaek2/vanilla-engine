@@ -16,8 +16,8 @@ use vanilla::{
 };
 
 // 뷰 크기.
-const VIEW_WIDTH: f32 = 1280.0;
-const VIEW_HEIGHT: f32 = 720.0;
+const VIEW_WIDTH: f64 = 1280.0;
+const VIEW_HEIGHT: f64 = 720.0;
 
 // 색.
 const BACKGROUND_COLOR: &str = "#1b1f2a";
@@ -41,7 +41,7 @@ fn create_box_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, posi
 //==============================================================================
 // 글자 노드 만들기. (UILabel)
 //==============================================================================
-fn create_label_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, position: Vector2, size: Vector2, text: &str, font_size: f32, color: &str) -> NodeId {
+fn create_label_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, position: Vector2, size: Vector2, text: &str, font_size: f64, color: &str) -> NodeId {
 	let label_id = create_box_node(node_tree, parent_id, name, position, size);
 	let label = node_tree.add_component(label_id, UILabel::create_with_text(text, font_size)).expect("label");
 	label.set_text_color(color);
@@ -92,13 +92,13 @@ struct EngineExtrasScene {
 	scene_base: SceneBase,
 	touch_recognizer: TouchRecognizer,
 	camera_gestures: CameraGestures,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 	click_count: Rc<Cell<u32>>,
 	ring_ids: Vec<NodeId>,
 	target_id: Option<NodeId>,
 	status_id: Option<NodeId>,
-	target_rotation: f32,
-	target_scale: f32,
+	target_rotation: f64,
+	target_scale: f64,
 	target_position: Vector2,
 }
 
@@ -390,7 +390,7 @@ impl Scene for EngineExtrasScene {
 	//==============================================================================
 	// 주기적 갱신.
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 		let ring_ratio = (self.elapsed_seconds * 0.25).fract();
 		for (ring_index, ring_id) in self.ring_ids.clone().into_iter().enumerate() {

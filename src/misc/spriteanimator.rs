@@ -42,7 +42,7 @@ type SpriteAnimatorCompleteEvent = Box<dyn FnOnce(&mut SpriteAnimator)>;
 struct SpriteAnimatorClip {
 	image: Rc<Image>,
 	frame_rects: Vec<Rect>,
-	frame_per_second: f32,
+	frame_per_second: f64,
 	is_loop: bool,
 }
 
@@ -105,8 +105,8 @@ impl SpriteAnimatorPlayOptions {
 ///
 /// let engine = Engine::new(EngineConfiguration::new());
 /// let image = Image::create_from_pixels(128, 16, vec![0u8; 128 * 16 * 4]);
-/// let idle_rects: Vec<Rect> = (0..2).map(|column| Rect::create(column as f32 * 16.0, 0.0, 16.0, 16.0)).collect();
-/// let attack_rects: Vec<Rect> = (4..7).map(|column| Rect::create(column as f32 * 16.0, 0.0, 16.0, 16.0)).collect();
+/// let idle_rects: Vec<Rect> = (0..2).map(|column| Rect::create(column as f64 * 16.0, 0.0, 16.0, 16.0)).collect();
+/// let attack_rects: Vec<Rect> = (4..7).map(|column| Rect::create(column as f64 * 16.0, 0.0, 16.0, 16.0)).collect();
 ///
 /// let mut node_tree = NodeTree::new();
 /// let root_id = node_tree.get_root_id();
@@ -137,7 +137,7 @@ pub struct SpriteAnimator {
 #[crate::reflect]
 impl SpriteAnimator {
 	/// 클립의 기본 초당 프레임 수. (원본 fps = 10)
-	pub const DEFAULT_FRAME_PER_SECOND: f32 = 10.0;
+	pub const DEFAULT_FRAME_PER_SECOND: f64 = 10.0;
 
 	//==============================================================================
 	/// 생성.
@@ -165,7 +165,7 @@ impl SpriteAnimator {
 	/// - `frame_per_second`: 초당 프레임 수. (0 이하면 넘기지 않는다, 원본 기본값은 DEFAULT_FRAME_PER_SECOND)
 	/// - `is_loop`: true 면 반복, false 면 마지막 프레임에서 멈추고 완료 콜백을 부른다.
 	//==============================================================================
-	pub fn add_clip(&mut self, clip_name: &str, image: Rc<Image>, frame_rects: &[Rect], frame_per_second: f32, is_loop: bool) {
+	pub fn add_clip(&mut self, clip_name: &str, image: Rc<Image>, frame_rects: &[Rect], frame_per_second: f64, is_loop: bool) {
 		let clip = SpriteAnimatorClip {
 			image,
 			frame_rects: frame_rects.to_vec(),
@@ -205,7 +205,7 @@ impl SpriteAnimator {
 	/// assert!(animator.play_clip("run", SpriteAnimatorPlayOptions::default()));
 	/// ```
 	//==============================================================================
-	pub fn add_clip_from_atlas(&mut self, clip_name: &str, image: Rc<Image>, atlas_json: &serde_json::Value, frame_ids: &[&str], frame_per_second: f32, is_loop: bool) {
+	pub fn add_clip_from_atlas(&mut self, clip_name: &str, image: Rc<Image>, atlas_json: &serde_json::Value, frame_ids: &[&str], frame_per_second: f64, is_loop: bool) {
 		let mut frame_rects: Vec<Rect> = Vec::new();
 		for frame_id in frame_ids {
 			let frame_data = match atlas_json.get("frames").and_then(|frames| frames.get(*frame_id)) {
@@ -217,10 +217,10 @@ impl SpriteAnimator {
 				}
 			};
 			let rect_data = frame_data.get("frame").unwrap_or(frame_data);
-			let read_number = |names: &[&str]| -> f32 {
+			let read_number = |names: &[&str]| -> f64 {
 				for name in names {
 					if let Some(number_value) = rect_data.get(*name).and_then(|value| value.as_f64()) {
-						return number_value as f32;
+						return number_value;
 					}
 				}
 				0.0
@@ -426,7 +426,7 @@ impl Component for SpriteAnimator {
 	//==============================================================================
 	/// 갱신. (프레임을 넘기고, 반복하지 않는 클립이 끝났으면 완료 콜백, 그다음 같은 노드의 Sprite 에 지금 프레임을 넣는다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let was_playing = self.animation.is_playing();
 		self.animation.tick(time_delta);
 		let is_completed = was_playing && !self.animation.is_playing();
@@ -455,7 +455,7 @@ mod tests {
 	/// 가로로 16x16 칸이 frame_count 개 있는 시트 영역.
 	//==============================================================================
 	fn create_sheet_rects(first_column: usize, frame_count: usize) -> Vec<Rect> {
-		(first_column..first_column + frame_count).map(|column| Rect::create(column as f32 * 16.0, 0.0, 16.0, 16.0)).collect()
+		(first_column..first_column + frame_count).map(|column| Rect::create(column as f64 * 16.0, 0.0, 16.0, 16.0)).collect()
 	}
 
 	//==============================================================================

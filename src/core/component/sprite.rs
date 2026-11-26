@@ -431,7 +431,7 @@ impl Sprite {
 	/// - `round_size`: 귀퉁이 둥근 크기. (노드 좌표, 0 이하면 곧은 사각형, 처음 0)
 	//==============================================================================
 	#[reflect(skip)]
-	pub fn set_round_size(&mut self, round_size: f32) {
+	pub fn set_round_size(&mut self, round_size: f64) {
 		self.paint.set_round_size(round_size);
 	}
 
@@ -442,7 +442,7 @@ impl Sprite {
 	/// 그림이 없을 때 칠하는 사각형의 귀퉁이 둥근 크기. (노드 좌표)
 	//==============================================================================
 	#[reflect(skip)]
-	pub fn get_round_size(&self) -> f32 {
+	pub fn get_round_size(&self) -> f64 {
 		self.paint.get_round_size()
 	}
 }
@@ -570,7 +570,7 @@ impl Component for Sprite {
 			SpriteDrawMode::Tiled => {
 				let mut image_rect = self.get_image_rect();
 				if image_rect.is_zero() {
-					image_rect = Rect::create(0.0, 0.0, image.get_width() as f32, image.get_height() as f32);
+					image_rect = Rect::create(0.0, 0.0, image.get_width() as f64, image.get_height() as f64);
 				}
 
 				let tile_width = image_rect.get_width().ceil().max(1.0);

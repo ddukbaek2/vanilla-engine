@@ -5,7 +5,7 @@
 //! - 붙인 노드의 내용 크기 전체가 고리의 바깥 꼴이고, 선의 가운데가 그 안쪽으로 굵기의 반만큼 들어온다.
 //! - 둘레의 점은 크기, 둥근 정도, 굵기가 바뀔 때만 다시 셈한다.
 //==============================================================================
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 
 use crate::base::color::Color;
 use crate::base::vector2::Vector2;
@@ -40,13 +40,13 @@ const CORNER_STEPS: usize = 10;
 //==============================================================================
 pub struct UIProgressRing {
 	component_base: ComponentBase,
-	ratio: f32,
-	round_size: f32,
-	line_width: f32,
+	ratio: f64,
+	round_size: f64,
+	line_width: f64,
 	fill_color: Color,
 	track_color: Color,
 	perimeter_points: Vec<Vector2>,
-	perimeter_key: [f32; 4],
+	perimeter_key: [f64; 4],
 }
 
 #[crate::reflect]
@@ -129,7 +129,7 @@ impl UIProgressRing {
 	/// assert_eq!(points[0], Vector2::create(50.0, 0.0));
 	/// ```
 	//==============================================================================
-	pub fn read_perimeter_points(left: f32, top: f32, width: f32, height: f32, round_size: f32) -> Vec<Vector2> {
+	pub fn read_perimeter_points(left: f64, top: f64, width: f64, height: f64, round_size: f64) -> Vec<Vector2> {
 		let radius = round_size.min(width * 0.5).min(height * 0.5);
 		let right = left + width;
 		let bottom = top + height;
@@ -144,7 +144,7 @@ impl UIProgressRing {
 		];
 		for (center_x, center_y, start_angle) in corners {
 			for step_index in 0..=CORNER_STEPS {
-				let angle = start_angle + PI * 0.5 * step_index as f32 / CORNER_STEPS as f32;
+				let angle = start_angle + PI * 0.5 * step_index as f64 / CORNER_STEPS as f64;
 				points.push(Vector2::create(center_x + angle.cos() * radius, center_y + angle.sin() * radius));
 			}
 		}
@@ -173,7 +173,7 @@ impl UIProgressRing {
 	/// assert!((last_point.y - 100.0).abs() < 0.01);
 	/// ```
 	//==============================================================================
-	pub fn read_partial_points(points: &[Vector2], ratio: f32) -> Vec<Vector2> {
+	pub fn read_partial_points(points: &[Vector2], ratio: f64) -> Vec<Vector2> {
 		if points.is_empty() {
 			return Vec::new();
 		}
@@ -212,7 +212,7 @@ impl UIProgressRing {
 	/// # 인자
 	/// - `ratio`: 채운 몫. (0 ~ 1, 넘으면 자른다)
 	//==============================================================================
-	pub fn set_ratio(&mut self, ratio: f32) {
+	pub fn set_ratio(&mut self, ratio: f64) {
 		self.ratio = ratio.clamp(0.0, 1.0);
 	}
 
@@ -222,7 +222,7 @@ impl UIProgressRing {
 	/// # 돌려줌
 	/// 채운 몫. (0 ~ 1, 기본 0)
 	//==============================================================================
-	pub fn get_ratio(&self) -> f32 {
+	pub fn get_ratio(&self) -> f64 {
 		self.ratio
 	}
 
@@ -232,7 +232,7 @@ impl UIProgressRing {
 	/// # 인자
 	/// - `round_size`: 바깥 꼴의 귀퉁이 반지름. (선의 가운데는 굵기의 반을 뺀 반지름으로 돈다)
 	//==============================================================================
-	pub fn set_round_size(&mut self, round_size: f32) {
+	pub fn set_round_size(&mut self, round_size: f64) {
 		self.round_size = round_size;
 	}
 
@@ -242,7 +242,7 @@ impl UIProgressRing {
 	/// # 돌려줌
 	/// 바깥 꼴의 귀퉁이 반지름. (기본 0)
 	//==============================================================================
-	pub fn get_round_size(&self) -> f32 {
+	pub fn get_round_size(&self) -> f64 {
 		self.round_size
 	}
 
@@ -252,7 +252,7 @@ impl UIProgressRing {
 	/// # 인자
 	/// - `line_width`: 선 굵기. (기본 2)
 	//==============================================================================
-	pub fn set_line_width(&mut self, line_width: f32) {
+	pub fn set_line_width(&mut self, line_width: f64) {
 		self.line_width = line_width;
 	}
 
@@ -262,7 +262,7 @@ impl UIProgressRing {
 	/// # 돌려줌
 	/// 선 굵기. (기본 2)
 	//==============================================================================
-	pub fn get_line_width(&self) -> f32 {
+	pub fn get_line_width(&self) -> f64 {
 		self.line_width
 	}
 

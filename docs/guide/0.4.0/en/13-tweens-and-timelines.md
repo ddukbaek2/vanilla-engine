@@ -4,9 +4,9 @@ This chapter covers ways to change values over time: `Tween`, which moves values
 
 ## Tween
 
-`Tween` moves named values from start values to target values. A value bundle is a `TweenValues`, and a single value is `TweenValue::Number(f32)` or `TweenValue::Vector2(Vector2)`. Only values whose name appears in both the start and target bundles, with the same kind, change.
+`Tween` moves named values from start values to target values. A value bundle is a `TweenValues`, and a single value is `TweenValue::Number(f64)` or `TweenValue::Vector2(Vector2)`. Only values whose name appears in both the start and target bundles, with the same kind, change.
 
-- Build a bundle with `TweenValues::new().with(name, value)`. Pass an `f32` or a `Vector2` directly as the value. `set`, `get`, `get_number`, `get_vector2` and `get_count` are also available.
+- Build a bundle with `TweenValues::new().with(name, value)`. Pass an `f64` or a `Vector2` directly as the value. `set`, `get`, `get_number`, `get_vector2` and `get_count` are also available.
 - Create a tween with `Tween::new(start_values)` and chain `to(target_values, duration)` (seconds, initially 1), `delay(seconds)` (initially 0) and `easing(function)` (initially `easing_function::linear`). These methods take the tween and return the modified tween, so they chain on one line.
 - `set_update(|values, node_tree| {})` receives the current value bundle and the node tree on every update after the delay, and `set_complete(|node_tree| {})` is called once on the update where progress reaches 1.
 - You can drive it yourself with `start()`, `stop()`, `tick(&mut node_tree, time_delta)` and `is_finished()`. If `duration` is 0 or less, the first update counts as the end. `stop` does not call the complete callback.
@@ -17,7 +17,7 @@ use std::rc::Rc;
 use vanilla::{easing_function, NodeTree, Tween, TweenValues};
 
 let mut node_tree = NodeTree::new();
-let last_x = Rc::new(Cell::new(0.0f32));
+let last_x = Rc::new(Cell::new(0.0f64));
 let last_x_in_update = last_x.clone();
 let complete_count = Rc::new(Cell::new(0));
 let complete_count_in_callback = complete_count.clone();
@@ -50,7 +50,7 @@ assert_eq!(easing_function::linear(0.25), 0.25);
 assert_eq!(easing_function::quadratic::r#in(0.5), 0.25);
 assert_eq!(easing_function::quadratic::out(0.5), 0.75);
 assert_eq!(easing_function::cubic::in_out(0.5), 0.5);
-let four_steps = |progress: f32| (progress * 4.0).floor() / 4.0;
+let four_steps = |progress: f64| (progress * 4.0).floor() / 4.0;
 assert_eq!(four_steps(0.6), 0.5);
 ```
 
@@ -180,7 +180,7 @@ impl Scene for TweenScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.start_next_pulse();
 	}
@@ -224,7 +224,7 @@ let sheet = Image::create_from_pixels(64, 16, vec![255u8; 64 * 16 * 4]);
 let whole_frame = Frame::new(sheet.clone(), None);
 assert_eq!(whole_frame.get_image_rect(), Rect::create(0.0, 0.0, 64.0, 16.0));
 
-let rects: Vec<Rect> = (0..4).map(|frame_index| Rect::create(16.0 * frame_index as f32, 0.0, 16.0, 16.0)).collect();
+let rects: Vec<Rect> = (0..4).map(|frame_index| Rect::create(16.0 * frame_index as f64, 0.0, 16.0, 16.0)).collect();
 let mut animation = Animation::new();
 animation.set_frames_from_rects(sheet, &rects);
 animation.set_animation_speed(8.0);
@@ -293,7 +293,7 @@ impl Scene for AnimationScene {
 		self.icon_id = Some(icon_id);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.animation.tick(time_delta);
 		if let Some(icon_id) = self.icon_id {
@@ -588,7 +588,7 @@ impl Scene for TimelineScene {
 		self.timeline.play();
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
 	}
@@ -626,7 +626,7 @@ use std::rc::Rc;
 use vanilla::{resolve_timeline_easing, NodeTree, Timeline, TimelinePropertyTarget, TimelineTarget, TimelineValue};
 
 struct Vignette {
-	strength: f32,
+	strength: f64,
 }
 
 impl TimelinePropertyTarget for Vignette {
@@ -765,7 +765,7 @@ impl Scene for StateScene {
 
 		let idle_requester = self.state_machine.get_state_change_requester();
 		self.state_machine.add_state("idle", StateHandlers {
-			tick: Some(Box::new(move |_time_delta: f32, state_seconds: f32| {
+			tick: Some(Box::new(move |_time_delta: f64, state_seconds: f64| {
 				if state_seconds >= 2.0 {
 					idle_requester.change_state("run", false);
 				}
@@ -774,7 +774,7 @@ impl Scene for StateScene {
 		});
 		let run_requester = self.state_machine.get_state_change_requester();
 		self.state_machine.add_state("run", StateHandlers {
-			tick: Some(Box::new(move |_time_delta: f32, state_seconds: f32| {
+			tick: Some(Box::new(move |_time_delta: f64, state_seconds: f64| {
 				if state_seconds >= 1.0 {
 					run_requester.change_state("idle", false);
 				}
@@ -784,7 +784,7 @@ impl Scene for StateScene {
 		self.state_machine.change_state("idle", false);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.state_machine.tick(time_delta);
 		if let (Some(hero_id), Some(state_name)) = (self.hero_id, self.state_machine.get_state_name()) {

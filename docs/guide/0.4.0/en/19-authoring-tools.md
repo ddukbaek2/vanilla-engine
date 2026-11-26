@@ -156,7 +156,7 @@ assert!(node_tree[field_id].get_component::<UIInputField>().is_some());
 
 ### Saving documents from the game
 
-`to_json_text(node_tree, root_id, is_pretty)` turns a node tree into text of the same form. Key order and indentation (tabs) match the original `JSON.stringify`, and numbers are written as the shortest decimal of an `f32`. Registered types are written under their registered names. Unregistered components are written through getters and setters as in the original, but without `#[vanilla::reflect]` they cannot be written, so a warning is printed and they are left out. There is no need to worry about a bundler renaming classes as in the original. To write components that have `&mut self` getters, use `to_json_text_mut`.
+`to_json_text(node_tree, root_id, is_pretty)` turns a node tree into text of the same form. Key order and indentation (tabs) match the original `JSON.stringify`, and numbers are written as the shortest decimal of an `f64`. Registered types are written under their registered names. Unregistered components are written through getters and setters as in the original, but without `#[vanilla::reflect]` they cannot be written, so a warning is printed and they are left out. There is no need to worry about a bundler renaming classes as in the original. To write components that have `&mut self` getters, use `to_json_text_mut`.
 
 ## Playing Timeline Editor documents
 
@@ -376,7 +376,7 @@ impl Scene for VisualScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		let node_tree = self.scene_base.get_node_tree_mut();
 		self.document.bind_pending_images(node_tree);
@@ -423,7 +423,7 @@ let root_id = node_tree.get_root_id();
 let mut document = UIDocument::new();
 for index in 0..3 {
 	let coin_id = document.from_json_text(&mut node_tree, prefab_json_text).unwrap();
-	node_tree[coin_id].set_local_position(Vector2::create(200.0 + index as f32 * 120.0, 120.0));
+	node_tree[coin_id].set_local_position(Vector2::create(200.0 + index as f64 * 120.0, 120.0));
 	node_tree.add_child(root_id, coin_id);
 }
 let coin_ids = node_tree.get_child_ids(root_id).to_vec();

@@ -152,8 +152,8 @@ impl SpriteAtlasLoad {
 				}
 			}
 			for (file_name, image_data) in image_table {
-				let read_number = |key: &str| -> f32 {
-					image_data.get(key).and_then(|value| value.as_f64()).unwrap_or(0.0) as f32
+				let read_number = |key: &str| -> f64 {
+					image_data.get(key).and_then(|value| value.as_f64()).unwrap_or(0.0)
 				};
 				let page_index = image_data.get("page").and_then(|value| value.as_u64()).unwrap_or(0) as usize;
 				frame_value_list.push(AtlasFrameValue {
@@ -176,7 +176,7 @@ impl SpriteAtlasLoad {
 				frame_value_list.push(AtlasFrameValue {
 					frame_name: frame_name.clone(),
 					page_index: read_number(0) as usize,
-					rect: Rect::create(read_number(1) as f32, read_number(2) as f32, read_number(3) as f32, read_number(4) as f32),
+					rect: Rect::create(read_number(1), read_number(2), read_number(3), read_number(4)),
 				});
 			}
 		}

@@ -15,7 +15,7 @@
 //!     그래서 원본은 숨을 때 set_active(false) 하지만 러스트 판은 tick 이 돌아야 해서 set_visible(false) 로 숨긴다.
 //!     UI 문서는 원본처럼 숨은 토스트를 active false 로 쓰고 읽는다. (uidocument.rs 의 UIDocumentNode)
 //!   - 등장 / 머묾 / 퇴장 시간과 곡선은 원본 그대로 이 안에서 센다. (Tween 은 쓰지 않는다)
-//!   - 가로 자리 rest_x 는 `Option<f32>` 다. (원본 null = 부모 가운데) options 객체는 UIToastOptions 구조체다.
+//!   - 가로 자리 rest_x 는 `Option<f64>` 다. (원본 null = 부모 가운데) options 객체는 UIToastOptions 구조체다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -27,14 +27,14 @@ use crate::ui::uilabel::UILabel;
 use std::collections::VecDeque;
 
 /// 등장 / 퇴장 시간. (초, 원본과 같다)
-const ENTER_SECONDS: f32 = 0.24;
-const EXIT_SECONDS: f32 = 0.2;
+const ENTER_SECONDS: f64 = 0.24;
+const EXIT_SECONDS: f64 = 0.2;
 
 /// 떠오르는 거리. (픽셀, 원본과 같다)
-const RISE_DISTANCE: f32 = 28.0;
+const RISE_DISTANCE: f64 = 28.0;
 
 /// 부모 크기를 모를 때의 가운데. (원본과 같다)
-const DEFAULT_CENTER_X: f32 = 480.0;
+const DEFAULT_CENTER_X: f64 = 480.0;
 
 //==============================================================================
 /// 토스트 설정. (원본 options = { width = 400, height = 48, rest_y = 560, rest_x = null, hold_seconds = 1.8, font_size = 15, background_color?, text_color? })
@@ -60,17 +60,17 @@ const DEFAULT_CENTER_X: f32 = 480.0;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UIToastOptions {
 	/// 알약 가로. (기본 400)
-	pub width: f32,
+	pub width: f64,
 	/// 알약 세로. (기본 48, 둥근 정도는 그 반)
-	pub height: f32,
+	pub height: f64,
 	/// 머무는 자리의 가운데 세로 좌표.
-	pub rest_y: f32,
+	pub rest_y: f64,
 	/// 머무는 자리의 가운데 가로 좌표. (None 이면 부모 가로 가운데)
-	pub rest_x: Option<f32>,
+	pub rest_x: Option<f64>,
 	/// 머무는 시간. (초)
-	pub hold_seconds: f32,
+	pub hold_seconds: f64,
 	/// 글 크기. (기본 15)
-	pub font_size: f32,
+	pub font_size: f64,
 	/// 알약 색.
 	pub background_color: Color,
 	/// 글 색.
@@ -131,10 +131,10 @@ pub struct UIToast {
 	options: UIToastOptions,
 	message_queue: VecDeque<String>,
 	phase: ToastPhase,
-	phase_seconds: f32,
-	hold_seconds: f32,
-	rest_y: f32,
-	rest_x: Option<f32>,
+	phase_seconds: f64,
+	hold_seconds: f64,
+	rest_y: f64,
+	rest_x: Option<f64>,
 }
 
 #[crate::reflect]
@@ -245,7 +245,7 @@ impl UIToast {
 	//==============================================================================
 	/// 진행 비율로 자리 고치기. (0 = 아래에서 출발, 1 = 제자리)
 	//==============================================================================
-	fn update_position(&self, context: &mut ComponentContext, progress_ratio: f32) {
+	fn update_position(&self, context: &mut ComponentContext, progress_ratio: f64) {
 		let center_x = match self.rest_x {
 			Some(rest_x) => {
 				rest_x
@@ -272,7 +272,7 @@ impl UIToast {
 	/// # 인자
 	/// - `rest_y`: 머무는 자리의 가운데 세로 좌표. (부모 로컬 좌표, 등장할 때는 28 아래에서 떠오른다, 다음 자리 셈부터)
 	//==============================================================================
-	pub fn set_rest_y(&mut self, rest_y: f32) {
+	pub fn set_rest_y(&mut self, rest_y: f64) {
 		self.rest_y = rest_y;
 	}
 
@@ -282,7 +282,7 @@ impl UIToast {
 	/// # 인자
 	/// - `rest_x`: 머무는 자리의 가운데 가로 좌표. (부모 로컬 좌표, None 이면 부모 가로 가운데, 부모 크기를 모르면 480)
 	//==============================================================================
-	pub fn set_rest_x(&mut self, rest_x: Option<f32>) {
+	pub fn set_rest_x(&mut self, rest_x: Option<f64>) {
 		self.rest_x = rest_x;
 	}
 
@@ -292,7 +292,7 @@ impl UIToast {
 	/// # 인자
 	/// - `hold_seconds`: 다 떠오른 뒤 머무는 시간. (초, 기본 1.8)
 	//==============================================================================
-	pub fn set_hold_seconds(&mut self, hold_seconds: f32) {
+	pub fn set_hold_seconds(&mut self, hold_seconds: f64) {
 		self.hold_seconds = hold_seconds;
 	}
 
@@ -361,7 +361,7 @@ impl Component for UIToast {
 	//==============================================================================
 	/// 갱신. (숨은 동안 줄에 메시지가 있으면 꺼내고, 등장 → 머묾 → 퇴장을 센다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		if self.phase == ToastPhase::Hidden {
 			if self.message_queue.is_empty() {
 				return;

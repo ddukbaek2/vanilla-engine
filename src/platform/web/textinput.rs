@@ -536,7 +536,7 @@ pub(super) fn begin_frame(engine: &mut Engine) {
 	if let Some(context_menu_request) = PENDING_CONTEXT_MENU_REQUEST.with(|request_cell| request_cell.take()) {
 		let view_position = match context_menu_request {
 			Some((canvas_x, canvas_y)) => {
-				engine.get_view_manager().canvas_position_to_view_position(crate::base::vector2::Vector2::create(canvas_x as f32, canvas_y as f32))
+				engine.get_view_manager().canvas_position_to_view_position(crate::base::vector2::Vector2::create(canvas_x as f64, canvas_y as f64))
 			}
 			None => {
 				engine.get_input_manager().get_view_input_position()
@@ -991,8 +991,8 @@ fn read_client_position(event: &web_sys::Event) -> Option<(f64, f64)> {
 //==============================================================================
 fn find_field_state_at_client_position(web_text_input_state: &WebTextInputState, client_x: f64, client_y: f64, is_dom_input_only: bool) -> Option<TextInputFieldState> {
 	let canvas_rect = web_text_input_state.canvas.as_ref()?.get_bounding_client_rect();
-	let canvas_x = (client_x - canvas_rect.left()) as f32;
-	let canvas_y = (client_y - canvas_rect.top()) as f32;
+	let canvas_x = (client_x - canvas_rect.left()) as f64;
+	let canvas_y = (client_y - canvas_rect.top()) as f64;
 	web_text_input_state.field_state_list.iter().rev().find(|field_state| {
 		let field_rect = field_state.field_rect;
 		let is_inside = canvas_x >= field_rect.position.x && canvas_x <= field_rect.position.x + field_rect.size.x && canvas_y >= field_rect.position.y && canvas_y <= field_rect.position.y + field_rect.size.y;
@@ -1078,8 +1078,8 @@ fn handle_canvas_context_menu(event: web_sys::Event) {
 		let mut web_text_input_state = state_cell.borrow_mut();
 		if let Some(canvas) = &web_text_input_state.canvas {
 			let canvas_rect = canvas.get_bounding_client_rect();
-			let canvas_x = (client_x - canvas_rect.left()) as f32;
-			let canvas_y = (client_y - canvas_rect.top()) as f32;
+			let canvas_x = (client_x - canvas_rect.left()) as f64;
+			let canvas_y = (client_y - canvas_rect.top()) as f64;
 			is_inside_menu = web_text_input_state.menu_canvas_rect_list.iter().any(|menu_rect| canvas_x >= menu_rect.position.x && canvas_x <= menu_rect.position.x + menu_rect.size.x && canvas_y >= menu_rect.position.y && canvas_y <= menu_rect.position.y + menu_rect.size.y);
 		}
 		if is_inside_menu {

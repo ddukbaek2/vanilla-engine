@@ -190,7 +190,7 @@ impl Component for AudioListener2D {
 	/// - `context`: 자기 노드와 트리, 엔진.
 	/// - `_time_delta`: 지난 프레임부터의 시간. (초, 쓰지 않는다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		let (pixels_per_unit, depth) = (self.pixels_per_unit, self.depth);
 		let Some(listener) = self.listener.as_mut() else {
 			return;

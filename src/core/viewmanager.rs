@@ -44,13 +44,13 @@ use crate::platform;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SafeAreaInsets {
 	/// 위 쪽 인셋.
-	pub top: f32,
+	pub top: f64,
 	/// 오른쪽 인셋.
-	pub right: f32,
+	pub right: f64,
 	/// 아래 쪽 인셋.
-	pub bottom: f32,
+	pub bottom: f64,
 	/// 왼쪽 인셋.
-	pub left: f32,
+	pub left: f64,
 }
 
 impl SafeAreaInsets {
@@ -66,7 +66,7 @@ impl SafeAreaInsets {
 	/// # 돌려줌
 	/// 네 칸을 채운 인셋.
 	//==============================================================================
-	pub const fn create(top: f32, right: f32, bottom: f32, left: f32) -> SafeAreaInsets {
+	pub const fn create(top: f64, right: f64, bottom: f64, left: f64) -> SafeAreaInsets {
 		SafeAreaInsets {
 			top,
 			right,
@@ -142,8 +142,8 @@ pub enum ViewScaleMode {
 /// ```
 //==============================================================================
 pub struct ViewManager {
-	device_pixel_ratio: f32,
-	target_resolution_scale: f32,
+	device_pixel_ratio: f64,
+	target_resolution_scale: f64,
 	client_native_size: Vector2,
 	canvas_native_size: Vector2,
 	canvas_pixel_size: Vector2,
@@ -152,7 +152,7 @@ pub struct ViewManager {
 	view_native_rect: Rect,
 	view_size: Vector2,
 	/// 렌더에 쓸 배율 상한. (0 이면 제한 없음)
-	max_render_pixel_ratio: f32,
+	max_render_pixel_ratio: f64,
 	/// 세이프 에어리어 강제값. (CSS 픽셀, 위 / 오른쪽 / 아래 / 왼쪽)
 	safe_area_override: Option<SafeAreaInsets>,
 	/// 무시할 세이프 에어리어 쪽. (get_safe_area_insets 가 0 으로 돌려준다)
@@ -207,15 +207,15 @@ impl ViewManager {
 	/// assert_eq!(view_manager.get_view_size(), Vector2::create(1280.0, 1707.0));
 	/// ```
 	//==============================================================================
-	pub fn calculate_view_rect(&mut self, physical_width: u32, physical_height: u32, scale_factor: f32) {
+	pub fn calculate_view_rect(&mut self, physical_width: u32, physical_height: u32, scale_factor: f64) {
 		let device_pixel_ratio = if scale_factor > 0.0 {
 			scale_factor
 		}
 		else {
 			1.0
 		};
-		let canvas_native_size = Vector2::create((physical_width as f32 / device_pixel_ratio).round(), (physical_height as f32 / device_pixel_ratio).round());
-		let canvas_pixel_size = Vector2::create(physical_width as f32, physical_height as f32);
+		let canvas_native_size = Vector2::create((physical_width as f64 / device_pixel_ratio).round(), (physical_height as f64 / device_pixel_ratio).round());
+		let canvas_pixel_size = Vector2::create(physical_width as f64, physical_height as f64);
 		let reference_resolution_size = self.get_reference_resolution_size();
 		self.device_pixel_ratio = device_pixel_ratio;
 		self.client_native_size = platform::read_client_native_size().unwrap_or(canvas_native_size);
@@ -284,7 +284,7 @@ impl ViewManager {
 	//==============================================================================
 	/// 여백 없이 창 전체를 쓰는 모드의 뷰 영역. (한 축 스케일 고정, 뷰 크기는 창 비율로 산출)
 	//==============================================================================
-	fn apply_expanded_view(&mut self, target_resolution_scale: f32, canvas_native_size: Vector2) {
+	fn apply_expanded_view(&mut self, target_resolution_scale: f64, canvas_native_size: Vector2) {
 		let safe_target_resolution_scale = if target_resolution_scale > 0.0 {
 			target_resolution_scale
 		}
@@ -311,7 +311,7 @@ impl ViewManager {
 	/// - `translate_x`: 가로 이동. (그리기 버퍼 픽셀, 행렬의 e)
 	/// - `translate_y`: 세로 이동. (그리기 버퍼 픽셀, 행렬의 f)
 	//==============================================================================
-	pub fn apply_transform(&self, graphic: &mut Graphic, scale_x: f32, scale_y: f32, skew_x: f32, skew_y: f32, translate_x: f32, translate_y: f32) {
+	pub fn apply_transform(&self, graphic: &mut Graphic, scale_x: f64, scale_y: f64, skew_x: f64, skew_y: f64, translate_x: f64, translate_y: f64) {
 		graphic.set_transform(scale_x, skew_y, skew_x, scale_y, translate_x, translate_y);
 	}
 
@@ -360,7 +360,7 @@ impl ViewManager {
 	/// # 돌려줌
 	/// 창의 배율. (calculate_view_rect 에 넘긴 값, 0 이하였으면 1, 처음 1)
 	//==============================================================================
-	pub fn get_device_pixel_ratio(&self) -> f32 {
+	pub fn get_device_pixel_ratio(&self) -> f64 {
 		self.device_pixel_ratio
 	}
 
@@ -450,7 +450,7 @@ impl ViewManager {
 	/// # 돌려줌
 	/// 뷰 한 단위가 창 안쪽 논리 픽셀 몇 개인지. (None 과 ReferenceResolution 모드는 1)
 	//==============================================================================
-	pub fn get_target_resolution_scale(&self) -> f32 {
+	pub fn get_target_resolution_scale(&self) -> f64 {
 		self.target_resolution_scale
 	}
 
@@ -462,7 +462,7 @@ impl ViewManager {
 	/// # 돌려줌
 	/// 창 안쪽 논리 높이 / 뷰 높이. (둘 가운데 하나라도 0 이하면 1)
 	//==============================================================================
-	pub fn get_css_pixel_scale(&self) -> f32 {
+	pub fn get_css_pixel_scale(&self) -> f64 {
 		let view_size = self.get_view_size();
 		let canvas_height = self.canvas_native_size.y;
 		if view_size.y > 0.0 && canvas_height > 0.0 {
@@ -480,7 +480,7 @@ impl ViewManager {
 	/// # 인자
 	/// - `max_render_pixel_ratio`: 렌더 배율 상한. (0 이면 제한 없음, 음수는 0 으로 둔다)
 	//==============================================================================
-	pub fn set_max_render_pixel_ratio(&mut self, max_render_pixel_ratio: f32) {
+	pub fn set_max_render_pixel_ratio(&mut self, max_render_pixel_ratio: f64) {
 		self.max_render_pixel_ratio = max_render_pixel_ratio.max(0.0);
 	}
 
@@ -490,7 +490,7 @@ impl ViewManager {
 	/// # 돌려줌
 	/// 렌더 배율 상한. (0 이면 제한 없음, 기본 0)
 	//==============================================================================
-	pub fn get_max_render_pixel_ratio(&self) -> f32 {
+	pub fn get_max_render_pixel_ratio(&self) -> f64 {
 		self.max_render_pixel_ratio
 	}
 
@@ -514,7 +514,7 @@ impl ViewManager {
 	/// assert_eq!(view_manager.limit_render_pixel_ratio(1.5), 1.5);
 	/// ```
 	//==============================================================================
-	pub fn limit_render_pixel_ratio(&self, device_pixel_ratio: f32) -> f32 {
+	pub fn limit_render_pixel_ratio(&self, device_pixel_ratio: f64) -> f64 {
 		if self.max_render_pixel_ratio > 0.0 && device_pixel_ratio > self.max_render_pixel_ratio {
 			return self.max_render_pixel_ratio;
 		}
@@ -688,7 +688,7 @@ impl ViewManager {
 	/// # 돌려줌
 	/// 뷰 좌표. (반올림한 값)
 	//==============================================================================
-	pub fn convert_client_to_view(&self, client_x: f32, client_y: f32) -> Vector2 {
+	pub fn convert_client_to_view(&self, client_x: f64, client_y: f64) -> Vector2 {
 		let canvas_client_position = platform::read_canvas_client_position();
 		let canvas_position = Vector2::create(client_x - canvas_client_position.x, client_y - canvas_client_position.y);
 		self.canvas_position_to_view_position(canvas_position)
@@ -703,11 +703,11 @@ fn parse_safe_area_text(safe_area_text: &str) -> Option<SafeAreaInsets> {
 	if safe_area_text.is_empty() {
 		return None;
 	}
-	let mut insets = [0.0f32; 4];
+	let mut insets = [0.0f64; 4];
 	for (part_index, part) in safe_area_text.split(',').take(4).enumerate() {
 		let value = parse_leading_float(part);
 		if !value.is_nan() {
-			insets[part_index] = value as f32;
+			insets[part_index] = value;
 		}
 	}
 	Some(SafeAreaInsets::create(insets[0], insets[1], insets[2], insets[3]))

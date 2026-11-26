@@ -90,7 +90,7 @@ impl UILabel {
 	/// # 돌려줌
 	/// 그 글과 크기의 새 라벨.
 	//==============================================================================
-	pub fn create_with_text(text: &str, font_size: f32) -> UILabel {
+	pub fn create_with_text(text: &str, font_size: f64) -> UILabel {
 		let mut label = UILabel::new();
 		label.set_text(text);
 		label.set_font_size(font_size);
@@ -294,7 +294,7 @@ impl UILabel {
 	/// assert_eq!(label.get_fit_width(), 0.0);
 	/// ```
 	//==============================================================================
-	pub fn set_fit_width(&mut self, width: f32, minimum_ratio: f32) {
+	pub fn set_fit_width(&mut self, width: f64, minimum_ratio: f64) {
 		self.rich_text.get_text_component_mut().set_fit_width(width, minimum_ratio);
 	}
 
@@ -304,7 +304,7 @@ impl UILabel {
 	/// # 돌려줌
 	/// 맞출 너비. (픽셀, 0 이면 맞추지 않는다)
 	//==============================================================================
-	pub fn get_fit_width(&self) -> f32 {
+	pub fn get_fit_width(&self) -> f64 {
 		self.rich_text.get_text_component().get_fit_width()
 	}
 
@@ -317,7 +317,7 @@ impl UILabel {
 	/// # 돌려줌
 	/// 그릴 때의 글자 크기. (픽셀, 맞출 너비를 넘치면 줄인 크기)
 	//==============================================================================
-	pub fn calculate_fitted_font_size(&mut self, graphic: &mut Graphic) -> f32 {
+	pub fn calculate_fitted_font_size(&mut self, graphic: &mut Graphic) -> f64 {
 		self.rich_text.get_text_component_mut().calculate_fitted_font_size(graphic)
 	}
 
@@ -332,7 +332,7 @@ impl UILabel {
 	/// # 돌려줌
 	/// 글의 너비. (픽셀, 빈 글이면 0)
 	//==============================================================================
-	pub fn measure_text(&self, graphic: &Graphic, text: &str, font_size: f32) -> f32 {
+	pub fn measure_text(&self, graphic: &Graphic, text: &str, font_size: f64) -> f64 {
 		self.rich_text.get_text_component().measure_text(graphic, text, font_size)
 	}
 
@@ -342,7 +342,7 @@ impl UILabel {
 	/// # 돌려줌
 	/// 그릴 때의 글자 크기. (픽셀, 아직 배치를 다시 재지 않았으면 정한 크기)
 	//==============================================================================
-	pub fn get_fitted_font_size(&self) -> f32 {
+	pub fn get_fitted_font_size(&self) -> f64 {
 		self.rich_text.get_text_component().get_fitted_font_size()
 	}
 
@@ -352,7 +352,7 @@ impl UILabel {
 	/// # 인자
 	/// - `font_size`: 글자 크기. (픽셀)
 	//==============================================================================
-	pub fn set_font_size(&mut self, font_size: f32) {
+	pub fn set_font_size(&mut self, font_size: f64) {
 		self.rich_text.set_font_size(font_size);
 	}
 
@@ -362,7 +362,7 @@ impl UILabel {
 	/// # 돌려줌
 	/// 정한 글자 크기. (픽셀, 맞춰 줄여도 그대로)
 	//==============================================================================
-	pub fn get_font_size(&self) -> f32 {
+	pub fn get_font_size(&self) -> f64 {
 		self.rich_text.get_font_size()
 	}
 
@@ -393,7 +393,7 @@ impl UILabel {
 	/// # 인자
 	/// - `word_wrap_width`: 자동 줄바꿈 폭. (픽셀, 0 이면 줄바꿈 문자로만 나눈다)
 	//==============================================================================
-	pub fn set_word_wrap_width(&mut self, word_wrap_width: f32) {
+	pub fn set_word_wrap_width(&mut self, word_wrap_width: f64) {
 		self.rich_text.set_word_wrap_width(word_wrap_width);
 	}
 
@@ -423,7 +423,7 @@ impl UILabel {
 	/// # 인자
 	/// - `line_spacing`: 줄 간격. (글자 크기의 배수)
 	//==============================================================================
-	pub fn set_line_spacing(&mut self, line_spacing: f32) {
+	pub fn set_line_spacing(&mut self, line_spacing: f64) {
 		self.rich_text.set_line_spacing(line_spacing);
 	}
 
@@ -463,7 +463,7 @@ impl UILabel {
 	/// # 인자
 	/// - `stroke_width`: 외곽선 두께. (픽셀, 0 이면 외곽선 없음)
 	//==============================================================================
-	pub fn set_stroke_width(&mut self, stroke_width: f32) {
+	pub fn set_stroke_width(&mut self, stroke_width: f64) {
 		self.rich_text.set_stroke_width(stroke_width);
 	}
 

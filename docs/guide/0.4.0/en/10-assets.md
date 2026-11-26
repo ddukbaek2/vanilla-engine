@@ -380,7 +380,7 @@ let blob_asset = asset_loader.add_blob("data:,abc");
 let missing_asset = asset_loader.add_image("missing.png");
 let last_progress = Rc::new(Cell::new(0.0));
 let progress_reader = last_progress.clone();
-asset_loader.set_progress_handler(Some(Box::new(move |progress: f32, _finished_count: usize, _total_count: usize| {
+asset_loader.set_progress_handler(Some(Box::new(move |progress: f64, _finished_count: usize, _total_count: usize| {
 	progress_reader.set(progress);
 })));
 asset_loader.load(&engine);
@@ -583,7 +583,7 @@ impl Scene for AtlasScene {
 		for (frame_index, frame_name) in frame_names.iter().enumerate() {
 			let icon_id = node_tree.create_child(root_id, frame_name);
 			let icon_node = &mut node_tree[icon_id];
-			icon_node.set_local_position(Vector2::create(240.0 + frame_index as f32 * 200.0, 360.0));
+			icon_node.set_local_position(Vector2::create(240.0 + frame_index as f64 * 200.0, 360.0));
 			icon_node.set_content_size(Vector2::create(96.0, 96.0));
 			let sprite = icon_node.add_component(Sprite::new());
 			self.sprite_atlas.apply_frame(sprite, frame_name);

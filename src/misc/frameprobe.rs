@@ -51,12 +51,12 @@
 /// ```
 //==============================================================================
 pub struct FrameProbe {
-	warmup_seconds: f32,
-	probe_seconds: f32,
-	slow_frame_ratio: f32,
-	slow_frame_share: f32,
-	unlimited_target_frame_per_second: f32,
-	elapsed_seconds: f32,
+	warmup_seconds: f64,
+	probe_seconds: f64,
+	slow_frame_ratio: f64,
+	slow_frame_share: f64,
+	unlimited_target_frame_per_second: f64,
+	elapsed_seconds: f64,
 	frame_count: u32,
 	slow_frame_count: u32,
 	is_finished: bool,
@@ -112,7 +112,7 @@ impl FrameProbe {
 	/// assert!(!frame_probe.measure_frame(1.0 / 60.0, 60.0));
 	/// ```
 	//==============================================================================
-	pub fn measure_frame(&mut self, frame_seconds: f32, maximum_frame_per_second: f32) -> bool {
+	pub fn measure_frame(&mut self, frame_seconds: f64, maximum_frame_per_second: f64) -> bool {
 		if self.is_finished || !(frame_seconds > 0.0) {
 			return false;
 		}
@@ -135,7 +135,7 @@ impl FrameProbe {
 			return false;
 		}
 		self.is_finished = true;
-		self.is_slow = self.slow_frame_count as f32 >= self.frame_count as f32 * self.slow_frame_share;
+		self.is_slow = self.slow_frame_count as f64 >= self.frame_count as f64 * self.slow_frame_share;
 		true
 	}
 
@@ -190,9 +190,9 @@ impl FrameProbe {
 	/// # 돌려줌
 	/// 처진 프레임 수 / 잰 프레임 수. (0 ~ 1)
 	//==============================================================================
-	pub fn read_slow_frame_share(&self) -> f32 {
+	pub fn read_slow_frame_share(&self) -> f64 {
 		if self.frame_count > 0 {
-			self.slow_frame_count as f32 / self.frame_count as f32
+			self.slow_frame_count as f64 / self.frame_count as f64
 		}
 		else {
 			0.0
@@ -206,7 +206,7 @@ impl FrameProbe {
 	/// - `warmup_seconds`: 재기 전에 기다리는 시간. (초, 0 보다 작으면 0, 처음 2)
 	/// - `probe_seconds`: 기다린 뒤 재는 시간. (초, 0 보다 작으면 0, 처음 4)
 	//==============================================================================
-	pub fn set_seconds(&mut self, warmup_seconds: f32, probe_seconds: f32) {
+	pub fn set_seconds(&mut self, warmup_seconds: f64, probe_seconds: f64) {
 		self.warmup_seconds = warmup_seconds.max(0.0);
 		self.probe_seconds = probe_seconds.max(0.0);
 	}
@@ -217,7 +217,7 @@ impl FrameProbe {
 	/// # 돌려줌
 	/// 재기 전에 기다리는 시간. (초)
 	//==============================================================================
-	pub fn get_warmup_seconds(&self) -> f32 {
+	pub fn get_warmup_seconds(&self) -> f64 {
 		self.warmup_seconds
 	}
 
@@ -227,7 +227,7 @@ impl FrameProbe {
 	/// # 돌려줌
 	/// 기다린 뒤 재는 시간. (초)
 	//==============================================================================
-	pub fn get_probe_seconds(&self) -> f32 {
+	pub fn get_probe_seconds(&self) -> f64 {
 		self.probe_seconds
 	}
 
@@ -238,7 +238,7 @@ impl FrameProbe {
 	/// - `slow_frame_ratio`: 목표 간격의 몇 배보다 길면 처진 프레임으로 셀지. (처음 1.4)
 	/// - `slow_frame_share`: 처진 프레임이 잰 프레임의 이 몫 이상이면 처지는 기기다. (0 ~ 1, 처음 0.25)
 	//==============================================================================
-	pub fn set_slow_frame_threshold(&mut self, slow_frame_ratio: f32, slow_frame_share: f32) {
+	pub fn set_slow_frame_threshold(&mut self, slow_frame_ratio: f64, slow_frame_share: f64) {
 		self.slow_frame_ratio = slow_frame_ratio;
 		self.slow_frame_share = slow_frame_share;
 	}
@@ -249,7 +249,7 @@ impl FrameProbe {
 	/// # 돌려줌
 	/// 목표 간격에 곱하는 배. (처음 1.4)
 	//==============================================================================
-	pub fn get_slow_frame_ratio(&self) -> f32 {
+	pub fn get_slow_frame_ratio(&self) -> f64 {
 		self.slow_frame_ratio
 	}
 
@@ -259,7 +259,7 @@ impl FrameProbe {
 	/// # 돌려줌
 	/// 처진 몫. (0 ~ 1, 처음 0.25)
 	//==============================================================================
-	pub fn get_slow_frame_share(&self) -> f32 {
+	pub fn get_slow_frame_share(&self) -> f64 {
 		self.slow_frame_share
 	}
 
@@ -269,7 +269,7 @@ impl FrameProbe {
 	/// # 인자
 	/// - `unlimited_target_frame_per_second`: measure_frame 에 0 이하의 최대 프레임이 오면 쓸 목표 프레임. (초당 프레임, 처음 60)
 	//==============================================================================
-	pub fn set_unlimited_target_frame_per_second(&mut self, unlimited_target_frame_per_second: f32) {
+	pub fn set_unlimited_target_frame_per_second(&mut self, unlimited_target_frame_per_second: f64) {
 		self.unlimited_target_frame_per_second = unlimited_target_frame_per_second;
 	}
 
@@ -279,7 +279,7 @@ impl FrameProbe {
 	/// # 돌려줌
 	/// 목표 프레임. (초당 프레임)
 	//==============================================================================
-	pub fn get_unlimited_target_frame_per_second(&self) -> f32 {
+	pub fn get_unlimited_target_frame_per_second(&self) -> f64 {
 		self.unlimited_target_frame_per_second
 	}
 }

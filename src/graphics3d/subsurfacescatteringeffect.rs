@@ -12,6 +12,7 @@ use crate::core::graphic::GlTexture;
 use crate::graphics3d::fullscreenpass::FullscreenPass;
 use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 
 //==============================================================================
 // 전역 상수 목록.
@@ -103,9 +104,9 @@ pub struct SubsurfaceScatteringEffect {
 	ping_render_target: RenderTarget,
 	pong_render_target: RenderTarget,
 	kernel: [f32; KERNEL_SAMPLE_COUNT * 4],
-	scatter_width: f32,
-	falloff_color: [f32; 3],
-	strength_color: [f32; 3],
+	scatter_width: f64,
+	falloff_color: [f64; 3],
+	strength_color: [f64; 3],
 }
 
 impl SubsurfaceScatteringEffect {
@@ -161,7 +162,7 @@ impl SubsurfaceScatteringEffect {
 	///
 	/// let kernel = SubsurfaceScatteringEffect::build_kernel([1.0, 0.37, 0.3], [0.48, 0.41, 0.28]);
 	/// for channel_index in 0..3 {
-	/// 	let weight_sum: f32 = (0..KERNEL_SAMPLE_COUNT).map(|sample_index| kernel[sample_index * 4 + channel_index]).sum();
+	/// 	let weight_sum: f64 = (0..KERNEL_SAMPLE_COUNT).map(|sample_index| kernel[sample_index * 4 + channel_index] as f64).sum();
 	/// 	assert!((weight_sum - 1.0).abs() < 1.0e-5);
 	/// }
 	/// assert_eq!(kernel[3], 0.0);
@@ -171,12 +172,12 @@ impl SubsurfaceScatteringEffect {
 	/// assert_eq!(identity_kernel[4], 0.0);
 	/// ```
 	//==============================================================================
-	pub fn build_kernel(falloff_color: [f32; 3], strength_color: [f32; 3]) -> [f32; KERNEL_SAMPLE_COUNT * 4] {
+	pub fn build_kernel(falloff_color: [f64; 3], strength_color: [f64; 3]) -> [f32; KERNEL_SAMPLE_COUNT * 4] {
 		let sample_count = KERNEL_SAMPLE_COUNT;
 
 		// 채널별 확산 프로파일. (가우시안 합, 분산은 폴오프 색으로 채널마다 늘어난다)
 		let evaluate_gaussian = |variance: f64, distance: f64, channel_index: usize| -> f64 {
-			let scaled_distance = distance / (0.001 + falloff_color[channel_index] as f64);
+			let scaled_distance = distance / (0.001 + falloff_color[channel_index]);
 			(-(scaled_distance * scaled_distance) / (2.0 * variance)).exp() / (2.0 * std::f64::consts::PI * variance)
 		};
 		let evaluate_profile = |distance: f64, channel_index: usize| -> f64 {
@@ -240,7 +241,7 @@ impl SubsurfaceScatteringEffect {
 		let mut kernel = [0.0f32; KERNEL_SAMPLE_COUNT * 4];
 		for channel_index in 0..3 {
 			let weight_sum: f64 = ordered_weights.iter().map(|weight| weight[channel_index]).sum();
-			let strength = strength_color[channel_index] as f64;
+			let strength = strength_color[channel_index];
 			for sample_index in 0..sample_count {
 				let normalized_weight = ordered_weights[sample_index][channel_index] / weight_sum;
 				let final_weight = if sample_index == 0 {
@@ -249,11 +250,11 @@ impl SubsurfaceScatteringEffect {
 				else {
 					strength * normalized_weight
 				};
-				kernel[sample_index * 4 + channel_index] = final_weight as f32;
+				kernel[sample_index * 4 + channel_index] = (final_weight as f64) as f32;
 			}
 		}
 		for sample_index in 0..sample_count {
-			kernel[sample_index * 4 + 3] = ordered_offsets[sample_index] as f32;
+			kernel[sample_index * 4 + 3] = (ordered_offsets[sample_index] as f64) as f32;
 		}
 		kernel
 	}
@@ -289,7 +290,7 @@ impl SubsurfaceScatteringEffect {
 	/// - `near_distance`: 투영의 가까운 거리. (깊이를 선형으로 풀 때)
 	/// - `far_distance`: 투영의 먼 거리.
 	//==============================================================================
-	pub fn render(&self, gl: &glow::Context, irradiance_texture: Option<GlTexture>, depth_texture: Option<GlTexture>, field_of_view_radian: f32, aspect_ratio: f32, near_distance: f32, far_distance: f32) {
+	pub fn render(&self, gl: &glow::Context, irradiance_texture: Option<GlTexture>, depth_texture: Option<GlTexture>, field_of_view_radian: f64, aspect_ratio: f64, near_distance: f64, far_distance: f64) {
 		unsafe {
 			gl.disable(glow::DEPTH_TEST);
 			gl.disable(glow::BLEND);
@@ -302,10 +303,10 @@ impl SubsurfaceScatteringEffect {
 			gl.uniform_1_i32(scatter_pass.get_uniform_location(gl, "sourceTexture").as_ref(), 0);
 			gl.uniform_1_i32(scatter_pass.get_uniform_location(gl, "depthTexture").as_ref(), 1);
 			gl.uniform_4_f32_slice(scatter_pass.get_uniform_location(gl, "kernel[0]").as_ref(), &self.kernel);
-			gl.uniform_1_f32(scatter_pass.get_uniform_location(gl, "scatterWidth").as_ref(), self.scatter_width);
-			gl.uniform_1_f32(scatter_pass.get_uniform_location(gl, "distanceToProjectionWindow").as_ref(), 1.0 / (field_of_view_radian * 0.5).tan());
-			gl.uniform_1_f32(scatter_pass.get_uniform_location(gl, "aspectRatio").as_ref(), aspect_ratio);
-			gl.uniform_2_f32(scatter_pass.get_uniform_location(gl, "depthRange").as_ref(), near_distance, far_distance);
+			gl.uniform_1_f64(scatter_pass.get_uniform_location(gl, "scatterWidth").as_ref(), self.scatter_width);
+			gl.uniform_1_f64(scatter_pass.get_uniform_location(gl, "distanceToProjectionWindow").as_ref(), 1.0 / (field_of_view_radian * 0.5).tan());
+			gl.uniform_1_f64(scatter_pass.get_uniform_location(gl, "aspectRatio").as_ref(), aspect_ratio);
+			gl.uniform_2_f64(scatter_pass.get_uniform_location(gl, "depthRange").as_ref(), near_distance, far_distance);
 			gl.active_texture(glow::TEXTURE1);
 			gl.bind_texture(glow::TEXTURE_2D, depth_texture);
 			gl.active_texture(glow::TEXTURE0);
@@ -315,7 +316,7 @@ impl SubsurfaceScatteringEffect {
 		let ping_render_target = &self.ping_render_target;
 		ping_render_target.bind(gl);
 		unsafe {
-			gl.uniform_2_f32(blur_direction_location.as_ref(), 1.0, 0.0);
+			gl.uniform_2_f64(blur_direction_location.as_ref(), 1.0, 0.0);
 			gl.bind_texture(glow::TEXTURE_2D, irradiance_texture);
 		}
 		scatter_pass.draw(gl);
@@ -324,7 +325,7 @@ impl SubsurfaceScatteringEffect {
 		let pong_render_target = &self.pong_render_target;
 		pong_render_target.bind(gl);
 		unsafe {
-			gl.uniform_2_f32(blur_direction_location.as_ref(), 0.0, 1.0);
+			gl.uniform_2_f64(blur_direction_location.as_ref(), 0.0, 1.0);
 			gl.bind_texture(glow::TEXTURE_2D, ping_render_target.get_color_texture(0));
 		}
 		scatter_pass.draw(gl);
@@ -353,7 +354,7 @@ impl SubsurfaceScatteringEffect {
 	/// # 인자
 	/// - `scatter_width`: 산란 폭. (월드 단위, 기본 0.2, 화면에 투영한 폭은 화면 높이의 0.05 를 넘지 않게 셰이더가 자른다)
 	//==============================================================================
-	pub fn set_scatter_width(&mut self, scatter_width: f32) {
+	pub fn set_scatter_width(&mut self, scatter_width: f64) {
 		self.scatter_width = scatter_width;
 	}
 
@@ -363,7 +364,7 @@ impl SubsurfaceScatteringEffect {
 	/// # 돌려줌
 	/// 산란 폭. (월드 단위)
 	//==============================================================================
-	pub fn get_scatter_width(&self) -> f32 {
+	pub fn get_scatter_width(&self) -> f64 {
 		self.scatter_width
 	}
 
@@ -375,7 +376,7 @@ impl SubsurfaceScatteringEffect {
 	/// - `falloff_color`: 채널별 폴오프. (r, g, b, 클수록 그 채널이 멀리 퍼진다)
 	/// - `strength_color`: 채널별 강도. (r, g, b, 0 이면 그 채널은 흩지 않는다)
 	//==============================================================================
-	pub fn set_profile(&mut self, falloff_color: [f32; 3], strength_color: [f32; 3]) {
+	pub fn set_profile(&mut self, falloff_color: [f64; 3], strength_color: [f64; 3]) {
 		self.falloff_color = falloff_color;
 		self.strength_color = strength_color;
 		self.compute_kernel();
@@ -387,7 +388,7 @@ impl SubsurfaceScatteringEffect {
 	/// # 돌려줌
 	/// 채널별 폴오프. (r, g, b)
 	//==============================================================================
-	pub fn get_falloff_color(&self) -> [f32; 3] {
+	pub fn get_falloff_color(&self) -> [f64; 3] {
 		self.falloff_color
 	}
 
@@ -397,7 +398,7 @@ impl SubsurfaceScatteringEffect {
 	/// # 돌려줌
 	/// 채널별 강도. (r, g, b)
 	//==============================================================================
-	pub fn get_strength_color(&self) -> [f32; 3] {
+	pub fn get_strength_color(&self) -> [f64; 3] {
 		self.strength_color
 	}
 
@@ -455,11 +456,11 @@ mod tests {
 	fn kernel_is_normalized_and_centered() {
 		let kernel = SubsurfaceScatteringEffect::build_kernel([1.0, 0.37, 0.3], [0.48, 0.41, 0.28]);
 		for channel_index in 0..3 {
-			let weight_sum: f32 = (0..KERNEL_SAMPLE_COUNT).map(|sample_index| kernel[sample_index * 4 + channel_index]).sum();
+			let weight_sum: f64 = (0..KERNEL_SAMPLE_COUNT).map(|sample_index| kernel[sample_index * 4 + channel_index] as f64).sum();
 			assert!((weight_sum - 1.0).abs() < 1.0e-5, "channel {} sum {}", channel_index, weight_sum);
 		}
 		assert_eq!(kernel[3], 0.0);
-		let maximum_offset = (0..KERNEL_SAMPLE_COUNT).map(|sample_index| kernel[sample_index * 4 + 3].abs()).fold(0.0f32, f32::max);
+		let maximum_offset = (0..KERNEL_SAMPLE_COUNT).map(|sample_index| kernel[sample_index * 4 + 3].abs() as f64).fold(0.0f64, f64::max);
 		assert!((maximum_offset - 3.0).abs() < 1.0e-6);
 
 		let identity_kernel = SubsurfaceScatteringEffect::build_kernel([1.0, 0.37, 0.3], [0.0, 0.0, 0.0]);

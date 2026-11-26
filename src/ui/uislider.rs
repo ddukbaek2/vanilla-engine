@@ -64,16 +64,16 @@ pub type UISliderEvent = Box<dyn FnMut(&mut UISlider, &mut ComponentContext)>;
 //==============================================================================
 pub struct UISlider {
 	ui_control: UIControl,
-	value: f32,
-	min_value: f32,
-	max_value: f32,
+	value: f64,
+	min_value: f64,
+	max_value: f64,
 	track_color: Color,
 	fill_color: Color,
 	thumb_color: Color,
-	thumb_radius: f32,
-	track_thickness: f32,
+	thumb_radius: f64,
+	track_thickness: f64,
 	thumb_node_id: Option<NodeId>,
-	corner_radius: f32,
+	corner_radius: f64,
 	direction: ProgressDirection,
 	is_dragging: bool,
 	is_interactable: bool,
@@ -241,7 +241,7 @@ impl UISlider {
 	/// # 돌려줌
 	/// 값이 범위에서 차지하는 비율. (0 ~ 1, 최대값이 최소값보다 크지 않으면 0)
 	//==============================================================================
-	pub fn get_ratio(&self) -> f32 {
+	pub fn get_ratio(&self) -> f64 {
 		let range = self.max_value - self.min_value;
 		if range <= 0.0 {
 			return 0.0;
@@ -256,7 +256,7 @@ impl UISlider {
 	/// # 인자
 	/// - `value`: 새 값. (최소값보다 작으면 최소값, 최대값보다 크면 최대값)
 	//==============================================================================
-	pub fn set_value(&mut self, value: f32) {
+	pub fn set_value(&mut self, value: f64) {
 		self.value = math::clamp(value, self.min_value, self.max_value);
 	}
 
@@ -266,7 +266,7 @@ impl UISlider {
 	/// # 돌려줌
 	/// 지금 값. (최소값 ~ 최대값)
 	//==============================================================================
-	pub fn get_value(&self) -> f32 {
+	pub fn get_value(&self) -> f64 {
 		self.value
 	}
 
@@ -293,7 +293,7 @@ impl UISlider {
 	/// assert_eq!(slider.get_value(), 5.0);
 	/// ```
 	//==============================================================================
-	pub fn set_range(&mut self, min_value: f32, max_value: f32) {
+	pub fn set_range(&mut self, min_value: f64, max_value: f64) {
 		self.min_value = min_value;
 		self.max_value = max_value;
 		let value = self.value;
@@ -306,7 +306,7 @@ impl UISlider {
 	/// # 돌려줌
 	/// 최소값. (기본 0)
 	//==============================================================================
-	pub fn get_min_value(&self) -> f32 {
+	pub fn get_min_value(&self) -> f64 {
 		self.min_value
 	}
 
@@ -316,7 +316,7 @@ impl UISlider {
 	/// # 돌려줌
 	/// 최대값. (기본 1)
 	//==============================================================================
-	pub fn get_max_value(&self) -> f32 {
+	pub fn get_max_value(&self) -> f64 {
 		self.max_value
 	}
 
@@ -418,7 +418,7 @@ impl UISlider {
 	/// # 인자
 	/// - `thumb_radius`: 손잡이 원의 반지름. (호스트 content_size 와 같은 단위, 기본 16)
 	//==============================================================================
-	pub fn set_thumb_radius(&mut self, thumb_radius: f32) {
+	pub fn set_thumb_radius(&mut self, thumb_radius: f64) {
 		self.thumb_radius = thumb_radius;
 	}
 
@@ -428,7 +428,7 @@ impl UISlider {
 	/// # 돌려줌
 	/// 손잡이 원의 반지름.
 	//==============================================================================
-	pub fn get_thumb_radius(&self) -> f32 {
+	pub fn get_thumb_radius(&self) -> f64 {
 		self.thumb_radius
 	}
 
@@ -438,7 +438,7 @@ impl UISlider {
 	/// # 인자
 	/// - `track_thickness`: 트랙 두께. (호스트 content_size 와 같은 단위, 기본 0)
 	//==============================================================================
-	pub fn set_track_thickness(&mut self, track_thickness: f32) {
+	pub fn set_track_thickness(&mut self, track_thickness: f64) {
 		self.track_thickness = track_thickness;
 	}
 
@@ -448,7 +448,7 @@ impl UISlider {
 	/// # 돌려줌
 	/// 트랙 두께. (0 이면 호스트 영역 전체)
 	//==============================================================================
-	pub fn get_track_thickness(&self) -> f32 {
+	pub fn get_track_thickness(&self) -> f64 {
 		self.track_thickness
 	}
 
@@ -502,7 +502,7 @@ impl UISlider {
 	/// # 인자
 	/// - `corner_radius`: 트랙과 채움 사각형의 둥근 모서리 반지름. (0 이면 각진 사각형, 기본 0)
 	//==============================================================================
-	pub fn set_corner_radius(&mut self, corner_radius: f32) {
+	pub fn set_corner_radius(&mut self, corner_radius: f64) {
 		self.corner_radius = corner_radius;
 	}
 
@@ -512,7 +512,7 @@ impl UISlider {
 	/// # 돌려줌
 	/// 둥근 모서리 반지름.
 	//==============================================================================
-	pub fn get_corner_radius(&self) -> f32 {
+	pub fn get_corner_radius(&self) -> f64 {
 		self.corner_radius
 	}
 
@@ -652,7 +652,7 @@ impl Component for UISlider {
 	//==============================================================================
 	/// 갱신. (미뤄 둔 값 바뀜 이벤트, 손잡이 노드 자리)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		if self.is_value_changed_fire_pending {
 			self.is_value_changed_fire_pending = false;
 			self.fire_value_changed_event(context);

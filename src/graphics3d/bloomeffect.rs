@@ -9,6 +9,7 @@ use crate::core::graphic::GlTexture;
 use crate::graphics3d::fullscreenpass::FullscreenPass;
 use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 
 //==============================================================================
 // 전역 상수 목록.
@@ -77,8 +78,8 @@ pub struct BloomEffect {
 	blur_pass: FullscreenPass,
 	ping_render_target: RenderTarget,
 	pong_render_target: RenderTarget,
-	threshold_start: f32,
-	threshold_end: f32,
+	threshold_start: f64,
+	threshold_end: f64,
 	iteration_count: u32,
 }
 
@@ -168,7 +169,7 @@ impl BloomEffect {
 		let bright_threshold_range_location = bright_pass.get_uniform_location(gl, "thresholdRange");
 		unsafe {
 			gl.uniform_1_i32(bright_scene_texture_location.as_ref(), 0);
-			gl.uniform_2_f32(bright_threshold_range_location.as_ref(), self.threshold_start, self.threshold_end);
+			gl.uniform_2_f64(bright_threshold_range_location.as_ref(), self.threshold_start, self.threshold_end);
 			gl.bind_texture(glow::TEXTURE_2D, scene_color_texture);
 		}
 		bright_pass.draw(gl);
@@ -184,18 +185,18 @@ impl BloomEffect {
 		for _blur_index in 0..self.iteration_count {
 			// 가로. (핑 → 퐁)
 			pong_render_target.bind(gl);
-			let ping_width = ping_render_target.get_width() as f32;
+			let ping_width = ping_render_target.get_width() as f64;
 			unsafe {
-				gl.uniform_2_f32(blur_direction_location.as_ref(), 1.0 / ping_width, 0.0);
+				gl.uniform_2_f64(blur_direction_location.as_ref(), 1.0 / ping_width, 0.0);
 				gl.bind_texture(glow::TEXTURE_2D, ping_render_target.get_color_texture(0));
 			}
 			blur_pass.draw(gl);
 
 			// 세로. (퐁 → 핑)
 			ping_render_target.bind(gl);
-			let pong_height = pong_render_target.get_height() as f32;
+			let pong_height = pong_render_target.get_height() as f64;
 			unsafe {
-				gl.uniform_2_f32(blur_direction_location.as_ref(), 0.0, 1.0 / pong_height);
+				gl.uniform_2_f64(blur_direction_location.as_ref(), 0.0, 1.0 / pong_height);
 				gl.bind_texture(glow::TEXTURE_2D, pong_render_target.get_color_texture(0));
 			}
 			blur_pass.draw(gl);
@@ -219,7 +220,7 @@ impl BloomEffect {
 	/// - `threshold_start`: 뽑기 시작 밝기. (세 채널 가운데 가장 큰 값, 이보다 어두우면 뽑지 않는다, 기본 0.5)
 	/// - `threshold_end`: 다 뽑는 밝기. (이보다 밝으면 그대로, 사이는 smoothstep, 기본 0.95)
 	//==============================================================================
-	pub fn set_threshold(&mut self, threshold_start: f32, threshold_end: f32) {
+	pub fn set_threshold(&mut self, threshold_start: f64, threshold_end: f64) {
 		self.threshold_start = threshold_start;
 		self.threshold_end = threshold_end;
 	}

@@ -68,7 +68,7 @@ impl Drop for ScreenRectGuard<'_> {
 /// view.get_camera_mut().set_perspective(0.8, 0.1, 100.0);
 /// view.get_camera_mut().look_at(Vector3::create(0.0, 1.5, 3.0), Vector3::create(0.0, 0.5, 0.0), Vector3::create(0.0, 1.0, 0.0));
 /// let mut builder = MeshBuilder::new();
-/// builder.add_part(&create_sphere_geometry(0.5, 24, 16, std::f32::consts::PI), &Matrix4::create_translation(0.0, 0.5, 0.0), "#f0b080", ToonPartOptions::default());
+/// builder.add_part(&create_sphere_geometry(0.5, 24, 16, std::f64::consts::PI), &Matrix4::create_translation(0.0, 0.5, 0.0), "#f0b080", ToonPartOptions::default());
 /// let arrays = builder.read_arrays();
 /// let mut mesh: Option<ToonMesh> = None;
 /// view.set_draw_callback(Some(Box::new(move |renderer: &mut ToonRenderer, camera: &Camera3D, _screen_rect: Rect, gl: &glow::Context, _drawing_buffer_height: i32| {
@@ -259,8 +259,8 @@ impl ToonView3D {
 	//==============================================================================
 	pub fn refresh_screen_rect(&mut self, graphic: &Graphic, content_size: Vector2) {
 		let transform_matrix = graphic.get_transform_matrix();
-		let mut minimum = Vector2::create(f32::INFINITY, f32::INFINITY);
-		let mut maximum = Vector2::create(f32::NEG_INFINITY, f32::NEG_INFINITY);
+		let mut minimum = Vector2::create(f64::INFINITY, f64::INFINITY);
+		let mut maximum = Vector2::create(f64::NEG_INFINITY, f64::NEG_INFINITY);
 		for (corner_x, corner_y) in [(0.0, 0.0), (content_size.x, 0.0), (0.0, content_size.y), (content_size.x, content_size.y)] {
 			let screen_position = transform_matrix.transform_point(corner_x, corner_y);
 			minimum.x = minimum.x.min(screen_position.x);

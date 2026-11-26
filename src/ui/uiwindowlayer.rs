@@ -77,14 +77,14 @@ pub struct UIWindowLayer {
 	/// 닫는 움직임 중인 창. (끝나면 지움)
 	closing_window_ids: Vec<NodeId>,
 	/// 영역의 크기. (부모 단위)
-	view_width: f32,
-	view_height: f32,
+	view_width: f64,
+	view_height: f64,
 	/// 영역 밖으로 더 덮는 너비. (위, 오른쪽, 아래, 왼쪽, 부모 단위)
-	view_bleed: [f32; 4],
+	view_bleed: [f64; 4],
 	/// 마지막으로 받은 뷰 한 단위의 CSS 픽셀.
-	css_pixel_scale: f32,
+	css_pixel_scale: f64,
 	ui_scale_options: Option<UIScaleOptions>,
-	ui_scale: f32,
+	ui_scale: f64,
 	window_change_event: Option<UIWindowChangeEvent>,
 }
 
@@ -193,7 +193,7 @@ impl UIWindowLayer {
 	/// # 돌려줌
 	/// 층을 키운 배율. (마지막 set_view_size 에서 읽은 값, 처음은 1)
 	//==============================================================================
-	pub fn get_ui_scale(&self) -> f32 {
+	pub fn get_ui_scale(&self) -> f64 {
 		self.ui_scale
 	}
 
@@ -270,7 +270,7 @@ impl UIWindowLayer {
 	/// assert_eq!(node_tree[layer_id].get_component::<UIWindowLayer>().expect("layer").get_ui_scale(), 1.0);
 	/// ```
 	//==============================================================================
-	pub fn set_view_size(&mut self, node_tree: &mut NodeTree, view_width: f32, view_height: f32, css_pixel_scale: f32) {
+	pub fn set_view_size(&mut self, node_tree: &mut NodeTree, view_width: f64, view_height: f64, css_pixel_scale: f64) {
 		self.view_width = view_width.max(1.0);
 		self.view_height = view_height.max(1.0);
 		self.css_pixel_scale = css_pixel_scale;
@@ -300,7 +300,7 @@ impl UIWindowLayer {
 	/// - `bottom`: 아래로 더 덮는 너비. (0 보다 작으면 0)
 	/// - `left`: 왼쪽으로 더 덮는 너비. (0 보다 작으면 0)
 	//==============================================================================
-	pub fn set_view_bleed(&mut self, node_tree: &mut NodeTree, top: f32, right: f32, bottom: f32, left: f32) {
+	pub fn set_view_bleed(&mut self, node_tree: &mut NodeTree, top: f64, right: f64, bottom: f64, left: f64) {
 		self.view_bleed = [top.max(0.0), right.max(0.0), bottom.max(0.0), left.max(0.0)];
 		self.place_all_windows(node_tree);
 	}
@@ -663,7 +663,7 @@ impl Component for UIWindowLayer {
 	//==============================================================================
 	/// 갱신. (닫는 움직임이 끝난 창을 지운다. 층은 자식보다 먼저 돌아서 끝난 창은 다음 프레임에 지운다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		self.node_id = Some(context.get_node_id());
 		let node_tree = context.get_node_tree_mut();
 		let finished_window_ids: Vec<NodeId> = self.closing_window_ids.iter().copied().filter(|window_id| node_tree.get_node(*window_id).and_then(|window_node| window_node.get_component::<UIWindow>()).map(|window| window.is_close_motion_finished()).unwrap_or(true)).collect();

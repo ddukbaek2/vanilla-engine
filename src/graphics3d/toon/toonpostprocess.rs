@@ -23,6 +23,7 @@
 //! - 원본과 다른 점: GL 객체를 다시 짓는 설정(set_sample_count, set_resolution_scale, set_bloom_levels, set_bloom_float_color)은 gl 을 받고 Result 를 돌려준다.
 //==============================================================================
 use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 
 use crate::base::matrix4::Matrix4;
 use crate::core::fullscreenpass::FullscreenPass;
@@ -119,9 +120,9 @@ impl Default for ToonPostProcessOptions {
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 struct LitArea {
-	center: [f32; 3],
-	inner_radius: f32,
-	outer_radius: f32,
+	center: [f64; 3],
+	inner_radius: f64,
+	outer_radius: f64,
 	inverse_view_projection_matrix: Matrix4,
 }
 
@@ -140,11 +141,11 @@ struct LitArea {
 /// 	let mut renderer = ToonRenderer::new(gl)?;
 /// 	renderer.set_hdr_output(post_process.get_use_float_color());
 /// 	let mut builder = MeshBuilder::new();
-/// 	builder.add_part(&create_sphere_geometry(0.5, 32, 20, std::f32::consts::PI), &Matrix4::create_identity(), "#ffd080", ToonPartOptions { glow: 2.0, ..ToonPartOptions::default() });
+/// 	builder.add_part(&create_sphere_geometry(0.5, 32, 20, std::f64::consts::PI), &Matrix4::create_identity(), "#ffd080", ToonPartOptions { glow: 2.0, ..ToonPartOptions::default() });
 /// 	let mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("mesh failed")?;
 /// 	let mut camera = Camera3D::new();
 /// 	camera.set_perspective(0.8, 0.1, 100.0);
-/// 	camera.set_aspect_ratio(width as f32 / height as f32);
+/// 	camera.set_aspect_ratio(width as f64 / height as f64);
 /// 	camera.look_at(Vector3::create(0.0, 1.0, 3.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
 /// 	post_process.begin(gl, [0.02, 0.02, 0.04]);
 /// 	renderer.begin_frame_with_camera(gl, &camera);
@@ -171,28 +172,28 @@ pub struct ToonPostProcess {
 	/// resize 로 받은 출력 크기.
 	output_width: i32,
 	output_height: i32,
-	resolution_scale: f32,
-	exposure: f32,
-	bloom_strength: f32,
+	resolution_scale: f64,
+	exposure: f64,
+	bloom_strength: f64,
 	is_bloom_enabled: bool,
 	/// 다단 블룸의 문턱과 무릎.
-	bloom_threshold: f32,
-	bloom_knee: f32,
-	brightness: f32,
+	bloom_threshold: f64,
+	bloom_knee: f64,
+	brightness: f64,
 	/// 밝힌 자리. (깊이 텍스처가 있을 때만 쓴다)
 	lit_area: Option<LitArea>,
-	saturation: f32,
-	contrast: f32,
+	saturation: f64,
+	contrast: f64,
 	/// 밝기 1 로 맞춘 색조 곱.
-	tone_color: [f32; 3],
-	tone_amount: f32,
-	haze_color: [f32; 3],
-	haze_amount: f32,
-	vignette_strength: f32,
+	tone_color: [f64; 3],
+	tone_amount: f64,
+	haze_color: [f64; 3],
+	haze_amount: f64,
+	vignette_strength: f64,
 }
 
 /// 밝기의 무게. (Rec. 709)
-const LUMINANCE_WEIGHTS: [f32; 3] = [0.2126, 0.7152, 0.0722];
+const LUMINANCE_WEIGHTS: [f64; 3] = [0.2126, 0.7152, 0.0722];
 
 impl ToonPostProcess {
 	//==============================================================================
@@ -317,14 +318,14 @@ impl ToonPostProcess {
 	/// 씬 판의 너비. (출력 너비 x 해상도 배율, 1 이상)
 	//==============================================================================
 	fn read_scene_width(&self) -> i32 {
-		((self.output_width as f32 * self.resolution_scale).round() as i32).max(1)
+		((self.output_width as f64 * self.resolution_scale).round() as i32).max(1)
 	}
 
 	//==============================================================================
 	/// 씬 판의 높이. (출력 높이 x 해상도 배율, 1 이상)
 	//==============================================================================
 	fn read_scene_height(&self) -> i32 {
-		((self.output_height as f32 * self.resolution_scale).round() as i32).max(1)
+		((self.output_height as f64 * self.resolution_scale).round() as i32).max(1)
 	}
 
 	//==============================================================================
@@ -364,7 +365,7 @@ impl ToonPostProcess {
 	/// # 돌려줌
 	/// 판을 맞췄으면 Ok. 다시 짓다 GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
-	pub fn set_resolution_scale(&mut self, gl: &glow::Context, resolution_scale: f32) -> Result<(), String> {
+	pub fn set_resolution_scale(&mut self, gl: &glow::Context, resolution_scale: f64) -> Result<(), String> {
 		self.resolution_scale = resolution_scale.clamp(0.05, 4.0);
 		self.resize(gl, self.output_width, self.output_height)
 	}
@@ -375,7 +376,7 @@ impl ToonPostProcess {
 	/// # 돌려줌
 	/// 씬 판의 배율.
 	//==============================================================================
-	pub fn get_resolution_scale(&self) -> f32 {
+	pub fn get_resolution_scale(&self) -> f64 {
 		self.resolution_scale
 	}
 
@@ -428,12 +429,12 @@ impl ToonPostProcess {
 	/// - `gl`: GL 컨텍스트.
 	/// - `clear_color`: [r, g, b] 바탕 색. (HDR 길은 선형 색, LDR 길은 화면 색)
 	//==============================================================================
-	pub fn begin(&self, gl: &glow::Context, clear_color: [f32; 3]) {
+	pub fn begin(&self, gl: &glow::Context, clear_color: [f64; 3]) {
 		self.scene_render_target.bind(gl);
 		unsafe {
 			gl.viewport(0, 0, self.scene_render_target.get_width(), self.scene_render_target.get_height());
 			gl.depth_mask(true);
-			gl.clear_color(clear_color[0], clear_color[1], clear_color[2], 1.0);
+			gl.clear_color((clear_color[0]) as f32, (clear_color[1]) as f32, (clear_color[2]) as f32, 1.0);
 			gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
 		}
 	}
@@ -486,28 +487,28 @@ impl ToonPostProcess {
 			gl.active_texture(glow::TEXTURE2);
 			gl.bind_texture(glow::TEXTURE_2D, if applied_lit_area.is_some() { depth_texture } else { scene_texture });
 			gl.uniform_1_i32(composite_pass.get_uniform_location(gl, "depthTexture").as_ref(), 2);
-			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "bloomStrength").as_ref(), if self.is_bloom_enabled { self.bloom_strength } else { 0.0 });
-			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "exposure").as_ref(), self.exposure);
-			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "hdrInput").as_ref(), if self.use_float_color { 1.0 } else { 0.0 });
-			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "brightness").as_ref(), self.brightness);
+			gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "bloomStrength").as_ref(), if self.is_bloom_enabled { self.bloom_strength } else { 0.0 });
+			gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "exposure").as_ref(), self.exposure);
+			gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "hdrInput").as_ref(), if self.use_float_color { 1.0 } else { 0.0 });
+			gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "brightness").as_ref(), self.brightness);
 			if let Some(lit_area) = applied_lit_area {
 				let center = lit_area.center;
-				gl.uniform_4_f32(composite_pass.get_uniform_location(gl, "litCenter").as_ref(), center[0], center[1], center[2], lit_area.outer_radius);
-				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "litInnerRadius").as_ref(), lit_area.inner_radius);
+				gl.uniform_4_f64(composite_pass.get_uniform_location(gl, "litCenter").as_ref(), center[0], center[1], center[2], lit_area.outer_radius);
+				gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "litInnerRadius").as_ref(), lit_area.inner_radius);
 				gl.uniform_matrix_4_f32_slice(composite_pass.get_uniform_location(gl, "inverseViewProjectionMatrix").as_ref(), false, &lit_area.inverse_view_projection_matrix.elements);
 			}
 			else {
-				gl.uniform_4_f32(composite_pass.get_uniform_location(gl, "litCenter").as_ref(), 0.0, 0.0, 0.0, 0.0);
+				gl.uniform_4_f64(composite_pass.get_uniform_location(gl, "litCenter").as_ref(), 0.0, 0.0, 0.0, 0.0);
 			}
 			let tone_color = self.tone_color;
 			let haze_color = self.haze_color;
-			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "saturation").as_ref(), self.saturation);
-			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "contrast").as_ref(), self.contrast);
-			gl.uniform_3_f32(composite_pass.get_uniform_location(gl, "toneColor").as_ref(), tone_color[0], tone_color[1], tone_color[2]);
-			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "toneAmount").as_ref(), self.tone_amount);
-			gl.uniform_3_f32(composite_pass.get_uniform_location(gl, "hazeColor").as_ref(), haze_color[0], haze_color[1], haze_color[2]);
-			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "hazeAmount").as_ref(), self.haze_amount);
-			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "vignetteStrength").as_ref(), self.vignette_strength);
+			gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "saturation").as_ref(), self.saturation);
+			gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "contrast").as_ref(), self.contrast);
+			gl.uniform_3_f64(composite_pass.get_uniform_location(gl, "toneColor").as_ref(), tone_color[0], tone_color[1], tone_color[2]);
+			gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "toneAmount").as_ref(), self.tone_amount);
+			gl.uniform_3_f64(composite_pass.get_uniform_location(gl, "hazeColor").as_ref(), haze_color[0], haze_color[1], haze_color[2]);
+			gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "hazeAmount").as_ref(), self.haze_amount);
+			gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "vignetteStrength").as_ref(), self.vignette_strength);
 			gl.active_texture(glow::TEXTURE0);
 		}
 		composite_pass.draw(gl);
@@ -524,7 +525,7 @@ impl ToonPostProcess {
 	/// # 인자
 	/// - `exposure`: 노출 배. (0 이상, 1 이 기본)
 	//==============================================================================
-	pub fn set_exposure(&mut self, exposure: f32) {
+	pub fn set_exposure(&mut self, exposure: f64) {
 		self.exposure = exposure.max(0.0);
 	}
 
@@ -537,7 +538,7 @@ impl ToonPostProcess {
 	/// - `threshold_start`: 밝은 곳을 뽑기 시작하는 선형 밝기. (기본 0.9)
 	/// - `threshold_end`: 다 뽑는 선형 밝기. (기본 1.6)
 	//==============================================================================
-	pub fn set_bloom(&mut self, is_bloom_enabled: bool, bloom_strength: f32, threshold_start: f32, threshold_end: f32) {
+	pub fn set_bloom(&mut self, is_bloom_enabled: bool, bloom_strength: f64, threshold_start: f64, threshold_end: f64) {
 		self.is_bloom_enabled = is_bloom_enabled;
 		self.bloom_strength = bloom_strength.max(0.0);
 		self.bloom_effect.set_threshold(threshold_start, threshold_end);
@@ -556,7 +557,7 @@ impl ToonPostProcess {
 	/// # 돌려줌
 	/// 바꿨으면 Ok. 다단 블룸의 셰이더나 판을 못 지으면 Err(오류 글).
 	//==============================================================================
-	pub fn set_bloom_levels(&mut self, gl: &glow::Context, level_count: usize, threshold: f32, knee: f32) -> Result<(), String> {
+	pub fn set_bloom_levels(&mut self, gl: &glow::Context, level_count: usize, threshold: f64, knee: f64) -> Result<(), String> {
 		self.bloom_threshold = threshold.max(0.0);
 		self.bloom_knee = knee.max(0.0);
 		if level_count == 0 {
@@ -608,7 +609,7 @@ impl ToonPostProcess {
 	/// # 인자
 	/// - `brightness`: 밝기 배. (0 이상, 1 이 그대로)
 	//==============================================================================
-	pub fn set_brightness(&mut self, brightness: f32) {
+	pub fn set_brightness(&mut self, brightness: f64) {
 		self.brightness = brightness.max(0.0);
 	}
 
@@ -623,7 +624,7 @@ impl ToonPostProcess {
 	/// - `outer_radius`: 이 밖은 set_brightness 의 밝기인 수평 반지름. (월드 길이)
 	/// - `inverse_view_projection_matrix`: 이번 프레임 보기와 투영의 역행렬.
 	//==============================================================================
-	pub fn set_lit_area(&mut self, center: [f32; 3], inner_radius: f32, outer_radius: f32, inverse_view_projection_matrix: &Matrix4) {
+	pub fn set_lit_area(&mut self, center: [f64; 3], inner_radius: f64, outer_radius: f64, inverse_view_projection_matrix: &Matrix4) {
 		let safe_outer_radius = outer_radius.max(0.0001);
 		self.lit_area = Some(LitArea { center, inner_radius: inner_radius.min(safe_outer_radius).max(0.0), outer_radius: safe_outer_radius, inverse_view_projection_matrix: *inverse_view_projection_matrix });
 	}
@@ -648,7 +649,7 @@ impl ToonPostProcess {
 	/// - `haze_color`: [r, g, b] 안개빛 색. (sRGB 0 ~ 1)
 	/// - `haze_amount`: 안개빛을 섞는 양. (0 ~ 1, 어두운 곳일수록 세다)
 	//==============================================================================
-	pub fn set_color_grade(&mut self, saturation: f32, contrast: f32, tone_color: [f32; 3], tone_amount: f32, haze_color: [f32; 3], haze_amount: f32) {
+	pub fn set_color_grade(&mut self, saturation: f64, contrast: f64, tone_color: [f64; 3], tone_amount: f64, haze_color: [f64; 3], haze_amount: f64) {
 		let tone_luminance = tone_color[0] * LUMINANCE_WEIGHTS[0] + tone_color[1] * LUMINANCE_WEIGHTS[1] + tone_color[2] * LUMINANCE_WEIGHTS[2];
 		let tone_scale = if tone_luminance > 0.0 { 1.0 / tone_luminance } else { 1.0 };
 		self.saturation = saturation.max(0.0);
@@ -665,7 +666,7 @@ impl ToonPostProcess {
 	/// # 인자
 	/// - `vignette_strength`: 가장자리를 어둡게 하는 세기. (0 이 없음, 1 이면 구석이 까맣게)
 	//==============================================================================
-	pub fn set_vignette(&mut self, vignette_strength: f32) {
+	pub fn set_vignette(&mut self, vignette_strength: f64) {
 		self.vignette_strength = vignette_strength.max(0.0);
 	}
 

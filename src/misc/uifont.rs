@@ -176,17 +176,17 @@ fn with_state<R>(visitor: impl FnOnce(&mut UiFontState) -> R) -> R {
 /// ```
 //==============================================================================
 pub fn read_target_weights(weight_descriptor: &str, weights: &[u16]) -> Vec<u16> {
-	let weight_values: Vec<f32> = weight_descriptor.split_whitespace().filter_map(|weight_text| weight_text.parse::<f32>().ok()).collect();
+	let weight_values: Vec<f64> = weight_descriptor.split_whitespace().filter_map(|weight_text| weight_text.parse::<f64>().ok()).collect();
 	if weights.is_empty() {
 		return Vec::new();
 	}
 	if weight_values.len() >= 2 {
-		return weights.iter().copied().filter(|target_weight| (*target_weight as f32) >= weight_values[0] && (*target_weight as f32) <= weight_values[1]).collect();
+		return weights.iter().copied().filter(|target_weight| (*target_weight as f64) >= weight_values[0] && (*target_weight as f64) <= weight_values[1]).collect();
 	}
 	let wanted_weight = weight_values.first().copied().unwrap_or(400.0);
 	let mut nearest_weight = weights[0];
 	for target_weight in weights {
-		if (*target_weight as f32 - wanted_weight).abs() < (nearest_weight as f32 - wanted_weight).abs() {
+		if (*target_weight as f64 - wanted_weight).abs() < (nearest_weight as f64 - wanted_weight).abs() {
 			nearest_weight = *target_weight;
 		}
 	}
@@ -832,7 +832,7 @@ pub fn read_ui_font_face() -> Option<String> {
 /// # 돌려줌
 /// Canvas2D font 꼴 글. (`500 16px "GameUI", sans-serif` 꼴)
 //==============================================================================
-pub fn build_ui_font_string(font_weight: u16, font_size: f32) -> String {
+pub fn build_ui_font_string(font_weight: u16, font_size: f64) -> String {
 	let family = read_ui_font_family();
 	format!("{} {}px \"{}\", sans-serif", font_weight, font_size, family)
 }

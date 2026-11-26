@@ -22,7 +22,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 
 /// 구운 캔버스의 가장자리 여유. (원본 ShadowText, ShadowImage 의 BAKE_PADDING, 픽셀)
-const SHADOW_BAKE_PADDING: f32 = 2.0;
+const SHADOW_BAKE_PADDING: f64 = 2.0;
 
 //==============================================================================
 /// 구운 비트맵. (길이 단위는 배율을 곱한 픽셀)
@@ -32,11 +32,11 @@ pub struct SystemFontBitmap {
 	pub bitmap_height: i32,
 	/// 프리멀티플라이드 RGBA. (글자는 흰색이라 fontdue 길과 같은 꼴, 색 이모지는 제 색)
 	pub pixels: Vec<u8>,
-	pub pen_x: f32,
-	pub baseline_y: f32,
-	pub advance_width: f32,
-	pub font_ascent: f32,
-	pub font_descent: f32,
+	pub pen_x: f64,
+	pub baseline_y: f64,
+	pub advance_width: f64,
+	pub font_ascent: f64,
+	pub font_descent: f64,
 }
 
 struct SystemFontCanvas {
@@ -68,11 +68,11 @@ pub struct BrowserBakeBitmap {
 //==============================================================================
 pub struct BrowserShadowTextBake {
 	pub bitmap: BrowserBakeBitmap,
-	pub pen_x: f32,
-	pub baseline_y: f32,
-	pub advance_width: f32,
-	pub font_ascent: f32,
-	pub font_descent: f32,
+	pub pen_x: f64,
+	pub baseline_y: f64,
+	pub advance_width: f64,
+	pub font_ascent: f64,
+	pub font_descent: f64,
 }
 
 thread_local! {
@@ -220,7 +220,7 @@ fn create_bake_canvas(width: u32, height: u32) -> Option<(web_sys::HtmlCanvasEle
 /// 그림자 글 굽기. (원본 ShadowText.bakeText 와 같은 셈, font_description 의 크기는 맞춰 줄인 크기. 그림자 내림과 번짐은 내용 크기 단위)
 //==============================================================================
 #[allow(clippy::too_many_arguments)]
-pub fn bake_shadow_text(text: &str, font_description: &FontDescription, bake_scale: f32, direction: ShapingDirection, text_color: Color, shadow_color: Color, shadow_offset: f32, shadow_blur: f32, is_underline: bool, is_strikethrough: bool) -> Option<BrowserShadowTextBake> {
+pub fn bake_shadow_text(text: &str, font_description: &FontDescription, bake_scale: f64, direction: ShapingDirection, text_color: Color, shadow_color: Color, shadow_offset: f64, shadow_blur: f64, is_underline: bool, is_strikethrough: bool) -> Option<BrowserShadowTextBake> {
 	let scaled_font_string = build_css_font_string(font_description, bake_scale);
 	let direction_name = match direction {
 		ShapingDirection::LeftToRight => {
@@ -238,7 +238,7 @@ pub fn bake_shadow_text(text: &str, font_description: &FontDescription, bake_sca
 	drop(measure_canvas);
 
 	// 글자의 실제 경계와 글꼴의 위아래 경계.
-	let advance_width = text_metrics.width() as f32;
+	let advance_width = text_metrics.width() as f64;
 	let actual_left = read_finite_value(text_metrics.actual_bounding_box_left(), 0.0).max(0.0).ceil();
 	let actual_right = read_finite_value(text_metrics.actual_bounding_box_right(), advance_width).max(0.0).ceil();
 	let (scaled_font_ascent, scaled_font_descent) = read_font_bounding_box(&text_metrics);
@@ -252,12 +252,12 @@ pub fn bake_shadow_text(text: &str, font_description: &FontDescription, bake_sca
 	let bake_width = scaled_pen_x + actual_right + bake_padding;
 	// 밑줄은 기준선 아래로 내려가므로 그만큼 여유를 더 둔다.
 	let font_size = font_description.font_size;
-	let scaled_decoration_line_width = (font_size / 16.0).max(1.0) * bake_scale;
+	let scaled_decoration_line_width = (font_size / 16.0).max(1.0) * bake_scale as f32;
 	let scaled_middle_y = scaled_baseline_y - (scaled_font_ascent - scaled_font_descent) * 0.5;
-	let scaled_underline_y = scaled_middle_y + (font_size * 0.5 + 2.0) * bake_scale;
+	let scaled_underline_y = scaled_middle_y + ((font_size * 0.5 + 2.0) * bake_scale as f32) as f64;
 	let mut bake_height = scaled_baseline_y + (scaled_font_descent + scaled_shadow_offset).ceil() + bake_padding;
 	if is_underline {
-		bake_height = bake_height.max((scaled_underline_y + scaled_decoration_line_width * 0.5 + scaled_shadow_offset).ceil() + bake_padding);
+		bake_height = bake_height.max((scaled_underline_y + (scaled_decoration_line_width * 0.5) as f64 + scaled_shadow_offset).ceil() + bake_padding);
 	}
 	if bake_width <= 0.0 || bake_height <= 0.0 {
 		return None;
@@ -277,10 +277,10 @@ pub fn bake_shadow_text(text: &str, font_description: &FontDescription, bake_sca
 	context.fill_text(text, scaled_pen_x as f64, scaled_baseline_y as f64).ok()?;
 	// 밑줄과 취소선도 같은 그림자로 칠한다. (길이는 전진폭, Text 의 가운데 기준선과 같은 자리)
 	if is_underline {
-		context.fill_rect(scaled_pen_x as f64, (scaled_underline_y - scaled_decoration_line_width * 0.5) as f64, advance_width as f64, scaled_decoration_line_width as f64);
+		context.fill_rect(scaled_pen_x as f64, (scaled_underline_y - (scaled_decoration_line_width * 0.5) as f64) as f64, advance_width as f64, scaled_decoration_line_width as f64);
 	}
 	if is_strikethrough {
-		context.fill_rect(scaled_pen_x as f64, (scaled_middle_y - scaled_decoration_line_width * 0.5) as f64, advance_width as f64, scaled_decoration_line_width as f64);
+		context.fill_rect(scaled_pen_x as f64, (scaled_middle_y - (scaled_decoration_line_width * 0.5) as f64) as f64, advance_width as f64, scaled_decoration_line_width as f64);
 	}
 	let image_data = context.get_image_data(0.0, 0.0, width as f64, height as f64).ok()?;
 	Some(BrowserShadowTextBake {
@@ -302,7 +302,7 @@ pub fn bake_shadow_text(text: &str, font_description: &FontDescription, bake_sca
 /// - 그림의 조각을 imageSmoothingQuality high 로 그릴 크기에 그리고, 색이 있으면 source-in 으로 칠한 뒤, 그 밑에 캔버스 그림자를 깔아 한 장으로.
 //==============================================================================
 #[allow(clippy::too_many_arguments)]
-pub fn bake_shadow_image(source_pixels: &[u8], source_width: u32, source_height: u32, source_rect: [f32; 4], scaled_width: u32, scaled_height: u32, image_color: Option<Color>, shadow_color: Color, scaled_shadow_offset: f32, scaled_shadow_blur: f32) -> Option<BrowserBakeBitmap> {
+pub fn bake_shadow_image(source_pixels: &[u8], source_width: u32, source_height: u32, source_rect: [f64; 4], scaled_width: u32, scaled_height: u32, image_color: Option<Color>, shadow_color: Color, scaled_shadow_offset: f64, scaled_shadow_blur: f64) -> Option<BrowserBakeBitmap> {
 	// 그림 픽셀을 캔버스에. (putImageData 는 곧은 알파)
 	let mut straight_pixels = source_pixels.to_vec();
 	for pixel in straight_pixels.chunks_exact_mut(4) {
@@ -356,13 +356,13 @@ pub fn measure_text(font_description: &FontDescription, text: &str) -> TextMetri
 		let text_metrics = system_font_canvas.context.measure_text(text).ok()?;
 		let (font_ascent, font_descent) = read_font_bounding_box(&text_metrics);
 		Some(TextMetrics {
-			width: text_metrics.width() as f32,
-			font_ascent,
-			font_descent,
-			actual_bounding_box_left: read_finite_value(text_metrics.actual_bounding_box_left(), 0.0),
-			actual_bounding_box_right: read_finite_value(text_metrics.actual_bounding_box_right(), text_metrics.width() as f32),
-			actual_bounding_box_ascent: read_finite_value(text_metrics.actual_bounding_box_ascent(), font_ascent),
-			actual_bounding_box_descent: read_finite_value(text_metrics.actual_bounding_box_descent(), font_descent),
+			width: (text_metrics.width() as f64) as f64,
+			font_ascent: font_ascent as f64,
+			font_descent: font_descent as f64,
+			actual_bounding_box_left: (read_finite_value(text_metrics.actual_bounding_box_left(), 0.0)) as f64,
+			actual_bounding_box_right: (read_finite_value(text_metrics.actual_bounding_box_right(), text_metrics.width() as f64)) as f64,
+			actual_bounding_box_ascent: (read_finite_value(text_metrics.actual_bounding_box_ascent(), font_ascent)) as f64,
+			actual_bounding_box_descent: (read_finite_value(text_metrics.actual_bounding_box_descent(), font_descent)) as f64,
 		})
 	});
 	measured.unwrap_or_default()
@@ -370,18 +370,18 @@ pub fn measure_text(font_description: &FontDescription, text: &str) -> TextMetri
 
 thread_local! {
 	/// 브라우저가 놓은 클래식 스크롤 막대 두께. ((얇은지) → px, 0 이면 얹는 막대)
-	static CLASSIC_SCROLLBAR_THICKNESS_TABLE: RefCell<std::collections::HashMap<bool, f32>> = RefCell::new(std::collections::HashMap::new());
+	static CLASSIC_SCROLLBAR_THICKNESS_TABLE: RefCell<std::collections::HashMap<bool, f64>> = RefCell::new(std::collections::HashMap::new());
 }
 
 //==============================================================================
 /// 브라우저가 놓는 클래식 스크롤 막대 두께 재기. (px, 얹는 막대거나 문서가 없으면 0)
 /// - 문서 밖에 숨긴 overflow: scroll 요소의 offsetWidth - clientWidth 다. (scrollbar-width: thin 이면 그 값으로)
 //==============================================================================
-pub fn measure_classic_scrollbar_thickness(is_thin: bool) -> f32 {
+pub fn measure_classic_scrollbar_thickness(is_thin: bool) -> f64 {
 	if let Some(thickness) = CLASSIC_SCROLLBAR_THICKNESS_TABLE.with(|table_cell| table_cell.borrow().get(&is_thin).copied()) {
 		return thickness;
 	}
-	let measure = || -> Option<f32> {
+	let measure = || -> Option<f64> {
 		let document = web_sys::window()?.document()?;
 		let body = document.body()?;
 		let probe_element = document.create_element("div").ok()?.dyn_into::<web_sys::HtmlElement>().ok()?;
@@ -396,7 +396,7 @@ pub fn measure_classic_scrollbar_thickness(is_thin: bool) -> f32 {
 			let _ = probe_style.set_property(property_name, property_value);
 		}
 		let _ = body.append_child(&probe_element);
-		let thickness = (probe_element.offset_width() - probe_element.client_width()) as f32;
+		let thickness = (probe_element.offset_width() - probe_element.client_width()) as f64;
 		probe_element.remove();
 		Some(thickness.max(0.0))
 	};
@@ -409,7 +409,7 @@ pub fn measure_classic_scrollbar_thickness(is_thin: bool) -> f32 {
 
 thread_local! {
 	/// 브라우저가 놓은 line-height normal 의 줄 높이. ((CSS 폰트 문자열, 글꼴 바뀐 횟수) → px)
-	static NORMAL_LINE_HEIGHT_TABLE: RefCell<std::collections::HashMap<(String, u64), f32>> = RefCell::new(std::collections::HashMap::new());
+	static NORMAL_LINE_HEIGHT_TABLE: RefCell<std::collections::HashMap<(String, u64), f64>> = RefCell::new(std::collections::HashMap::new());
 }
 
 //==============================================================================
@@ -417,7 +417,7 @@ thread_local! {
 /// - 문서 밖에 숨긴 블록 요소에 그 폰트와 line-height: normal 로 글 한 줄을 놓고 높이를 읽는다. 블록의 한 줄 높이는 크롬이 첫째로 쓸 수 있는 글꼴의 LineSpacing 이다.
 /// - 글꼴이 새로 받아지면(글꼴 바뀐 횟수) 다시 잰다.
 //==============================================================================
-pub fn measure_normal_line_height(font_description: &FontDescription) -> Option<f32> {
+pub fn measure_normal_line_height(font_description: &FontDescription) -> Option<f64> {
 	let font_string = build_css_font_string(font_description, 1.0);
 	let table_key = (font_string.clone(), read_font_change_count());
 	if let Some(line_height) = NORMAL_LINE_HEIGHT_TABLE.with(|table_cell| table_cell.borrow().get(&table_key).copied()) {
@@ -433,7 +433,7 @@ pub fn measure_normal_line_height(font_description: &FontDescription) -> Option<
 	let _ = probe_style.set_property("font", &font_string);
 	probe_element.set_text_content(Some("x"));
 	let _ = body.append_child(&probe_element);
-	let line_height = probe_element.get_bounding_client_rect().height() as f32;
+	let line_height = probe_element.get_bounding_client_rect().height() as f64;
 	probe_element.remove();
 	if line_height <= 0.0 {
 		return None;
@@ -446,7 +446,7 @@ pub fn measure_normal_line_height(font_description: &FontDescription) -> Option<
 
 thread_local! {
 	/// 브라우저로 푼 글자 크기. (폰트 문자열과 창 크기 → px, 틀린 문자열이면 None)
-	static RESOLVED_FONT_SIZE_TABLE: RefCell<std::collections::HashMap<String, Option<f32>>> = RefCell::new(std::collections::HashMap::new());
+	static RESOLVED_FONT_SIZE_TABLE: RefCell<std::collections::HashMap<String, Option<f64>>> = RefCell::new(std::collections::HashMap::new());
 }
 
 /// 틀린 문자열을 가리려고 먼저 넣어 두는 폰트. (브라우저는 틀린 font 를 받지 않고 앞의 값을 둔다)
@@ -457,7 +457,7 @@ const FONT_SIZE_SENTINEL: &str = "7.25px vanilla-font-size-sentinel";
 /// - 원본은 글꼴에 대는 단위(ex, ch, cap, ic, lh, rem 같은), 뷰포트 단위, calc() 를 브라우저 캔버스의 font 가 셈한다.
 ///   원본처럼 문서에 붙이지 않은 캔버스의 font 에 넣고 다시 읽어 같은 값을 받는다. 한 번 푼 문자열은 창 크기와 함께 기억한다.
 //==============================================================================
-pub fn resolve_font_size(font_string: &str) -> Option<f32> {
+pub fn resolve_font_size(font_string: &str) -> Option<f64> {
 	let window = web_sys::window()?;
 	let viewport_width = window.inner_width().ok().and_then(|value| value.as_f64()).unwrap_or(0.0);
 	let viewport_height = window.inner_height().ok().and_then(|value| value.as_f64()).unwrap_or(0.0);
@@ -472,7 +472,7 @@ pub fn resolve_font_size(font_string: &str) -> Option<f32> {
 		if serialized_font == FONT_SIZE_SENTINEL {
 			return Some(None);
 		}
-		let font_size = serialized_font.split_whitespace().find_map(|token| token.strip_suffix("px").and_then(|number_text| number_text.parse::<f32>().ok()));
+		let font_size = serialized_font.split_whitespace().find_map(|token| token.strip_suffix("px").and_then(|number_text| number_text.parse::<f64>().ok()));
 		Some(font_size)
 	}).flatten();
 	RESOLVED_FONT_SIZE_TABLE.with(|table_cell| {
@@ -484,7 +484,7 @@ pub fn resolve_font_size(font_string: &str) -> Option<f32> {
 //==============================================================================
 /// 문자열 굽기. (원본 bakeEntry. 크기와 펜 자리 계산이 원본과 같다, direction 은 캔버스의 direction)
 //==============================================================================
-pub fn bake_text(text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f32, bake_scale: f32, direction: ShapingDirection) -> Option<SystemFontBitmap> {
+pub fn bake_text(text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<SystemFontBitmap> {
 	let font_string = build_css_font_string(font_description, bake_scale);
 	let direction_name = match direction {
 		ShapingDirection::LeftToRight => {
@@ -505,7 +505,7 @@ pub fn bake_text(text_draw_kind: TextDrawKind, text: &str, font_description: &Fo
 		let text_metrics = context.measure_text(text).ok()?;
 
 		// 글리프 실측 경계. (측정 미지원 브라우저는 전진폭으로 어림)
-		let advance_width = text_metrics.width() as f32;
+		let advance_width = text_metrics.width() as f64;
 		let actual_left = read_finite_value(text_metrics.actual_bounding_box_left(), 0.0).max(0.0).ceil();
 		let actual_right = read_finite_value(text_metrics.actual_bounding_box_right(), advance_width).max(0.0).ceil();
 		let (font_ascent, font_descent) = read_font_bounding_box(&text_metrics);
@@ -576,9 +576,9 @@ pub fn bake_text(text_draw_kind: TextDrawKind, text: &str, font_description: &Fo
 //==============================================================================
 /// 시스템 글꼴 조각 재기. (올린 글꼴에 없는 글자 묶음, 크기는 픽셀. 원본 브라우저의 글꼴 대체 자리)
 //==============================================================================
-pub fn measure_piece(font_description: &FontDescription, pixel_size: f32, text: &str, is_right_to_left: bool) -> f32 {
+pub fn measure_piece(font_description: &FontDescription, pixel_size: f64, text: &str, is_right_to_left: bool) -> f64 {
 	let mut piece_description = font_description.clone();
-	piece_description.font_size = pixel_size;
+	piece_description.font_size = pixel_size as f32;
 	let font_string = build_css_font_string(&piece_description, 1.0);
 	let measured = with_canvas(|system_font_canvas| {
 		system_font_canvas.context.set_font(&font_string);
@@ -589,7 +589,7 @@ pub fn measure_piece(font_description: &FontDescription, pixel_size: f32, text: 
 			"ltr"
 		});
 		let text_metrics = system_font_canvas.context.measure_text(text).ok()?;
-		Some(text_metrics.width() as f32)
+		Some(text_metrics.width() as f64)
 	});
 	measured.unwrap_or(0.0)
 }
@@ -598,9 +598,9 @@ pub fn measure_piece(font_description: &FontDescription, pixel_size: f32, text: 
 /// 시스템 글꼴 조각 래스터. (덮인 정도, 왼쪽은 펜 자리에서, 위는 기준선에서. 크기는 픽셀)
 /// - 흰 픽셀은 글자의 덮인 정도로, 흰색이 아닌 픽셀(브라우저가 그린 색 이모지)은 색 몫(color_pixels)으로 나눈다.
 //==============================================================================
-pub fn rasterize_piece(font_description: &FontDescription, pixel_size: f32, text: &str, is_right_to_left: bool) -> Option<crate::core::textshaping::GlyphRaster> {
+pub fn rasterize_piece(font_description: &FontDescription, pixel_size: f64, text: &str, is_right_to_left: bool) -> Option<crate::core::textshaping::GlyphRaster> {
 	let mut piece_description = font_description.clone();
-	piece_description.font_size = pixel_size;
+	piece_description.font_size = pixel_size as f32;
 	let direction = if is_right_to_left {
 		ShapingDirection::RightToLeft
 	}
@@ -642,7 +642,7 @@ pub fn rasterize_piece(font_description: &FontDescription, pixel_size: f32, text
 /// - 이름 목록을 차례로 앞에 두고 기본 폰트와 대체 폰트의 이름(sync_font_faces)을 뒤에 붙인다. 시스템 글꼴 목록(SYSTEM_FONT_STRING)은 default 를 청했을 때(목록이 비면 그때도)만 맨 뒤에 붙인다.
 ///   비었거나 "default" 인 이름은 빼고, 일반 글꼴 이름(sans-serif 등)은 따옴표 없이 둔다.
 //==============================================================================
-fn build_css_font_string(font_description: &FontDescription, bake_scale: f32) -> String {
+fn build_css_font_string(font_description: &FontDescription, bake_scale: f64) -> String {
 	let style_text = if font_description.is_italic {
 		"italic "
 	}
@@ -655,7 +655,7 @@ fn build_css_font_string(font_description: &FontDescription, bake_scale: f32) ->
 	else {
 		String::new()
 	};
-	let pixel_size = font_description.font_size * bake_scale;
+	let pixel_size = font_description.font_size * bake_scale as f32;
 	let mut family_text_list: Vec<String> = Vec::new();
 	for family_name in &font_description.family_name_list {
 		let family_name = family_name.trim();
@@ -700,7 +700,7 @@ fn set_canvas_direction(context: &web_sys::CanvasRenderingContext2d, direction_n
 //==============================================================================
 /// 폰트 위아래 경계. (fontBoundingBox 를 모르는 브라우저는 실측 경계로, 그것도 없으면 크기로 어림)
 //==============================================================================
-fn read_font_bounding_box(text_metrics: &web_sys::TextMetrics) -> (f32, f32) {
+fn read_font_bounding_box(text_metrics: &web_sys::TextMetrics) -> (f64, f64) {
 	let actual_ascent = read_finite_value(text_metrics.actual_bounding_box_ascent(), 0.0);
 	let actual_descent = read_finite_value(text_metrics.actual_bounding_box_descent(), 0.0);
 	let font_ascent = read_finite_value(text_metrics.font_bounding_box_ascent(), actual_ascent);
@@ -711,9 +711,9 @@ fn read_font_bounding_box(text_metrics: &web_sys::TextMetrics) -> (f32, f32) {
 //==============================================================================
 /// 브라우저가 모르는 값(undefined 는 NaN 으로 온다)이면 대신 값.
 //==============================================================================
-fn read_finite_value(value: f64, fallback_value: f32) -> f32 {
+fn read_finite_value(value: f64, fallback_value: f64) -> f64 {
 	if value.is_finite() {
-		value as f32
+		value as f64
 	}
 	else {
 		fallback_value

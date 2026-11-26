@@ -19,10 +19,10 @@ use vanilla::{
 };
 
 // 해가 비추는 방향. (빛이 나아가는 쪽)
-const SUN_DIRECTION: [f32; 3] = [-0.45, -1.0, -0.55];
+const SUN_DIRECTION: [f64; 3] = [-0.45, -1.0, -0.55];
 
 // 결정 덩이 꼭짓점 열둘의 반지름 배.
-const CHUNK_SCALES: [f32; 12] = [1.0, 0.85, 1.1, 0.95, 1.05, 0.9, 1.0, 1.12, 0.88, 1.0, 0.95, 1.08];
+const CHUNK_SCALES: [f64; 12] = [1.0, 0.85, 1.1, 0.95, 1.05, 0.9, 1.0, 1.12, 0.88, 1.0, 0.95, 1.08];
 
 //==============================================================================
 // 도형 하나로 지은 모형. (has_shell 이면 껍데기 바깥선도)
@@ -45,8 +45,8 @@ fn create_matcap_pixels() -> Vec<u8> {
 	let mut pixels = vec![0u8; size * size * 4];
 	for pixel_y in 0..size {
 		for pixel_x in 0..size {
-			let normal_x = (pixel_x as f32 + 0.5) / size as f32 * 2.0 - 1.0;
-			let normal_y = 1.0 - (pixel_y as f32 + 0.5) / size as f32 * 2.0;
+			let normal_x = (pixel_x as f64 + 0.5) / size as f64 * 2.0 - 1.0;
+			let normal_y = 1.0 - (pixel_y as f64 + 0.5) / size as f64 * 2.0;
 			let spot = (1.0 - ((normal_x + 0.35) * (normal_x + 0.35) + (normal_y - 0.4) * (normal_y - 0.4)).sqrt() / 0.32).max(0.0);
 			let glow = (1.0 - (normal_x * normal_x + normal_y * normal_y).sqrt()).max(0.0) * 0.25;
 			let value = ((spot.powf(1.5) + glow) * 255.0).round().min(255.0) as u8;
@@ -65,8 +65,8 @@ fn create_angel_ring_pixels() -> Vec<u8> {
 	let mut pixels = vec![0u8; size * size * 4];
 	for pixel_y in 0..size {
 		for pixel_x in 0..size {
-			let u = (pixel_x as f32 + 0.5) / size as f32;
-			let v = (pixel_y as f32 + 0.5) / size as f32;
+			let u = (pixel_x as f64 + 0.5) / size as f64;
+			let v = (pixel_y as f64 + 0.5) / size as f64;
 			let band = (1.0 - (v - 0.3).abs() / 0.06).max(0.0);
 			let across = (1.0 - (u - 0.5).abs() / 0.4).max(0.0);
 			let value = (band * across * 255.0).round().min(255.0) as u8;
@@ -86,14 +86,14 @@ struct StyleItem {
 	line_id: u32,
 	has_screen_outline: bool,
 	has_crease_line: bool,
-	specular_scale: f32,
-	rim_scale: f32,
+	specular_scale: f64,
+	rim_scale: f64,
 	has_matcap: bool,
-	outline_color: Option<[f32; 4]>,
-	outline_width_scale: f32,
+	outline_color: Option<[f64; 4]>,
+	outline_width_scale: f64,
 	has_outline: bool,
 	has_angel_ring: bool,
-	outline_offset_z: f32,
+	outline_offset_z: f64,
 }
 
 //==============================================================================
@@ -106,7 +106,7 @@ fn create_item(mesh: ToonMesh, matrix: Matrix4, line_id: u32) -> StyleItem {
 //==============================================================================
 // 자리, 돌림(y 다음 x), 크기의 행렬.
 //==============================================================================
-fn create_placed(translation: [f32; 3], rotation_x: f32, rotation_y: f32, scale: [f32; 3]) -> Matrix4 {
+fn create_placed(translation: [f64; 3], rotation_x: f64, rotation_y: f64, scale: [f64; 3]) -> Matrix4 {
 	let mut matrix = Matrix4::create_translation(translation[0], translation[1], translation[2]);
 	matrix.rotate_y(rotation_y);
 	matrix.rotate_x(rotation_x);
@@ -132,7 +132,7 @@ impl StyleResources {
 	//==============================================================================
 	// 짓기. (선의 판 몫, 모형마다 바깥선 꼴을 바꿔 보일지, 껍데기 바깥선으로 그릴지)
 	//==============================================================================
-	fn new(gl: &glow::Context, line_scale: f32, is_toggled: bool, is_shell: bool) -> Result<StyleResources, String> {
+	fn new(gl: &glow::Context, line_scale: f64, is_toggled: bool, is_shell: bool) -> Result<StyleResources, String> {
 		let mut renderer = ToonRenderer::new(gl)?;
 		renderer.set_sun_direction(SUN_DIRECTION);
 		renderer.set_shade(ToonShade { step: 0.5, feather: 0.02, color: [0.55, 0.52, 0.72], second_step: 0.2, second_feather: 0.02, second_color: [0.38, 0.35, 0.56], is_half_lambert: true });
@@ -160,10 +160,10 @@ impl StyleResources {
 			StyleItem { has_screen_outline: !is_toggled, has_outline: false, specular_scale: 0.0, rim_scale: 0.0, ..create_item(mesh_of(create_box_geometry(14.0, 0.2, 10.0), "#9aa4b4")?, Matrix4::create_translation(0.0, -0.1, 0.0), 1) },
 			StyleItem { specular_scale: 0.0, ..create_item(mesh_of(create_box_geometry(2.4, 0.1, 3.0), "#86a07e")?, create_placed([-3.4, 0.55, -1.6], 0.5, 0.25, [1.0, 1.0, 1.0]), 2) },
 			create_item(mesh_of(create_box_geometry(1.2, 1.2, 1.2), "#e8a860")?, create_placed([-2.0, 0.6, 0.7], 0.0, 0.55, [1.0, 1.0, 1.0]), 3),
-			StyleItem { has_angel_ring: true, outline_offset_z: 0.02, ..create_item(mesh_of(create_sphere_geometry(0.8, 48, 32, std::f32::consts::PI), "#4a5a8a")?, Matrix4::create_translation(-0.2, 0.8, 0.2), 4) },
+			StyleItem { has_angel_ring: true, outline_offset_z: 0.02, ..create_item(mesh_of(create_sphere_geometry(0.8, 48, 32, std::f64::consts::PI), "#4a5a8a")?, Matrix4::create_translation(-0.2, 0.8, 0.2), 4) },
 			StyleItem { has_matcap: true, outline_color: Some([0.1, 0.22, 0.4, 1.0]), ..create_item(mesh_of(create_octahedron_geometry(0.6), "#80c8ff")?, create_placed([1.5, 0.96, 0.6], 0.0, 0.4, [1.0, 1.6, 1.0]), 5) },
 			StyleItem { has_crease_line: !is_toggled, ..create_item(mesh_of(create_faceted_chunk_geometry(0.55, &CHUNK_SCALES, [1.0, 0.8, 1.0]), "#b0a0d0")?, Matrix4::create_translation(3.0, 0.45, 0.2), 6) },
-			StyleItem { outline_color: Some([0.35, 0.08, 0.12, 1.0]), outline_width_scale: 1.4, ..create_item(mesh_of(create_torus_geometry(0.45, 0.17, 16, 40, std::f32::consts::PI * 2.0), "#d06070")?, create_placed([0.9, 0.3, 2.1], 1.2, 0.3, [1.0, 1.0, 1.0]), 7) },
+			StyleItem { outline_color: Some([0.35, 0.08, 0.12, 1.0]), outline_width_scale: 1.4, ..create_item(mesh_of(create_torus_geometry(0.45, 0.17, 16, 40, std::f64::consts::PI * 2.0), "#d06070")?, create_placed([0.9, 0.3, 2.1], 1.2, 0.3, [1.0, 1.0, 1.0]), 7) },
 		];
 		Ok(StyleResources { renderer, outline, is_shell, shadow_map, shadow_atlas, matcap_texture, angel_ring_texture, item_list })
 	}
@@ -213,7 +213,7 @@ struct ToonStyleScene {
 	scene_base: SceneBase,
 	resources: Option<StyleResources>,
 	camera: Camera3D,
-	line_scale: f32,
+	line_scale: f64,
 	is_toggled: bool,
 	is_shell: bool,
 }
@@ -233,7 +233,7 @@ impl ToonStyleScene {
 //==============================================================================
 // 선의 판 몫. (데스크탑은 TOON_STYLE_SCALE, 웹은 1)
 //==============================================================================
-fn read_line_scale() -> f32 {
+fn read_line_scale() -> f64 {
 	read_environment_number("TOON_STYLE_SCALE", 1.0)
 }
 
@@ -241,19 +241,19 @@ fn read_line_scale() -> f32 {
 // 환경 변수의 수. (데스크탑만, 없거나 웹이면 기본값)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
-fn read_environment_number(name: &str, default_value: f32) -> f32 {
-	std::env::var(name).ok().and_then(|text| text.parse::<f32>().ok()).unwrap_or(default_value)
+fn read_environment_number(name: &str, default_value: f64) -> f64 {
+	std::env::var(name).ok().and_then(|text| text.parse::<f64>().ok()).unwrap_or(default_value)
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_environment_number(_name: &str, default_value: f32) -> f32 {
+fn read_environment_number(_name: &str, default_value: f64) -> f64 {
 	default_value
 }
 
 //==============================================================================
 // 기울인 카메라의 위쪽. (보는 쪽 둘레로 위쪽을 roll 만큼 돌린다, 오른쪽이 위로 들린다, 원본 createRolledUp)
 //==============================================================================
-fn create_rolled_up(eye: [f32; 3], target: [f32; 3], roll: f32) -> Vector3 {
+fn create_rolled_up(eye: [f64; 3], target: [f64; 3], roll: f64) -> Vector3 {
 	let forward = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
 	let forward_length = (forward[0] * forward[0] + forward[1] * forward[1] + forward[2] * forward[2]).sqrt();
 	let front = [forward[0] / forward_length, forward[1] / forward_length, forward[2] / forward_length];

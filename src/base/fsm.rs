@@ -20,7 +20,7 @@ use std::rc::Rc;
 /// 상태에 들어갈 때 부른다. (이전 상태 이름, 처음이면 None)
 pub type StateEnterHandler<StateName> = Box<dyn FnMut(Option<&StateName>)>;
 /// 상태에 머무는 동안 tick 마다 부른다. (time_delta, 이 상태에 머문 초)
-pub type StateTickHandler = Box<dyn FnMut(f32, f32)>;
+pub type StateTickHandler = Box<dyn FnMut(f64, f64)>;
 /// 상태에서 나갈 때 부른다. (다음 상태 이름)
 pub type StateExitHandler<StateName> = Box<dyn FnMut(&StateName)>;
 /// 전이 가드. (이전 상태 이름, 다음 상태 이름) → 허용 여부
@@ -38,11 +38,11 @@ pub type TransitionEvent<StateName> = Box<dyn FnMut(Option<&StateName>, &StateNa
 /// use std::rc::Rc;
 /// use vanilla::{FiniteStateMachine, StateHandlers};
 ///
-/// let total_seconds = Rc::new(Cell::new(0.0f32));
+/// let total_seconds = Rc::new(Cell::new(0.0f64));
 /// let total_seconds_in_tick = total_seconds.clone();
 /// let mut state_machine: FiniteStateMachine<&'static str> = FiniteStateMachine::new();
 /// state_machine.add_state("play", StateHandlers {
-/// 	tick: Some(Box::new(move |time_delta: f32, _state_seconds: f32| {
+/// 	tick: Some(Box::new(move |time_delta: f64, _state_seconds: f64| {
 /// 		total_seconds_in_tick.set(total_seconds_in_tick.get() + time_delta);
 /// 	})),
 /// 	..StateHandlers::default()
@@ -82,7 +82,7 @@ impl<StateName> Default for StateHandlers<StateName> {
 /// let mut state_machine: FiniteStateMachine<&'static str> = FiniteStateMachine::new();
 /// let state_change_requester = state_machine.get_state_change_requester();
 /// state_machine.add_state("countdown", StateHandlers {
-/// 	tick: Some(Box::new(move |_time_delta: f32, state_seconds: f32| {
+/// 	tick: Some(Box::new(move |_time_delta: f64, state_seconds: f64| {
 /// 		if state_seconds >= 1.0 {
 /// 			state_change_requester.change_state("play", false);
 /// 		}
@@ -171,7 +171,7 @@ impl<StateName> StateChangeRequester<StateName> {
 pub struct FiniteStateMachine<StateName = String> {
 	state_table: HashMap<StateName, StateHandlers<StateName>>,
 	state_name: Option<StateName>,
-	state_seconds: f32,
+	state_seconds: f64,
 	transition_guard: Option<TransitionGuard<StateName>>,
 	transition_event: Option<TransitionEvent<StateName>>,
 	// 처리 함수가 부탁한 전이. (StateChangeRequester 와 나눠 든다)
@@ -341,7 +341,7 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 	/// # 인자
 	/// - `time_delta`: 지난 프레임과의 간격. (초, 머문 시간에 더하고 현재 상태의 tick 에 넘긴다. 현재 상태가 없으면 더하지 않는다)
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		self.apply_pending_state_changes();
 		self.tick_current_state(time_delta);
 		self.apply_pending_state_changes();
@@ -350,7 +350,7 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 	//==============================================================================
 	/// 현재 상태의 tick 부르기. (머문 시간을 늘린다)
 	//==============================================================================
-	fn tick_current_state(&mut self, time_delta: f32) {
+	fn tick_current_state(&mut self, time_delta: f64) {
 		let state_name = match self.state_name.as_ref() {
 			Some(state_name) => {
 				state_name
@@ -383,7 +383,7 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 	/// # 돌려줌
 	/// 머문 시간. (초, 전이할 때 0 으로 돌아간다)
 	//==============================================================================
-	pub fn get_state_seconds(&self) -> f32 {
+	pub fn get_state_seconds(&self) -> f64 {
 		self.state_seconds
 	}
 
@@ -489,7 +489,7 @@ mod tests {
 			enter: Some(Box::new(move |previous_state_name: Option<&TestState>| {
 				enter_records.borrow_mut().push(format!("{}.enter({:?})", name, previous_state_name));
 			})),
-			tick: Some(Box::new(move |time_delta: f32, state_seconds: f32| {
+			tick: Some(Box::new(move |time_delta: f64, state_seconds: f64| {
 				tick_records.borrow_mut().push(format!("{}.tick({}, {})", name, time_delta, state_seconds));
 			})),
 			exit: Some(Box::new(move |next_state_name: &TestState| {
@@ -568,7 +568,7 @@ mod tests {
 		let mut idle_handlers = create_recording_handlers("idle", &records);
 		let idle_tick_records = records.clone();
 		let idle_requester = state_change_requester.clone();
-		idle_handlers.tick = Some(Box::new(move |_time_delta: f32, state_seconds: f32| {
+		idle_handlers.tick = Some(Box::new(move |_time_delta: f64, state_seconds: f64| {
 			idle_tick_records.borrow_mut().push(format!("idle.tick({})", state_seconds));
 			if state_seconds >= 1.0 {
 				idle_requester.change_state(TestState::Run, false);

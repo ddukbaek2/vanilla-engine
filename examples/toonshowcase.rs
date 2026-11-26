@@ -8,7 +8,7 @@
 // - TOON_MODEL_PATH 에 GLB 경로를 주면 그 모형도 하나 더 놓는다. (데스크탑만)
 // - 실행: cargo run --example toonshowcase
 //==============================================================================
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 use std::path::PathBuf;
 use vanilla::{
 	create_box_geometry, create_capsule_geometry, create_cylinder_geometry, create_octahedron_geometry, create_part_matrix, create_rounded_box_geometry, create_sphere_geometry, create_torus_geometry, read_glb_arrays, write_skin_pose, BlobAsset, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ToonDrawOptions, ToonMesh, ToonMeshArrays, ToonOutlineOptions, ToonPartOptions, ToonRenderer, Vector2, Vector3, ShadowMap, ToonInstance, ToonPostProcess,
@@ -23,9 +23,9 @@ const EXAMPLE_ASSET_DIRECTORY: &str = "../vanilla.js/examples/ancientmountain/as
 struct PlacedToon {
 	mesh: ToonMesh,
 	arrays: ToonMeshArrays,
-	position: [f32; 3],
-	scale: f32,
-	spin: f32,
+	position: [f64; 3],
+	scale: f64,
+	spin: f64,
 }
 
 struct ToonShowcaseScene {
@@ -38,7 +38,7 @@ struct ToonShowcaseScene {
 	rock_instance_list: Vec<ToonInstance>,
 	frame_count: u32,
 	placed_list: Vec<PlacedToon>,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 }
 
 impl ToonShowcaseScene {
@@ -60,13 +60,13 @@ impl ToonShowcaseScene {
 	//==============================================================================
 	// 기본 도형으로 지은 배열.
 	//==============================================================================
-	fn build_shapes() -> Vec<(ToonMeshArrays, [f32; 3], f32)> {
+	fn build_shapes() -> Vec<(ToonMeshArrays, [f64; 3], f64)> {
 		let mut shape_list = Vec::new();
 		let mut ground_builder = MeshBuilder::new();
 		let ground_options = ToonPartOptions { has_outline: false, ..ToonPartOptions::default() };
 		ground_builder.add_part(&create_rounded_box_geometry(9.0, 0.3, 5.0, 3, 0.12), &create_part_matrix(None, [0.0, -0.15, 0.0], None, None), "#5a4a6e", ground_options);
 		shape_list.push((ground_builder.read_arrays(), [0.0, 0.0, 0.0], 0.0));
-		let shapes: [(&str, [f32; 3]); 7] = [("box", [-3.4, 0.0, -1.2]), ("roundedBox", [-1.7, 0.0, -1.2]), ("sphere", [0.0, 0.0, -1.4]), ("cone", [1.7, 0.0, -1.2]), ("capsule", [3.4, 0.0, -1.2]), ("torus", [-3.0, 0.0, 1.4]), ("octahedron", [3.0, 0.0, 1.4])];
+		let shapes: [(&str, [f64; 3]); 7] = [("box", [-3.4, 0.0, -1.2]), ("roundedBox", [-1.7, 0.0, -1.2]), ("sphere", [0.0, 0.0, -1.4]), ("cone", [1.7, 0.0, -1.2]), ("capsule", [3.4, 0.0, -1.2]), ("torus", [-3.0, 0.0, 1.4]), ("octahedron", [3.0, 0.0, 1.4])];
 		for (shape_name, position) in shapes {
 			let mut builder = MeshBuilder::new();
 			let options = ToonPartOptions { outline_width: 0.03, ..ToonPartOptions::default() };
@@ -110,7 +110,7 @@ impl ToonShowcaseScene {
 			}
 		}
 		let outline_options = ToonOutlineOptions { width: 0.02, ..ToonOutlineOptions::default() };
-		let mut model_byte_list: Vec<(Vec<u8>, [f32; 3], f32)> = Vec::new();
+		let mut model_byte_list: Vec<(Vec<u8>, [f64; 3], f64)> = Vec::new();
 		if let Some(mannequin_bytes) = self.mannequin_asset.get_blob() {
 			model_byte_list.push(((*mannequin_bytes).clone(), [-1.2, 0.0, 1.2], 1.0));
 		}
@@ -135,14 +135,14 @@ impl ToonShowcaseScene {
 		rock_builder.add_part(&create_octahedron_geometry(0.12), &create_part_matrix(None, [0.0, 0.08, 0.0], None, Some([1.0, 0.7, 1.0])), "#c9b8a0", ToonPartOptions { outline_width: 0.012, ..ToonPartOptions::default() });
 		self.rock_mesh = renderer.create_mesh(gl, &rock_builder.read_arrays());
 		for rock_index in 0..2000 {
-			let ratio = rock_index as f32 / 2000.0;
+			let ratio = rock_index as f64 / 2000.0;
 			let angle = ratio * PI * 2.0 * 37.0;
-			let distance = 5.5 + (rock_index % 97) as f32 / 97.0 * 9.0;
+			let distance = 5.5 + (rock_index % 97) as f64 / 97.0 * 9.0;
 			let mut model_matrix = Matrix4::create_translation(angle.cos() * distance, -0.3, angle.sin() * distance * 0.7);
 			model_matrix.rotate_y(angle * 3.0);
-			let scale = 0.6 + (rock_index % 13) as f32 / 13.0 * 1.4;
+			let scale = 0.6 + (rock_index % 13) as f64 / 13.0 * 1.4;
 			model_matrix.scale(scale, scale, scale);
-			let shade = 0.7 + (rock_index % 7) as f32 / 7.0 * 0.5;
+			let shade = 0.7 + (rock_index % 7) as f64 / 7.0 * 0.5;
 			self.rock_instance_list.push(ToonInstance { model_matrix, tint_color: [shade, shade * 0.95, shade * 0.9, 1.0], ..ToonInstance::default() });
 		}
 		renderer.set_hdr_output(true);
@@ -170,7 +170,7 @@ impl Scene for ToonShowcaseScene {
 		self.scene_base.track_asset(&self.mannequin_asset);
 	}
 
-	fn tick(&mut self, _engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, _engine: &mut Engine, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 	}
 

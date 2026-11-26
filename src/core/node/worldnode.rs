@@ -42,8 +42,8 @@ use crate::core::node::nodetree::NodeId;
 pub struct NodeTransform {
 	local_position: Vector2,
 	local_scale: Vector2,
-	local_rotation: f32,
-	local_opacity: f32,
+	local_rotation: f64,
+	local_opacity: f64,
 	pivot: Vector2,
 	content_size: Vector2,
 	anchor: Vector2,
@@ -116,7 +116,7 @@ impl NodeTransform {
 	/// # 인자
 	/// - `local_rotation`: 회전. (도, 양수면 화면에서 시계 방향)
 	//==============================================================================
-	pub fn set_local_rotation(&mut self, local_rotation: f32) {
+	pub fn set_local_rotation(&mut self, local_rotation: f64) {
 		self.local_rotation = local_rotation;
 	}
 
@@ -126,7 +126,7 @@ impl NodeTransform {
 	/// # 돌려줌
 	/// 로컬 회전. (도)
 	//==============================================================================
-	pub fn get_local_rotation(&self) -> f32 {
+	pub fn get_local_rotation(&self) -> f64 {
 		self.local_rotation
 	}
 
@@ -136,7 +136,7 @@ impl NodeTransform {
 	/// # 인자
 	/// - `local_opacity`: 불투명도. (0 ~ 1, 밖의 값은 잘라 넣는다)
 	//==============================================================================
-	pub fn set_local_opacity(&mut self, local_opacity: f32) {
+	pub fn set_local_opacity(&mut self, local_opacity: f64) {
 		self.local_opacity = math::clamp01(local_opacity);
 	}
 
@@ -146,7 +146,7 @@ impl NodeTransform {
 	/// # 돌려줌
 	/// 로컬 불투명도. (0 ~ 1)
 	//==============================================================================
-	pub fn get_local_opacity(&self) -> f32 {
+	pub fn get_local_opacity(&self) -> f64 {
 		self.local_opacity
 	}
 
@@ -197,7 +197,7 @@ impl NodeTransform {
 	/// - `x`: 로컬 위치 x.
 	/// - `y`: 로컬 위치 y.
 	//==============================================================================
-	pub fn set_local_position_xy(&mut self, x: f32, y: f32) {
+	pub fn set_local_position_xy(&mut self, x: f64, y: f64) {
 		self.local_position = Vector2::create(x, y);
 	}
 
@@ -208,7 +208,7 @@ impl NodeTransform {
 	/// - `x`: 가로 배율.
 	/// - `y`: 세로 배율.
 	//==============================================================================
-	pub fn set_local_scale_xy(&mut self, x: f32, y: f32) {
+	pub fn set_local_scale_xy(&mut self, x: f64, y: f64) {
 		self.local_scale = Vector2::create(x, y);
 	}
 
@@ -219,7 +219,7 @@ impl NodeTransform {
 	/// - `width`: 내용 너비.
 	/// - `height`: 내용 높이.
 	//==============================================================================
-	pub fn set_content_size_xy(&mut self, width: f32, height: f32) {
+	pub fn set_content_size_xy(&mut self, width: f64, height: f64) {
 		self.content_size = Vector2::create(width, height);
 	}
 
@@ -235,7 +235,7 @@ impl NodeTransform {
 	/// - `width`: 내용 너비.
 	/// - `height`: 내용 높이.
 	//==============================================================================
-	pub fn set_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
+	pub fn set_rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
 		self.content_size = Vector2::create(width, height);
 		self.local_position = Vector2::create(x + width * self.pivot.x, y + height * self.pivot.y);
 	}
@@ -388,7 +388,7 @@ pub struct WorldNode {
 	pub(crate) parent_id: Option<NodeId>,
 	pub(crate) child_ids: Vec<NodeId>,
 	/// 지난번 그릴 때 변환의 가장 큰 배율. (0 이면 아직 모른다, 글 굽기 배율을 움직이는 동안 묶는 데 쓴다)
-	last_drawn_maximum_scale: f32,
+	last_drawn_maximum_scale: f64,
 }
 
 impl WorldNode {
@@ -708,7 +708,7 @@ impl WorldNode {
 	/// # 인자
 	/// - `local_rotation`: 회전. (도, 양수면 화면에서 시계 방향)
 	//==============================================================================
-	pub fn set_local_rotation(&mut self, local_rotation: f32) {
+	pub fn set_local_rotation(&mut self, local_rotation: f64) {
 		self.transform.set_local_rotation(local_rotation);
 	}
 
@@ -718,7 +718,7 @@ impl WorldNode {
 	/// # 돌려줌
 	/// 로컬 회전. (도)
 	//==============================================================================
-	pub fn get_local_rotation(&self) -> f32 {
+	pub fn get_local_rotation(&self) -> f64 {
 		self.transform.get_local_rotation()
 	}
 
@@ -728,7 +728,7 @@ impl WorldNode {
 	/// # 인자
 	/// - `local_opacity`: 불투명도. (0 ~ 1, 밖의 값은 잘라 넣는다)
 	//==============================================================================
-	pub fn set_local_opacity(&mut self, local_opacity: f32) {
+	pub fn set_local_opacity(&mut self, local_opacity: f64) {
 		self.transform.set_local_opacity(local_opacity);
 	}
 
@@ -738,7 +738,7 @@ impl WorldNode {
 	/// # 돌려줌
 	/// 로컬 불투명도. (0 ~ 1)
 	//==============================================================================
-	pub fn get_local_opacity(&self) -> f32 {
+	pub fn get_local_opacity(&self) -> f64 {
 		self.transform.get_local_opacity()
 	}
 
@@ -789,7 +789,7 @@ impl WorldNode {
 	/// - `x`: 로컬 위치 x.
 	/// - `y`: 로컬 위치 y.
 	//==============================================================================
-	pub fn set_local_position_xy(&mut self, x: f32, y: f32) {
+	pub fn set_local_position_xy(&mut self, x: f64, y: f64) {
 		self.transform.set_local_position_xy(x, y);
 	}
 
@@ -800,7 +800,7 @@ impl WorldNode {
 	/// - `x`: 가로 배율.
 	/// - `y`: 세로 배율.
 	//==============================================================================
-	pub fn set_local_scale_xy(&mut self, x: f32, y: f32) {
+	pub fn set_local_scale_xy(&mut self, x: f64, y: f64) {
 		self.transform.set_local_scale_xy(x, y);
 	}
 
@@ -811,7 +811,7 @@ impl WorldNode {
 	/// - `width`: 내용 너비.
 	/// - `height`: 내용 높이.
 	//==============================================================================
-	pub fn set_content_size_xy(&mut self, width: f32, height: f32) {
+	pub fn set_content_size_xy(&mut self, width: f64, height: f64) {
 		self.transform.set_content_size_xy(width, height);
 	}
 
@@ -824,7 +824,7 @@ impl WorldNode {
 	/// - `width`: 내용 너비.
 	/// - `height`: 내용 높이.
 	//==============================================================================
-	pub fn set_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
+	pub fn set_rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
 		self.transform.set_rect(x, y, width, height);
 	}
 
@@ -834,7 +834,7 @@ impl WorldNode {
 	/// # 인자
 	/// - `last_drawn_maximum_scale`: 지난번 그릴 때 변환의 가장 큰 배율. (0 이면 모른다)
 	//==============================================================================
-	pub fn set_last_drawn_maximum_scale(&mut self, last_drawn_maximum_scale: f32) {
+	pub fn set_last_drawn_maximum_scale(&mut self, last_drawn_maximum_scale: f64) {
 		self.last_drawn_maximum_scale = last_drawn_maximum_scale;
 	}
 
@@ -844,7 +844,7 @@ impl WorldNode {
 	/// # 돌려줌
 	/// 가장 큰 배율. (0 이면 아직 모른다)
 	//==============================================================================
-	pub fn get_last_drawn_maximum_scale(&self) -> f32 {
+	pub fn get_last_drawn_maximum_scale(&self) -> f64 {
 		self.last_drawn_maximum_scale
 	}
 
@@ -1135,7 +1135,7 @@ impl WorldNode {
 	/// # 돌려줌
 	/// (켜진 자르는 컴포넌트(Mask)의 귀퉁이 둥근 크기, 없으면 None. 화면 밖이라 그리지 않았으면 true)
 	//==============================================================================
-	pub fn draw_components(&mut self, graphic: &mut Graphic) -> (Option<f32>, bool) {
+	pub fn draw_components(&mut self, graphic: &mut Graphic) -> (Option<f64>, bool) {
 		let mut is_culled = false;
 		if !self.components.is_empty() && graphic.is_culling_enabled() {
 			let mut drawn_rect: Option<Rect> = None;
@@ -1173,7 +1173,7 @@ impl WorldNode {
 			}
 		}
 
-		let mut clip_round_size: Option<f32> = None;
+		let mut clip_round_size: Option<f64> = None;
 		for component in self.components.iter_mut() {
 			if !component.is_enable() {
 				continue;

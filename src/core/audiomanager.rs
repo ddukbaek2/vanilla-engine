@@ -235,9 +235,9 @@ impl AudioManager {
 	/// ```rust,no_run
 	/// use vanilla::AudioManager;
 	///
-	/// fn read_sample_rate(audio_manager: &AudioManager) -> Option<f32> {
+	/// fn read_sample_rate(audio_manager: &AudioManager) -> Option<f64> {
 	/// 	let audio_context = audio_manager.get_audio_context()?;
-	/// 	Some(audio_context.sample_rate())
+	/// 	Some(audio_context.sample_rate() as f64)
 	/// }
 	/// ```
 	//==============================================================================

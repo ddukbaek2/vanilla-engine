@@ -13,12 +13,12 @@ use vanilla::{
 };
 
 // 화면 크기.
-const VIEW_WIDTH: f32 = 960.0;
-const VIEW_HEIGHT: f32 = 640.0;
+const VIEW_WIDTH: f64 = 960.0;
+const VIEW_HEIGHT: f64 = 640.0;
 // 월드 격자.
 const GRID_COLUMN_COUNT: i32 = 12;
 const GRID_ROW_COUNT: i32 = 8;
-const TILE_SIZE: f32 = 48.0;
+const TILE_SIZE: f64 = 48.0;
 // 격자의 벽. ('#')
 const GRID_MAP: [&str; 8] = [
 	"............",
@@ -74,8 +74,8 @@ fn create_sheet_image() -> Rc<Image> {
 	for pixel_y in 0..image_height {
 		for pixel_x in 0..image_width {
 			let frame_color = frame_colors[pixel_x / 32];
-			let local_x = (pixel_x % 32) as f32 - 15.5;
-			let local_y = pixel_y as f32 - 15.5;
+			let local_x = (pixel_x % 32) as f64 - 15.5;
+			let local_y = pixel_y as f64 - 15.5;
 			let is_inside = local_x * local_x + local_y * local_y <= 14.0 * 14.0;
 			let pixel_index = (pixel_y * image_width + pixel_x) * 4;
 			if is_inside {
@@ -103,8 +103,8 @@ struct MiscTourScene {
 	label_id: Option<NodeId>,
 	floating_text_id: Option<NodeId>,
 	touch_effect_id: Option<NodeId>,
-	elapsed_seconds: f32,
-	spawn_seconds: f32,
+	elapsed_seconds: f64,
+	spawn_seconds: f64,
 }
 
 impl MiscTourScene {
@@ -137,7 +137,7 @@ impl MiscTourScene {
 	fn draw_world(&self, graphic: &mut Graphic) {
 		for row in 0..GRID_ROW_COUNT {
 			for column in 0..GRID_COLUMN_COUNT {
-				let tile_rect = Rect::create(column as f32 * TILE_SIZE, row as f32 * TILE_SIZE, TILE_SIZE - 2.0, TILE_SIZE - 2.0);
+				let tile_rect = Rect::create(column as f64 * TILE_SIZE, row as f64 * TILE_SIZE, TILE_SIZE - 2.0, TILE_SIZE - 2.0);
 				let tile_color = if is_wall(column, row) {
 					Color::create(0.45, 0.32, 0.25, 1.0)
 				}
@@ -188,7 +188,7 @@ impl Scene for MiscTourScene {
 
 		// 카메라와 길찾기.
 		self.camera.set_view_size(Vector2::create(VIEW_WIDTH, VIEW_HEIGHT));
-		self.camera.set_world_bounds(Some(Rect::create(0.0, 0.0, GRID_COLUMN_COUNT as f32 * TILE_SIZE, GRID_ROW_COUNT as f32 * TILE_SIZE)));
+		self.camera.set_world_bounds(Some(Rect::create(0.0, 0.0, GRID_COLUMN_COUNT as f64 * TILE_SIZE, GRID_ROW_COUNT as f64 * TILE_SIZE)));
 		self.camera.set_zoom(1.2);
 		self.path = PathFinder::find_path(GRID_COLUMN_COUNT, GRID_ROW_COUNT, GridCell::create(0, 7), GridCell::create(11, 3), is_wall).unwrap_or_default();
 		self.shaker.add_shake(6.0);
@@ -227,7 +227,7 @@ impl Scene for MiscTourScene {
 		hero_node.set_content_size(Vector2::create(64.0, 64.0));
 		hero_node.add_component(Sprite::new());
 		let animator = hero_node.add_component(SpriteAnimator::new());
-		let frame_rects: Vec<Rect> = (0..4).map(|frame_index| Rect::create(frame_index as f32 * 32.0, 0.0, 32.0, 32.0)).collect();
+		let frame_rects: Vec<Rect> = (0..4).map(|frame_index| Rect::create(frame_index as f64 * 32.0, 0.0, 32.0, 32.0)).collect();
 		animator.add_clip("spin", sheet_image, &frame_rects, 6.0, true);
 		SpriteAnimator::play(hero_node, "spin", SpriteAnimatorPlayOptions::default());
 
@@ -251,7 +251,7 @@ impl Scene for MiscTourScene {
 	//==============================================================================
 	// 갱신.
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 		self.spawn_seconds += time_delta;
 

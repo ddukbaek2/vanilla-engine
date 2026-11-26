@@ -26,6 +26,7 @@ use crate::base::color::Color;
 use crate::core::fullscreenpass::FullscreenPass;
 use crate::core::graphic::{GlTexture, Graphic};
 use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 use std::collections::HashMap;
 use std::rc::Weak;
 
@@ -235,7 +236,7 @@ const EFFECT_NAME_TABLE: [(ScreenEffectType, &str); 58] = [
 ];
 
 /// 효과별 기본 파라미터. (적용 차례)
-const DEFAULT_PARAMETER_TABLE: [(ScreenEffectType, [f32; 4]); 58] = [
+const DEFAULT_PARAMETER_TABLE: [(ScreenEffectType, [f64; 4]); 58] = [
 	(ScreenEffectType::LensDistortion, [0.35, 0.0, 0.0, 0.0]),
 	(ScreenEffectType::Bulge, [0.5, 0.5, 0.5, 0.5]),
 	(ScreenEffectType::Swirl, [0.5, 0.5, 0.6, 0.5]),
@@ -359,7 +360,7 @@ pub const SCREEN_EFFECT_PARAMETER_NAMES: [(ScreenEffectType, &[&str]); 58] = [
 ];
 
 /// 효과별 기본 색. (없는 효과는 흰색)
-const DEFAULT_COLOR_TABLE: [(ScreenEffectType, [f32; 4]); 25] = [
+const DEFAULT_COLOR_TABLE: [(ScreenEffectType, [f64; 4]); 25] = [
 	(ScreenEffectType::Shockwave, [1.0, 1.0, 1.0, 0.6]),
 	(ScreenEffectType::GodRays, [1.0, 0.95, 0.8, 1.0]),
 	(ScreenEffectType::Anamorphic, [0.5, 0.7, 1.0, 1.0]),
@@ -949,8 +950,8 @@ impl ScreenEffectType {
 #[derive(Clone, Copy, Debug)]
 struct ScreenEffectState {
 	is_enabled: bool,
-	strength: f32,
-	parameters: [f32; 4],
+	strength: f64,
+	parameters: [f64; 4],
 	color: Color,
 }
 
@@ -974,15 +975,15 @@ struct ScreenEffectState {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScreenEffectRegion {
 	/// 영역 왼쪽. (캔버스 픽셀)
-	pub x: f32,
+	pub x: f64,
 	/// 영역 위. (캔버스 픽셀)
-	pub y: f32,
+	pub y: f64,
 	/// 영역 너비. (픽셀, 캔버스 밖으로 나가는 만큼은 잘린다)
-	pub width: f32,
+	pub width: f64,
 	/// 영역 높이. (픽셀, 캔버스 밖으로 나가는 만큼은 잘린다)
-	pub height: f32,
+	pub height: f64,
 	/// 둥근 모서리 반지름. (픽셀, 0 이면 사각형)
-	pub corner_radius: f32,
+	pub corner_radius: f64,
 }
 
 //==============================================================================
@@ -1034,9 +1035,9 @@ enum PassStepTexture {
 #[derive(Clone, Copy, Debug)]
 struct PassStep {
 	pass_name: &'static str,
-	strength: f32,
+	strength: f64,
 	color: Color,
-	parameters: [f32; 4],
+	parameters: [f64; 4],
 	target: PassStepTarget,
 	source: PassStepTexture,
 	auxiliary: Option<PassStepTexture>,
@@ -1045,7 +1046,7 @@ struct PassStep {
 //==============================================================================
 /// 패스 단계 만들기. (상태가 없으면 세기 1, 흰색)
 //==============================================================================
-fn create_pass_step(pass_name: &'static str, effect_state: Option<&ScreenEffectState>, parameters: [f32; 4], target: PassStepTarget, source: PassStepTexture, auxiliary: Option<PassStepTexture>) -> PassStep {
+fn create_pass_step(pass_name: &'static str, effect_state: Option<&ScreenEffectState>, parameters: [f64; 4], target: PassStepTarget, source: PassStepTexture, auxiliary: Option<PassStepTexture>) -> PassStep {
 	let (strength, color) = match effect_state {
 		Some(effect_state) => {
 			(effect_state.strength, effect_state.color)
@@ -1207,7 +1208,7 @@ fn find_effect_body(pass_name: &str) -> Option<&'static str> {
 /// 		self.screen_effect.set_enabled(ScreenEffectType::Vignette, true);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 /// 		self.scene_base.tick(engine, time_delta);
 /// 		self.screen_effect.tick(time_delta);
 /// 	}
@@ -1235,7 +1236,7 @@ pub struct ScreenEffect {
 	effect_state_list: Vec<ScreenEffectState>,
 	render_target_set: Option<RenderTargetSet>,
 	step_list: Vec<PassStep>,
-	time: f32,
+	time: f64,
 	is_bound: bool,
 	region: Option<ScreenEffectRegion>,
 	/// GL 자원을 만든 컨텍스트의 약한 손잡이. (destroy 와 Drop 이 쓴다)
@@ -1298,7 +1299,7 @@ impl ScreenEffect {
 	/// - `height`: 영역 높이. (픽셀, 캔버스 밖은 잘린다)
 	/// - `corner_radius`: 둥근 모서리 반지름. (픽셀, 음수는 0, 그 바깥은 원래 화면을 둔다)
 	//==============================================================================
-	pub fn set_region(&mut self, x: f32, y: f32, width: f32, height: f32, corner_radius: f32) {
+	pub fn set_region(&mut self, x: f64, y: f64, width: f64, height: f64, corner_radius: f64) {
 		self.region = Some(ScreenEffectRegion {
 			x,
 			y,
@@ -1331,7 +1332,7 @@ impl ScreenEffect {
 	/// # 인자
 	/// - `time_delta`: 지난 프레임에서 흐른 시간. (초, 효과 시간에 더한다)
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		self.time += time_delta;
 	}
 
@@ -1553,11 +1554,11 @@ impl ScreenEffect {
 					gl.uniform_1_i32(pass.get_uniform_location(gl, "auxiliaryTexture").as_ref(), 1);
 					gl.active_texture(glow::TEXTURE0);
 				}
-				gl.uniform_2_f32(pass.get_uniform_location(gl, "resolution").as_ref(), pass_width as f32, pass_height as f32);
-				gl.uniform_1_f32(pass.get_uniform_location(gl, "time").as_ref(), self.time);
-				gl.uniform_1_f32(pass.get_uniform_location(gl, "strength").as_ref(), step.strength);
-				gl.uniform_4_f32(pass.get_uniform_location(gl, "parameters").as_ref(), step.parameters[0], step.parameters[1], step.parameters[2], step.parameters[3]);
-				gl.uniform_4_f32(pass.get_uniform_location(gl, "effectColor").as_ref(), step.color.red, step.color.green, step.color.blue, step.color.alpha);
+				gl.uniform_2_f64(pass.get_uniform_location(gl, "resolution").as_ref(), pass_width as f64, pass_height as f64);
+				gl.uniform_1_f64(pass.get_uniform_location(gl, "time").as_ref(), self.time);
+				gl.uniform_1_f64(pass.get_uniform_location(gl, "strength").as_ref(), step.strength);
+				gl.uniform_4_f64(pass.get_uniform_location(gl, "parameters").as_ref(), step.parameters[0], step.parameters[1], step.parameters[2], step.parameters[3]);
+				gl.uniform_4_f64(pass.get_uniform_location(gl, "effectColor").as_ref(), step.color.red, step.color.green, step.color.blue, step.color.alpha);
 			}
 			pass.draw(gl);
 
@@ -1598,8 +1599,8 @@ impl ScreenEffect {
 			destroy_render_target_set(gl, render_target_set);
 			self.render_target_set = None;
 		}
-		let half_width = ((width as f32 / 2.0).round() as i32).max(1);
-		let half_height = ((height as f32 / 2.0).round() as i32).max(1);
+		let half_width = ((width as f64 / 2.0).round() as i32).max(1);
+		let half_height = ((height as f64 / 2.0).round() as i32).max(1);
 		// 씬 사본, 핑, 퐁, 절반 크기 둘. (하나라도 못 지으면 먼저 지은 것을 지운다)
 		let target_size_list = [(width, height, true), (width, height, false), (width, height, false), (half_width, half_height, false), (half_width, half_height, false)];
 		let mut created_target_list: Vec<RenderTarget> = Vec::with_capacity(target_size_list.len());
@@ -1681,7 +1682,7 @@ impl ScreenEffect {
 	/// - `effect_type`: 효과.
 	/// - `strength`: 세기. (보통 0 ~ 1, 0 이하면 걸지 않는다. 전환 효과는 덮인 정도, 기본 1)
 	//==============================================================================
-	pub fn set_strength(&mut self, effect_type: ScreenEffectType, strength: f32) {
+	pub fn set_strength(&mut self, effect_type: ScreenEffectType, strength: f64) {
 		self.effect_state_list[effect_type as usize].strength = strength;
 	}
 
@@ -1694,7 +1695,7 @@ impl ScreenEffect {
 	/// # 돌려줌
 	/// 세기. (기본 1)
 	//==============================================================================
-	pub fn get_strength(&self, effect_type: ScreenEffectType) -> f32 {
+	pub fn get_strength(&self, effect_type: ScreenEffectType) -> f64 {
 		self.effect_state_list[effect_type as usize].strength
 	}
 
@@ -1708,7 +1709,7 @@ impl ScreenEffect {
 	/// - `z`: 셋째 파라미터. (쓰지 않는 효과는 0)
 	/// - `w`: 넷째 파라미터. (쓰지 않는 효과는 0)
 	//==============================================================================
-	pub fn set_parameters(&mut self, effect_type: ScreenEffectType, x: f32, y: f32, z: f32, w: f32) {
+	pub fn set_parameters(&mut self, effect_type: ScreenEffectType, x: f64, y: f64, z: f64, w: f64) {
 		self.effect_state_list[effect_type as usize].parameters = [x, y, z, w];
 	}
 
@@ -1720,7 +1721,7 @@ impl ScreenEffect {
 	/// - `parameter_name`: 파라미터 이름. (get_parameter_names 의 것, 모르는 이름이면 아무것도 하지 않는다)
 	/// - `value`: 값.
 	//==============================================================================
-	pub fn set_parameter(&mut self, effect_type: ScreenEffectType, parameter_name: &str, value: f32) {
+	pub fn set_parameter(&mut self, effect_type: ScreenEffectType, parameter_name: &str, value: f64) {
 		let parameter_names = effect_type.get_parameter_names();
 		if let Some(parameter_index) = parameter_names.iter().position(|name| *name == parameter_name) {
 			self.effect_state_list[effect_type as usize].parameters[parameter_index] = value;
@@ -1736,7 +1737,7 @@ impl ScreenEffect {
 	/// # 돌려줌
 	/// 파라미터 [x, y, z, w]. (reset_all 뒤에는 효과별 기본값)
 	//==============================================================================
-	pub fn get_parameters(&self, effect_type: ScreenEffectType) -> [f32; 4] {
+	pub fn get_parameters(&self, effect_type: ScreenEffectType) -> [f64; 4] {
 		self.effect_state_list[effect_type as usize].parameters
 	}
 
@@ -1842,7 +1843,7 @@ impl ScreenEffect {
 	/// # 돌려줌
 	/// 효과 시간. (초, tick 으로 쌓인다)
 	//==============================================================================
-	pub fn get_time(&self) -> f32 {
+	pub fn get_time(&self) -> f64 {
 		self.time
 	}
 

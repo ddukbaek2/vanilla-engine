@@ -14,7 +14,7 @@ use vanilla::{Component, ComponentBase, ComponentContext, DevTools, Engine, Engi
 //==============================================================================
 struct Spin {
 	component_base: ComponentBase,
-	degrees_per_second: f32,
+	degrees_per_second: f64,
 }
 
 #[vanilla::reflect]
@@ -22,14 +22,14 @@ impl Spin {
 	//==============================================================================
 	// 초당 도는 각도 설정.
 	//==============================================================================
-	pub fn set_degrees_per_second(&mut self, degrees_per_second: f32) {
+	pub fn set_degrees_per_second(&mut self, degrees_per_second: f64) {
 		self.degrees_per_second = degrees_per_second;
 	}
 
 	//==============================================================================
 	// 초당 도는 각도 반환.
 	//==============================================================================
-	pub fn get_degrees_per_second(&self) -> f32 {
+	pub fn get_degrees_per_second(&self) -> f64 {
 		self.degrees_per_second
 	}
 }
@@ -51,7 +51,7 @@ impl Component for Spin {
 	//==============================================================================
 	// 주기적 갱신. (자기 노드를 돌린다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let transform = context.get_transform_mut();
 		let local_rotation = transform.get_local_rotation();
 		transform.set_local_rotation(local_rotation + self.degrees_per_second * time_delta);
@@ -147,7 +147,7 @@ impl Scene for MainScene {
 		for item_index in 0..3 {
 			let item_id = node_tree.create_child(group_id, &format!("item{}", item_index));
 			let item_node = &mut node_tree[item_id];
-			item_node.set_local_position(Vector2::create(60.0 + item_index as f32 * 50.0, 450.0));
+			item_node.set_local_position(Vector2::create(60.0 + item_index as f64 * 50.0, 450.0));
 			item_node.set_content_size(Vector2::create(36.0, 36.0));
 			item_node.add_component(Paint::create_with_color("#7a6a50"));
 		}
@@ -165,7 +165,7 @@ impl Scene for MainScene {
 	//==============================================================================
 	// 주기적 갱신. (노드 다음에 DevTools, 처음 한 번 패널을 연다)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		if !self.is_dev_tools_opened {
 			self.is_dev_tools_opened = true;

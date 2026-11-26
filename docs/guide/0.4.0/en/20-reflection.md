@@ -14,7 +14,7 @@ use vanilla::{Component, ComponentBase, ReflectValue};
 
 struct Spin {
 	component_base: ComponentBase,
-	degrees_per_second: f32,
+	degrees_per_second: f64,
 }
 
 #[vanilla::reflect]
@@ -26,11 +26,11 @@ impl Spin {
 		}
 	}
 
-	pub fn set_degrees_per_second(&mut self, degrees_per_second: f32) {
+	pub fn set_degrees_per_second(&mut self, degrees_per_second: f64) {
 		self.degrees_per_second = degrees_per_second;
 	}
 
-	pub fn get_degrees_per_second(&self) -> f32 {
+	pub fn get_degrees_per_second(&self) -> f64 {
 		self.degrees_per_second
 	}
 }
@@ -318,8 +318,8 @@ use vanilla::{Component, ComponentBase};
 
 struct Gauge {
 	component_base: ComponentBase,
-	ui_scale: f32,
-	fill_ratio: f32,
+	ui_scale: f64,
+	fill_ratio: f64,
 	font_face: String,
 }
 
@@ -335,21 +335,21 @@ impl Gauge {
 	}
 
 	#[reflect(name = "UIScale")]
-	pub fn set_ui_scale(&mut self, ui_scale: f32) {
+	pub fn set_ui_scale(&mut self, ui_scale: f64) {
 		self.ui_scale = ui_scale;
 	}
 
 	#[reflect(name = "UIScale")]
-	pub fn get_ui_scale(&self) -> f32 {
+	pub fn get_ui_scale(&self) -> f64 {
 		self.ui_scale
 	}
 
-	pub fn set_fill_ratio(&mut self, fill_ratio: f32) {
+	pub fn set_fill_ratio(&mut self, fill_ratio: f64) {
 		self.fill_ratio = fill_ratio;
 	}
 
 	#[reflect(transient)]
-	pub fn get_fill_ratio(&self) -> f32 {
+	pub fn get_fill_ratio(&self) -> f64 {
 		self.fill_ratio
 	}
 
@@ -416,7 +416,7 @@ use vanilla::{Component, ComponentBase, Reflect, ReflectValue};
 
 struct Unit {
 	component_base: ComponentBase,
-	speed: f32,
+	speed: f64,
 }
 
 #[vanilla::reflect]
@@ -428,11 +428,11 @@ impl Unit {
 		}
 	}
 
-	pub fn set_speed(&mut self, speed: f32) {
+	pub fn set_speed(&mut self, speed: f64) {
 		self.speed = speed;
 	}
 
-	pub fn get_speed(&self) -> f32 {
+	pub fn get_speed(&self) -> f64 {
 		self.speed
 	}
 }
@@ -517,7 +517,7 @@ use vanilla::{Component, ComponentBase, NodeTree, UIDocument};
 
 struct Spin {
 	component_base: ComponentBase,
-	degrees_per_second: f32,
+	degrees_per_second: f64,
 }
 
 #[vanilla::reflect]
@@ -529,11 +529,11 @@ impl Spin {
 		}
 	}
 
-	pub fn set_degrees_per_second(&mut self, degrees_per_second: f32) {
+	pub fn set_degrees_per_second(&mut self, degrees_per_second: f64) {
 		self.degrees_per_second = degrees_per_second;
 	}
 
-	pub fn get_degrees_per_second(&self) -> f32 {
+	pub fn get_degrees_per_second(&self) -> f64 {
 		self.degrees_per_second
 	}
 }

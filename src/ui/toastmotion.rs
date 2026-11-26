@@ -8,29 +8,29 @@
 //!   글은 set_apply_text_handler 로 건 함수가 노드에 넣는다. 숨은 동안 노드는 끄지 않고 보이지 않게만 한다. (tick 이 계속 돌게)
 //! - UIToast 는 줄 세운 알약 알림을 스스로 만들고, 이것은 게임이 만든 알림 노드를 움직인다.
 //==============================================================================
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 
 /// 나옴: 바깥쪽에서 미끄러져 들어오는 거리, 투명에서 보이기까지와 커졌다 돌아오는 초, 크기.
-const ENTER_DISTANCE: f32 = 10.0;
-const ENTER_SECONDS: f32 = 0.18;
-const ENTER_SETTLE_SECONDS: f32 = 0.08;
-const ENTER_START_SCALE: f32 = 0.94;
-const ENTER_PEAK_SCALE: f32 = 1.02;
+const ENTER_DISTANCE: f64 = 10.0;
+const ENTER_SECONDS: f64 = 0.18;
+const ENTER_SETTLE_SECONDS: f64 = 0.08;
+const ENTER_START_SCALE: f64 = 0.94;
+const ENTER_PEAK_SCALE: f64 = 1.02;
 /// 사라짐: 떠오르는 거리와 초, 새 알림에 비킬 때의 초.
-const EXIT_DISTANCE: f32 = 8.0;
-const EXIT_SECONDS: f32 = 0.25;
-const QUICK_EXIT_SECONDS: f32 = 0.12;
+const EXIT_DISTANCE: f64 = 8.0;
+const EXIT_SECONDS: f64 = 0.25;
+const QUICK_EXIT_SECONDS: f64 = 0.12;
 /// 같은 글이 또 오면 통 튀는 크기와 초.
-const REPEAT_SCALE: f32 = 1.05;
-const REPEAT_SECONDS: f32 = 0.15;
+const REPEAT_SCALE: f64 = 1.05;
+const REPEAT_SECONDS: f64 = 0.15;
 /// 머무는 시간: 글이 이 글자 수를 넘으면 그만큼마다 더하고, 이 초를 넘지 않는다.
 const LONG_TEXT_CHARACTERS: usize = 20;
-const LONG_TEXT_EXTRA_SECONDS: f32 = 0.5;
-const MAXIMUM_STAY_SECONDS: f32 = 4.0;
+const LONG_TEXT_EXTRA_SECONDS: f64 = 0.5;
+const MAXIMUM_STAY_SECONDS: f64 = 4.0;
 
 /// 노드에 글을 넣는 함수. (같은 노드의 다른 컴포넌트, 예를 들어 UILabel 은 문맥의 노드에서 찾는다)
 pub type ToastApplyTextHandler = Box<dyn FnMut(&mut ComponentContext, &str)>;
@@ -78,10 +78,10 @@ crate::core::reflection::impl_reflect_names!(ToastPhase, [
 /// assert_eq!(read_toast_seconds(&"a".repeat(400), 2.0), 4.0);
 /// ```
 //==============================================================================
-pub fn read_toast_seconds(text: &str, base_seconds: f32) -> f32 {
+pub fn read_toast_seconds(text: &str, base_seconds: f64) -> f64 {
 	let character_count = text.chars().count();
 	let extra_steps = if character_count > LONG_TEXT_CHARACTERS { (character_count - LONG_TEXT_CHARACTERS).div_ceil(LONG_TEXT_CHARACTERS) } else { 0 };
-	(base_seconds + extra_steps as f32 * LONG_TEXT_EXTRA_SECONDS).max(base_seconds).min(MAXIMUM_STAY_SECONDS)
+	(base_seconds + extra_steps as f64 * LONG_TEXT_EXTRA_SECONDS).max(base_seconds).min(MAXIMUM_STAY_SECONDS)
 }
 
 //==============================================================================
@@ -124,15 +124,15 @@ pub fn read_toast_seconds(text: &str, base_seconds: f32) -> f32 {
 //==============================================================================
 pub struct ToastMotion {
 	component_base: ComponentBase,
-	enter_side: f32,
+	enter_side: f64,
 	phase: ToastPhase,
-	phase_seconds: f32,
-	exit_length: f32,
-	stay_seconds: f32,
-	repeat_seconds: f32,
+	phase_seconds: f64,
+	exit_length: f64,
+	stay_seconds: f64,
+	repeat_seconds: f64,
 	text: String,
-	requested: Option<(String, f32)>,
-	pending: Option<(String, f32)>,
+	requested: Option<(String, f64)>,
+	pending: Option<(String, f64)>,
 	is_hide_requested: bool,
 	base_position: Option<Vector2>,
 	applied_position: Option<Vector2>,
@@ -150,7 +150,7 @@ impl ToastMotion {
 	/// # 돌려줌
 	/// 숨은 새 모션. (노드에 붙일 때는 attach_toast_motion 을 쓴다)
 	//==============================================================================
-	pub fn new(enter_side: f32) -> ToastMotion {
+	pub fn new(enter_side: f64) -> ToastMotion {
 		ToastMotion {
 			component_base: ComponentBase::new(),
 			enter_side,
@@ -186,7 +186,7 @@ impl ToastMotion {
 	/// - `text`: 띄울 글. (떠 있는 글과 같고 사라지는 중이 아니면 머무는 시간만 다시 채우고 통 튄다)
 	/// - `seconds`: 머무는 시간. (초, 나오는 시간과 사라지는 시간은 빼고, read_toast_seconds 로 글 길이에 맞출 수 있다)
 	//==============================================================================
-	pub fn show(&mut self, text: &str, seconds: f32) {
+	pub fn show(&mut self, text: &str, seconds: f64) {
 		self.requested = Some((String::from(text), seconds));
 	}
 
@@ -225,7 +225,7 @@ impl ToastMotion {
 	/// # 인자
 	/// - `enter_side`: 들어오는 쪽. (-1 이면 위에서, 1 이면 아래에서)
 	//==============================================================================
-	pub fn set_enter_side(&mut self, enter_side: f32) {
+	pub fn set_enter_side(&mut self, enter_side: f64) {
 		self.enter_side = enter_side;
 	}
 
@@ -266,7 +266,7 @@ impl ToastMotion {
 	//==============================================================================
 	/// 나오기 시작.
 	//==============================================================================
-	fn start_enter(&mut self, context: &mut ComponentContext, text: &str, seconds: f32) {
+	fn start_enter(&mut self, context: &mut ComponentContext, text: &str, seconds: f64) {
 		if let Some(apply_text_handler) = self.apply_text_handler.as_mut() {
 			apply_text_handler(context, text);
 		}
@@ -283,7 +283,7 @@ impl ToastMotion {
 	//==============================================================================
 	/// 사라지기 시작.
 	//==============================================================================
-	fn start_exit(&mut self, exit_length: f32) {
+	fn start_exit(&mut self, exit_length: f64) {
 		self.phase = ToastPhase::Exit;
 		self.phase_seconds = 0.0;
 		self.exit_length = exit_length;
@@ -292,7 +292,7 @@ impl ToastMotion {
 	//==============================================================================
 	/// 놓인 자리를 기준으로 가운데를 두고 그 크기와 위아래 비킴, 불투명도로 놓기.
 	//==============================================================================
-	fn place_around(&mut self, context: &mut ComponentContext, scale: f32, offset_y: f32, opacity: f32) {
+	fn place_around(&mut self, context: &mut ComponentContext, scale: f64, offset_y: f64, opacity: f64) {
 		let transform = context.get_transform_mut();
 		let local_position = transform.get_local_position();
 		let is_moved_by_layout = self.applied_position != Some(local_position);
@@ -320,7 +320,7 @@ impl ToastMotion {
 /// # 돌려줌
 /// 붙인 ToastMotion. 노드가 없으면 None.
 //==============================================================================
-pub fn attach_toast_motion(node_tree: &mut NodeTree, node_id: NodeId, enter_side: f32) -> Option<&mut ToastMotion> {
+pub fn attach_toast_motion(node_tree: &mut NodeTree, node_id: NodeId, enter_side: f64) -> Option<&mut ToastMotion> {
 	node_tree.add_component(node_id, ToastMotion::new(enter_side))
 }
 
@@ -350,7 +350,7 @@ impl Component for ToastMotion {
 	//==============================================================================
 	/// 갱신. (요청을 처리하고, 단계마다 자리와 크기와 불투명도)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		self.handle_request(context);
 		if self.phase == ToastPhase::Hidden {
 			return;

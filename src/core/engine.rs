@@ -115,7 +115,7 @@ pub struct EngineConfiguration {
 	/// 개발자 도구(F2 하이어라키/인스펙터)를 GameSceneBase 가 만드는지. (원본 useDevTools, 기본 true)
 	pub use_dev_tools: bool,
 	/// 최대 FPS. 0 이면 제한하지 않는다. (수직 동기를 켜면 화면 주사율을 따른다)
-	pub maximum_frame_per_second: f32,
+	pub maximum_frame_per_second: f64,
 	/// 수직 동기.
 	pub use_vertical_sync: bool,
 	/// 기본 글꼴 사슬의 파일. (데스크탑, 비우면(기본) 원본 SYSTEM_FONT_STRING 의 이름을 차례로 운영체제 글꼴에서 찾아 잇는다)
@@ -156,7 +156,7 @@ pub struct EngineConfiguration {
 	/// 데스크탑은 크롬 윈도우처럼 터치 키보드가 visualViewport 를 줄인다. 맥과 리눅스는 크롬처럼 줄지 않는다)
 	pub ignore_virtual_keyboard_resize: bool,
 	/// 캔버스의 가로세로 비 상한. (창이 그보다 길쭉하면 캔버스를 줄여 창의 가운데에 둔다, 0 이면 제한 없음)
-	pub max_canvas_aspect_ratio: f32,
+	pub max_canvas_aspect_ratio: f64,
 	/// 글꼴이 늦게 받아지면 그 글꼴로 구운 글자 가운데 그 글꼴의 글자 범위에 든 것만 버려 다시 굽게 할지. (원본 rebakeTextOnFontLoad, 원본처럼 기본 끔)
 	/// 끄면 받기 전에 다른 글꼴로 구운 글자는 캐시에서 밀려날 때까지 그대로 남는다. (글자 범위로 나눈 글꼴 조각을 그때그때 받는 프로젝트가 켠다)
 	pub rebake_text_on_font_load: bool,
@@ -1392,7 +1392,7 @@ impl Engine {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 	/// 		self.scene_base.tick(engine, time_delta);
 	/// 		let is_key_g = engine.get_input_manager().is_key_pressed(KeyCode::G);
 	/// 		if let Some(graphic) = engine.get_graphic_mut() {
@@ -1583,7 +1583,7 @@ impl Engine {
 	/// assert_eq!(engine.get_maximum_frame_per_second(), 0.0);
 	/// ```
 	//==============================================================================
-	pub fn set_maximum_frame_per_second(&mut self, maximum_frame_per_second: f32) {
+	pub fn set_maximum_frame_per_second(&mut self, maximum_frame_per_second: f64) {
 		if !maximum_frame_per_second.is_finite() || maximum_frame_per_second < 0.0 {
 			self.engine_configuration.maximum_frame_per_second = 0.0;
 			return;
@@ -1597,7 +1597,7 @@ impl Engine {
 	/// # 돌려줌
 	/// 초당 최대 프레임 수. (기본 0)
 	//==============================================================================
-	pub fn get_maximum_frame_per_second(&self) -> f32 {
+	pub fn get_maximum_frame_per_second(&self) -> f64 {
 		self.engine_configuration.maximum_frame_per_second
 	}
 
@@ -2797,7 +2797,7 @@ mod tests {
 		assert_eq!(engine.get_engine_configuration().maximum_frame_per_second, 30.0);
 		engine.set_maximum_frame_per_second(-5.0);
 		assert_eq!(engine.get_maximum_frame_per_second(), 0.0);
-		engine.set_maximum_frame_per_second(f32::INFINITY);
+		engine.set_maximum_frame_per_second(f64::INFINITY);
 		assert_eq!(engine.get_maximum_frame_per_second(), 0.0);
 	}
 

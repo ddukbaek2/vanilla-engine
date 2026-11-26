@@ -48,7 +48,7 @@
 /// 		time_manager.set_maximum_time_delta(0.1);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 /// 		self.scene_base.tick(engine, time_delta);
 /// 		let time_manager = engine.get_time_manager();
 /// 		let unscaled_time_delta = time_manager.get_unscale_delta_time();
@@ -69,8 +69,8 @@ pub struct TimeManager {
 	realtime_since_startup: f64,
 	previous_frame_check_time: f64,
 	time: f64,
-	unscaled_time_delta: f32,
-	time_scale: f32,
+	unscaled_time_delta: f64,
+	time_scale: f64,
 	frame_per_second: u32,
 	frames_this_second: u32,
 	has_started: bool,
@@ -134,7 +134,7 @@ impl TimeManager {
 		let unscaled_time_delta = raw_time_delta.clamp(0.0, self.maximum_time_delta);
 		self.realtime_since_startup = seconds_since_startup;
 		self.time += unscaled_time_delta;
-		self.unscaled_time_delta = unscaled_time_delta as f32;
+		self.unscaled_time_delta = unscaled_time_delta;
 
 		// 프레임 계산.
 		if seconds_since_startup >= self.previous_frame_check_time + 1.0 {
@@ -173,7 +173,7 @@ impl TimeManager {
 	/// # 돌려줌
 	/// 이번 프레임 간격. (초, 0 ~ 상한)
 	//==============================================================================
-	pub fn get_unscale_delta_time(&self) -> f32 {
+	pub fn get_unscale_delta_time(&self) -> f64 {
 		self.unscaled_time_delta
 	}
 
@@ -183,7 +183,7 @@ impl TimeManager {
 	/// # 돌려줌
 	/// 이번 프레임 간격 곱하기 시간 배율. (초, 배율이 음수면 음수)
 	//==============================================================================
-	pub fn get_time_delta(&self) -> f32 {
+	pub fn get_time_delta(&self) -> f64 {
 		self.unscaled_time_delta * self.time_scale
 	}
 
@@ -203,7 +203,7 @@ impl TimeManager {
 	/// # 인자
 	/// - `time_scale`: 시간 배율. (1 이면 그대로, 0.5 면 절반 속도, 0 이면 멈춤, 기본 1)
 	//==============================================================================
-	pub fn set_time_scale(&mut self, time_scale: f32) {
+	pub fn set_time_scale(&mut self, time_scale: f64) {
 		self.time_scale = time_scale;
 	}
 
@@ -213,7 +213,7 @@ impl TimeManager {
 	/// # 돌려줌
 	/// 지금 시간 배율. (기본 1)
 	//==============================================================================
-	pub fn get_time_scale(&self) -> f32 {
+	pub fn get_time_scale(&self) -> f64 {
 		self.time_scale
 	}
 
@@ -236,12 +236,12 @@ impl TimeManager {
 	/// assert_eq!(time_manager.get_maximum_time_delta(), 0.25);
 	/// ```
 	//==============================================================================
-	pub fn set_maximum_time_delta(&mut self, seconds: f32) {
+	pub fn set_maximum_time_delta(&mut self, seconds: f64) {
 		if !seconds.is_finite() || seconds < 0.0 {
 			self.maximum_time_delta = 0.25;
 			return;
 		}
-		self.maximum_time_delta = seconds as f64;
+		self.maximum_time_delta = seconds;
 	}
 
 	//==============================================================================
@@ -250,8 +250,8 @@ impl TimeManager {
 	/// # 돌려줌
 	/// 지금 상한. (초, 기본 0.25)
 	//==============================================================================
-	pub fn get_maximum_time_delta(&self) -> f32 {
-		self.maximum_time_delta as f32
+	pub fn get_maximum_time_delta(&self) -> f64 {
+		self.maximum_time_delta
 	}
 }
 
@@ -285,7 +285,7 @@ mod tests {
 		assert_eq!(time_manager.get_unscale_delta_time(), 0.05);
 		time_manager.update(4.01);
 		assert!((time_manager.get_unscale_delta_time() - 0.01).abs() < 1e-6);
-		time_manager.set_maximum_time_delta(f32::NAN);
+		time_manager.set_maximum_time_delta(f64::NAN);
 		assert_eq!(time_manager.get_maximum_time_delta(), 0.25);
 		time_manager.set_time_scale(-2.0);
 		assert_eq!(time_manager.get_time_scale(), -2.0);

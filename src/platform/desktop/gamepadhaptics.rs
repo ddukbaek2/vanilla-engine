@@ -42,9 +42,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 /// 무거운 모터 자리의 날카로움. (낮을수록 묵직하게 떤다)
-const STRONG_MOTOR_SHARPNESS: f32 = 0.3;
+const STRONG_MOTOR_SHARPNESS: f64 = 0.3;
 /// 가벼운 모터 자리의 날카로움. (높을수록 가볍고 또렷하게 떤다)
-const WEAK_MOTOR_SHARPNESS: f32 = 0.7;
+const WEAK_MOTOR_SHARPNESS: f64 = 0.7;
 /// 연속 햅틱 이벤트 하나의 가장 긴 길이. (CoreHaptics 문서: 30 초)
 const MAXIMUM_CONTINUOUS_EVENT_SECONDS: f64 = 30.0;
 
@@ -136,7 +136,7 @@ fn pair_gamepads_with_controllers(gamepad_name_list: &[String], controller_name_
 /// - `weak_magnitude`: 가벼운 모터(오른쪽 손잡이) 세기. (0 ~ 1)
 /// - `duration_milliseconds`: 떠는 길이. (밀리초, 0 이면 멈추기만 한다)
 //==============================================================================
-pub fn vibrate_gamepads(gamepad_name_list: &[String], strong_magnitude: f32, weak_magnitude: f32, duration_milliseconds: u32) {
+pub fn vibrate_gamepads(gamepad_name_list: &[String], strong_magnitude: f64, weak_magnitude: f64, duration_milliseconds: u32) {
 	if MainThreadMarker::new().is_none() {
 		write_log("[GamepadManager] 맥 패드 진동은 메인 스레드에서만 낼 수 있어 건너뜁니다.");
 		return;
@@ -249,7 +249,7 @@ impl ControllerHaptics {
 	//==============================================================================
 	/// 떨기. (손잡이 둘이면 나눠 내고, 하나면 큰 세기로 낸다)
 	//==============================================================================
-	fn vibrate(&mut self, controller_name: &str, strong_magnitude: f32, weak_magnitude: f32, seconds: f64) {
+	fn vibrate(&mut self, controller_name: &str, strong_magnitude: f64, weak_magnitude: f64, seconds: f64) {
 		let controller = self.controller.clone();
 		if self.motor_list.len() >= 2 {
 			self.motor_list[0].vibrate(&controller, controller_name, strong_magnitude, STRONG_MOTOR_SHARPNESS, seconds);
@@ -271,7 +271,7 @@ impl HapticMotor {
 	//==============================================================================
 	/// 떨기. (앞 진동을 멈추고, 세기와 길이가 있으면 새로 낸다. 실패하면 엔진을 다시 지어 한 번 더 해 본다)
 	//==============================================================================
-	fn vibrate(&mut self, controller: &GCController, controller_name: &str, intensity: f32, sharpness: f32, seconds: f64) {
+	fn vibrate(&mut self, controller: &GCController, controller_name: &str, intensity: f64, sharpness: f64, seconds: f64) {
 		if let Some(player) = self.player.take() {
 			let _ = unsafe { player.stopAtTime_error(0.0) };
 		}
@@ -296,7 +296,7 @@ impl HapticMotor {
 	//==============================================================================
 	/// 엔진을 (지어) 시작하고 연속 이벤트 플레이어를 시작한다.
 	//==============================================================================
-	fn start_player(&mut self, controller: &GCController, intensity: f32, sharpness: f32, seconds: f64) -> Result<Retained<ProtocolObject<dyn CHHapticPatternPlayer>>, String> {
+	fn start_player(&mut self, controller: &GCController, intensity: f64, sharpness: f64, seconds: f64) -> Result<Retained<ProtocolObject<dyn CHHapticPatternPlayer>>, String> {
 		if self.engine.is_none() {
 			self.engine = Some(self.create_engine(controller)?);
 		}
@@ -363,13 +363,13 @@ impl HapticMotor {
 //==============================================================================
 /// 세기와 날카로움이 고른 연속 진동 패턴. (30 초를 넘으면 이어 붙인다)
 //==============================================================================
-fn create_continuous_pattern(intensity: f32, sharpness: f32, seconds: f64) -> Result<Retained<CHHapticPattern>, String> {
+fn create_continuous_pattern(intensity: f64, sharpness: f64, seconds: f64) -> Result<Retained<CHHapticPattern>, String> {
 	let mut event_list: Vec<Retained<CHHapticEvent>> = Vec::new();
 	let mut relative_time = 0.0;
 	while relative_time < seconds {
 		let event_seconds = (seconds - relative_time).min(MAXIMUM_CONTINUOUS_EVENT_SECONDS);
-		let intensity_parameter = unsafe { CHHapticEventParameter::initWithParameterID_value(CHHapticEventParameter::alloc(), CHHapticEventParameterIDHapticIntensity, intensity) };
-		let sharpness_parameter = unsafe { CHHapticEventParameter::initWithParameterID_value(CHHapticEventParameter::alloc(), CHHapticEventParameterIDHapticSharpness, sharpness) };
+		let intensity_parameter = unsafe { CHHapticEventParameter::initWithParameterID_value(CHHapticEventParameter::alloc(), CHHapticEventParameterIDHapticIntensity, intensity as f32) };
+		let sharpness_parameter = unsafe { CHHapticEventParameter::initWithParameterID_value(CHHapticEventParameter::alloc(), CHHapticEventParameterIDHapticSharpness, sharpness as f32) };
 		let parameter_array = NSArray::from_retained_slice(&[intensity_parameter, sharpness_parameter]);
 		let event = unsafe { CHHapticEvent::initWithEventType_parameters_relativeTime_duration(CHHapticEvent::alloc(), CHHapticEventTypeHapticContinuous, &parameter_array, relative_time, event_seconds) };
 		event_list.push(event);

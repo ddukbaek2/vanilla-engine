@@ -20,8 +20,8 @@ use vanilla::{Color, Engine, EngineConfiguration, Graphic, NodeId, NodeTree, Piv
 const SCENE_FILE_PATH: &str = "scenedocument.scene.json";
 const EXAMPLE_ASSET_DIRECTORY: &str = "examples/assets";
 const IMAGE_ASSET_DIRECTORY: &str = "../vanilla.js/examples/timelineshowcase/assets";
-const VIEW_WIDTH: f32 = 1280.0;
-const VIEW_HEIGHT: f32 = 720.0;
+const VIEW_WIDTH: f64 = 1280.0;
+const VIEW_HEIGHT: f64 = 720.0;
 
 //==============================================================================
 // UI 문서 씬.
@@ -155,7 +155,7 @@ impl Scene for SceneDocumentScene {
 	//==============================================================================
 	// 갱신. (나중에 읽힌 그림을 붙인다)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		if self.pending_image_count > 0 {
 			self.pending_image_count = self.document.bind_pending_images(self.scene_base.get_node_tree_mut());
 			self.refresh_status_label();

@@ -19,17 +19,17 @@ use vanilla::{
 //==============================================================================
 // 전역 상수 목록.
 //==============================================================================
-const VIEW_WIDTH: f32 = 1280.0;
-const VIEW_HEIGHT: f32 = 720.0;
+const VIEW_WIDTH: f64 = 1280.0;
+const VIEW_HEIGHT: f64 = 720.0;
 const BACKGROUND_COLOR: &str = "#14171f";
 const PANEL_COLOR: &str = "#1d2230";
 const ACCENT_COLOR: &str = "#6c7bff";
 const LIGHT_TEXT_COLOR: &str = "#e8ecf4";
 const CAPTION_TEXT_COLOR: &str = "#8d97ad";
 const LIST_ITEM_COUNT: usize = 500;
-const LIST_ITEM_HEIGHT: f32 = 40.0;
-const SNAP_PAGE_WIDTH: f32 = 260.0;
-const SNAP_PAGE_GAP: f32 = 10.0;
+const LIST_ITEM_HEIGHT: f64 = 40.0;
+const SNAP_PAGE_WIDTH: f64 = 260.0;
+const SNAP_PAGE_GAP: f64 = 10.0;
 const SNAP_PAGE_COUNT: usize = 5;
 const EXIT_FRAME_COUNT: u32 = 240;
 
@@ -48,7 +48,7 @@ fn create_box_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, posi
 //==============================================================================
 // 글자 노드 만들기. (UILabel)
 //==============================================================================
-fn create_label_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, position: Vector2, size: Vector2, text: &str, font_size: f32, color: &str, text_align: TextAlign) -> NodeId {
+fn create_label_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, position: Vector2, size: Vector2, text: &str, font_size: f64, color: &str, text_align: TextAlign) -> NodeId {
 	let label_id = create_box_node(node_tree, parent_id, name, position, size);
 	let label = node_tree.add_component(label_id, UILabel::create_with_text(text, font_size)).expect("label");
 	label.set_text_color(color);
@@ -117,7 +117,7 @@ struct UIGallery2Scene {
 	scene_base: SceneBase,
 	touch_recognizer: TouchRecognizer,
 	frame_count: u32,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 	list_id: Option<NodeId>,
 	list_count_label_id: Option<NodeId>,
 	snap_id: Option<NodeId>,
@@ -227,13 +227,13 @@ impl UIGallery2Scene {
 		let content_id = {
 			let snap_view = node_tree.add_component(snap_id, UISnapScrollView::new()).expect("snap view");
 			snap_view.set_background_color("#161a25");
-			let content_width = side_padding * 2.0 + SNAP_PAGE_COUNT as f32 * (SNAP_PAGE_WIDTH + SNAP_PAGE_GAP) - SNAP_PAGE_GAP;
+			let content_width = side_padding * 2.0 + SNAP_PAGE_COUNT as f64 * (SNAP_PAGE_WIDTH + SNAP_PAGE_GAP) - SNAP_PAGE_GAP;
 			snap_view.set_scroll_content_size(Vector2::create(content_width, 150.0));
 			snap_view.get_content().expect("content")
 		};
 		let page_colors = ["#ff7a7a", "#ffb35c", "#7fd38a", "#5cc8ff", "#b48cff"];
 		for (page_index, page_color) in page_colors.iter().enumerate() {
-			let page_position = Vector2::create(side_padding + page_index as f32 * (SNAP_PAGE_WIDTH + SNAP_PAGE_GAP), 12.0);
+			let page_position = Vector2::create(side_padding + page_index as f64 * (SNAP_PAGE_WIDTH + SNAP_PAGE_GAP), 12.0);
 			let page_id = create_box_node(node_tree, content_id, "page", page_position, Vector2::create(SNAP_PAGE_WIDTH, 126.0));
 			let page_paint = node_tree[page_id].add_component(Paint::create_with_color(*page_color));
 			page_paint.set_round_size(14.0);
@@ -287,7 +287,7 @@ impl UIGallery2Scene {
 		create_label_node(node_tree, slot_id, "slotCaption", Vector2::create(0.0, 110.0), Vector2::create(150.0, 30.0), "놓는 칸", 15.0, CAPTION_TEXT_COLOR, TextAlign::Center);
 		let chip_colors = ["#ffb35c", "#7fd38a"];
 		for (chip_index, chip_color) in chip_colors.iter().enumerate() {
-			let chip_position = Vector2::create(70.0, 90.0 + chip_index as f32 * 100.0);
+			let chip_position = Vector2::create(70.0, 90.0 + chip_index as f64 * 100.0);
 			let chip_id = node_tree.create_child(panel_id, "chip");
 			let chip_node = &mut node_tree[chip_id];
 			chip_node.set_local_position(chip_position);
@@ -325,13 +325,13 @@ impl UIGallery2Scene {
 		line_chart.set_line_color(ACCENT_COLOR);
 		line_chart.set_line_width(2.0);
 		line_chart.set_value_range(Some(0.0), Some(260.0));
-		let history_values: Vec<f32> = (0..60).map(|sample_index| 130.0 + (sample_index as f32 * 0.35).sin() * 60.0 + ((sample_index * 37) % 23) as f32).collect();
+		let history_values: Vec<f64> = (0..60).map(|sample_index| 130.0 + (sample_index as f64 * 0.35).sin() * 60.0 + ((sample_index * 37) % 23) as f64).collect();
 		line_chart.set_value_list(&history_values);
 
 		// 바 차트. (마지막 막대 강조)
 		let bar_chart_id = create_box_node(node_tree, panel_id, "barChart", Vector2::create(14.0, 176.0), Vector2::create(352.0, 110.0));
 		let bar_chart = node_tree[bar_chart_id].add_component(UIBarChart::new());
-		let bar_values: Vec<f32> = (0..12).map(|day_index| 2400.0 + ((day_index * 1733) % 2800) as f32).collect();
+		let bar_values: Vec<f64> = (0..12).map(|day_index| 2400.0 + ((day_index * 1733) % 2800) as f64).collect();
 		bar_chart.set_value_list(&bar_values);
 		bar_chart.set_bar_color(Color::create(0.357, 0.424, 1.0, 0.45));
 		bar_chart.set_highlight_color(ACCENT_COLOR);
@@ -473,7 +473,7 @@ impl UIGallery2Scene {
 			}
 		}
 		if (16..=25).contains(&frame_count) {
-			let drag_frame_count = (frame_count - 15) as f32;
+			let drag_frame_count = (frame_count - 15) as f64;
 			self.input_position = self.drag_start_position.add(Vector2::create(-20.0 * drag_frame_count, 0.0));
 			input_action = InputAction::Moved;
 		}
@@ -529,7 +529,7 @@ impl UIGallery2Scene {
 				}
 			}
 			if frame_count > start_frame && frame_count <= start_frame + 8 {
-				let drag_frame_count = (frame_count - start_frame) as f32;
+				let drag_frame_count = (frame_count - start_frame) as f64;
 				let drag_step = if chip_index == 0 {
 					Vector2::create(6.0, -4.0)
 				}
@@ -635,7 +635,7 @@ impl UIGallery2Scene {
 			}
 		}
 		if let Some(line_chart) = line_chart_id.and_then(|line_chart_id| node_tree[line_chart_id].get_component_mut::<UILineChart>()) {
-			let live_value = 130.0 + (elapsed_seconds * 4.0).sin() * 60.0 + ((frame_count * 37) % 23) as f32;
+			let live_value = 130.0 + (elapsed_seconds * 4.0).sin() * 60.0 + ((frame_count * 37) % 23) as f64;
 			line_chart.push_value(live_value);
 		}
 		if frame_count == 150 {
@@ -680,7 +680,7 @@ impl Scene for UIGallery2Scene {
 	//==============================================================================
 	// 주기적 갱신. (흉내 낸 입력 → 상태 글자 → 노드 갱신 → TouchRecognizer)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.frame_count += 1;
 		self.elapsed_seconds += time_delta;
 		if self.frame_count >= EXIT_FRAME_COUNT {

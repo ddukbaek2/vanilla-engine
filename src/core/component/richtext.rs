@@ -72,13 +72,13 @@ pub struct RichTextAttributes {
 	/// 글자 색. (None 이면 Text 의 글자 색)
 	pub text_color: Option<Color>,
 	/// 글자 크기. (픽셀, None 이면 Text 의 글자 크기)
-	pub font_size: Option<f32>,
+	pub font_size: Option<f64>,
 	/// 폰트 이름. (None 이면 Text 의 폰트 이름)
 	pub font_family: Option<String>,
 	/// 외곽선 색. (None 이면 Text 의 외곽선 색)
 	pub stroke_color: Option<Color>,
 	/// 외곽선 두께. (픽셀, None 이면 Text 의 외곽선 두께)
-	pub stroke_width: Option<f32>,
+	pub stroke_width: Option<f64>,
 	/// 굵게. (false 면 Text 의 값을 따른다)
 	pub is_bold: bool,
 	/// 기울임. (false 면 Text 의 값을 따른다)
@@ -159,8 +159,8 @@ pub struct RichTextSegment {
 /// ```rust
 /// use vanilla::{Color, RichText, TextDirection, Vector2};
 ///
-/// let mut measure_width = |_font_string: &str, text: &str| -> f32 {
-/// 	text.chars().count() as f32 * 10.0
+/// let mut measure_width = |_font_string: &str, text: &str| -> f64 {
+/// 	text.chars().count() as f64 * 10.0
 /// };
 /// let mut rich_text = RichText::create_with_text("ab<size=40><u>cd</u></size>", 20.0);
 /// rich_text.set_text_color("#00ff00");
@@ -182,17 +182,17 @@ pub struct RichTextRun {
 	/// 폰트 문자열. (Canvas2D font 꼴)
 	pub font_string: String,
 	/// 글자 크기. (픽셀)
-	pub font_size: f32,
+	pub font_size: f64,
 	/// 그릴 왼쪽 x. (content 좌표, 정렬과 문단 방향을 반영한 값)
-	pub x: f32,
+	pub x: f64,
 	/// 잰 폭.
-	pub width: f32,
+	pub width: f64,
 	/// 글자 색.
 	pub text_color: Color,
 	/// 외곽선 색.
 	pub stroke_color: Color,
 	/// 외곽선 두께. (0 이면 외곽선을 긋지 않는다)
-	pub stroke_width: f32,
+	pub stroke_width: f64,
 	/// 밑줄을 긋는지.
 	pub is_underline: bool,
 	/// 취소선을 긋는지.
@@ -207,8 +207,8 @@ pub struct RichTextRun {
 /// ```rust
 /// use vanilla::{RichText, TextAlign, TextBaseline, TextDirection, Vector2};
 ///
-/// let mut measure_width = |_font_string: &str, text: &str| -> f32 {
-/// 	text.chars().count() as f32 * 10.0
+/// let mut measure_width = |_font_string: &str, text: &str| -> f64 {
+/// 	text.chars().count() as f64 * 10.0
 /// };
 /// let mut rich_text = RichText::create_with_text("ab<size=40>cd</size>", 20.0);
 /// rich_text.set_text_align(TextAlign::Center);
@@ -225,11 +225,11 @@ pub struct RichTextLayout {
 	/// 배치된 조각 목록. (글이 빈 조각은 빼고 조각 차례)
 	pub run_list: Vec<RichTextRun>,
 	/// 조각 폭의 합.
-	pub total_width: f32,
+	pub total_width: f64,
 	/// 가장 큰 글자 크기. (픽셀, 조각이 없으면 0)
-	pub maximum_font_size: f32,
+	pub maximum_font_size: f64,
 	/// 기준선 y. (content 좌표, Top 과 Hanging 은 0, Middle 은 높이의 반, 그 밖은 높이)
-	pub baseline_y: f32,
+	pub baseline_y: f64,
 }
 
 //==============================================================================
@@ -279,7 +279,7 @@ impl RichText {
 	/// # 돌려줌
 	/// 컴포넌트.
 	//==============================================================================
-	pub fn create_with_text(text: &str, font_size: f32) -> RichText {
+	pub fn create_with_text(text: &str, font_size: f64) -> RichText {
 		let mut rich_text = RichText::new();
 		rich_text.set_text(text);
 		rich_text.set_font_size(font_size);
@@ -380,7 +380,7 @@ impl RichText {
 	/// # 인자
 	/// - `font_size`: 기본 글자 크기. (픽셀, 크기를 정하지 않은 조각이 쓴다)
 	//==============================================================================
-	pub fn set_font_size(&mut self, font_size: f32) {
+	pub fn set_font_size(&mut self, font_size: f64) {
 		self.text.set_font_size(font_size);
 	}
 
@@ -391,7 +391,7 @@ impl RichText {
 	/// 기본 글자 크기. (픽셀)
 	//==============================================================================
 	#[reflect(skip)]
-	pub fn get_font_size(&self) -> f32 {
+	pub fn get_font_size(&self) -> f64 {
 		self.text.get_font_size()
 	}
 
@@ -464,7 +464,7 @@ impl RichText {
 	/// # 인자
 	/// - `stroke_width`: 기본 외곽선 두께. (픽셀, 0 이면 없음)
 	//==============================================================================
-	pub fn set_stroke_width(&mut self, stroke_width: f32) {
+	pub fn set_stroke_width(&mut self, stroke_width: f64) {
 		self.text.set_stroke_width(stroke_width);
 	}
 
@@ -475,7 +475,7 @@ impl RichText {
 	/// 기본 외곽선 두께. (픽셀)
 	//==============================================================================
 	#[reflect(skip)]
-	pub fn get_stroke_width(&self) -> f32 {
+	pub fn get_stroke_width(&self) -> f64 {
 		self.text.get_stroke_width()
 	}
 
@@ -632,7 +632,7 @@ impl RichText {
 	/// # 인자
 	/// - `word_wrap_width`: 줄바꿈 폭. (픽셀, 0 이하면 줄바꿈 문자로만 나눈다)
 	//==============================================================================
-	pub fn set_word_wrap_width(&mut self, word_wrap_width: f32) {
+	pub fn set_word_wrap_width(&mut self, word_wrap_width: f64) {
 		self.text.set_word_wrap_width(word_wrap_width);
 	}
 
@@ -643,7 +643,7 @@ impl RichText {
 	/// 줄바꿈 폭. (픽셀)
 	//==============================================================================
 	#[reflect(skip)]
-	pub fn get_word_wrap_width(&self) -> f32 {
+	pub fn get_word_wrap_width(&self) -> f64 {
 		self.text.get_word_wrap_width()
 	}
 
@@ -653,7 +653,7 @@ impl RichText {
 	/// # 인자
 	/// - `line_spacing`: 줄 간격. (글자 크기의 배수, 마크업이 없을 때만 쓰인다)
 	//==============================================================================
-	pub fn set_line_spacing(&mut self, line_spacing: f32) {
+	pub fn set_line_spacing(&mut self, line_spacing: f64) {
 		self.text.set_line_spacing(line_spacing);
 	}
 
@@ -664,14 +664,14 @@ impl RichText {
 	/// 줄 간격. (글자 크기의 배수)
 	//==============================================================================
 	#[reflect(skip)]
-	pub fn get_line_spacing(&self) -> f32 {
+	pub fn get_line_spacing(&self) -> f64 {
 		self.text.get_line_spacing()
 	}
 
 	//==============================================================================
 	/// 조각의 폰트 문자열과 크기. (Canvas2D font 꼴)
 	//==============================================================================
-	fn resolve_segment_font(&self, attributes: &RichTextAttributes) -> (String, f32) {
+	fn resolve_segment_font(&self, attributes: &RichTextAttributes) -> (String, f64) {
 		let font_size = attributes.font_size.unwrap_or(self.text.get_font_size());
 		let font_family = attributes.font_family.as_deref().unwrap_or(self.text.get_font_family());
 		let is_bold = attributes.is_bold || self.text.is_bold();
@@ -697,8 +697,8 @@ impl RichText {
 	/// ```rust
 	/// use vanilla::{RichText, TextAlign, TextDirection, Vector2};
 	///
-	/// let mut measure_width = |_font_string: &str, text: &str| -> f32 {
-	/// 	text.chars().count() as f32 * 10.0
+	/// let mut measure_width = |_font_string: &str, text: &str| -> f64 {
+	/// 	text.chars().count() as f64 * 10.0
 	/// };
 	/// let mut rich_text = RichText::create_with_text("ab<b>cd</b>", 20.0);
 	/// rich_text.set_text_align(TextAlign::Start);
@@ -711,10 +711,10 @@ impl RichText {
 	/// assert_eq!(right_to_left_layout.run_list[1].x, 160.0);
 	/// ```
 	//==============================================================================
-	pub fn layout_segments(&self, content_size: Vector2, text_direction: TextDirection, measure_width: &mut dyn FnMut(&str, &str) -> f32) -> RichTextLayout {
+	pub fn layout_segments(&self, content_size: Vector2, text_direction: TextDirection, measure_width: &mut dyn FnMut(&str, &str) -> f64) -> RichTextLayout {
 		let mut run_list: Vec<RichTextRun> = Vec::new();
 		let mut total_width = 0.0;
-		let mut maximum_font_size: f32 = 0.0;
+		let mut maximum_font_size: f64 = 0.0;
 		for segment in self.segments.iter() {
 			if segment.text.is_empty() {
 				continue;
@@ -809,8 +809,8 @@ impl RichText {
 	/// ```rust
 	/// use vanilla::{RichText, Vector2};
 	///
-	/// let mut measure_width = |_font_string: &str, text: &str| -> f32 {
-	/// 	text.chars().count() as f32 * 10.0
+	/// let mut measure_width = |_font_string: &str, text: &str| -> f64 {
+	/// 	text.chars().count() as f64 * 10.0
 	/// };
 	/// let mut rich_text = RichText::create_with_text("ab<size=40>cd</size>", 20.0);
 	/// assert_eq!(rich_text.calculate_intrinsic_content_size(&mut measure_width), Vector2::create(40.0, 40.0));
@@ -818,7 +818,7 @@ impl RichText {
 	/// assert_eq!(rich_text.calculate_intrinsic_content_size(&mut measure_width), Vector2::create(50.0, 20.0));
 	/// ```
 	//==============================================================================
-	pub fn calculate_intrinsic_content_size(&self, measure_width: &mut dyn FnMut(&str, &str) -> f32) -> Vector2 {
+	pub fn calculate_intrinsic_content_size(&self, measure_width: &mut dyn FnMut(&str, &str) -> f64) -> Vector2 {
 		if !self.has_segments() {
 			let font_string = self.text.build_font_string();
 			let width = measure_width(&font_string, self.text.get_text());
@@ -909,7 +909,7 @@ impl RichText {
 	//==============================================================================
 	/// 밑줄 y 오프셋. (원본 Text.computeUnderlineOffsetY)
 	//==============================================================================
-	fn calculate_underline_offset_y(&self, font_size: f32) -> f32 {
+	fn calculate_underline_offset_y(&self, font_size: f64) -> f64 {
 		match self.text.get_text_baseline() {
 			TextBaseline::Top | TextBaseline::Hanging => {
 				font_size + 2.0
@@ -926,7 +926,7 @@ impl RichText {
 	//==============================================================================
 	/// 취소선 y 오프셋. (원본 Text.computeStrikethroughOffsetY)
 	//==============================================================================
-	fn calculate_strikethrough_offset_y(&self, font_size: f32) -> f32 {
+	fn calculate_strikethrough_offset_y(&self, font_size: f64) -> f64 {
 		match self.text.get_text_baseline() {
 			TextBaseline::Top | TextBaseline::Hanging => {
 				font_size * 0.55
@@ -1082,7 +1082,7 @@ impl Component for RichText {
 /// assert_eq!(build_font_string("GameFont", 16.5, true, true), "italic bold 16.5px GameFont");
 /// ```
 //==============================================================================
-pub fn build_font_string(font_family: &str, font_size: f32, is_bold: bool, is_italic: bool) -> String {
+pub fn build_font_string(font_family: &str, font_size: f64, is_bold: bool, is_italic: bool) -> String {
 	let mut style_parts: Vec<String> = Vec::new();
 	if is_italic {
 		style_parts.push(String::from("italic"));
@@ -1147,7 +1147,7 @@ fn build_attributes_for_tag(tag_name: &str, tag_value: Option<&str>) -> Option<R
 			if font_size <= 0 {
 				return None;
 			}
-			attributes.font_size = Some(font_size as f32);
+			attributes.font_size = Some(font_size as f64);
 		}
 		"b" => {
 			attributes.is_bold = true;
@@ -1310,9 +1310,9 @@ mod tests {
 	//==============================================================================
 	/// 시험용 재기. (글자 하나 = 크기의 절반 폭. 폰트 문자열의 "Npx" 를 읽는다)
 	//==============================================================================
-	fn measure_by_font_size(font_string: &str, text: &str) -> f32 {
+	fn measure_by_font_size(font_string: &str, text: &str) -> f64 {
 		let font_description = crate::core::textstringtexturecache::parse_font_string(font_string);
-		text.chars().count() as f32 * font_description.font_size * 0.5
+		text.chars().count() as f64 * font_description.font_size as f64 * 0.5
 	}
 
 	//==============================================================================

@@ -8,15 +8,15 @@
 use vanilla::{Color, Engine, EngineConfiguration, Graphic, Rect, Scene, SceneBase, TextAlign, TextBaseline, Vector2};
 
 /// 논리 화면 너비.
-const VIEW_WIDTH: f32 = 960.0;
+const VIEW_WIDTH: f64 = 960.0;
 /// 논리 화면 높이.
-const VIEW_HEIGHT: f32 = 720.0;
+const VIEW_HEIGHT: f64 = 720.0;
 /// 크기 줄의 글자 크기. (픽셀)
-const SIZE_LIST: [f32; 10] = [10.0, 12.0, 13.0, 14.0, 16.0, 18.0, 20.0, 24.0, 32.0, 48.0];
+const SIZE_LIST: [f64; 10] = [10.0, 12.0, 13.0, 14.0, 16.0, 18.0, 20.0, 24.0, 32.0, 48.0];
 /// 크기 줄의 글.
 const SAMPLE_TEXT: &str = "Hamburgefonstiv 0123 Ag";
 /// 오른쪽 줄. (폰트 문자열, 글, 가로 자리)
-const LINE_LIST: [(&str, &str, f32); 9] = [
+const LINE_LIST: [(&str, &str, f64); 9] = [
 	("16px serif", "Serif Hamburgefonstiv 0123", 545.0),
 	("bold 16px sans-serif", "Bold Hamburgefonstiv 0123", 545.0),
 	("italic 16px sans-serif", "Italic Hamburgefonstiv", 545.0),
@@ -31,7 +31,7 @@ const LINE_LIST: [(&str, &str, f32); 9] = [
 //==============================================================================
 // 반쪽 그리기. (위 끝 y 와 글 색)
 //==============================================================================
-fn draw_half(graphic: &mut Graphic, top_y: f32, text_color: Color) {
+fn draw_half(graphic: &mut Graphic, top_y: f64, text_color: Color) {
 	graphic.set_fill_color(text_color);
 	let mut baseline_y = top_y + 4.0;
 	for size in SIZE_LIST {

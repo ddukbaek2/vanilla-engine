@@ -52,13 +52,13 @@ crate::core::reflection::impl_reflect_names!(ProgressDirection, [
 //==============================================================================
 pub struct UIProgressView {
 	ui_view: UIView,
-	value: f32,
-	min_value: f32,
-	max_value: f32,
+	value: f64,
+	min_value: f64,
+	max_value: f64,
 	fill_color: Color,
-	secondary_value: Option<f32>,
+	secondary_value: Option<f64>,
 	secondary_fill_color: Color,
-	corner_radius: f32,
+	corner_radius: f64,
 	direction: ProgressDirection,
 }
 
@@ -159,7 +159,7 @@ impl UIProgressView {
 	/// # 돌려줌
 	/// 범위 안에서 값의 자리. (0 ~ 1, 최대값이 최소값보다 크지 않으면 0)
 	//==============================================================================
-	pub fn get_ratio(&self) -> f32 {
+	pub fn get_ratio(&self) -> f64 {
 		let range = self.max_value - self.min_value;
 		if range <= 0.0 {
 			return 0.0;
@@ -174,7 +174,7 @@ impl UIProgressView {
 	/// # 인자
 	/// - `value`: 값. (최소값 ~ 최대값으로 자른다)
 	//==============================================================================
-	pub fn set_value(&mut self, value: f32) {
+	pub fn set_value(&mut self, value: f64) {
 		self.value = math::clamp(value, self.min_value, self.max_value);
 	}
 
@@ -184,7 +184,7 @@ impl UIProgressView {
 	/// # 돌려줌
 	/// 값. (기본 0)
 	//==============================================================================
-	pub fn get_value(&self) -> f32 {
+	pub fn get_value(&self) -> f64 {
 		self.value
 	}
 
@@ -210,7 +210,7 @@ impl UIProgressView {
 	/// assert_eq!(progress_view.get_ratio(), 0.0);
 	/// ```
 	//==============================================================================
-	pub fn set_range(&mut self, min_value: f32, max_value: f32) {
+	pub fn set_range(&mut self, min_value: f64, max_value: f64) {
 		self.min_value = min_value;
 		self.max_value = max_value;
 		let value = self.value;
@@ -223,7 +223,7 @@ impl UIProgressView {
 	/// # 돌려줌
 	/// 최소값. (기본 0)
 	//==============================================================================
-	pub fn get_min_value(&self) -> f32 {
+	pub fn get_min_value(&self) -> f64 {
 		self.min_value
 	}
 
@@ -233,7 +233,7 @@ impl UIProgressView {
 	/// # 돌려줌
 	/// 최대값. (기본 1)
 	//==============================================================================
-	pub fn get_max_value(&self) -> f32 {
+	pub fn get_max_value(&self) -> f64 {
 		self.max_value
 	}
 
@@ -259,7 +259,7 @@ impl UIProgressView {
 	/// assert_eq!(progress_view.get_secondary_value(), None);
 	/// ```
 	//==============================================================================
-	pub fn set_secondary_value(&mut self, secondary_value: Option<f32>) {
+	pub fn set_secondary_value(&mut self, secondary_value: Option<f64>) {
 		self.secondary_value = secondary_value.map(|value| math::clamp(value, self.min_value, self.max_value));
 	}
 
@@ -269,7 +269,7 @@ impl UIProgressView {
 	/// # 돌려줌
 	/// 반대편 값. (끈 상태면 None, 기본 None)
 	//==============================================================================
-	pub fn get_secondary_value(&self) -> Option<f32> {
+	pub fn get_secondary_value(&self) -> Option<f64> {
 		self.secondary_value
 	}
 
@@ -339,7 +339,7 @@ impl UIProgressView {
 	/// # 인자
 	/// - `corner_radius`: 트랙과 채움의 모서리 반지름. (0 이하면 각진 사각형, 기본 0)
 	//==============================================================================
-	pub fn set_corner_radius(&mut self, corner_radius: f32) {
+	pub fn set_corner_radius(&mut self, corner_radius: f64) {
 		self.corner_radius = corner_radius;
 	}
 
@@ -349,7 +349,7 @@ impl UIProgressView {
 	/// # 돌려줌
 	/// 모서리 반지름. (기본 0)
 	//==============================================================================
-	pub fn get_corner_radius(&self) -> f32 {
+	pub fn get_corner_radius(&self) -> f64 {
 		self.corner_radius
 	}
 

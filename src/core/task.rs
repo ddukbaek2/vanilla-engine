@@ -1266,7 +1266,7 @@ mod tests {
 			wait::seconds(0.0).await;
 			task_progress.set(1);
 			wait::seconds(-1.0).await;
-			wait::seconds(f32::NAN).await;
+			wait::seconds(f64::NAN).await;
 			task_progress.set(2);
 			wait::seconds(0.03).await;
 			task_progress.set(3);

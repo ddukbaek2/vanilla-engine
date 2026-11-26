@@ -1798,7 +1798,7 @@ impl Canvas2D {
 		};
 
 		// 정렬과 기준선. (Graphic 의 drawTextEntry 와 같은 셈)
-		let advance_width = text_raster.advance_width / text_scale;
+		let advance_width = text_raster.advance_width as f32 / text_scale;
 		let condense_scale = match maximum_width {
 			Some(maximum_width) if advance_width > maximum_width => {
 				maximum_width / advance_width
@@ -1819,8 +1819,8 @@ impl Canvas2D {
 				0.0
 			}
 		};
-		let font_ascent = text_raster.font_ascent / text_scale;
-		let font_descent = text_raster.font_descent / text_scale;
+		let font_ascent = text_raster.font_ascent as f32 / text_scale;
+		let font_descent = text_raster.font_descent as f32 / text_scale;
 		let baseline_offset = match self.state.text_baseline {
 			CanvasTextBaseline::Top => {
 				font_ascent
@@ -1838,8 +1838,8 @@ impl Canvas2D {
 				0.0
 			}
 		};
-		let quad_x = x + align_offset - text_raster.origin_x / text_scale * condense_scale;
-		let quad_y = y + baseline_offset - text_raster.baseline_y / text_scale;
+		let quad_x = x + align_offset - text_raster.origin_x as f32 / text_scale * condense_scale;
+		let quad_y = y + baseline_offset - text_raster.baseline_y as f32 / text_scale;
 		let text_matrix = matrix.multiply(&CanvasMatrix::create(condense_scale / text_scale, 0.0, 0.0, 1.0 / text_scale, quad_x, quad_y));
 
 		// 글 그림. (칠할 것을 글 좌표로 채우고 덮인 정도로 깎는다)
@@ -1879,7 +1879,7 @@ impl Canvas2D {
 		if let Some(color_pixels) = text_raster.color_pixels.as_ref() {
 			let style_alpha = match &style {
 				CanvasStyle::Color(color) => {
-					color.alpha
+					color.alpha as f32
 				}
 				_ => {
 					1.0
@@ -2019,7 +2019,7 @@ fn convert_blend_mode(operation_name: &str) -> BlendMode {
 /// 엔진 색 → tiny-skia 색. (알파에 곱하기)
 //==============================================================================
 fn convert_color(color: Color, alpha_scale: f32) -> tiny_skia::Color {
-	tiny_skia::Color::from_rgba(color.red.clamp(0.0, 1.0), color.green.clamp(0.0, 1.0), color.blue.clamp(0.0, 1.0), (color.alpha * alpha_scale).clamp(0.0, 1.0)).unwrap_or(tiny_skia::Color::TRANSPARENT)
+	tiny_skia::Color::from_rgba((color.red as f32).clamp(0.0, 1.0), (color.green as f32).clamp(0.0, 1.0), (color.blue as f32).clamp(0.0, 1.0), (color.alpha as f32 * alpha_scale).clamp(0.0, 1.0)).unwrap_or(tiny_skia::Color::TRANSPARENT)
 }
 
 //==============================================================================
@@ -2360,10 +2360,10 @@ fn build_shadow_layer(layer: &Pixmap, shadow_color: Color, shadow_blur: f32, off
 		blur_alpha_plane(&mut alpha_plane, width, height, sigma);
 	}
 	let mut shadow_layer = Pixmap::new(layer.width(), layer.height())?;
-	let shadow_alpha = shadow_color.alpha.clamp(0.0, 1.0);
-	let red = shadow_color.red.clamp(0.0, 1.0);
-	let green = shadow_color.green.clamp(0.0, 1.0);
-	let blue = shadow_color.blue.clamp(0.0, 1.0);
+	let shadow_alpha = (shadow_color.alpha as f32).clamp(0.0, 1.0);
+	let red = (shadow_color.red as f32).clamp(0.0, 1.0);
+	let green = (shadow_color.green as f32).clamp(0.0, 1.0);
+	let blue = (shadow_color.blue as f32).clamp(0.0, 1.0);
 	let shift_x = offset_x.round() as i64;
 	let shift_y = offset_y.round() as i64;
 	let shadow_pixels = shadow_layer.data_mut();

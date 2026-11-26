@@ -967,7 +967,7 @@ impl NodeTree {
 	/// # 돌려줌
 	/// 전역 회전. (도, 자기와 조상의 로컬 회전을 더한 것)
 	//==============================================================================
-	pub fn get_rotation(&self, node_id: NodeId) -> f32 {
+	pub fn get_rotation(&self, node_id: NodeId) -> f64 {
 		let local_rotation = self.nodes[node_id].get_local_rotation();
 		match self.get_parent_id(node_id) {
 			Some(parent_id) => {
@@ -986,7 +986,7 @@ impl NodeTree {
 	/// - `node_id`: 바꿀 노드. (없는 노드면 멈춘다)
 	/// - `rotation`: 전역 회전. (도)
 	//==============================================================================
-	pub fn set_rotation(&mut self, node_id: NodeId, rotation: f32) {
+	pub fn set_rotation(&mut self, node_id: NodeId, rotation: f64) {
 		let local_rotation = match self.get_parent_id(node_id) {
 			Some(parent_id) => {
 				rotation - self.get_rotation(parent_id)
@@ -1007,7 +1007,7 @@ impl NodeTree {
 	/// # 돌려줌
 	/// 전역 불투명도. (0 ~ 1, 자기와 조상의 로컬 불투명도를 곱한 것)
 	//==============================================================================
-	pub fn get_opacity(&self, node_id: NodeId) -> f32 {
+	pub fn get_opacity(&self, node_id: NodeId) -> f64 {
 		let mut opacity = self.nodes[node_id].get_local_opacity();
 		let mut current_id = self.get_parent_id(node_id);
 		while let Some(parent_id) = current_id {
@@ -1059,7 +1059,7 @@ impl NodeTree {
 		let radian = math::degree_to_radian(rotation);
 		let cosine = math::cos(radian);
 		let sine = math::sin(radian);
-		let rotate_corner = |corner_x: f32, corner_y: f32| -> Vector2 {
+		let rotate_corner = |corner_x: f64, corner_y: f64| -> Vector2 {
 			Vector2::create(corner_x * cosine - corner_y * sine + position.x, corner_x * sine + corner_y * cosine + position.y)
 		};
 		[rotate_corner(left, top), rotate_corner(right, top), rotate_corner(right, bottom), rotate_corner(left, bottom)]
@@ -1076,8 +1076,8 @@ impl NodeTree {
 	//==============================================================================
 	pub fn get_world_bounds(&self, node_id: NodeId) -> Rect {
 		let world_corners = self.get_world_corners(node_id);
-		let mut minimum = Vector2::create(f32::INFINITY, f32::INFINITY);
-		let mut maximum = Vector2::create(f32::NEG_INFINITY, f32::NEG_INFINITY);
+		let mut minimum = Vector2::create(f64::INFINITY, f64::INFINITY);
+		let mut maximum = Vector2::create(f64::NEG_INFINITY, f64::NEG_INFINITY);
 		for world_corner in world_corners.iter() {
 			if minimum.x > world_corner.x {
 				minimum.x = world_corner.x;
@@ -1234,7 +1234,7 @@ impl NodeTree {
 	/// - `engine`: 컴포넌트 문맥에 넘길 엔진.
 	/// - `time_delta`: 지난 tick 뒤로 흐른 시간. (초)
 	//==============================================================================
-	pub fn tick(&mut self, engine: &Engine, time_delta: f32) {
+	pub fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		let root_id = self.root_id;
 		self.traversal_depth += 1;
 		self.tick_node(root_id, engine, time_delta);
@@ -1397,7 +1397,7 @@ impl NodeTree {
 	//==============================================================================
 	/// 노드 하나와 그 자손 갱신.
 	//==============================================================================
-	fn tick_node(&mut self, node_id: NodeId, engine: &Engine, time_delta: f32) {
+	fn tick_node(&mut self, node_id: NodeId, engine: &Engine, time_delta: f64) {
 		let is_tick_needed = match self.nodes.get(node_id) {
 			Some(node) => {
 				if !node.is_active() {
@@ -1702,7 +1702,7 @@ impl NodeTree {
 	///
 	/// struct Scroller {
 	/// 	component_base: ComponentBase,
-	/// 	scroll_offset: f32,
+	/// 	scroll_offset: f64,
 	/// }
 	///
 	/// #[vanilla::reflect]
@@ -1882,7 +1882,7 @@ impl Component for ComponentPlaceholder {
 /// # 	fn get_component_type(&self) -> &'static str {
 /// # 		"Follower"
 /// # 	}
-/// 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+/// 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 /// 		let node_tree = context.get_node_tree();
 /// 		let root_id = node_tree.get_root_id();
 /// 		if let Some(target_id) = node_tree.find_descendant_by_name(root_id, "target") {
@@ -2050,7 +2050,7 @@ impl<'a> ComponentContext<'a> {
 	/// # 	fn get_component_type(&self) -> &'static str {
 	/// # 		"Clicker"
 	/// # 	}
-	/// 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	/// 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 	/// 		context.with_component_mut::<Counter, _>(self.counter_id, |counter, _counter_context| {
 	/// 			counter.count += 1;
 	/// 		});
@@ -2131,7 +2131,7 @@ mod tests {
 		//==============================================================================
 		/// 자기 노드를 지운다.
 		//==============================================================================
-		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 			let node_id = context.get_node_id();
 			context.get_node_tree_mut().destroy_node(node_id);
 		}
@@ -2174,7 +2174,7 @@ mod tests {
 		//==============================================================================
 		/// 오른쪽으로 1 옮기고, 처음 한 번 형제 노드를 만든다.
 		//==============================================================================
-		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 			let local_position = context.get_transform().get_local_position();
 			context.get_transform_mut().set_local_position(Vector2::create(local_position.x + 1.0, local_position.y));
 			if !self.is_sibling_created {
@@ -2190,7 +2190,7 @@ mod tests {
 	//==============================================================================
 	struct WheelCatcher {
 		component_base: ComponentBase,
-		wheel_total: f32,
+		wheel_total: f64,
 	}
 
 	#[crate::reflect]
@@ -2525,7 +2525,7 @@ mod sibling_tests {
 		//==============================================================================
 		/// 같은 노드의 Paint 빨강을 바꾼다. (자기가 노드에 보이면 0.5, 빠져 있으면 1)
 		//==============================================================================
-		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 			let node = context.get_node_mut();
 			let is_self_visible = node.has_component::<SiblingPainter>();
 			if let Some(paint) = node.get_component_mut::<Paint>() {

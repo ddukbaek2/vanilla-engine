@@ -8,7 +8,7 @@
 //!   create_look_at 은 눈에서 대상 반대쪽이 +Z(뒤쪽 축)인 뷰 행렬, 회전은 라디안이고 축을 바라볼 때 반시계가 양수다.
 //! - 원본 getElements() 는 Float32Array 를 내주고 호출자가 그 안을 직접 고친다. 러스트 판은 elements 를 공개 필드로 두고,
 //!   get_elements() 는 읽기 참조를, write_to_array / write_to_slice 는 유니폼 배열에 옮겨 쓰는 일을 맡는다.
-//! - 원본은 Float32Array(f32)에 담되 계산은 f64 로 한다. 러스트 판은 담기와 계산 모두 f32 라 끝자리가 조금 다를 수 있다.
+//! - 원본처럼 칸은 Float32Array 와 같은 f32 에 담고, 셈은 칸마다 f64 로 한 뒤 f32 로 담는다. (원본과 같은 비트, 셈에 쓸 때는 read_elements 로 f64 로 읽는다)
 //! - 원본 transformPoint 의 { x, y, z, w } 는 TransformedPoint 로, transform_direction 의 { x, y, z } 는 Vector3 로 돌려준다.
 //! - 원본 clone 은 Copy 로 갈음한다. 원본에 없는 전치(transpose)는 만들지 않았다.
 //==============================================================================
@@ -33,13 +33,13 @@ use crate::base::vector3::Vector3;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TransformedPoint {
 	/// 변환한 x. (원근 나누기 전)
-	pub x: f32,
+	pub x: f64,
 	/// 변환한 y. (원근 나누기 전)
-	pub y: f32,
+	pub y: f64,
 	/// 변환한 z. (원근 나누기 전)
-	pub z: f32,
+	pub z: f64,
 	/// 동차 좌표 w. (원근 나누기에 쓴다, 아핀 변환이면 1)
-	pub w: f32,
+	pub w: f64,
 }
 
 //==============================================================================
@@ -120,11 +120,11 @@ impl Matrix4 {
 		let mut result_elements = [0.0f32; 16];
 		for column_index in 0..4 {
 			for row_index in 0..4 {
-				let mut sum = 0.0f32;
+				let mut sum = 0.0f64;
 				for term_index in 0..4 {
-					sum += elements[term_index * 4 + row_index] * other_elements[column_index * 4 + term_index];
+					sum += elements[term_index * 4 + row_index] as f64 * other_elements[column_index * 4 + term_index] as f64;
 				}
-				result_elements[column_index * 4 + row_index] = sum;
+				result_elements[column_index * 4 + row_index] = sum as f32;
 			}
 		}
 		self.elements = result_elements;
@@ -138,7 +138,7 @@ impl Matrix4 {
 	/// - `y`: y 이동량.
 	/// - `z`: z 이동량.
 	//==============================================================================
-	pub fn translate(&mut self, x: f32, y: f32, z: f32) {
+	pub fn translate(&mut self, x: f64, y: f64, z: f64) {
 		let translation_matrix = Matrix4::create_translation(x, y, z);
 		self.multiply(&translation_matrix);
 	}
@@ -149,7 +149,7 @@ impl Matrix4 {
 	/// # 인자
 	/// - `radian`: 회전 각. (라디안, 양수면 +Y 를 +Z 쪽으로 돌린다)
 	//==============================================================================
-	pub fn rotate_x(&mut self, radian: f32) {
+	pub fn rotate_x(&mut self, radian: f64) {
 		let rotation_matrix = Matrix4::create_rotation_x(radian);
 		self.multiply(&rotation_matrix);
 	}
@@ -160,7 +160,7 @@ impl Matrix4 {
 	/// # 인자
 	/// - `radian`: 회전 각. (라디안, 양수면 +Z 를 +X 쪽으로 돌린다)
 	//==============================================================================
-	pub fn rotate_y(&mut self, radian: f32) {
+	pub fn rotate_y(&mut self, radian: f64) {
 		let rotation_matrix = Matrix4::create_rotation_y(radian);
 		self.multiply(&rotation_matrix);
 	}
@@ -171,7 +171,7 @@ impl Matrix4 {
 	/// # 인자
 	/// - `radian`: 회전 각. (라디안, 양수면 +X 를 +Y 쪽으로 돌린다)
 	//==============================================================================
-	pub fn rotate_z(&mut self, radian: f32) {
+	pub fn rotate_z(&mut self, radian: f64) {
 		let rotation_matrix = Matrix4::create_rotation_z(radian);
 		self.multiply(&rotation_matrix);
 	}
@@ -184,7 +184,7 @@ impl Matrix4 {
 	/// - `y`: y 배율.
 	/// - `z`: z 배율.
 	//==============================================================================
-	pub fn scale(&mut self, x: f32, y: f32, z: f32) {
+	pub fn scale(&mut self, x: f64, y: f64, z: f64) {
 		let scale_matrix = Matrix4::create_scale(x, y, z);
 		self.multiply(&scale_matrix);
 	}
@@ -200,12 +200,12 @@ impl Matrix4 {
 	/// # 돌려줌
 	/// matrix x (x, y, z, 1) 의 동차 좌표. (w 로 나누지 않은 값)
 	//==============================================================================
-	pub fn transform_point(&self, x: f32, y: f32, z: f32) -> TransformedPoint {
+	pub fn transform_point(&self, x: f64, y: f64, z: f64) -> TransformedPoint {
 		let elements = &self.elements;
-		let transformed_x = elements[0] * x + elements[4] * y + elements[8] * z + elements[12];
-		let transformed_y = elements[1] * x + elements[5] * y + elements[9] * z + elements[13];
-		let transformed_z = elements[2] * x + elements[6] * y + elements[10] * z + elements[14];
-		let transformed_w = elements[3] * x + elements[7] * y + elements[11] * z + elements[15];
+		let transformed_x = elements[0] as f64 * x + elements[4] as f64 * y + elements[8] as f64 * z + elements[12] as f64;
+		let transformed_y = elements[1] as f64 * x + elements[5] as f64 * y + elements[9] as f64 * z + elements[13] as f64;
+		let transformed_z = elements[2] as f64 * x + elements[6] as f64 * y + elements[10] as f64 * z + elements[14] as f64;
+		let transformed_w = elements[3] as f64 * x + elements[7] as f64 * y + elements[11] as f64 * z + elements[15] as f64;
 		TransformedPoint { x: transformed_x, y: transformed_y, z: transformed_z, w: transformed_w }
 	}
 
@@ -230,12 +230,30 @@ impl Matrix4 {
 	/// assert_eq!(matrix.transform_direction(0.0, 1.0, 0.0), Vector3::create(0.0, 2.0, 0.0));
 	/// ```
 	//==============================================================================
-	pub fn transform_direction(&self, x: f32, y: f32, z: f32) -> Vector3 {
+	pub fn transform_direction(&self, x: f64, y: f64, z: f64) -> Vector3 {
 		let elements = &self.elements;
-		let transformed_x = elements[0] * x + elements[4] * y + elements[8] * z;
-		let transformed_y = elements[1] * x + elements[5] * y + elements[9] * z;
-		let transformed_z = elements[2] * x + elements[6] * y + elements[10] * z;
+		let transformed_x = elements[0] as f64 * x + elements[4] as f64 * y + elements[8] as f64 * z;
+		let transformed_y = elements[1] as f64 * x + elements[5] as f64 * y + elements[9] as f64 * z;
+		let transformed_z = elements[2] as f64 * x + elements[6] as f64 * y + elements[10] as f64 * z;
 		Vector3::create(transformed_x, transformed_y, transformed_z)
+	}
+
+	//==============================================================================
+	/// 열 우선 요소를 수(f64)로 읽은 배열. (원본이 Float32Array 칸을 읽으면 자바스크립트 수가 되는 것과 같다, 셈은 이것으로 한다)
+	///
+	/// # 예제
+	/// 이동 행렬의 이동 칸 읽기
+	/// ```rust
+	/// use vanilla::Matrix4;
+	///
+	/// let matrix = Matrix4::create_translation(1.5, 2.0, 0.1);
+	/// let elements = matrix.read_elements();
+	/// assert_eq!(elements[12], 1.5);
+	/// assert_eq!(elements[14], 0.1f32 as f64);
+	/// ```
+	//==============================================================================
+	pub fn read_elements(&self) -> [f64; 16] {
+		self.elements.map(|element| element as f64)
 	}
 
 	//==============================================================================
@@ -304,11 +322,11 @@ impl Matrix4 {
 	/// # 돌려줌
 	/// 이동 행렬. (elements 12, 13, 14 에 x, y, z)
 	//==============================================================================
-	pub fn create_translation(x: f32, y: f32, z: f32) -> Matrix4 {
+	pub fn create_translation(x: f64, y: f64, z: f64) -> Matrix4 {
 		let mut matrix = Matrix4::create_identity();
-		matrix.elements[12] = x;
-		matrix.elements[13] = y;
-		matrix.elements[14] = z;
+		matrix.elements[12] = x as f32;
+		matrix.elements[13] = y as f32;
+		matrix.elements[14] = z as f32;
 		matrix
 	}
 
@@ -321,14 +339,14 @@ impl Matrix4 {
 	/// # 돌려줌
 	/// X 축 회전 행렬.
 	//==============================================================================
-	pub fn create_rotation_x(radian: f32) -> Matrix4 {
+	pub fn create_rotation_x(radian: f64) -> Matrix4 {
 		let cosine = radian.cos();
 		let sine = radian.sin();
 		let mut matrix = Matrix4::create_identity();
-		matrix.elements[5] = cosine;
-		matrix.elements[6] = sine;
-		matrix.elements[9] = -sine;
-		matrix.elements[10] = cosine;
+		matrix.elements[5] = cosine as f32;
+		matrix.elements[6] = sine as f32;
+		matrix.elements[9] = (-sine) as f32;
+		matrix.elements[10] = cosine as f32;
 		matrix
 	}
 
@@ -341,14 +359,14 @@ impl Matrix4 {
 	/// # 돌려줌
 	/// Y 축 회전 행렬.
 	//==============================================================================
-	pub fn create_rotation_y(radian: f32) -> Matrix4 {
+	pub fn create_rotation_y(radian: f64) -> Matrix4 {
 		let cosine = radian.cos();
 		let sine = radian.sin();
 		let mut matrix = Matrix4::create_identity();
-		matrix.elements[0] = cosine;
-		matrix.elements[2] = -sine;
-		matrix.elements[8] = sine;
-		matrix.elements[10] = cosine;
+		matrix.elements[0] = cosine as f32;
+		matrix.elements[2] = (-sine) as f32;
+		matrix.elements[8] = sine as f32;
+		matrix.elements[10] = cosine as f32;
 		matrix
 	}
 
@@ -372,14 +390,14 @@ impl Matrix4 {
 	/// assert!((rotated.y - 1.0).abs() < 1e-6);
 	/// ```
 	//==============================================================================
-	pub fn create_rotation_z(radian: f32) -> Matrix4 {
+	pub fn create_rotation_z(radian: f64) -> Matrix4 {
 		let cosine = radian.cos();
 		let sine = radian.sin();
 		let mut matrix = Matrix4::create_identity();
-		matrix.elements[0] = cosine;
-		matrix.elements[1] = sine;
-		matrix.elements[4] = -sine;
-		matrix.elements[5] = cosine;
+		matrix.elements[0] = cosine as f32;
+		matrix.elements[1] = sine as f32;
+		matrix.elements[4] = (-sine) as f32;
+		matrix.elements[5] = cosine as f32;
 		matrix
 	}
 
@@ -412,15 +430,15 @@ impl Matrix4 {
 		let w = quaternion.w;
 		let mut matrix = Matrix4::create_identity();
 		let elements = &mut matrix.elements;
-		elements[0] = 1.0 - 2.0 * (y * y + z * z);
-		elements[1] = 2.0 * (x * y + z * w);
-		elements[2] = 2.0 * (x * z - y * w);
-		elements[4] = 2.0 * (x * y - z * w);
-		elements[5] = 1.0 - 2.0 * (x * x + z * z);
-		elements[6] = 2.0 * (y * z + x * w);
-		elements[8] = 2.0 * (x * z + y * w);
-		elements[9] = 2.0 * (y * z - x * w);
-		elements[10] = 1.0 - 2.0 * (x * x + y * y);
+		elements[0] = (1.0 - 2.0 * (y * y + z * z)) as f32;
+		elements[1] = (2.0 * (x * y + z * w)) as f32;
+		elements[2] = (2.0 * (x * z - y * w)) as f32;
+		elements[4] = (2.0 * (x * y - z * w)) as f32;
+		elements[5] = (1.0 - 2.0 * (x * x + z * z)) as f32;
+		elements[6] = (2.0 * (y * z + x * w)) as f32;
+		elements[8] = (2.0 * (x * z + y * w)) as f32;
+		elements[9] = (2.0 * (y * z - x * w)) as f32;
+		elements[10] = (1.0 - 2.0 * (x * x + y * y)) as f32;
 		matrix
 	}
 
@@ -435,11 +453,11 @@ impl Matrix4 {
 	/// # 돌려줌
 	/// 크기 행렬.
 	//==============================================================================
-	pub fn create_scale(x: f32, y: f32, z: f32) -> Matrix4 {
+	pub fn create_scale(x: f64, y: f64, z: f64) -> Matrix4 {
 		let mut matrix = Matrix4::create_identity();
-		matrix.elements[0] = x;
-		matrix.elements[5] = y;
-		matrix.elements[10] = z;
+		matrix.elements[0] = x as f32;
+		matrix.elements[5] = y as f32;
+		matrix.elements[10] = z as f32;
 		matrix
 	}
 
@@ -465,16 +483,16 @@ impl Matrix4 {
 	/// assert_eq!(near_point.z / near_point.w, -1.0);
 	/// ```
 	//==============================================================================
-	pub fn create_perspective(field_of_view_radian: f32, aspect_ratio: f32, near_distance: f32, far_distance: f32) -> Matrix4 {
+	pub fn create_perspective(field_of_view_radian: f64, aspect_ratio: f64, near_distance: f64, far_distance: f64) -> Matrix4 {
 		let focal_length = 1.0 / (field_of_view_radian / 2.0).tan();
 		let range_inverse = 1.0 / (near_distance - far_distance);
 		let mut matrix = Matrix4 { elements: [0.0; 16] };
 		let elements = &mut matrix.elements;
-		elements[0] = focal_length / aspect_ratio;
-		elements[5] = focal_length;
-		elements[10] = (near_distance + far_distance) * range_inverse;
+		elements[0] = (focal_length / aspect_ratio) as f32;
+		elements[5] = focal_length as f32;
+		elements[10] = ((near_distance + far_distance) * range_inverse) as f32;
 		elements[11] = -1.0;
-		elements[14] = near_distance * far_distance * range_inverse * 2.0;
+		elements[14] = (near_distance * far_distance * range_inverse * 2.0) as f32;
 		matrix
 	}
 
@@ -502,15 +520,15 @@ impl Matrix4 {
 	/// assert_eq!((corner.x, corner.y, corner.z, corner.w), (1.0, 1.0, 1.0, 1.0));
 	/// ```
 	//==============================================================================
-	pub fn create_orthographic(left: f32, right: f32, bottom: f32, top: f32, near_distance: f32, far_distance: f32) -> Matrix4 {
+	pub fn create_orthographic(left: f64, right: f64, bottom: f64, top: f64, near_distance: f64, far_distance: f64) -> Matrix4 {
 		let mut matrix = Matrix4 { elements: [0.0; 16] };
 		let elements = &mut matrix.elements;
-		elements[0] = 2.0 / (right - left);
-		elements[5] = 2.0 / (top - bottom);
-		elements[10] = -2.0 / (far_distance - near_distance);
-		elements[12] = -(right + left) / (right - left);
-		elements[13] = -(top + bottom) / (top - bottom);
-		elements[14] = -(far_distance + near_distance) / (far_distance - near_distance);
+		elements[0] = (2.0 / (right - left)) as f32;
+		elements[5] = (2.0 / (top - bottom)) as f32;
+		elements[10] = (-2.0 / (far_distance - near_distance)) as f32;
+		elements[12] = (-(right + left) / (right - left)) as f32;
+		elements[13] = (-(top + bottom) / (top - bottom)) as f32;
+		elements[14] = (-(far_distance + near_distance) / (far_distance - near_distance)) as f32;
 		elements[15] = 1.0;
 		matrix
 	}
@@ -545,21 +563,21 @@ impl Matrix4 {
 
 		let mut matrix = Matrix4::create_identity();
 		let elements = &mut matrix.elements;
-		elements[0] = right_axis.x;
-		elements[1] = up_axis.x;
-		elements[2] = back_axis.x;
+		elements[0] = right_axis.x as f32;
+		elements[1] = up_axis.x as f32;
+		elements[2] = back_axis.x as f32;
 		elements[3] = 0.0;
-		elements[4] = right_axis.y;
-		elements[5] = up_axis.y;
-		elements[6] = back_axis.y;
+		elements[4] = right_axis.y as f32;
+		elements[5] = up_axis.y as f32;
+		elements[6] = back_axis.y as f32;
 		elements[7] = 0.0;
-		elements[8] = right_axis.z;
-		elements[9] = up_axis.z;
-		elements[10] = back_axis.z;
+		elements[8] = right_axis.z as f32;
+		elements[9] = up_axis.z as f32;
+		elements[10] = back_axis.z as f32;
 		elements[11] = 0.0;
-		elements[12] = -right_axis.dot(eye_position);
-		elements[13] = -up_axis.dot(eye_position);
-		elements[14] = -back_axis.dot(eye_position);
+		elements[12] = (-right_axis.dot(eye_position)) as f32;
+		elements[13] = (-up_axis.dot(eye_position)) as f32;
+		elements[14] = (-back_axis.dot(eye_position)) as f32;
 		elements[15] = 1.0;
 		matrix
 	}
@@ -590,22 +608,22 @@ impl Matrix4 {
 	//==============================================================================
 	pub fn create_inverse(matrix: &Matrix4) -> Matrix4 {
 		let source_elements = &matrix.elements;
-		let m00 = source_elements[0];
-		let m01 = source_elements[1];
-		let m02 = source_elements[2];
-		let m03 = source_elements[3];
-		let m04 = source_elements[4];
-		let m05 = source_elements[5];
-		let m06 = source_elements[6];
-		let m07 = source_elements[7];
-		let m08 = source_elements[8];
-		let m09 = source_elements[9];
-		let m10 = source_elements[10];
-		let m11 = source_elements[11];
-		let m12 = source_elements[12];
-		let m13 = source_elements[13];
-		let m14 = source_elements[14];
-		let m15 = source_elements[15];
+		let m00 = source_elements[0] as f64;
+		let m01 = source_elements[1] as f64;
+		let m02 = source_elements[2] as f64;
+		let m03 = source_elements[3] as f64;
+		let m04 = source_elements[4] as f64;
+		let m05 = source_elements[5] as f64;
+		let m06 = source_elements[6] as f64;
+		let m07 = source_elements[7] as f64;
+		let m08 = source_elements[8] as f64;
+		let m09 = source_elements[9] as f64;
+		let m10 = source_elements[10] as f64;
+		let m11 = source_elements[11] as f64;
+		let m12 = source_elements[12] as f64;
+		let m13 = source_elements[13] as f64;
+		let m14 = source_elements[14] as f64;
+		let m15 = source_elements[15] as f64;
 
 		let cofactor00 = m00 * m05 - m01 * m04;
 		let cofactor01 = m00 * m06 - m02 * m04;
@@ -628,22 +646,22 @@ impl Matrix4 {
 
 		let mut result_matrix = Matrix4::create_identity();
 		let result_elements = &mut result_matrix.elements;
-		result_elements[0] = (m05 * cofactor11 - m06 * cofactor10 + m07 * cofactor09) * inverse_determinant;
-		result_elements[1] = (m02 * cofactor10 - m01 * cofactor11 - m03 * cofactor09) * inverse_determinant;
-		result_elements[2] = (m13 * cofactor05 - m14 * cofactor04 + m15 * cofactor03) * inverse_determinant;
-		result_elements[3] = (m10 * cofactor04 - m09 * cofactor05 - m11 * cofactor03) * inverse_determinant;
-		result_elements[4] = (m06 * cofactor08 - m04 * cofactor11 - m07 * cofactor07) * inverse_determinant;
-		result_elements[5] = (m00 * cofactor11 - m02 * cofactor08 + m03 * cofactor07) * inverse_determinant;
-		result_elements[6] = (m14 * cofactor02 - m12 * cofactor05 - m15 * cofactor01) * inverse_determinant;
-		result_elements[7] = (m08 * cofactor05 - m10 * cofactor02 + m11 * cofactor01) * inverse_determinant;
-		result_elements[8] = (m04 * cofactor10 - m05 * cofactor08 + m07 * cofactor06) * inverse_determinant;
-		result_elements[9] = (m01 * cofactor08 - m00 * cofactor10 - m03 * cofactor06) * inverse_determinant;
-		result_elements[10] = (m12 * cofactor04 - m13 * cofactor02 + m15 * cofactor00) * inverse_determinant;
-		result_elements[11] = (m09 * cofactor02 - m08 * cofactor04 - m11 * cofactor00) * inverse_determinant;
-		result_elements[12] = (m05 * cofactor07 - m04 * cofactor09 - m06 * cofactor06) * inverse_determinant;
-		result_elements[13] = (m00 * cofactor09 - m01 * cofactor07 + m02 * cofactor06) * inverse_determinant;
-		result_elements[14] = (m13 * cofactor01 - m12 * cofactor03 - m14 * cofactor00) * inverse_determinant;
-		result_elements[15] = (m08 * cofactor03 - m09 * cofactor01 + m10 * cofactor00) * inverse_determinant;
+		result_elements[0] = ((m05 * cofactor11 - m06 * cofactor10 + m07 * cofactor09) * inverse_determinant) as f32;
+		result_elements[1] = ((m02 * cofactor10 - m01 * cofactor11 - m03 * cofactor09) * inverse_determinant) as f32;
+		result_elements[2] = ((m13 * cofactor05 - m14 * cofactor04 + m15 * cofactor03) * inverse_determinant) as f32;
+		result_elements[3] = ((m10 * cofactor04 - m09 * cofactor05 - m11 * cofactor03) * inverse_determinant) as f32;
+		result_elements[4] = ((m06 * cofactor08 - m04 * cofactor11 - m07 * cofactor07) * inverse_determinant) as f32;
+		result_elements[5] = ((m00 * cofactor11 - m02 * cofactor08 + m03 * cofactor07) * inverse_determinant) as f32;
+		result_elements[6] = ((m14 * cofactor02 - m12 * cofactor05 - m15 * cofactor01) * inverse_determinant) as f32;
+		result_elements[7] = ((m08 * cofactor05 - m10 * cofactor02 + m11 * cofactor01) * inverse_determinant) as f32;
+		result_elements[8] = ((m04 * cofactor10 - m05 * cofactor08 + m07 * cofactor06) * inverse_determinant) as f32;
+		result_elements[9] = ((m01 * cofactor08 - m00 * cofactor10 - m03 * cofactor06) * inverse_determinant) as f32;
+		result_elements[10] = ((m12 * cofactor04 - m13 * cofactor02 + m15 * cofactor00) * inverse_determinant) as f32;
+		result_elements[11] = ((m09 * cofactor02 - m08 * cofactor04 - m11 * cofactor00) * inverse_determinant) as f32;
+		result_elements[12] = ((m05 * cofactor07 - m04 * cofactor09 - m06 * cofactor06) * inverse_determinant) as f32;
+		result_elements[13] = ((m00 * cofactor09 - m01 * cofactor07 + m02 * cofactor06) * inverse_determinant) as f32;
+		result_elements[14] = ((m13 * cofactor01 - m12 * cofactor03 - m14 * cofactor00) * inverse_determinant) as f32;
+		result_elements[15] = ((m08 * cofactor03 - m09 * cofactor01 + m10 * cofactor00) * inverse_determinant) as f32;
 		result_matrix
 	}
 }
@@ -652,8 +670,8 @@ impl Matrix4 {
 mod tests {
 	use super::*;
 
-	/// 원본(f64 계산 뒤 Float32Array)과 러스트 판(f32 계산)의 끝자리 차이를 받아 줄 허용 오차.
-	const TOLERANCE: f32 = 1.0e-5;
+	/// f32 칸에 담은 값과 f64 기대값의 차이를 받아 줄 허용 오차.
+	const TOLERANCE: f64 = 1.0e-5;
 
 	//==============================================================================
 	/// 요소 배열이 기대값(원본이 찍은 f64 값)과 허용 오차 안에서 같은지 확인한다.
@@ -661,16 +679,16 @@ mod tests {
 	fn assert_elements_near(actual: &[f32; 16], expected: &[f64; 16]) {
 		for (index, (actual_value, expected_value)) in actual.iter().zip(expected.iter()).enumerate() {
 			let difference = (*actual_value as f64 - *expected_value).abs();
-			assert!(difference <= TOLERANCE as f64, "elements[{}] = {}, expected {} (all: {:?})", index, actual_value, expected_value, actual);
+			assert!(difference <= TOLERANCE, "elements[{}] = {}, expected {} (all: {:?})", index, actual_value, expected_value, actual);
 		}
 	}
 
 	//==============================================================================
 	/// 값 하나가 기대값(원본이 찍은 f64 값)과 허용 오차 안에서 같은지 확인한다.
 	//==============================================================================
-	fn assert_near(actual: f32, expected: f64) {
-		let difference = (actual as f64 - expected).abs();
-		assert!(difference <= TOLERANCE as f64, "{} expected {}", actual, expected);
+	fn assert_near(actual: f64, expected: f64) {
+		let difference = (actual - expected).abs();
+		assert!(difference <= TOLERANCE, "{} expected {}", actual, expected);
 	}
 
 	//==============================================================================
@@ -713,7 +731,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn rotation_is_right_handed() {
-		let quarter_turn = std::f32::consts::FRAC_PI_2;
+		let quarter_turn = std::f64::consts::FRAC_PI_2;
 		let rotated_by_z = Matrix4::create_rotation_z(quarter_turn).transform_direction(1.0, 0.0, 0.0);
 		assert_near(rotated_by_z.x, 0.0);
 		assert_near(rotated_by_z.y, 1.0);
@@ -787,7 +805,7 @@ mod tests {
 	#[test]
 	fn perspective_matches_hand_and_original() {
 		// 초점 거리 1 / tan(45 도) = 1, [10] = (1 + 3) / (1 - 3) = -2, [14] = 2 * 1 * 3 / (1 - 3) = -3.
-		let hand_matrix = Matrix4::create_perspective(std::f32::consts::FRAC_PI_2, 2.0, 1.0, 3.0);
+		let hand_matrix = Matrix4::create_perspective(std::f64::consts::FRAC_PI_2, 2.0, 1.0, 3.0);
 		assert_elements_near(&hand_matrix.elements, &[0.5, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, -2.0, -1.0, 0.0, 0.0, -3.0, 0.0]);
 
 		let original_matrix = Matrix4::create_perspective(1.0, 1.5, 0.5, 100.0);
@@ -832,7 +850,7 @@ mod tests {
 		let distance = eye_position.distance(target_position);
 		assert_near(target_in_view.x, 0.0);
 		assert_near(target_in_view.y, 0.0);
-		assert_near(target_in_view.z, -distance as f64);
+		assert_near(target_in_view.z, -distance);
 	}
 
 	//==============================================================================

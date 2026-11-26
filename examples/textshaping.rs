@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use vanilla::{Component, ComponentBase, ComponentContext, DynamicFont, Engine, EngineConfiguration, FontAsset, Graphic, NodeId, NodeTransform, NodeTree, Pivot, RichText, Scene, SceneBase, ShadowText, Text, TextAlign, TextBaseline, TextDirection, Vector2};
 
 const EXAMPLE_ASSET_DIRECTORY: &str = "examples/assets";
-const VIEW_WIDTH: f32 = 1280.0;
-const VIEW_HEIGHT: f32 = 720.0;
+const VIEW_WIDTH: f64 = 1280.0;
+const VIEW_HEIGHT: f64 = 720.0;
 const BACKGROUND_COLOR: &str = "#151821";
 const TEXT_COLOR: &str = "#e8ebf2";
 const CAPTION_COLOR: &str = "#9aa2b2";
@@ -30,7 +30,7 @@ const ARABIC_FONT_PATHS: [&str; 1] = ["fonts/arabic.ttf"];
 //==============================================================================
 // 상자 노드 만들기. (왼쪽 위 피봇, set_rect)
 //==============================================================================
-fn create_box_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, x: f32, y: f32, width: f32, height: f32) -> NodeId {
+fn create_box_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, x: f64, y: f64, width: f64, height: f64) -> NodeId {
 	let node_id = node_tree.create_child(parent_id, name);
 	let node = &mut node_tree[node_id];
 	node.set_pivot(Pivot::TOP_LEFT);
@@ -41,7 +41,7 @@ fn create_box_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, x: f
 //==============================================================================
 // 설명 글 노드 만들기.
 //==============================================================================
-fn create_caption_node(node_tree: &mut NodeTree, parent_id: NodeId, x: f32, y: f32, text: &str) {
+fn create_caption_node(node_tree: &mut NodeTree, parent_id: NodeId, x: f64, y: f64, text: &str) {
 	let caption_id = create_box_node(node_tree, parent_id, "caption", x, y, 560.0, 24.0);
 	let caption_text = node_tree[caption_id].add_component(Text::create_with_text(text, 16.0));
 	caption_text.set_text_color(CAPTION_COLOR);
@@ -54,7 +54,7 @@ fn create_caption_node(node_tree: &mut NodeTree, parent_id: NodeId, x: f32, y: f
 struct DynamicFontCounter {
 	component_base: ComponentBase,
 	dynamic_font: DynamicFont,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 }
 
 #[vanilla::reflect]
@@ -74,7 +74,7 @@ impl Component for DynamicFontCounter {
 		"DynamicFontCounter"
 	}
 
-	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 	}
 
@@ -127,7 +127,7 @@ impl Scene for MainScene {
 		create_caption_node(node_tree, root_id, 40.0, 84.0, "Text Rtl + Start, Auto, RichText Rtl");
 		let arabic_lines: [(&str, TextDirection); 3] = [("مرحبا بالعالم 123", TextDirection::Rtl), ("Hello مرحبا world", TextDirection::Auto), ("سلام عليكم 2024/11", TextDirection::Rtl)];
 		for (line_index, (text, text_direction)) in arabic_lines.iter().enumerate() {
-			let line_id = create_box_node(node_tree, root_id, "arabic", 40.0, 114.0 + line_index as f32 * 46.0, 520.0, 40.0);
+			let line_id = create_box_node(node_tree, root_id, "arabic", 40.0, 114.0 + line_index as f64 * 46.0, 520.0, 40.0);
 			let line_text = node_tree[line_id].add_component(Text::create_with_text(text, 30.0));
 			line_text.set_font_family(ARABIC_FONT_FAMILY);
 			line_text.set_text_color(TEXT_COLOR);
@@ -145,7 +145,7 @@ impl Scene for MainScene {
 		create_caption_node(node_tree, root_id, 40.0, 310.0, "italic, bold, ShadowText italic + underline + strikethrough");
 		let style_list: [(&str, bool, bool); 3] = [("보통 Regular AVA", false, false), ("기울임 Italic AVA", false, true), ("굵게 Bold AVA", true, false)];
 		for (style_index, (text, is_bold, is_italic)) in style_list.iter().enumerate() {
-			let style_id = create_box_node(node_tree, root_id, "style", 40.0, 340.0 + style_index as f32 * 40.0, 520.0, 36.0);
+			let style_id = create_box_node(node_tree, root_id, "style", 40.0, 340.0 + style_index as f64 * 40.0, 520.0, 36.0);
 			let style_text = node_tree[style_id].add_component(Text::create_with_text(text, 28.0));
 			style_text.set_text_color(TEXT_COLOR);
 			style_text.set_text_align(TextAlign::Left);
@@ -165,7 +165,7 @@ impl Scene for MainScene {
 		create_caption_node(node_tree, root_id, 640.0, 84.0, "word wrap 260 (한중일 낱말 사이), visible 12 (글자 묶음)");
 		let wrap_list = ["Vanilla엔진은 JavaScript와 Rust로 만든 게임engine입니다.", "我们今天去公园玩吧，天气非常好，大家都很开心。", "今日はいい天気ですね。明日も晴れるといいですね。"];
 		for (wrap_index, text) in wrap_list.iter().enumerate() {
-			let wrap_id = create_box_node(node_tree, root_id, "wrap", 640.0, 114.0 + wrap_index as f32 * 110.0, 260.0, 100.0);
+			let wrap_id = create_box_node(node_tree, root_id, "wrap", 640.0, 114.0 + wrap_index as f64 * 110.0, 260.0, 100.0);
 			let wrap_text = node_tree[wrap_id].add_component(Text::create_with_text(text, 22.0));
 			wrap_text.set_text_color(TEXT_COLOR);
 			wrap_text.set_text_align(TextAlign::Left);

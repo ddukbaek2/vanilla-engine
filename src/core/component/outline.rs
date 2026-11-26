@@ -39,8 +39,8 @@ use crate::core::node::worldnode::NodeTransform;
 pub struct Outline {
 	component_base: ComponentBase,
 	color: Color,
-	line_width: f32,
-	round_size: f32,
+	line_width: f64,
+	round_size: f64,
 	is_circle: bool,
 }
 
@@ -124,7 +124,7 @@ impl Outline {
 	/// # 인자
 	/// - `line_width`: 선 굵기. (노드 좌표, 0 이하면 그리지 않는다, 처음 1)
 	//==============================================================================
-	pub fn set_line_width(&mut self, line_width: f32) {
+	pub fn set_line_width(&mut self, line_width: f64) {
 		self.line_width = line_width;
 	}
 
@@ -134,7 +134,7 @@ impl Outline {
 	/// # 돌려줌
 	/// 선 굵기. (노드 좌표)
 	//==============================================================================
-	pub fn get_line_width(&self) -> f32 {
+	pub fn get_line_width(&self) -> f64 {
 		self.line_width
 	}
 
@@ -144,7 +144,7 @@ impl Outline {
 	/// # 인자
 	/// - `round_size`: 바깥 꼴의 귀퉁이 둥근 크기. (노드 좌표, 처음 0) 선의 가운데는 굵기의 반만큼 덜 둥글게 긋는다. 동그라미 테에는 쓰지 않는다.
 	//==============================================================================
-	pub fn set_round_size(&mut self, round_size: f32) {
+	pub fn set_round_size(&mut self, round_size: f64) {
 		self.round_size = round_size;
 	}
 
@@ -154,7 +154,7 @@ impl Outline {
 	/// # 돌려줌
 	/// 바깥 꼴의 귀퉁이 둥근 크기. (노드 좌표)
 	//==============================================================================
-	pub fn get_round_size(&self) -> f32 {
+	pub fn get_round_size(&self) -> f64 {
 		self.round_size
 	}
 

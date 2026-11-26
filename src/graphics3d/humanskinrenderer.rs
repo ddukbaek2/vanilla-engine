@@ -25,6 +25,7 @@ use crate::graphics3d::material::{Material, TEXTURE_UNIT_BASECOLOR, TEXTURE_UNIT
 use crate::graphics3d::skinnedmodel::{Drawable, SkinnedModel};
 use crate::graphics3d::skinnedmodelrenderer::{SkinnedModelRenderer, MORPH_GLSL};
 use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
@@ -752,7 +753,7 @@ pub fn create_cutout_depth_vertex_shader_source() -> String {
 /// }
 ///
 /// fn render_head(gl: &glow::Context, human_skin_renderer: &HumanSkinRenderer, skinned_model: &mut SkinnedModel, scene_render_target: &RenderTarget) {
-/// 	let aspect_ratio = scene_render_target.get_width() as f32 / scene_render_target.get_height() as f32;
+/// 	let aspect_ratio = scene_render_target.get_width() as f64 / scene_render_target.get_height() as f64;
 /// 	let camera_position = Vector3::create(0.0, 1.6, 0.6);
 /// 	let view_matrix = Matrix4::create_look_at(camera_position, Vector3::create(0.0, 1.6, 0.0), Vector3::up());
 /// 	let mut view_projection_matrix = Matrix4::create_perspective(0.5, aspect_ratio, 0.05, 10.0);
@@ -786,40 +787,40 @@ pub struct HumanSkinRenderer {
 	material_shading_modes: Vec<(Rc<Material>, i32)>,
 	shadow_map_texture: Option<GlTexture>,
 	light_view_projection_elements: Option<[f32; 16]>,
-	shadow_strength: f32,
-	shadow_texel_size: f32,
-	shadow_softness: f32,
+	shadow_strength: f64,
+	shadow_texel_size: f64,
+	shadow_softness: f64,
 	shadow_sample_count: i32,
-	hair_sway: [f32; 3],
+	hair_sway: [f64; 3],
 	use_hair_fringe: bool,
 	light_directions: [f32; 9],
 	light_colors: [f32; 9],
-	ambient_sky_color: [f32; 3],
-	ambient_horizon_color: [f32; 3],
-	ambient_ground_color: [f32; 3],
-	normal_strength: f32,
-	detail_strength: f32,
-	detail_texel_size: f32,
-	cavity_strength: f32,
-	roughness_range: [f32; 2],
-	specular_strength: f32,
-	sheen_strength: f32,
-	subsurface_amount: f32,
-	micro_tiling: f32,
-	micro_strength: f32,
+	ambient_sky_color: [f64; 3],
+	ambient_horizon_color: [f64; 3],
+	ambient_ground_color: [f64; 3],
+	normal_strength: f64,
+	detail_strength: f64,
+	detail_texel_size: f64,
+	cavity_strength: f64,
+	roughness_range: [f64; 2],
+	specular_strength: f64,
+	sheen_strength: f64,
+	subsurface_amount: f64,
+	micro_tiling: f64,
+	micro_strength: f64,
 	use_wrinkle_maps: bool,
 	wrinkle_channel_weights: [f32; WRINKLE_CHANNEL_COUNT * 3],
 	wrinkle_tile_mask: i32,
-	wrinkle_normal_strength: f32,
-	wrinkle_color_strength: f32,
-	eye_iris_radius: f32,
-	eye_pupil_radius: f32,
-	eye_iris_depth: f32,
-	eye_closure: f32,
-	hair_specular_shift: [f32; 3],
-	hair_specular_power: [f32; 3],
-	hair_specular_intensity: [f32; 3],
-	hair_root_shade: f32,
+	wrinkle_normal_strength: f64,
+	wrinkle_color_strength: f64,
+	eye_iris_radius: f64,
+	eye_pupil_radius: f64,
+	eye_iris_depth: f64,
+	eye_closure: f64,
+	hair_specular_shift: [f64; 3],
+	hair_specular_power: [f64; 3],
+	hair_specular_intensity: [f64; 3],
+	hair_root_shade: f64,
 }
 
 impl HumanSkinRenderer {
@@ -899,7 +900,7 @@ impl HumanSkinRenderer {
 	/// - `camera_y`: 카메라 월드 y.
 	/// - `camera_z`: 카메라 월드 z.
 	//==============================================================================
-	pub fn draw(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f32, camera_y: f32, camera_z: f32) {
+	pub fn draw(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f64, camera_y: f64, camera_z: f64) {
 		self.draw_pass(gl, skinned_model, view_projection_elements, model_matrix_elements, camera_x, camera_y, camera_z, 0);
 	}
 
@@ -936,7 +937,7 @@ impl HumanSkinRenderer {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn draw_blended(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f32, camera_y: f32, camera_z: f32) {
+	pub fn draw_blended(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f64, camera_y: f64, camera_z: f64) {
 		self.draw_pass(gl, skinned_model, view_projection_elements, model_matrix_elements, camera_x, camera_y, camera_z, 1);
 	}
 
@@ -954,7 +955,7 @@ impl HumanSkinRenderer {
 	/// - `pass_mode`: 패스. (0 = 불투명, 1 = 블렌드)
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
-	pub fn draw_pass(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f32, camera_y: f32, camera_z: f32, pass_mode: i32) {
+	pub fn draw_pass(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f64, camera_y: f64, camera_z: f64, pass_mode: i32) {
 		skinned_model.upload_pending_morph_targets(gl);
 		let shader_program = self.skinned_model_renderer.get_shader_program();
 		let shader_program = &*shader_program;
@@ -965,7 +966,7 @@ impl HumanSkinRenderer {
 		unsafe {
 			gl.uniform_matrix_4_f32_slice(view_projection_location.as_ref(), false, view_projection_elements);
 			gl.uniform_matrix_4_f32_slice(model_matrix_location.as_ref(), false, model_matrix_elements);
-			gl.uniform_3_f32(camera_position_location.as_ref(), camera_x, camera_y, camera_z);
+			gl.uniform_3_f64(camera_position_location.as_ref(), camera_x, camera_y, camera_z);
 		}
 		self.apply_environment_uniforms(gl, shader_program);
 		self.apply_shadow_uniforms(gl, shader_program);
@@ -974,7 +975,7 @@ impl HumanSkinRenderer {
 		let shading_mode_location = shader_program.get_uniform_location(gl, "shadingMode");
 		unsafe {
 			gl.uniform_1_i32(pass_mode_location.as_ref(), pass_mode);
-			gl.uniform_4_f32(hair_sway_location.as_ref(), self.hair_sway[0], self.hair_sway[1], self.hair_sway[2], 0.0);
+			gl.uniform_4_f64(hair_sway_location.as_ref(), self.hair_sway[0], self.hair_sway[1], self.hair_sway[2], 0.0);
 		}
 
 		let joint_matrices_location = shader_program.get_uniform_location(gl, "jointMatrices[0]");
@@ -1036,7 +1037,7 @@ impl HumanSkinRenderer {
 	/// 	let model_matrix = Matrix4::create_identity();
 	/// 	shadow_map.begin_render(gl);
 	/// 	human_skin_renderer.draw_depth(gl, skinned_model, &light_view_projection_elements, model_matrix.get_elements());
-	/// 	let texel_size = 1.0 / shadow_map.get_resolution() as f32;
+	/// 	let texel_size = 1.0 / shadow_map.get_resolution() as f64;
 	/// 	human_skin_renderer.set_shadow_map(Some(shadow_map.get_depth_texture()), Some(&light_view_projection_elements), texel_size);
 	/// 	human_skin_renderer.set_shadow_strength(0.85);
 	/// }
@@ -1146,32 +1147,32 @@ impl HumanSkinRenderer {
 		unsafe {
 			gl.uniform_3_f32_slice(light_directions_location.as_ref(), &self.light_directions);
 			gl.uniform_3_f32_slice(light_colors_location.as_ref(), &self.light_colors);
-			gl.uniform_3_f32(ambient_sky_color_location.as_ref(), self.ambient_sky_color[0], self.ambient_sky_color[1], self.ambient_sky_color[2]);
-			gl.uniform_3_f32(ambient_horizon_color_location.as_ref(), self.ambient_horizon_color[0], self.ambient_horizon_color[1], self.ambient_horizon_color[2]);
-			gl.uniform_3_f32(ambient_ground_color_location.as_ref(), self.ambient_ground_color[0], self.ambient_ground_color[1], self.ambient_ground_color[2]);
-			gl.uniform_1_f32(normal_strength_location.as_ref(), self.normal_strength);
-			gl.uniform_1_f32(detail_strength_location.as_ref(), self.detail_strength);
-			gl.uniform_1_f32(detail_texel_size_location.as_ref(), self.detail_texel_size);
-			gl.uniform_1_f32(cavity_strength_location.as_ref(), self.cavity_strength);
-			gl.uniform_2_f32(roughness_range_location.as_ref(), self.roughness_range[0], self.roughness_range[1]);
-			gl.uniform_1_f32(specular_strength_location.as_ref(), self.specular_strength);
-			gl.uniform_1_f32(sheen_strength_location.as_ref(), self.sheen_strength);
-			gl.uniform_1_f32(subsurface_amount_location.as_ref(), self.subsurface_amount);
-			gl.uniform_1_f32(micro_tiling_location.as_ref(), self.micro_tiling);
-			gl.uniform_1_f32(micro_strength_location.as_ref(), self.micro_strength);
+			gl.uniform_3_f64(ambient_sky_color_location.as_ref(), self.ambient_sky_color[0], self.ambient_sky_color[1], self.ambient_sky_color[2]);
+			gl.uniform_3_f64(ambient_horizon_color_location.as_ref(), self.ambient_horizon_color[0], self.ambient_horizon_color[1], self.ambient_horizon_color[2]);
+			gl.uniform_3_f64(ambient_ground_color_location.as_ref(), self.ambient_ground_color[0], self.ambient_ground_color[1], self.ambient_ground_color[2]);
+			gl.uniform_1_f64(normal_strength_location.as_ref(), self.normal_strength);
+			gl.uniform_1_f64(detail_strength_location.as_ref(), self.detail_strength);
+			gl.uniform_1_f64(detail_texel_size_location.as_ref(), self.detail_texel_size);
+			gl.uniform_1_f64(cavity_strength_location.as_ref(), self.cavity_strength);
+			gl.uniform_2_f64(roughness_range_location.as_ref(), self.roughness_range[0], self.roughness_range[1]);
+			gl.uniform_1_f64(specular_strength_location.as_ref(), self.specular_strength);
+			gl.uniform_1_f64(sheen_strength_location.as_ref(), self.sheen_strength);
+			gl.uniform_1_f64(subsurface_amount_location.as_ref(), self.subsurface_amount);
+			gl.uniform_1_f64(micro_tiling_location.as_ref(), self.micro_tiling);
+			gl.uniform_1_f64(micro_strength_location.as_ref(), self.micro_strength);
 			gl.uniform_1_i32(use_wrinkle_maps_location.as_ref(), i32::from(self.use_wrinkle_maps));
 			gl.uniform_3_f32_slice(wrinkle_channel_weights_location.as_ref(), &self.wrinkle_channel_weights);
 			gl.uniform_1_i32(wrinkle_tile_mask_location.as_ref(), self.wrinkle_tile_mask);
-			gl.uniform_1_f32(wrinkle_normal_strength_location.as_ref(), self.wrinkle_normal_strength);
-			gl.uniform_1_f32(wrinkle_color_strength_location.as_ref(), self.wrinkle_color_strength);
-			gl.uniform_1_f32(eye_iris_radius_location.as_ref(), self.eye_iris_radius);
-			gl.uniform_1_f32(eye_pupil_radius_location.as_ref(), self.eye_pupil_radius);
-			gl.uniform_1_f32(eye_iris_depth_location.as_ref(), self.eye_iris_depth);
-			gl.uniform_1_f32(eye_closure_location.as_ref(), self.eye_closure);
-			gl.uniform_3_f32(hair_specular_shift_location.as_ref(), self.hair_specular_shift[0], self.hair_specular_shift[1], self.hair_specular_shift[2]);
-			gl.uniform_3_f32(hair_specular_power_location.as_ref(), self.hair_specular_power[0], self.hair_specular_power[1], self.hair_specular_power[2]);
-			gl.uniform_3_f32(hair_specular_intensity_location.as_ref(), self.hair_specular_intensity[0], self.hair_specular_intensity[1], self.hair_specular_intensity[2]);
-			gl.uniform_1_f32(hair_root_shade_location.as_ref(), self.hair_root_shade);
+			gl.uniform_1_f64(wrinkle_normal_strength_location.as_ref(), self.wrinkle_normal_strength);
+			gl.uniform_1_f64(wrinkle_color_strength_location.as_ref(), self.wrinkle_color_strength);
+			gl.uniform_1_f64(eye_iris_radius_location.as_ref(), self.eye_iris_radius);
+			gl.uniform_1_f64(eye_pupil_radius_location.as_ref(), self.eye_pupil_radius);
+			gl.uniform_1_f64(eye_iris_depth_location.as_ref(), self.eye_iris_depth);
+			gl.uniform_1_f64(eye_closure_location.as_ref(), self.eye_closure);
+			gl.uniform_3_f64(hair_specular_shift_location.as_ref(), self.hair_specular_shift[0], self.hair_specular_shift[1], self.hair_specular_shift[2]);
+			gl.uniform_3_f64(hair_specular_power_location.as_ref(), self.hair_specular_power[0], self.hair_specular_power[1], self.hair_specular_power[2]);
+			gl.uniform_3_f64(hair_specular_intensity_location.as_ref(), self.hair_specular_intensity[0], self.hair_specular_intensity[1], self.hair_specular_intensity[2]);
+			gl.uniform_1_f64(hair_root_shade_location.as_ref(), self.hair_root_shade);
 		}
 	}
 
@@ -1190,7 +1191,7 @@ impl HumanSkinRenderer {
 		let shadow_sample_count_location = shader_program.get_uniform_location(gl, "shadowSampleCount");
 		unsafe {
 			gl.uniform_1_i32(shadow_map_texture_location.as_ref(), TEXTURE_UNIT_SHADOWMAP as i32);
-			gl.uniform_1_f32(shadow_softness_location.as_ref(), self.shadow_softness);
+			gl.uniform_1_f64(shadow_softness_location.as_ref(), self.shadow_softness);
 			gl.uniform_1_i32(shadow_sample_count_location.as_ref(), self.shadow_sample_count);
 		}
 		match (self.shadow_map_texture, &self.light_view_projection_elements) {
@@ -1199,8 +1200,8 @@ impl HumanSkinRenderer {
 				let shadow_texel_size_location = shader_program.get_uniform_location(gl, "shadowTexelSize");
 				unsafe {
 					gl.uniform_matrix_4_f32_slice(light_view_projection_location.as_ref(), false, light_view_projection_elements);
-					gl.uniform_1_f32(shadow_texel_size_location.as_ref(), self.shadow_texel_size);
-					gl.uniform_1_f32(shadow_strength_location.as_ref(), self.shadow_strength);
+					gl.uniform_1_f64(shadow_texel_size_location.as_ref(), self.shadow_texel_size);
+					gl.uniform_1_f64(shadow_strength_location.as_ref(), self.shadow_strength);
 					gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
 					gl.bind_texture(glow::TEXTURE_2D, Some(shadow_map_texture));
 					gl.active_texture(glow::TEXTURE0);
@@ -1208,7 +1209,7 @@ impl HumanSkinRenderer {
 			}
 			_ => {
 				unsafe {
-					gl.uniform_1_f32(shadow_strength_location.as_ref(), 0.0);
+					gl.uniform_1_f64(shadow_strength_location.as_ref(), 0.0);
 					gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
 					gl.bind_texture(glow::TEXTURE_2D, Some(self.skinned_model_renderer.get_empty_shadow_texture()));
 					gl.active_texture(glow::TEXTURE0);
@@ -1225,7 +1226,7 @@ impl HumanSkinRenderer {
 	/// - `light_view_projection_elements`: 광원 뷰 투영 행렬 원소. (None 이면 그림자를 받지 않는다)
 	/// - `texel_size`: 섀도우 텍셀 크기. (1 / 섀도우 맵 해상도)
 	//==============================================================================
-	pub fn set_shadow_map(&mut self, shadow_map_texture: Option<GlTexture>, light_view_projection_elements: Option<&[f32; 16]>, texel_size: f32) {
+	pub fn set_shadow_map(&mut self, shadow_map_texture: Option<GlTexture>, light_view_projection_elements: Option<&[f32; 16]>, texel_size: f64) {
 		self.skinned_model_renderer.set_shadow_map(shadow_map_texture, light_view_projection_elements, texel_size);
 		self.shadow_map_texture = shadow_map_texture;
 		self.light_view_projection_elements = light_view_projection_elements.copied();
@@ -1238,7 +1239,7 @@ impl HumanSkinRenderer {
 	/// # 인자
 	/// - `shadow_strength`: 그림자 강도. (0 이면 받지 않고 1 이면 다 받는다, 기본 0)
 	//==============================================================================
-	pub fn set_shadow_strength(&mut self, shadow_strength: f32) {
+	pub fn set_shadow_strength(&mut self, shadow_strength: f64) {
 		self.skinned_model_renderer.set_shadow_strength(shadow_strength);
 		self.shadow_strength = shadow_strength;
 	}
@@ -1249,7 +1250,7 @@ impl HumanSkinRenderer {
 	/// # 인자
 	/// - `shadow_softness`: 포아송 표본을 흩는 반경. (섀도우 텍셀 단위, 기본 2.5)
 	//==============================================================================
-	pub fn set_shadow_softness(&mut self, shadow_softness: f32) {
+	pub fn set_shadow_softness(&mut self, shadow_softness: f64) {
 		self.shadow_softness = shadow_softness;
 	}
 
@@ -1276,12 +1277,12 @@ impl HumanSkinRenderer {
 	/// ```rust,no_run
 	/// use vanilla::HumanSkinRenderer;
 	///
-	/// fn update_hair(human_skin_renderer: &mut HumanSkinRenderer, elapsed_seconds: f32) {
+	/// fn update_hair(human_skin_renderer: &mut HumanSkinRenderer, elapsed_seconds: f64) {
 	/// 	human_skin_renderer.set_hair_sway(0.003, elapsed_seconds, 1.6);
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn set_hair_sway(&mut self, amplitude: f32, time: f32, frequency: f32) {
+	pub fn set_hair_sway(&mut self, amplitude: f64, time: f64, frequency: f64) {
 		self.hair_sway = [amplitude, time, frequency];
 	}
 
@@ -1355,7 +1356,7 @@ impl HumanSkinRenderer {
 	/// ```
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
-	pub fn set_light(&mut self, light_index: usize, direction_x: f32, direction_y: f32, direction_z: f32, red: f32, green: f32, blue: f32, intensity: f32) {
+	pub fn set_light(&mut self, light_index: usize, direction_x: f64, direction_y: f64, direction_z: f64, red: f64, green: f64, blue: f64, intensity: f64) {
 		if light_index >= 3 {
 			return;
 		}
@@ -1366,12 +1367,12 @@ impl HumanSkinRenderer {
 		else {
 			1.0
 		};
-		self.light_directions[light_index * 3] = direction_x / safe_length;
-		self.light_directions[light_index * 3 + 1] = direction_y / safe_length;
-		self.light_directions[light_index * 3 + 2] = direction_z / safe_length;
-		self.light_colors[light_index * 3] = red * intensity;
-		self.light_colors[light_index * 3 + 1] = green * intensity;
-		self.light_colors[light_index * 3 + 2] = blue * intensity;
+		self.light_directions[light_index * 3] = (direction_x / safe_length) as f32;
+		self.light_directions[light_index * 3 + 1] = (direction_y / safe_length) as f32;
+		self.light_directions[light_index * 3 + 2] = (direction_z / safe_length) as f32;
+		self.light_colors[light_index * 3] = (red * intensity) as f32;
+		self.light_colors[light_index * 3 + 1] = (green * intensity) as f32;
+		self.light_colors[light_index * 3 + 2] = (blue * intensity) as f32;
 	}
 
 	//==============================================================================
@@ -1382,7 +1383,7 @@ impl HumanSkinRenderer {
 	/// - `horizon_color`: 옆을 향한 면의 색. (선형 rgb, 기본 (0.16, 0.15, 0.16))
 	/// - `ground_color`: 아래를 향한 면의 색. (선형 rgb, 기본 (0.05, 0.04, 0.045))
 	//==============================================================================
-	pub fn set_ambient_colors(&mut self, sky_color: [f32; 3], horizon_color: [f32; 3], ground_color: [f32; 3]) {
+	pub fn set_ambient_colors(&mut self, sky_color: [f64; 3], horizon_color: [f64; 3], ground_color: [f64; 3]) {
 		self.ambient_sky_color = sky_color;
 		self.ambient_horizon_color = horizon_color;
 		self.ambient_ground_color = ground_color;
@@ -1394,7 +1395,7 @@ impl HumanSkinRenderer {
 	/// # 인자
 	/// - `normal_strength`: 노멀 맵 xy 배율. (1 = 원본, 기본 1)
 	//==============================================================================
-	pub fn set_normal_strength(&mut self, normal_strength: f32) {
+	pub fn set_normal_strength(&mut self, normal_strength: f64) {
 		self.normal_strength = normal_strength;
 	}
 
@@ -1404,7 +1405,7 @@ impl HumanSkinRenderer {
 	/// # 인자
 	/// - `detail_strength`: 높이 디테일 노멀 강도. (0 이면 없음, 기본 6)
 	//==============================================================================
-	pub fn set_detail_strength(&mut self, detail_strength: f32) {
+	pub fn set_detail_strength(&mut self, detail_strength: f64) {
 		self.detail_strength = detail_strength;
 	}
 
@@ -1414,7 +1415,7 @@ impl HumanSkinRenderer {
 	/// # 인자
 	/// - `detail_texel_size`: 높이 맵 한 텍셀의 UV 크기. (1 / 높이 맵 해상도, 기본 1 / 4096)
 	//==============================================================================
-	pub fn set_detail_texel_size(&mut self, detail_texel_size: f32) {
+	pub fn set_detail_texel_size(&mut self, detail_texel_size: f64) {
 		self.detail_texel_size = detail_texel_size;
 	}
 
@@ -1424,7 +1425,7 @@ impl HumanSkinRenderer {
 	/// # 인자
 	/// - `cavity_strength`: 캐비티 강도. (높이 맵의 오목한 곳을 어둡게, 0 이면 없음, 기본 6)
 	//==============================================================================
-	pub fn set_cavity_strength(&mut self, cavity_strength: f32) {
+	pub fn set_cavity_strength(&mut self, cavity_strength: f64) {
 		self.cavity_strength = cavity_strength;
 	}
 
@@ -1435,7 +1436,7 @@ impl HumanSkinRenderer {
 	/// - `minimum_roughness`: 스펙큘러 맵이 1 인 곳의 러프니스. (기본 0.32)
 	/// - `maximum_roughness`: 스펙큘러 맵이 0 인 곳의 러프니스. (기본 0.62)
 	//==============================================================================
-	pub fn set_roughness_range(&mut self, minimum_roughness: f32, maximum_roughness: f32) {
+	pub fn set_roughness_range(&mut self, minimum_roughness: f64, maximum_roughness: f64) {
 		self.roughness_range = [minimum_roughness, maximum_roughness];
 	}
 
@@ -1445,7 +1446,7 @@ impl HumanSkinRenderer {
 	/// # 인자
 	/// - `specular_strength`: 피부 F0 배율. (기본 1)
 	//==============================================================================
-	pub fn set_specular_strength(&mut self, specular_strength: f32) {
+	pub fn set_specular_strength(&mut self, specular_strength: f64) {
 		self.specular_strength = specular_strength;
 	}
 
@@ -1455,7 +1456,7 @@ impl HumanSkinRenderer {
 	/// # 인자
 	/// - `sheen_strength`: 잔털 산란 강도. (비스듬한 가장자리의 밝기, 기본 0.35)
 	//==============================================================================
-	pub fn set_sheen_strength(&mut self, sheen_strength: f32) {
+	pub fn set_sheen_strength(&mut self, sheen_strength: f64) {
 		self.sheen_strength = sheen_strength;
 	}
 
@@ -1465,7 +1466,7 @@ impl HumanSkinRenderer {
 	/// # 인자
 	/// - `subsurface_amount`: SSS 마스크 강도. (머티리얼의 서브서피스 팩터와 곱해 조도 출력 알파로, 기본 1)
 	//==============================================================================
-	pub fn set_subsurface_amount(&mut self, subsurface_amount: f32) {
+	pub fn set_subsurface_amount(&mut self, subsurface_amount: f64) {
 		self.subsurface_amount = subsurface_amount;
 	}
 
@@ -1476,7 +1477,7 @@ impl HumanSkinRenderer {
 	/// - `micro_tiling`: 마이크로 텍스처 UV 반복 횟수. (기본 0)
 	/// - `micro_strength`: 마이크로 노멀과 캐비티 강도. (0 이면 없음, 기본 0)
 	//==============================================================================
-	pub fn set_micro_detail(&mut self, micro_tiling: f32, micro_strength: f32) {
+	pub fn set_micro_detail(&mut self, micro_tiling: f64, micro_strength: f64) {
 		self.micro_tiling = micro_tiling;
 		self.micro_strength = micro_strength;
 	}
@@ -1489,7 +1490,7 @@ impl HumanSkinRenderer {
 	/// - `normal_strength`: 주름 노멀 강도. (기본 1)
 	/// - `color_strength`: 주름 색 강도. (기본 1)
 	//==============================================================================
-	pub fn set_wrinkle_maps(&mut self, use_wrinkle_maps: bool, normal_strength: f32, color_strength: f32) {
+	pub fn set_wrinkle_maps(&mut self, use_wrinkle_maps: bool, normal_strength: f64, color_strength: f64) {
 		self.use_wrinkle_maps = use_wrinkle_maps;
 		self.wrinkle_normal_strength = normal_strength;
 		self.wrinkle_color_strength = color_strength;
@@ -1519,13 +1520,13 @@ impl HumanSkinRenderer {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn set_wrinkle_channel_weight(&mut self, channel_index: usize, weight1: f32, weight2: f32, weight3: f32) {
+	pub fn set_wrinkle_channel_weight(&mut self, channel_index: usize, weight1: f64, weight2: f64, weight3: f64) {
 		if channel_index >= WRINKLE_CHANNEL_COUNT {
 			return;
 		}
-		self.wrinkle_channel_weights[channel_index * 3] = weight1;
-		self.wrinkle_channel_weights[channel_index * 3 + 1] = weight2;
-		self.wrinkle_channel_weights[channel_index * 3 + 2] = weight3;
+		self.wrinkle_channel_weights[channel_index * 3] = weight1 as f32;
+		self.wrinkle_channel_weights[channel_index * 3 + 1] = weight2 as f32;
+		self.wrinkle_channel_weights[channel_index * 3 + 2] = weight3 as f32;
 	}
 
 	//==============================================================================
@@ -1543,7 +1544,7 @@ impl HumanSkinRenderer {
 	/// - `pupil_radius`: 동공 반경. (UV 단위, 기본 0.04)
 	/// - `iris_depth`: 홍채 평면 깊이. (각막 굴절 시차의 크기, 기본 0.05)
 	//==============================================================================
-	pub fn set_eye_parameters(&mut self, iris_radius: f32, pupil_radius: f32, iris_depth: f32) {
+	pub fn set_eye_parameters(&mut self, iris_radius: f64, pupil_radius: f64, iris_depth: f64) {
 		self.eye_iris_radius = iris_radius;
 		self.eye_pupil_radius = pupil_radius;
 		self.eye_iris_depth = iris_depth;
@@ -1555,7 +1556,7 @@ impl HumanSkinRenderer {
 	/// # 인자
 	/// - `eye_closure`: 감김 정도. (0 = 뜬 눈, 1 = 감은 눈, 0 ~ 1 로 자른다)
 	//==============================================================================
-	pub fn set_eye_closure(&mut self, eye_closure: f32) {
+	pub fn set_eye_closure(&mut self, eye_closure: f64) {
 		self.eye_closure = eye_closure.clamp(0.0, 1.0);
 	}
 
@@ -1569,7 +1570,7 @@ impl HumanSkinRenderer {
 	/// - `specular_intensity`: 1차, 2차 로브 강도와 투과 강도. (기본 `[0.35, 0.5, 0.25]`)
 	/// - `root_shade`: 뿌리 차폐. (0 이면 없음, 기본 0.45)
 	//==============================================================================
-	pub fn set_hair_parameters(&mut self, specular_shift: [f32; 2], specular_power: [f32; 2], specular_intensity: [f32; 3], root_shade: f32) {
+	pub fn set_hair_parameters(&mut self, specular_shift: [f64; 2], specular_power: [f64; 2], specular_intensity: [f64; 3], root_shade: f64) {
 		self.hair_specular_shift = [specular_shift[0], specular_shift[1], 0.0];
 		self.hair_specular_power = [specular_power[0], specular_power[1], 0.0];
 		self.hair_specular_intensity = specular_intensity;

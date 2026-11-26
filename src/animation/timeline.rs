@@ -22,7 +22,7 @@
 //!   - External 대상에는 원본처럼 evaluate 가 그 자리에서 set_timeline_property 를 부른다. (씬은 대상을 `Rc<RefCell>` 로 나눠 쥔다)
 //!     넘겨받는 쪽은 TimelinePropertyTarget 트레이트를 구현한다. ScreenEffect 는 이 파일에서 구현했다.
 //!     마지막 evaluate 가 External 대상에 건 값은 get_external_properties 로 읽을 수 있다. (편집기와 시험용)
-//!   - 값은 원본의 숫자 / 문자열 / 참거짓을 TimelineValue 열거형으로 든다. 숫자는 f32 다.
+//!   - 값은 원본의 숫자 / 문자열 / 참거짓을 TimelineValue 열거형으로 든다. 숫자는 f64 다.
 //!   - 핸들러는 원본처럼 마지막 인자로 타임라인 자신(&mut Timeline)을 받고, 노드에 거는 함수에 넘길 NodeTree 를 그 뒤에 같이 받는다.
 //!     부르는 동안 핸들러를 칸에서 꺼내 두므로 핸들러 안에서 pause, seek, set_*_handler 를 부를 수 있다. (새로 건 핸들러가 이긴다)
 //!   - 글 속성(text, number, fontSize, visibleCharacters, color)은 원본 getComponent(Text) 가 Text 를 상속한 RichText 도 찾듯 RichText 노드에도 건다.
@@ -88,7 +88,7 @@ pub const TIMELINE_EASING_NAMES: [&str; 33] = [
 ];
 
 /// 이징 함수. (진행률 → 이징 값)
-type EasingFunction = fn(f32) -> f32;
+type EasingFunction = fn(f64) -> f64;
 
 /// 이름 → Tween 이징 함수. (원본 `Tween.easing_function[종류][방향]`)
 const EASING_FUNCTION_TABLE: [(&str, EasingFunction); 30] = [
@@ -125,19 +125,19 @@ const EASING_FUNCTION_TABLE: [(&str, EasingFunction); 30] = [
 ];
 
 /// "bezier" 키에 곡선이 없을 때 쓰는 제어점. (CSS ease-in-out)
-const DEFAULT_BEZIER_CURVE: [f32; 4] = [0.42, 0.0, 0.58, 1.0];
+const DEFAULT_BEZIER_CURVE: [f64; 4] = [0.42, 0.0, 0.58, 1.0];
 
 /// 파티클 씨앗. (수집 차례로 서로 다른 씨앗을 준다)
 const PARTICLE_RANDOM_SEED_BASE: u32 = 0x9E3779B1;
 const PARTICLE_RANDOM_SEED_STEP: u32 = 7919;
 
 /// emit 이벤트에 개수가 없을 때 내는 수.
-const DEFAULT_EMIT_COUNT: f32 = 30.0;
+const DEFAULT_EMIT_COUNT: f64 = 30.0;
 
 //==============================================================================
 /// 3차 베지어 이징 값. (CSS cubic-bezier 와 같은 제어점, x 는 0 ~ 1 로 자른다. 뉴턴법 8 번)
 //==============================================================================
-fn evaluate_bezier_easing(x1: f32, y1: f32, x2: f32, y2: f32, progress: f32) -> f32 {
+fn evaluate_bezier_easing(x1: f64, y1: f64, x2: f64, y2: f64, progress: f64) -> f64 {
 	if progress <= 0.0 {
 		return 0.0;
 	}
@@ -146,11 +146,11 @@ fn evaluate_bezier_easing(x1: f32, y1: f32, x2: f32, y2: f32, progress: f32) -> 
 	}
 	let clamped_x1 = x1.clamp(0.0, 1.0);
 	let clamped_x2 = x2.clamp(0.0, 1.0);
-	let sample_curve = |t: f32, point1: f32, point2: f32| {
+	let sample_curve = |t: f64, point1: f64, point2: f64| {
 		let one_minus = 1.0 - t;
 		3.0 * one_minus * one_minus * t * point1 + 3.0 * one_minus * t * t * point2 + t * t * t
 	};
-	let sample_derivative = |t: f32, point1: f32, point2: f32| {
+	let sample_derivative = |t: f64, point1: f64, point2: f64| {
 		let one_minus = 1.0 - t;
 		3.0 * one_minus * one_minus * point1 + 6.0 * one_minus * t * (point2 - point1) + 3.0 * t * t * (1.0 - point2)
 	};
@@ -194,14 +194,14 @@ fn evaluate_bezier_easing(x1: f32, y1: f32, x2: f32, y2: f32, progress: f32) -> 
 /// assert!(ease_in_out(0.1) < 0.1);
 /// ```
 //==============================================================================
-pub fn create_bezier_easing(x1: f32, y1: f32, x2: f32, y2: f32) -> impl Fn(f32) -> f32 + Clone {
-	move |progress: f32| evaluate_bezier_easing(x1, y1, x2, y2, progress)
+pub fn create_bezier_easing(x1: f64, y1: f64, x2: f64, y2: f64) -> impl Fn(f64) -> f64 + Clone {
+	move |progress: f64| evaluate_bezier_easing(x1, y1, x2, y2, progress)
 }
 
 //==============================================================================
 /// 계단 이징. (구간 내내 0, 다음 키에서 바뀐다)
 //==============================================================================
-fn step_easing(_progress: f32) -> f32 {
+fn step_easing(_progress: f64) -> f64 {
 	0.0
 }
 
@@ -213,7 +213,7 @@ pub enum TimelineEasing {
 	/// Tween 이징 함수, linear, step.
 	Function(EasingFunction),
 	/// 3차 베지어 (x1, y1, x2, y2).
-	Bezier(f32, f32, f32, f32),
+	Bezier(f64, f64, f64, f64),
 }
 
 impl TimelineEasing {
@@ -226,7 +226,7 @@ impl TimelineEasing {
 	/// # 돌려줌
 	/// 이징 값. (보통 0 ~ 1, elastic, back, 베지어 y 처럼 넘치는 곡선은 밖으로 나간다. step 은 늘 0)
 	//==============================================================================
-	pub fn evaluate(&self, progress: f32) -> f32 {
+	pub fn evaluate(&self, progress: f64) -> f64 {
 		match self {
 			TimelineEasing::Function(easing) => {
 				easing(progress)
@@ -257,13 +257,13 @@ impl TimelineEasing {
 /// assert_eq!(quadratic_in.evaluate(0.5), 0.25);
 /// let step = resolve_timeline_easing("step", None);
 /// assert_eq!(step.evaluate(0.9), 0.0);
-/// let curve: [f32; 4] = [0.68, -0.55, 0.265, 1.55];
+/// let curve: [f64; 4] = [0.68, -0.55, 0.265, 1.55];
 /// let overshoot = resolve_timeline_easing("bezier", Some(&curve));
 /// assert!(overshoot.evaluate(0.3) < 0.0);
 /// assert_eq!(resolve_timeline_easing("unknown", None).evaluate(0.3), 0.3);
 /// ```
 //==============================================================================
-pub fn resolve_timeline_easing(easing_name: &str, curve: Option<&[f32]>) -> TimelineEasing {
+pub fn resolve_timeline_easing(easing_name: &str, curve: Option<&[f64]>) -> TimelineEasing {
 	if easing_name.is_empty() || easing_name == "linear" {
 		return TimelineEasing::Function(easing_function::linear);
 	}
@@ -294,7 +294,7 @@ pub fn resolve_timeline_easing(easing_name: &str, curve: Option<&[f32]>) -> Time
 //==============================================================================
 /// 원본 parseInt(글, 16) 흉내. (앞 공백, 부호, 0x 를 건너뛰고 16 진 숫자가 이어지는 데까지. 숫자가 없으면 None = NaN)
 //==============================================================================
-fn parse_leading_hexadecimal(text: &str) -> Option<f32> {
+fn parse_leading_hexadecimal(text: &str) -> Option<f64> {
 	let trimmed_text = text.trim_start();
 	let (sign, unsigned_text) = if let Some(rest) = trimmed_text.strip_prefix('-') {
 		(-1.0, rest)
@@ -306,12 +306,12 @@ fn parse_leading_hexadecimal(text: &str) -> Option<f32> {
 		(1.0, trimmed_text)
 	};
 	let digit_text = unsigned_text.strip_prefix("0x").or_else(|| unsigned_text.strip_prefix("0X")).unwrap_or(unsigned_text);
-	let mut value: f32 = 0.0;
+	let mut value: f64 = 0.0;
 	let mut digit_count = 0;
 	for character in digit_text.chars() {
 		match character.to_digit(16) {
 			Some(digit) => {
-				value = value * 16.0 + digit as f32;
+				value = value * 16.0 + digit as f64;
 				digit_count += 1;
 			}
 			None => {
@@ -344,7 +344,7 @@ fn parse_leading_hexadecimal(text: &str) -> Option<f32> {
 /// assert_eq!(parse_timeline_color("red"), [1.0, 1.0, 1.0, 1.0]);
 /// ```
 //==============================================================================
-pub fn parse_timeline_color(hex_text: &str) -> [f32; 4] {
+pub fn parse_timeline_color(hex_text: &str) -> [f64; 4] {
 	let characters: Vec<char> = match hex_text.strip_prefix('#') {
 		Some(rest) => {
 			rest.chars().collect()
@@ -353,7 +353,7 @@ pub fn parse_timeline_color(hex_text: &str) -> [f32; 4] {
 			"ffffff".chars().collect()
 		}
 	};
-	let read_channel = |start_index: usize| -> Option<f32> {
+	let read_channel = |start_index: usize| -> Option<f64> {
 		let end_index = (start_index + 2).min(characters.len());
 		if start_index >= end_index {
 			return None;
@@ -391,12 +391,12 @@ pub fn parse_timeline_color(hex_text: &str) -> [f32; 4] {
 /// assert_eq!(compose_timeline_color(&[0.2, 0.4, 0.6]), "#336699ff");
 /// ```
 //==============================================================================
-pub fn compose_timeline_color(channels: &[f32]) -> String {
-	let to_byte = |value: f32| -> u32 {
+pub fn compose_timeline_color(channels: &[f64]) -> String {
+	let to_byte = |value: f64| -> u32 {
 		let clamped_value = value.clamp(0.0, 1.0);
 		(clamped_value * 255.0 + 0.5).floor() as u32
 	};
-	let read_channel = |channel_index: usize, default_value: f32| channels.get(channel_index).copied().unwrap_or(default_value);
+	let read_channel = |channel_index: usize, default_value: f64| channels.get(channel_index).copied().unwrap_or(default_value);
 	format!("#{:02x}{:02x}{:02x}{:02x}", to_byte(read_channel(0, 0.0)), to_byte(read_channel(1, 0.0)), to_byte(read_channel(2, 0.0)), to_byte(read_channel(3, 1.0)))
 }
 
@@ -411,14 +411,14 @@ fn create_color_from_text(hex_text: &str) -> Color {
 //==============================================================================
 /// 원본 Math.round. (절반은 위로)
 //==============================================================================
-fn round_half_up(value: f32) -> f32 {
+fn round_half_up(value: f64) -> f64 {
 	(value + 0.5).floor()
 }
 
 //==============================================================================
 /// 숫자 → 글. (원본 String(숫자) 처럼 정수는 소수점 없이, -0 은 0)
 //==============================================================================
-fn format_number(value: f32) -> String {
+fn format_number(value: f64) -> String {
 	if value == 0.0 {
 		return String::from("0");
 	}
@@ -434,21 +434,21 @@ fn format_number(value: f32) -> String {
 //==============================================================================
 /// 원본 Number(글) 흉내. (앞뒤 공백을 떼고, 빈 글은 0, 못 읽으면 NaN)
 //==============================================================================
-fn parse_number_text(text: &str) -> f32 {
+fn parse_number_text(text: &str) -> f64 {
 	let trimmed_text = text.trim();
 	if trimmed_text.is_empty() {
 		return 0.0;
 	}
-	trimmed_text.parse::<f32>().unwrap_or(f32::NAN)
+	trimmed_text.parse::<f64>().unwrap_or(f64::NAN)
 }
 
 //==============================================================================
 /// JSON 값 → 숫자. (원본 Number(값). null 은 0, 없는 값과 객체는 NaN)
 //==============================================================================
-fn read_json_number(value: Option<&Value>) -> f32 {
+fn read_json_number(value: Option<&Value>) -> f64 {
 	match value {
 		Some(Value::Number(number)) => {
-			number.as_f64().unwrap_or(f64::NAN) as f32
+			number.as_f64().unwrap_or(f64::NAN)
 		}
 		Some(Value::String(text)) => {
 			parse_number_text(text)
@@ -465,7 +465,7 @@ fn read_json_number(value: Option<&Value>) -> f32 {
 			0.0
 		}
 		_ => {
-			f32::NAN
+			f64::NAN
 		}
 	}
 }
@@ -478,7 +478,7 @@ pub enum TimelineValue {
 	/// 값 없음. (원본 null)
 	None,
 	/// 숫자.
-	Number(f32),
+	Number(f64),
 	/// 글. (색 "#rrggbbaa", 이벤트 이름도 이것)
 	String(String),
 	/// 참거짓.
@@ -493,7 +493,7 @@ impl TimelineValue {
 	/// - `value`: 서술 키의 value 칸.
 	///
 	/// # 돌려줌
-	/// 숫자는 Number(f32), 글은 String, 참거짓은 Boolean, null 과 배열, 객체는 None.
+	/// 숫자는 Number(f64), 글은 String, 참거짓은 Boolean, null 과 배열, 객체는 None.
 	///
 	/// # 예제
 	/// JSON 값을 타임라인 값으로
@@ -509,7 +509,7 @@ impl TimelineValue {
 	pub fn from_json(value: &Value) -> TimelineValue {
 		match value {
 			Value::Number(number) => {
-				TimelineValue::Number(number.as_f64().unwrap_or(0.0) as f32)
+				TimelineValue::Number(number.as_f64().unwrap_or(0.0))
 			}
 			Value::String(text) => {
 				TimelineValue::String(text.clone())
@@ -563,7 +563,7 @@ impl TimelineValue {
 	/// assert!(TimelineValue::String(String::from("abc")).as_number().is_nan());
 	/// ```
 	//==============================================================================
-	pub fn as_number(&self) -> f32 {
+	pub fn as_number(&self) -> f64 {
 		match self {
 			TimelineValue::None => {
 				0.0
@@ -934,17 +934,17 @@ fn apply_sprite_frame_with_grid(node: &mut WorldNode, grid_columns: usize, grid_
 	}
 	let frame_count = (grid_columns * grid_rows) as i64;
 	let wrapped_index = frame_index.rem_euclid(frame_count) as usize;
-	let frame_width = image.get_width() as f32 / grid_columns as f32;
-	let frame_height = image.get_height() as f32 / grid_rows as f32;
+	let frame_width = image.get_width() as f64 / grid_columns as f64;
+	let frame_height = image.get_height() as f64 / grid_rows as f64;
 	let column = wrapped_index % grid_columns;
 	let row = wrapped_index / grid_columns;
-	shader_sprite.get_sprite_mut().set_image_rect(Rect::create(column as f32 * frame_width, row as f32 * frame_height, frame_width, frame_height));
+	shader_sprite.get_sprite_mut().set_image_rect(Rect::create(column as f64 * frame_width, row as f64 * frame_height, frame_width, frame_height));
 }
 
 //==============================================================================
 /// 값 보간. (종류별. number 는 선형, color 는 채널별, 그 밖에는 앞 값)
 //==============================================================================
-fn interpolate_value(kind: TimelinePropertyKind, from_value: &TimelineValue, to_value: &TimelineValue, eased_progress: f32) -> TimelineValue {
+fn interpolate_value(kind: TimelinePropertyKind, from_value: &TimelineValue, to_value: &TimelineValue, eased_progress: f64) -> TimelineValue {
 	match kind {
 		TimelinePropertyKind::Number => {
 			let from_number = from_value.as_number();
@@ -954,7 +954,7 @@ fn interpolate_value(kind: TimelinePropertyKind, from_value: &TimelineValue, to_
 		TimelinePropertyKind::Color => {
 			let from_channels = parse_timeline_color(&color_text_of(from_value));
 			let to_channels = parse_timeline_color(&color_text_of(to_value));
-			let mixed_channels: Vec<f32> = from_channels.iter().zip(to_channels.iter()).map(|(from_channel, to_channel)| from_channel + (to_channel - from_channel) * eased_progress).collect();
+			let mixed_channels: Vec<f64> = from_channels.iter().zip(to_channels.iter()).map(|(from_channel, to_channel)| from_channel + (to_channel - from_channel) * eased_progress).collect();
 			TimelineValue::String(compose_timeline_color(&mixed_channels))
 		}
 		_ => {
@@ -997,13 +997,13 @@ fn color_text_of(value: &TimelineValue) -> String {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineKey {
 	/// 키 시간. (초)
-	pub time: f32,
+	pub time: f64,
 	/// 키 값.
 	pub value: TimelineValue,
 	/// 이 키에서 다음 키까지 구간의 이징 이름. (빈 글과 모르는 이름은 linear)
 	pub easing: String,
 	/// easing 이 "bezier" 일 때의 제어점 [x1, y1, x2, y2]. (None 이면 ease-in-out)
-	pub curve: Option<Vec<f32>>,
+	pub curve: Option<Vec<f64>>,
 }
 
 impl TimelineKey {
@@ -1017,7 +1017,7 @@ impl TimelineKey {
 	/// # 돌려줌
 	/// 이징 "linear", 제어점 없는 키.
 	//==============================================================================
-	pub fn new(time: f32, value: TimelineValue) -> TimelineKey {
+	pub fn new(time: f64, value: TimelineValue) -> TimelineKey {
 		TimelineKey {
 			time,
 			value,
@@ -1036,11 +1036,11 @@ impl TimelineKey {
 	/// 읽은 키.
 	//==============================================================================
 	pub fn from_json(key_description: &Value) -> TimelineKey {
-		let time = key_description.get("time").and_then(|value| value.as_f64()).unwrap_or(0.0) as f32;
+		let time = key_description.get("time").and_then(|value| value.as_f64()).unwrap_or(0.0);
 		let value = key_description.get("value").map(TimelineValue::from_json).unwrap_or(TimelineValue::None);
 		let easing = key_description.get("easing").and_then(|value| value.as_str()).unwrap_or("").to_string();
 		let curve = key_description.get("curve").and_then(|value| value.as_array()).map(|curve_array| {
-			curve_array.iter().map(|point| point.as_f64().unwrap_or(0.0) as f32).collect()
+			curve_array.iter().map(|point| point.as_f64().unwrap_or(0.0)).collect()
 		});
 		TimelineKey {
 			time,
@@ -1091,7 +1091,7 @@ impl TimelineKey {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineMarker {
 	/// 마커 시간. (초)
-	pub time: f32,
+	pub time: f64,
 	/// 마커 이름.
 	pub name: String,
 }
@@ -1155,7 +1155,7 @@ impl std::fmt::Debug for TimelineTarget {
 /// use vanilla::{NodeTree, Timeline, TimelinePropertyTarget, TimelineTarget, TimelineValue};
 ///
 /// struct Fader {
-/// 	alpha: f32,
+/// 	alpha: f64,
 /// }
 ///
 /// impl TimelinePropertyTarget for Fader {
@@ -1270,43 +1270,43 @@ pub struct TimelineNodeDescription {
 	/// 부모 노드 이름. (None 이면 무대 부모에 붙는다)
 	pub parent: Option<String>,
 	/// 로컬 x 위치. (부모 왼쪽 위 기준, 기본 0)
-	pub x: f32,
+	pub x: f64,
 	/// 로컬 y 위치. (기본 0)
-	pub y: f32,
+	pub y: f64,
 	/// 컨텐츠 너비. (기본 100)
-	pub width: f32,
+	pub width: f64,
 	/// 컨텐츠 높이. (기본 100)
-	pub height: f32,
+	pub height: f64,
 	/// 가로 배율. (JSON "scaleX", 기본 1)
-	pub scale_x: f32,
+	pub scale_x: f64,
 	/// 세로 배율. (JSON "scaleY", 기본 1)
-	pub scale_y: f32,
+	pub scale_y: f64,
 	/// 회전. (도, 기본 0)
-	pub rotation: f32,
+	pub rotation: f64,
 	/// 투명도. (0 ~ 1, 기본 1)
-	pub opacity: f32,
+	pub opacity: f64,
 	/// 피봇 x 비율. (JSON "pivotX", 0 ~ 1, 기본 0.5)
-	pub pivot_x: f32,
+	pub pivot_x: f64,
 	/// 피봇 y 비율. (JSON "pivotY", 0 ~ 1, 기본 0.5)
-	pub pivot_y: f32,
+	pub pivot_y: f64,
 	/// 보이기. (JSON 이 false 일 때만 끈다, 기본 true)
 	pub visible: bool,
 	/// 색 글. (paint 의 칠하기 색, text 의 글자색, sprite 의 덧칠 색. 기본 "#ffffffff")
 	pub color: String,
 	/// paint 귀퉁이 둥근 크기. (JSON "roundSize", 기본 0)
-	pub round_size: f32,
+	pub round_size: f64,
 	/// sprite 이미지 이름. (이미지 해석기에 넘긴다. "data:" 주소면 그 자리에서 푼다, 기본 빈 글)
 	pub image: String,
 	/// sprite 시트 가로 칸 수. (JSON "frameColumns", 1 보다 작으면 1, 기본 1)
-	pub frame_columns: f32,
+	pub frame_columns: f64,
 	/// sprite 시트 세로 칸 수. (JSON "frameRows", 1 보다 작으면 1, 기본 1)
-	pub frame_rows: f32,
+	pub frame_rows: f64,
 	/// sprite 시트 처음 칸 번호. (반올림, 기본 0)
-	pub frame: f32,
+	pub frame: f64,
 	/// sprite 의 ShaderSprite 효과 이름. (ShaderSpriteEffect::from_name, 모르는 이름은 효과 없음, 기본 "none")
 	pub effect: String,
 	/// sprite 효과 진행률. (JSON "effectProgress", 0 ~ 1, 기본 0)
-	pub effect_progress: f32,
+	pub effect_progress: f64,
 	/// sprite 효과 색 글. (JSON "effectColor", 빈 글이면 효과 기본 색, 기본 빈 글)
 	pub effect_color: String,
 	/// sprite 섞기 이름. (JSON "blendMode", 캔버스 합성 이름, 모르는 이름은 Normal, 기본 "source-over")
@@ -1314,7 +1314,7 @@ pub struct TimelineNodeDescription {
 	/// text 글. (기본 "Text")
 	pub text: String,
 	/// text 글자 크기. (JSON "fontSize", 픽셀, 기본 32)
-	pub font_size: f32,
+	pub font_size: f64,
 	/// text 굵게. (JSON 이 true 일 때만, 기본 false)
 	pub bold: bool,
 	/// text 가로 정렬 이름. (JSON "textAlign", "left", "right", "start", "end", 그 밖은 가운데. 기본 "center")
@@ -1324,7 +1324,7 @@ pub struct TimelineNodeDescription {
 	/// sound 소리 주소. (Timeline::load_sounds 가 읽는다, 기본 빈 글)
 	pub audio: String,
 	/// sound 음량. (들고만 있다, 기본 1)
-	pub volume: f32,
+	pub volume: f64,
 }
 
 impl Default for TimelineNodeDescription {
@@ -1381,7 +1381,7 @@ impl TimelineNodeDescription {
 	//==============================================================================
 	pub fn from_json(node_description: &Value) -> TimelineNodeDescription {
 		let defaults = TimelineNodeDescription::default();
-		let read_number = |name: &str, default_value: f32| node_description.get(name).and_then(|value| value.as_f64()).map(|value| value as f32).unwrap_or(default_value);
+		let read_number = |name: &str, default_value: f64| node_description.get(name).and_then(|value| value.as_f64()).map(|value| value).unwrap_or(default_value);
 		let read_text = |name: &str, default_value: &str| node_description.get(name).and_then(|value| value.as_str()).unwrap_or(default_value).to_string();
 		TimelineNodeDescription {
 			name: read_text("name", &defaults.name),
@@ -1543,7 +1543,7 @@ impl Component for TimelineSpriteFrameGrid {
 	//==============================================================================
 	/// 브라우저가 푸는 "data:" 주소 그림 기다리기. (다 풀리면 스프라이트에 걸고 칸을 고른다, 못 풀었으면 그림 없이 둔다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		let (load_handle, frame_index) = match self.pending_image_load.take_if(|(load_handle, _)| load_handle.is_finished()) {
 			Some(pending_image_load) => {
 				pending_image_load
@@ -1607,7 +1607,7 @@ pub struct TimelineSound {
 	audio_player: Option<AudioPlayer>,
 	audio_asset: Option<Rc<AudioAsset>>,
 	audio_source: String,
-	volume: f32,
+	volume: f64,
 }
 
 #[crate::reflect]
@@ -1644,7 +1644,7 @@ impl TimelineSound {
 	/// # 돌려줌
 	/// 서술의 volume. (기본 1, 플레이어에 걸지 않는다)
 	//==============================================================================
-	pub fn get_volume(&self) -> f32 {
+	pub fn get_volume(&self) -> f64 {
 		self.volume
 	}
 
@@ -1903,7 +1903,7 @@ pub type TimelineImageResolver<'a> = &'a dyn Fn(&str) -> Option<Rc<Image>>;
 /// 		self.timeline.play();
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 /// 		self.scene_base.tick(engine, time_delta);
 /// 		self.timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
 /// 	}
@@ -1927,8 +1927,8 @@ pub struct Timeline {
 	event_handler: Option<TimelineEventHandler>,
 	marker_handler: Option<TimelineMarkerHandler>,
 	complete_handler: Option<TimelineCompleteHandler>,
-	time: f32,
-	speed: f32,
+	time: f64,
+	speed: f64,
 	is_playing: bool,
 	is_dirty: bool,
 	/// 타임라인 시간으로 진행하는 파티클이 붙은 노드. (대상 노드에서 모은다)
@@ -2213,7 +2213,7 @@ impl Timeline {
 
 		let mut compiled_markers: Vec<TimelineMarker> = self.get_description_array("/markers").iter().map(|marker| {
 			TimelineMarker {
-				time: marker.get("time").and_then(|value| value.as_f64()).unwrap_or(0.0) as f32,
+				time: marker.get("time").and_then(|value| value.as_f64()).unwrap_or(0.0),
 				name: marker.get("name").and_then(|value| value.as_str()).unwrap_or("").to_string(),
 			}
 		}).collect();
@@ -2289,7 +2289,7 @@ impl Timeline {
 	/// - `node_tree`: 파티클 노드가 든 노드 트리.
 	/// - `time_delta`: 진행할 시간. (초, 0 이하이면 아무것도 하지 않는다)
 	//==============================================================================
-	pub fn simulate_particles(&mut self, node_tree: &mut NodeTree, time_delta: f32) {
+	pub fn simulate_particles(&mut self, node_tree: &mut NodeTree, time_delta: f64) {
 		if time_delta <= 0.0 {
 			return;
 		}
@@ -2308,7 +2308,7 @@ impl Timeline {
 	/// - `node_tree`: 파티클 노드가 든 노드 트리.
 	/// - `time`: 맞출 타임라인 시간. (초)
 	//==============================================================================
-	pub fn resimulate_particles(&mut self, node_tree: &mut NodeTree, time: f32) {
+	pub fn resimulate_particles(&mut self, node_tree: &mut NodeTree, time: f64) {
 		self.compile_if_dirty(node_tree);
 		if self.particle_node_ids.is_empty() {
 			return;
@@ -2325,7 +2325,7 @@ impl Timeline {
 		}
 
 		// 파티클 대상 이벤트 키를 시간순으로 모은다.
-		let mut event_list: Vec<(f32, usize, usize)> = Vec::new();
+		let mut event_list: Vec<(f64, usize, usize)> = Vec::new();
 		for (track_index, compiled_track) in self.compiled_tracks.iter().enumerate() {
 			if compiled_track.property_name != "event" || !compiled_track.is_enabled {
 				continue;
@@ -2349,8 +2349,8 @@ impl Timeline {
 		}
 		event_list.sort_by(|left, right| left.0.partial_cmp(&right.0).unwrap_or(std::cmp::Ordering::Equal));
 
-		let step_seconds = (1.0f32 / 60.0).max(time / 600.0);
-		let mut current_time = 0.0f32;
+		let step_seconds = (1.0f64 / 60.0).max(time / 600.0);
+		let mut current_time = 0.0f64;
 		for (event_time, track_index, key_index) in event_list {
 			self.advance_particles_to(node_tree, &mut current_time, event_time, step_seconds);
 			self.dispatch_event(node_tree, track_index, key_index, true);
@@ -2361,7 +2361,7 @@ impl Timeline {
 	//==============================================================================
 	/// 파티클을 step_seconds 씩 target_time 까지 진행. (재시뮬레이션용)
 	//==============================================================================
-	fn advance_particles_to(&mut self, node_tree: &mut NodeTree, current_time: &mut f32, target_time: f32, step_seconds: f32) {
+	fn advance_particles_to(&mut self, node_tree: &mut NodeTree, current_time: &mut f64, target_time: f64, step_seconds: f64) {
 		while *current_time < target_time - 0.000001 {
 			let step_delta = step_seconds.min(target_time - *current_time);
 			self.simulate_particles(node_tree, step_delta);
@@ -2736,7 +2736,7 @@ impl Timeline {
 	/// 		self.timeline.play();
 	/// 	}
 	///
-	/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 	/// 		self.scene_base.tick(engine, time_delta);
 	/// 		self.timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
 	/// 	}
@@ -2849,7 +2849,7 @@ impl Timeline {
 	/// - `node_tree`: 대상 노드가 든 노드 트리.
 	/// - `time`: 옮길 시간. (초, 0 ~ 길이로 자른다)
 	//==============================================================================
-	pub fn seek(&mut self, node_tree: &mut NodeTree, time: f32) {
+	pub fn seek(&mut self, node_tree: &mut NodeTree, time: f64) {
 		self.time = time.min(self.get_duration()).max(0.0);
 		let current_time = self.time;
 		self.evaluate(node_tree, current_time);
@@ -2864,7 +2864,7 @@ impl Timeline {
 	/// - `node_tree`: 대상 노드가 든 노드 트리. (핸들러에도 넘긴다)
 	/// - `time_delta`: 지난 프레임에서 흐른 시간. (초, 속도를 곱해 흘린다)
 	//==============================================================================
-	pub fn tick(&mut self, node_tree: &mut NodeTree, time_delta: f32) {
+	pub fn tick(&mut self, node_tree: &mut NodeTree, time_delta: f64) {
 		if !self.is_playing {
 			return;
 		}
@@ -2920,9 +2920,9 @@ impl Timeline {
 	/// - `from_time`: 구간 시작. (초, 이 시간의 키는 뺀다. 0 초 키를 넣으려면 음수를 준다)
 	/// - `to_time`: 구간 끝. (초, 이 시간의 키는 넣는다)
 	//==============================================================================
-	pub fn fire_events_between(&mut self, node_tree: &mut NodeTree, from_time: f32, to_time: f32) {
+	pub fn fire_events_between(&mut self, node_tree: &mut NodeTree, from_time: f64, to_time: f64) {
 		self.compile_if_dirty(node_tree);
-		let is_inside = |time: f32| time > from_time && time <= to_time;
+		let is_inside = |time: f64| time > from_time && time <= to_time;
 		let mut event_list: Vec<(usize, usize)> = Vec::new();
 		for (track_index, compiled_track) in self.compiled_tracks.iter().enumerate() {
 			if compiled_track.property_name != "event" || !compiled_track.is_enabled {
@@ -3029,7 +3029,7 @@ impl Timeline {
 	/// - `node_tree`: 대상 노드가 든 노드 트리.
 	/// - `time`: 표본할 시간. (초)
 	//==============================================================================
-	pub fn evaluate(&mut self, node_tree: &mut NodeTree, time: f32) {
+	pub fn evaluate(&mut self, node_tree: &mut NodeTree, time: f64) {
 		self.compile_if_dirty(node_tree);
 		self.external_property_list.clear();
 		for compiled_track in self.compiled_tracks.iter() {
@@ -3085,7 +3085,7 @@ impl Timeline {
 	/// # 돌려줌
 	/// 그 시간의 값. 키가 없으면 Number 는 Number(0), 그 밖은 None.
 	//==============================================================================
-	pub fn sample_keys(sorted_keys: &[TimelineKey], kind: TimelinePropertyKind, time: f32) -> TimelineValue {
+	pub fn sample_keys(sorted_keys: &[TimelineKey], kind: TimelinePropertyKind, time: f64) -> TimelineValue {
 		let key_count = sorted_keys.len();
 		if key_count == 0 {
 			if kind == TimelinePropertyKind::Number {
@@ -3141,7 +3141,7 @@ impl Timeline {
 	/// assert_eq!(Timeline::sample_track(&text_track, 1.0).to_text(), "B");
 	/// ```
 	//==============================================================================
-	pub fn sample_track(track: &Value, time: f32) -> TimelineValue {
+	pub fn sample_track(track: &Value, time: f64) -> TimelineValue {
 		let property_name = track.get("property").and_then(|value| value.as_str()).unwrap_or("");
 		let kind = match find_timeline_property_definition(property_name) {
 			Some(definition) => {
@@ -3162,7 +3162,7 @@ impl Timeline {
 	/// # 돌려줌
 	/// 지금 재생 시간. (초, 0 ~ 길이)
 	//==============================================================================
-	pub fn get_time(&self) -> f32 {
+	pub fn get_time(&self) -> f64 {
 		self.time
 	}
 
@@ -3182,7 +3182,7 @@ impl Timeline {
 	/// # 인자
 	/// - `speed`: 시간 배율. (2 는 두 배 빠르기, 음수면 거꾸로 가며 0 에서 더 가지 않고 이벤트는 나지 않는다)
 	//==============================================================================
-	pub fn set_speed(&mut self, speed: f32) {
+	pub fn set_speed(&mut self, speed: f64) {
 		self.speed = speed;
 	}
 
@@ -3192,7 +3192,7 @@ impl Timeline {
 	/// # 돌려줌
 	/// 시간 배율. (기본 1)
 	//==============================================================================
-	pub fn get_speed(&self) -> f32 {
+	pub fn get_speed(&self) -> f64 {
 		self.speed
 	}
 
@@ -3224,7 +3224,7 @@ impl Timeline {
 	/// # 돌려줌
 	/// 서술의 duration. (초, 글 "4" 처럼 숫자로 읽히는 글도 받는다. 못 읽거나 0 이하면 0)
 	//==============================================================================
-	pub fn get_duration(&self) -> f32 {
+	pub fn get_duration(&self) -> f64 {
 		let duration = read_json_number(self.description.get("duration"));
 		if duration.is_finite() && duration > 0.0 {
 			duration
@@ -3240,7 +3240,7 @@ impl Timeline {
 	/// # 돌려줌
 	/// 서술의 frameRate. (못 읽거나 0 이하면 30, 재생 시간 계산에는 쓰지 않는다)
 	//==============================================================================
-	pub fn get_frame_rate(&self) -> f32 {
+	pub fn get_frame_rate(&self) -> f64 {
 		let frame_rate = read_json_number(self.description.get("frameRate"));
 		if frame_rate.is_finite() && frame_rate > 0.0 {
 			frame_rate
@@ -3349,8 +3349,8 @@ mod tests {
 	//==============================================================================
 	/// 두 수가 오차 안에서 같은지.
 	//==============================================================================
-	fn assert_near(actual: f32, expected: f64, tolerance: f64, label: &str) {
-		assert!(((actual as f64) - expected).abs() <= tolerance, "{}: {} != {}", label, actual, expected);
+	fn assert_near(actual: f64, expected: f64, tolerance: f64, label: &str) {
+		assert!((actual - expected).abs() <= tolerance, "{}: {} != {}", label, actual, expected);
 	}
 
 	//==============================================================================
@@ -3358,7 +3358,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn easing_curves_match_original() {
-		let progress_list = [0.0f32, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0];
+		let progress_list = [0.0f64, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0];
 		let expected_table: [(&str, [f64; 7]); 33] = [
 			("linear", [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0]),
 			("step", [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
@@ -3410,8 +3410,8 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn bezier_easing_matches_original() {
-		let progress_list = [0.0f32, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0];
-		let expected_table: [([f32; 4], [f64; 7]); 4] = [
+		let progress_list = [0.0f64, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0];
+		let expected_table: [([f64; 4], [f64; 7]); 4] = [
 			([0.25, 0.1, 0.25, 1.0], [0.0, 0.09479499730150565, 0.4085105930156005, 0.8024033876954126, 0.9604590729525888, 0.994316477509521, 1.0]),
 			([0.68, -0.55, 0.265, 1.55], [0.0, -0.06629147620026413, -0.0828074555627528, 0.6066814989627444, 1.089166506168796, 1.0623731930901974, 1.0]),
 			([0.42, 0.0, 0.58, 1.0], [0.0, 0.019722447263855636, 0.1291619005687877, 0.5, 0.8708380994312122, 0.9802775527361445, 1.0]),
@@ -3467,7 +3467,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn sample_track_matches_original() {
-		let time_list = [-1.0f32, 0.0, 0.3, 0.5, 0.99, 1.0, 1.4, 2.0, 2.5, 5.0];
+		let time_list = [-1.0f64, 0.0, 0.3, 0.5, 0.99, 1.0, 1.4, 2.0, 2.5, 5.0];
 		let number_tracks: [(Value, [f64; 10]); 3] = [
 			(json!({ "property": "x", "keys": [{ "time": 1, "value": 50, "easing": "cubic.out" }, { "time": 0, "value": 0, "easing": "quadratic.in" }, { "time": 2, "value": 100 }] }),
 				[0.0, 0.0, 4.5, 12.5, 49.004999999999995, 50.0, 89.19999999999999, 100.0, 100.0, 100.0]),
@@ -3484,8 +3484,8 @@ mod tests {
 			}
 		}
 		let color_track = json!({ "property": "color", "keys": [{ "time": 0, "value": "#ff000080", "easing": "sinusoidal.inOut" }, { "time": 2, "value": "#0000ffff" }] });
-		// 1 초는 두 엔진 sin, cos 가 같은 비트(크롬 Math.cos)라 빨강이 80 이다. 원본은 감속 비율을 f64(0.49999999999999994)로 셈해 파랑이 7f(#80007fc0), 러스트 감속 함수는 f32(0.5)라 80 이다. (f32 셈 차이, 전수 조사 25)
-		let expected_colors = ["#ff000080", "#ff000080", "#f1000e87", "#da002593", "#82007dbf", "#800080c0", "#3500cae5", "#0000ffff", "#0000ffff", "#0000ffff"];
+		// 1 초는 두 엔진 sin, cos 가 같은 비트(크롬 Math.cos)라 빨강이 80 이다. 감속 비율을 두 엔진 다 f64(0.49999999999999994)로 셈해 파랑이 7f 다. (원본 #80007fc0)
+		let expected_colors = ["#ff000080", "#ff000080", "#f1000e87", "#da002593", "#82007dbf", "#80007fc0", "#3500cae5", "#0000ffff", "#0000ffff", "#0000ffff"];
 		for (time, expected_color) in time_list.iter().zip(expected_colors.iter()) {
 			assert_eq!(Timeline::sample_track(&color_track, *time), TimelineValue::String(expected_color.to_string()), "color at {}", time);
 		}
@@ -3560,7 +3560,7 @@ mod tests {
 		})));
 
 		timeline.play();
-		for time_delta in [0.25f32, 0.25, 0.6, 0.6, 0.6, 0.6] {
+		for time_delta in [0.25f64, 0.25, 0.6, 0.6, 0.6, 0.6] {
 			timeline.tick(&mut node_tree, time_delta);
 			log.borrow_mut().push(format!("time {:.4}", timeline.get_time()));
 		}

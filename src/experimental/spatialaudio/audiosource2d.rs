@@ -13,7 +13,7 @@ use crate::core::node::nodetree::ComponentContext;
 
 //==============================================================================
 /// 화면 자리를 WebAudio 자리로. ((x / pixels_per_unit, -y / pixels_per_unit, depth))
-/// - 원본처럼 f64 로 나눈 뒤 f32 로 반올림한다. (원본 fround(x / pixelsPerUnit), 배율과 깊이도 원본 number 처럼 f64)
+/// - 원본처럼 f64 로 나눈 뒤 f32 로 반올림한다. (원본 fround(x / pixelsPerUnit), WebAudio 의 float 칸, 배율과 깊이는 원본 number 처럼 f64)
 ///
 /// # 인자
 /// - `view_position`: 화면(뷰) 좌표의 자리. (아래가 +Y, 픽셀)
@@ -33,7 +33,8 @@ use crate::core::node::nodetree::ComponentContext;
 /// ```
 //==============================================================================
 pub fn convert_view_position_to_audio_position(view_position: Vector2, pixels_per_unit: f64, depth: f64) -> Vector3 {
-	Vector3::create((f64::from(view_position.x) / pixels_per_unit) as f32, (-f64::from(view_position.y) / pixels_per_unit) as f32, depth as f32)
+	// 원본처럼 f64 로 나눈 뒤 WebAudio 의 float 칸으로 줄인다. (원본 fround)
+	Vector3::create((view_position.x / pixels_per_unit) as f32 as f64, (-view_position.y / pixels_per_unit) as f32 as f64, depth as f32 as f64)
 }
 
 //==============================================================================
@@ -191,7 +192,7 @@ impl Component for AudioSource2D {
 	/// - `context`: 자기 노드와 트리, 엔진.
 	/// - `_time_delta`: 지난 프레임부터의 시간. (초, 쓰지 않는다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		let pixels_per_unit = self.pixels_per_unit;
 		let Some(player) = self.player.as_mut() else {
 			return;
@@ -251,7 +252,7 @@ mod tests {
 	#[test]
 	fn view_position_divides_in_f64() {
 		let position = convert_view_position_to_audio_position(Vector2::create(7.0, 7.0), 0.3, 1.0 / 3.0);
-		assert_eq!(position, Vector3::create(23.333334, -23.333334, 0.33333334));
+		assert_eq!(position, Vector3::create(23.333334f32 as f64, -23.333334f32 as f64, (1.0f64 / 3.0) as f32 as f64));
 	}
 
 	//==============================================================================

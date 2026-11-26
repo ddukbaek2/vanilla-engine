@@ -14,7 +14,7 @@
 //! - 손짓 중에는 엔진이 넘기는 누름과 뗌을 놀이에 쓰지 않도록 is_gesture_active 로 알린다.
 //! - 모인 양(밀기, 돌리기, 기울이기, 키우기)은 매 프레임 take 로 꺼내 간다. 밀기는 뷰 단위, 돌리기와 기울이기는 라디안, 키우기는 곱할 비다.
 //==============================================================================
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 use web_time::Instant;
 
 use crate::base::vector2::Vector2;
@@ -46,7 +46,7 @@ use crate::platform;
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 /// 		self.scene_base.tick(engine, time_delta);
 /// 		self.camera_gestures.update(engine.get_input_manager(), engine.get_view_manager());
 /// 		let pan = self.camera_gestures.take_pan();
@@ -63,9 +63,9 @@ use crate::platform;
 /// ```
 //==============================================================================
 pub struct CameraGestures {
-	twist_start_radians: f32,
-	tilt_per_half_height_radians: f32,
-	right_click_distance: f32,
+	twist_start_radians: f64,
+	tilt_per_half_height_radians: f64,
+	right_click_distance: f64,
 	is_right_button_down: bool,
 	is_middle_button_down: bool,
 	last_mouse_position: Vector2,
@@ -74,14 +74,14 @@ pub struct CameraGestures {
 	is_right_clicked: bool,
 	is_multi_touch: bool,
 	last_touch_center: Vector2,
-	last_touch_angle: f32,
-	last_touch_distance: f32,
-	twist_sum: f32,
+	last_touch_angle: f64,
+	last_touch_distance: f64,
+	twist_sum: f64,
 	is_twisting: bool,
 	pan: Vector2,
-	rotation: f32,
-	tilt: f32,
-	zoom: f32,
+	rotation: f64,
+	tilt: f64,
+	zoom: f64,
 	zoom_anchor: Option<Vector2>,
 	is_rotation_released: bool,
 	/// 지난 프레임의 손가락 수. (바뀌면 두 손가락의 기준을 다시 잡는다, 원본 touchstart / touchend)
@@ -93,7 +93,7 @@ pub struct CameraGestures {
 	/// 마지막 손가락 사건의 때. (없으면 흉내 낸 마우스 시간 밖)
 	last_touch_instant: Option<Instant>,
 	/// 손가락을 뗀 뒤 흉내 낸 마우스 사건을 무시하는 시간. (밀리초)
-	compatibility_mouse_milliseconds: f32,
+	compatibility_mouse_milliseconds: f64,
 	/// 흉내 낸 마우스 시간 안에 눌러 뗄 때까지 무시하는 오른쪽, 가운데 단추인지.
 	is_right_press_ignored: bool,
 	is_middle_press_ignored: bool,
@@ -167,7 +167,7 @@ impl CameraGestures {
 	///
 	/// input_manager.set_canvas_native_input_position(Vector2::create(300.0, 300.0));
 	/// camera_gestures.update(&input_manager, &view_manager);
-	/// assert!((camera_gestures.take_rotation() - std::f32::consts::FRAC_PI_2).abs() < 0.0001);
+	/// assert!((camera_gestures.take_rotation() - std::f64::consts::FRAC_PI_2).abs() < 0.0001);
 	/// assert_eq!(camera_gestures.read_mouse_drag_cursor(), "grabbing");
 	/// ```
 	//==============================================================================
@@ -295,7 +295,7 @@ impl CameraGestures {
 	fn is_compatibility_mouse(&self) -> bool {
 		match self.last_touch_instant {
 			Some(last_touch_instant) => {
-				(last_touch_instant.elapsed().as_secs_f64() * 1000.0) < self.compatibility_mouse_milliseconds as f64
+				(last_touch_instant.elapsed().as_secs_f64() * 1000.0) < self.compatibility_mouse_milliseconds
 			}
 			None => {
 				false
@@ -342,7 +342,7 @@ impl CameraGestures {
 	/// # 돌려줌
 	/// 1 / 기준 해상도 배율. 배율이 0 이하이면 1.
 	//==============================================================================
-	pub fn read_units_per_canvas_pixel(view_manager: &ViewManager) -> f32 {
+	pub fn read_units_per_canvas_pixel(view_manager: &ViewManager) -> f64 {
 		let target_resolution_scale = view_manager.get_target_resolution_scale();
 		if target_resolution_scale <= 0.0 {
 			return 1.0;
@@ -394,7 +394,7 @@ impl CameraGestures {
 	/// # 돌려줌
 	/// 지난번 꺼낸 뒤 모인 돌리기. (라디안)
 	//==============================================================================
-	pub fn take_rotation(&mut self) -> f32 {
+	pub fn take_rotation(&mut self) -> f64 {
 		let rotation = self.rotation;
 		self.rotation = 0.0;
 		rotation
@@ -406,7 +406,7 @@ impl CameraGestures {
 	/// # 돌려줌
 	/// 지난번 꺼낸 뒤 모인 기울이기. (라디안, 위로 끌면 +)
 	//==============================================================================
-	pub fn take_tilt(&mut self) -> f32 {
+	pub fn take_tilt(&mut self) -> f64 {
 		let tilt = self.tilt;
 		self.tilt = 0.0;
 		tilt
@@ -418,7 +418,7 @@ impl CameraGestures {
 	/// # 돌려줌
 	/// 지난번 꺼낸 뒤 모인 키우기 비. (1 보다 크면 벌린 것, 손짓이 없었으면 1)
 	//==============================================================================
-	pub fn take_zoom(&mut self) -> f32 {
+	pub fn take_zoom(&mut self) -> f64 {
 		let zoom = self.zoom;
 		self.zoom = 1.0;
 		zoom
@@ -467,7 +467,7 @@ impl CameraGestures {
 	/// - `right_click_distance`: 누른 자리에서 이만큼 안에서 떼면 오른쪽 클릭이다. (캔버스 논리 픽셀, 처음 8)
 	/// - `compatibility_mouse_milliseconds`: 손가락 사건 뒤 흉내 낸 마우스를 무시하는 시간. (밀리초, 처음 800, 0 이면 무시하지 않는다)
 	//==============================================================================
-	pub fn set_thresholds(&mut self, twist_start_radians: f32, tilt_per_half_height_radians: f32, right_click_distance: f32, compatibility_mouse_milliseconds: f32) {
+	pub fn set_thresholds(&mut self, twist_start_radians: f64, tilt_per_half_height_radians: f64, right_click_distance: f64, compatibility_mouse_milliseconds: f64) {
 		self.twist_start_radians = twist_start_radians;
 		self.tilt_per_half_height_radians = tilt_per_half_height_radians;
 		self.right_click_distance = right_click_distance;

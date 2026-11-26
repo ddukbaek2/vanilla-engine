@@ -223,34 +223,34 @@ mod engine_dialog {
 	const MESSAGE_MAXIMUM_ROW_COUNT: usize = 24;
 	const MESSAGE_MAXIMUM_COLUMN_COUNT: usize = 80;
 	/// 커서 깜빡임 주기. (초)
-	const CURSOR_BLINK_SECONDS: f32 = 0.5;
+	const CURSOR_BLINK_SECONDS: f64 = 0.5;
 
 	/// 모양. (크롬 main 의 값: MessageBoxView kDefaultMessageWidth 400, ChromeLayoutProvider INSETS_DIALOG 20, 제목 STYLE_HEADLINE_4 16px 500 줄 24,
 	/// 본문 CONTEXT_DIALOG_BODY_TEXT 13px 줄 20, 제목과 본문 사이 DIALOG_CONTENT_MARGIN_TOP_TEXT 8, 본문과 입력 칸 사이 RELATED_CONTROL_VERTICAL 8,
 	/// 아래 여백 입력 칸이 있으면 CONTROL 24 없으면 TEXT 16, 단추 줄 여백 (0, 20, 20, 20), 단추 사이 8, 단추 최소 폭 64 안쪽 16 글 13px 500 알약 꼴,
 	/// 입력 칸 안쪽 10 모서리 8, 대화 상자 모서리 12, 기본 밝은 팔레트 색. 단추와 입력 칸 높이는 글꼴 높이 + 위아래 10 을 기본 글꼴로 셈한 값이다)
-	const DIALOG_WIDTH: f32 = 400.0;
-	const DIALOG_MARGIN: f32 = 8.0;
-	const DIALOG_PADDING_TOP: f32 = 20.0;
-	const DIALOG_PADDING_SIDE: f32 = 20.0;
-	const DIALOG_PADDING_BOTTOM: f32 = 20.0;
-	const DIALOG_CORNER_RADIUS: f32 = 12.0;
+	const DIALOG_WIDTH: f64 = 400.0;
+	const DIALOG_MARGIN: f64 = 8.0;
+	const DIALOG_PADDING_TOP: f64 = 20.0;
+	const DIALOG_PADDING_SIDE: f64 = 20.0;
+	const DIALOG_PADDING_BOTTOM: f64 = 20.0;
+	const DIALOG_CORNER_RADIUS: f64 = 12.0;
 	const TITLE_FONT_STRING: &str = "500 16px system-ui";
-	const TITLE_LINE_HEIGHT: f32 = 24.0;
+	const TITLE_LINE_HEIGHT: f64 = 24.0;
 	const MESSAGE_FONT_STRING: &str = "13px system-ui";
 	const FIELD_FONT_STRING: &str = "13px system-ui";
-	const MESSAGE_LINE_HEIGHT: f32 = 20.0;
-	const TITLE_MESSAGE_GAP: f32 = 8.0;
-	const MESSAGE_FIELD_GAP: f32 = 8.0;
-	const CONTENT_BOTTOM_WITH_FIELD: f32 = 24.0;
-	const CONTENT_BOTTOM_WITHOUT_FIELD: f32 = 16.0;
-	const FIELD_HEIGHT: f32 = 36.0;
-	const FIELD_PADDING_X: f32 = 10.0;
-	const FIELD_CORNER_RADIUS: f32 = 8.0;
-	const BUTTON_HEIGHT: f32 = 36.0;
-	const BUTTON_MINIMUM_WIDTH: f32 = 64.0;
-	const BUTTON_PADDING_X: f32 = 16.0;
-	const BUTTON_GAP: f32 = 8.0;
+	const MESSAGE_LINE_HEIGHT: f64 = 20.0;
+	const TITLE_MESSAGE_GAP: f64 = 8.0;
+	const MESSAGE_FIELD_GAP: f64 = 8.0;
+	const CONTENT_BOTTOM_WITH_FIELD: f64 = 24.0;
+	const CONTENT_BOTTOM_WITHOUT_FIELD: f64 = 16.0;
+	const FIELD_HEIGHT: f64 = 36.0;
+	const FIELD_PADDING_X: f64 = 10.0;
+	const FIELD_CORNER_RADIUS: f64 = 8.0;
+	const BUTTON_HEIGHT: f64 = 36.0;
+	const BUTTON_MINIMUM_WIDTH: f64 = 64.0;
+	const BUTTON_PADDING_X: f64 = 16.0;
+	const BUTTON_GAP: f64 = 8.0;
 	const BUTTON_FONT_STRING: &str = "500 13px system-ui";
 	const COLOR_DIALOG_BACKGROUND: &str = "#ffffff";
 	const COLOR_DIALOG_BORDER: &str = "#e1e3e1";
@@ -264,10 +264,10 @@ mod engine_dialog {
 	const COLOR_SECONDARY_BUTTON_TEXT: &str = "#0b57d0";
 	/// 그림자. (bubble_border.cc 의 두 겹: 아래로 2, 흐림 8 과 12(gfx::ShadowValue, 시그마는 RadiusToSigma(blur / 2)), kGoogleGrey800 #3C4043 의 알파 0x33 과 0x1A. 맥은 운영체제가 그린다)
 	const SHADOW_LAYER_LIST: [(i32, u8); 2] = [(8, 0x33), (12, 0x1A)];
-	const SHADOW_OFFSET_Y: f32 = 2.0;
-	const SHADOW_COLOR_RED: f32 = 60.0 / 255.0;
-	const SHADOW_COLOR_GREEN: f32 = 64.0 / 255.0;
-	const SHADOW_COLOR_BLUE: f32 = 67.0 / 255.0;
+	const SHADOW_OFFSET_Y: f64 = 2.0;
+	const SHADOW_COLOR_RED: f64 = 60.0 / 255.0;
+	const SHADOW_COLOR_GREEN: f64 = 64.0 / 255.0;
+	const SHADOW_COLOR_BLUE: f64 = 67.0 / 255.0;
 
 	//==============================================================================
 	/// 단추.
@@ -285,9 +285,9 @@ mod engine_dialog {
 	struct DialogLayout {
 		box_rect: Rect,
 		title_line_list: Vec<String>,
-		title_top: f32,
+		title_top: f64,
 		message_line_list: Vec<String>,
-		message_top: f32,
+		message_top: f64,
 		field_rect: Option<Rect>,
 		button_rect_list: Vec<(DialogButton, Rect)>,
 	}
@@ -306,10 +306,10 @@ mod engine_dialog {
 		hovered_button: Option<DialogButton>,
 		drag_start_index: Option<usize>,
 		/// 입력 칸 글의 가로 밀림. (커서가 보이게)
-		text_scroll_x: f32,
+		text_scroll_x: f64,
 		/// 마지막으로 그린 커서 자리. (IME 후보 창)
 		caret_rect: Rect,
-		blink_timer: f32,
+		blink_timer: f64,
 		is_cursor_visible: bool,
 		/// 그림자 두 겹의 구운 그림.
 		shadow_list: [BlurredRoundRectShadow; 2],
@@ -535,7 +535,7 @@ mod engine_dialog {
 		//==============================================================================
 		/// 입력 칸 안 x 자리의 글자 자리. (가장 가까운 글자 경계)
 		//==============================================================================
-		fn find_character_index_at(&self, measure_width: &dyn Fn(&str) -> f32, local_x: f32) -> usize {
+		fn find_character_index_at(&self, measure_width: &dyn Fn(&str) -> f64, local_x: f64) -> usize {
 			let text = self.edit_buffer.get_text();
 			let character_count = count_characters(text);
 			let mut previous_width = 0.0;
@@ -554,7 +554,7 @@ mod engine_dialog {
 	//==============================================================================
 	/// 입력 칸 글꼴의 글 폭. (tick_modal_dialog 에 넘긴다)
 	//==============================================================================
-	pub fn measure_field_text_width(graphic: &Graphic, text: &str) -> f32 {
+	pub fn measure_field_text_width(graphic: &Graphic, text: &str) -> f64 {
 		graphic.measure_text_with_font_string(FIELD_FONT_STRING, text).width
 	}
 
@@ -572,7 +572,7 @@ mod engine_dialog {
 	//==============================================================================
 	/// 글을 폭에 맞춰 줄로 나누기. (공백에서 나누고, 공백 없이 넘치면 글자에서 나눈다. 줄바꿈 문자는 지킨다)
 	//==============================================================================
-	fn wrap_lines(graphic: &Graphic, font_string: &str, text: &str, maximum_width: f32) -> Vec<String> {
+	fn wrap_lines(graphic: &Graphic, font_string: &str, text: &str, maximum_width: f64) -> Vec<String> {
 		let mut line_list: Vec<String> = Vec::new();
 		for paragraph in text.split('\n') {
 			let mut current_line = String::new();
@@ -622,10 +622,10 @@ mod engine_dialog {
 		let box_x = ((canvas_native_size.x - box_width) * 0.5).max(0.0);
 		let box_y = 0.0;
 		let title_top = box_y + DIALOG_PADDING_TOP;
-		let mut content_bottom = title_top + TITLE_LINE_HEIGHT * title_line_list.len() as f32 + TITLE_MESSAGE_GAP;
+		let mut content_bottom = title_top + TITLE_LINE_HEIGHT * title_line_list.len() as f64 + TITLE_MESSAGE_GAP;
 		let message_top = content_bottom;
 		if !message_line_list.is_empty() {
-			content_bottom = message_top + MESSAGE_LINE_HEIGHT * message_line_list.len() as f32;
+			content_bottom = message_top + MESSAGE_LINE_HEIGHT * message_line_list.len() as f64;
 		}
 		let field_rect = if dialog.kind == ModalDialogKind::Prompt {
 			let field_rect = Rect::create(box_x + DIALOG_PADDING_SIDE, content_bottom + MESSAGE_FIELD_GAP, content_width, FIELD_HEIGHT);
@@ -684,7 +684,7 @@ mod engine_dialog {
 	/// 맨 앞 질문 창 갱신. (엔진이 프레임마다 씬 대신 부른다. 답이 정해지면 창을 내리고 손잡이를 끝낸다)
 	//==============================================================================
 	/// - measure_width 는 입력 칸 글꼴로 글 폭을 잰다. (엔진은 Graphic 으로 잰다, measure_field_text_width)
-	pub fn tick_modal_dialog(engine: &mut Engine, measure_width: &dyn Fn(&str) -> f32, time_delta: f32) {
+	pub fn tick_modal_dialog(engine: &mut Engine, measure_width: &dyn Fn(&str) -> f64, time_delta: f64) {
 		let mut dialog = match engine.take_front_modal_dialog() {
 			Some(dialog) => {
 				dialog
@@ -813,7 +813,7 @@ mod engine_dialog {
 		// 그림자와 바탕. (bubble_border.cc 의 두 겹을 views 시그마의 가우스로, 윈도우와 리눅스는 1px 테두리)
 		let box_rect = layout.box_rect;
 		for (shadow_index, (shadow_blur, shadow_alpha)) in SHADOW_LAYER_LIST.iter().enumerate() {
-			let shadow_color = Color::create(SHADOW_COLOR_RED, SHADOW_COLOR_GREEN, SHADOW_COLOR_BLUE, *shadow_alpha as f32 / 255.0);
+			let shadow_color = Color::create(SHADOW_COLOR_RED, SHADOW_COLOR_GREEN, SHADOW_COLOR_BLUE, *shadow_alpha as f64 / 255.0);
 			dialog.shadow_list[shadow_index].draw(graphic, box_rect, DIALOG_CORNER_RADIUS, Vector2::create(0.0, SHADOW_OFFSET_Y), views_shadow_blur_to_sigma(*shadow_blur), shadow_color);
 		}
 		graphic.set_fill_color(COLOR_DIALOG_BACKGROUND);
@@ -830,12 +830,12 @@ mod engine_dialog {
 		graphic.set_font_string(TITLE_FONT_STRING);
 		graphic.set_fill_color(COLOR_TITLE);
 		for (line_index, line) in layout.title_line_list.iter().enumerate() {
-			graphic.draw_fill_text(line, content_x, layout.title_top + TITLE_LINE_HEIGHT * (line_index as f32 + 0.5));
+			graphic.draw_fill_text(line, content_x, layout.title_top + TITLE_LINE_HEIGHT * (line_index as f64 + 0.5));
 		}
 		graphic.set_font_string(MESSAGE_FONT_STRING);
 		graphic.set_fill_color(COLOR_MESSAGE);
 		for (line_index, line) in layout.message_line_list.iter().enumerate() {
-			graphic.draw_fill_text(line, content_x, layout.message_top + MESSAGE_LINE_HEIGHT * (line_index as f32 + 0.5));
+			graphic.draw_fill_text(line, content_x, layout.message_top + MESSAGE_LINE_HEIGHT * (line_index as f64 + 0.5));
 		}
 
 		// 입력 칸. (초점 테두리, 선택, 글, 조합 밑줄, 커서)
@@ -929,8 +929,8 @@ mod tests {
 	//==============================================================================
 	/// 글자마다 8 의 폭.
 	//==============================================================================
-	fn measure_fixed_width(text: &str) -> f32 {
-		text.chars().count() as f32 * 8.0
+	fn measure_fixed_width(text: &str) -> f64 {
+		text.chars().count() as f64 * 8.0
 	}
 
 	//==============================================================================

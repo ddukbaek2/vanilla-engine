@@ -413,7 +413,7 @@ impl Scene for BlendScene {
 		self.scene_base.draw(graphic);
 		let blend_modes = [BlendMode::Normal, BlendMode::Lighter, BlendMode::Multiply, BlendMode::Screen, BlendMode::Difference];
 		for (index, blend_mode) in blend_modes.iter().enumerate() {
-			let center_x = 160.0 + index as f32 * 240.0;
+			let center_x = 160.0 + index as f64 * 240.0;
 			graphic.set_fill_color(Color::create(0.9, 0.3, 0.2, 1.0));
 			graphic.draw_circle(Vector2::create(center_x - 40.0, 360.0), 90.0);
 			graphic.push_state();
@@ -579,7 +579,7 @@ use vanilla::{Camera2D, Color, Engine, EngineConfiguration, Graphic, Rect, Scene
 struct CameraScene {
 	scene_base: SceneBase,
 	camera: Camera2D,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 }
 
 impl CameraScene {
@@ -603,7 +603,7 @@ impl Scene for CameraScene {
 		self.camera.set_zoom(1.5);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.elapsed_seconds += time_delta;
 		let view_size = engine.get_view_manager().get_view_size();
@@ -629,7 +629,7 @@ impl Scene for CameraScene {
 				else {
 					graphic.set_fill_color("#3a4660");
 				}
-				graphic.draw_rect(Rect::create(column as f32 * 100.0, row as f32 * 100.0, 100.0, 100.0));
+				graphic.draw_rect(Rect::create(column as f64 * 100.0, row as f64 * 100.0, 100.0, 100.0));
 			}
 		}
 		graphic.set_fill_color(Color::create(1.0, 0.8, 0.2, 1.0));

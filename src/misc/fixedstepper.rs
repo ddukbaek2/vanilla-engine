@@ -10,7 +10,7 @@
 //==============================================================================
 
 /// 한 걸음의 기본 시간. (초)
-const DEFAULT_STEP_SECONDS: f32 = 1.0 / 60.0;
+const DEFAULT_STEP_SECONDS: f64 = 1.0 / 60.0;
 
 /// 한 프레임에 도는 걸음의 기본 상한.
 const DEFAULT_MAXIMUM_STEPS_PER_FRAME: u32 = 5;
@@ -37,9 +37,9 @@ const DEFAULT_MAXIMUM_STEPS_PER_FRAME: u32 = 5;
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FixedStepper {
-	step_seconds: f32,
+	step_seconds: f64,
 	maximum_steps_per_frame: u32,
-	accumulated_seconds: f32,
+	accumulated_seconds: f64,
 	last_step_count: u32,
 }
 
@@ -54,7 +54,7 @@ impl FixedStepper {
 	/// # 돌려줌
 	/// 쌓인 시간이 0 인 새 고정 걸음.
 	//==============================================================================
-	pub fn new(step_seconds: f32, maximum_steps_per_frame: u32) -> FixedStepper {
+	pub fn new(step_seconds: f64, maximum_steps_per_frame: u32) -> FixedStepper {
 		let mut fixed_stepper = FixedStepper {
 			step_seconds: DEFAULT_STEP_SECONDS,
 			maximum_steps_per_frame: DEFAULT_MAXIMUM_STEPS_PER_FRAME,
@@ -72,7 +72,7 @@ impl FixedStepper {
 	/// # 인자
 	/// - `step_seconds`: 새 걸음 시간. (초)
 	//==============================================================================
-	pub fn set_step_seconds(&mut self, step_seconds: f32) {
+	pub fn set_step_seconds(&mut self, step_seconds: f64) {
 		if !step_seconds.is_finite() || step_seconds <= 0.0 {
 			return;
 		}
@@ -85,7 +85,7 @@ impl FixedStepper {
 	/// # 돌려줌
 	/// 지금 걸음 시간. (초)
 	//==============================================================================
-	pub fn get_step_seconds(&self) -> f32 {
+	pub fn get_step_seconds(&self) -> f64 {
 		self.step_seconds
 	}
 
@@ -134,7 +134,7 @@ impl FixedStepper {
 	/// assert_eq!(alpha, 1.0);
 	/// ```
 	//==============================================================================
-	pub fn advance(&mut self, time_delta: f32, mut step_function: impl FnMut(f32) -> bool) -> f32 {
+	pub fn advance(&mut self, time_delta: f64, mut step_function: impl FnMut(f64) -> bool) -> f64 {
 		let step_seconds = self.step_seconds;
 		let maximum_steps_per_frame = self.maximum_steps_per_frame;
 		if time_delta.is_finite() && time_delta > 0.0 {
@@ -164,7 +164,7 @@ impl FixedStepper {
 	/// # 돌려줌
 	/// 쌓인 시간을 걸음 시간으로 나눠 0 ~ 1 로 자른 값.
 	//==============================================================================
-	pub fn get_alpha(&self) -> f32 {
+	pub fn get_alpha(&self) -> f64 {
 		(self.accumulated_seconds / self.step_seconds).clamp(0.0, 1.0)
 	}
 
@@ -237,7 +237,7 @@ mod tests {
 
 		fixed_stepper.reset();
 		assert_eq!(fixed_stepper.get_alpha(), 0.0);
-		assert_eq!(fixed_stepper.advance(f32::NAN, |_| true), 0.0);
+		assert_eq!(fixed_stepper.advance(f64::NAN, |_| true), 0.0);
 		let default_stepper = FixedStepper::new(-1.0, 0);
 		assert_eq!(default_stepper.get_step_seconds(), DEFAULT_STEP_SECONDS);
 		assert_eq!(default_stepper.get_maximum_steps_per_frame(), 1);

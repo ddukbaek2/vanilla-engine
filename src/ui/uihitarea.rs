@@ -54,7 +54,7 @@ use crate::ui::uibutton::UIButton;
 pub struct UIHitArea {
 	component_base: ComponentBase,
 	target_id: Option<NodeId>,
-	minimum_size: f32,
+	minimum_size: f64,
 	clip_id: Option<NodeId>,
 }
 
@@ -105,7 +105,7 @@ impl UIHitArea {
 	/// assert_eq!(node_tree[hit_id].get_name(), "OkHitArea");
 	/// ```
 	//==============================================================================
-	pub fn attach(node_tree: &mut NodeTree, button_id: NodeId, minimum_size: f32) -> Option<NodeId> {
+	pub fn attach(node_tree: &mut NodeTree, button_id: NodeId, minimum_size: f64) -> Option<NodeId> {
 		let parent_id = node_tree.get_parent_id(button_id)?;
 		node_tree.get_node(button_id)?.get_component::<UIButton>()?;
 		let button_index = node_tree.get_child_ids(parent_id).iter().position(|child_id| *child_id == button_id)?;
@@ -166,7 +166,7 @@ impl UIHitArea {
 	/// # 인자
 	/// - `minimum_size`: 가장 작은 가로세로. (단추의 content_size 와 같은 단위, 단추가 이보다 크면 그 쪽은 단추 크기)
 	//==============================================================================
-	pub fn set_minimum_size(&mut self, minimum_size: f32) {
+	pub fn set_minimum_size(&mut self, minimum_size: f64) {
 		self.minimum_size = minimum_size;
 	}
 
@@ -176,7 +176,7 @@ impl UIHitArea {
 	/// # 돌려줌
 	/// 가장 작은 가로세로. (기본 0)
 	//==============================================================================
-	pub fn get_minimum_size(&self) -> f32 {
+	pub fn get_minimum_size(&self) -> f64 {
 		self.minimum_size
 	}
 
@@ -203,11 +203,11 @@ impl UIHitArea {
 	//==============================================================================
 	/// 자르는 노드의 사각형을 부모 안의 좌표로. (왼쪽, 위, 오른쪽, 아래)
 	//==============================================================================
-	fn read_clip_rect(node_tree: &NodeTree, clip_id: NodeId, parent_id: NodeId) -> Option<[f32; 4]> {
+	fn read_clip_rect(node_tree: &NodeTree, clip_id: NodeId, parent_id: NodeId) -> Option<[f64; 4]> {
 		let clip_size = node_tree.get_node(clip_id)?.get_content_size();
 		let corners = [Vector2::zero(), Vector2::create(clip_size.x, 0.0), Vector2::create(0.0, clip_size.y), clip_size];
-		let mut minimum = Vector2::create(f32::MAX, f32::MAX);
-		let mut maximum = Vector2::create(f32::MIN, f32::MIN);
+		let mut minimum = Vector2::create(f64::MAX, f64::MAX);
+		let mut maximum = Vector2::create(f64::MIN, f64::MIN);
 		for corner in corners {
 			let view_position = node_tree.convert_node_position_to_view_position(clip_id, corner);
 			let parent_position = node_tree.convert_view_position_to_node_position(parent_id, view_position)?;
@@ -253,7 +253,7 @@ impl Component for UIHitArea {
 	//==============================================================================
 	/// 단추 따라가기. (가운데를 맞추고 모자란 쪽만 넓힌다, 단추가 꺼져 있으면 함께 끈다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		let target_id = match self.target_id {
 			Some(target_id) => {
 				target_id

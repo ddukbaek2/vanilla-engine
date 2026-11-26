@@ -1,7 +1,7 @@
 //==============================================================================
 //! 2차원 벡터. (원본 base/vector2.js)
 //! - 원본 add / subtract / multiply / divide / modulo 는 수와 Vector2 를 다 받는다. 러스트 판은 Vector2 를 받는 것과
-//!   수를 받는 ..._scalar 로 나눴다. 원본 수는 f64 이고 러스트 판은 엔진의 다른 값처럼 f32 다.
+//!   수를 받는 ..._scalar 로 나눴다. 수는 원본 자바스크립트 수처럼 f64 다.
 //! - lerp 는 원본 math.lerp 식(from * (1 - t) + to * t)을 그대로 쓴다. (Vector3 와 같다)
 //! - 원본에 있던 버그 둘(modulo 가 나머지 대신 나누기를 하고, half 가 반 대신 두 배(0.5 로 나누기)를 돌려주던 것)을 두 엔진에서 같이 고쳤다.
 //!   modulo 는 나머지(%)를, half 는 반을 돌려준다. (vanilla.js 와 게임에서 둘을 쓰는 곳은 없다)
@@ -32,9 +32,9 @@ use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vector2 {
 	/// x 성분.
-	pub x: f32,
+	pub x: f64,
 	/// y 성분.
-	pub y: f32,
+	pub y: f64,
 }
 
 impl Vector2 {
@@ -48,7 +48,7 @@ impl Vector2 {
 	/// # 돌려줌
 	/// (x, y) 벡터.
 	//==============================================================================
-	pub const fn create(x: f32, y: f32) -> Vector2 {
+	pub const fn create(x: f64, y: f64) -> Vector2 {
 		Vector2 { x, y }
 	}
 
@@ -86,20 +86,20 @@ impl Vector2 {
 	/// (+무한대, +무한대).
 	///
 	/// # 돌려줌
-	/// 두 성분이 f32::INFINITY 인 벡터.
+	/// 두 성분이 f64::INFINITY 인 벡터.
 	//==============================================================================
 	pub const fn positive_infinity() -> Vector2 {
-		Vector2 { x: f32::INFINITY, y: f32::INFINITY }
+		Vector2 { x: f64::INFINITY, y: f64::INFINITY }
 	}
 
 	//==============================================================================
 	/// (-무한대, -무한대).
 	///
 	/// # 돌려줌
-	/// 두 성분이 f32::NEG_INFINITY 인 벡터.
+	/// 두 성분이 f64::NEG_INFINITY 인 벡터.
 	//==============================================================================
 	pub const fn negative_infinity() -> Vector2 {
-		Vector2 { x: f32::NEG_INFINITY, y: f32::NEG_INFINITY }
+		Vector2 { x: f64::NEG_INFINITY, y: f64::NEG_INFINITY }
 	}
 
 	//==============================================================================
@@ -109,7 +109,7 @@ impl Vector2 {
 	/// - `x`: 넣을 x 성분.
 	/// - `y`: 넣을 y 성분.
 	//==============================================================================
-	pub fn set(&mut self, x: f32, y: f32) {
+	pub fn set(&mut self, x: f64, y: f64) {
 		self.x = x;
 		self.y = y;
 	}
@@ -120,7 +120,7 @@ impl Vector2 {
 	/// # 돌려줌
 	/// x 성분.
 	//==============================================================================
-	pub fn get_x(&self) -> f32 {
+	pub fn get_x(&self) -> f64 {
 		self.x
 	}
 
@@ -130,7 +130,7 @@ impl Vector2 {
 	/// # 돌려줌
 	/// y 성분.
 	//==============================================================================
-	pub fn get_y(&self) -> f32 {
+	pub fn get_y(&self) -> f64 {
 		self.y
 	}
 
@@ -156,7 +156,7 @@ impl Vector2 {
 	/// # 돌려줌
 	/// 더한 새 벡터.
 	//==============================================================================
-	pub fn add_scalar(&self, scalar: f32) -> Vector2 {
+	pub fn add_scalar(&self, scalar: f64) -> Vector2 {
 		Vector2::create(self.x + scalar, self.y + scalar)
 	}
 
@@ -182,7 +182,7 @@ impl Vector2 {
 	/// # 돌려줌
 	/// 뺀 새 벡터.
 	//==============================================================================
-	pub fn subtract_scalar(&self, scalar: f32) -> Vector2 {
+	pub fn subtract_scalar(&self, scalar: f64) -> Vector2 {
 		Vector2::create(self.x - scalar, self.y - scalar)
 	}
 
@@ -208,7 +208,7 @@ impl Vector2 {
 	/// # 돌려줌
 	/// 곱한 새 벡터.
 	//==============================================================================
-	pub fn multiply_scalar(&self, scalar: f32) -> Vector2 {
+	pub fn multiply_scalar(&self, scalar: f64) -> Vector2 {
 		Vector2::create(self.x * scalar, self.y * scalar)
 	}
 
@@ -234,7 +234,7 @@ impl Vector2 {
 	/// # 돌려줌
 	/// 나눈 새 벡터.
 	//==============================================================================
-	pub fn divide_scalar(&self, scalar: f32) -> Vector2 {
+	pub fn divide_scalar(&self, scalar: f64) -> Vector2 {
 		Vector2::create(self.x / scalar, self.y / scalar)
 	}
 
@@ -269,7 +269,7 @@ impl Vector2 {
 	/// # 돌려줌
 	/// 성분별 나머지를 담은 새 벡터.
 	//==============================================================================
-	pub fn modulo_scalar(&self, scalar: f32) -> Vector2 {
+	pub fn modulo_scalar(&self, scalar: f64) -> Vector2 {
 		Vector2::create(self.x % scalar, self.y % scalar)
 	}
 
@@ -289,7 +289,7 @@ impl Vector2 {
 	/// # 돌려줌
 	/// 벡터의 길이. (0 이상)
 	//==============================================================================
-	pub fn length(&self) -> f32 {
+	pub fn length(&self) -> f64 {
 		(self.x * self.x + self.y * self.y).sqrt()
 	}
 
@@ -299,7 +299,7 @@ impl Vector2 {
 	/// # 돌려줌
 	/// x * x + y * y. (제곱근을 셈하지 않는다)
 	//==============================================================================
-	pub fn length_squared(&self) -> f32 {
+	pub fn length_squared(&self) -> f64 {
 		self.x * self.x + self.y * self.y
 	}
 
@@ -312,7 +312,7 @@ impl Vector2 {
 	/// # 돌려줌
 	/// 두 점 사이 거리. (0 이상)
 	//==============================================================================
-	pub fn distance(&self, other: Vector2) -> f32 {
+	pub fn distance(&self, other: Vector2) -> f64 {
 		let delta = self.subtract(other);
 		delta.length()
 	}
@@ -350,7 +350,7 @@ impl Vector2 {
 	/// # 돌려줌
 	/// 내적 값. (self.x * other.x + self.y * other.y)
 	//==============================================================================
-	pub fn dot(&self, other: Vector2) -> f32 {
+	pub fn dot(&self, other: Vector2) -> f64 {
 		self.x * other.x + self.y * other.y
 	}
 
@@ -374,7 +374,7 @@ impl Vector2 {
 	/// assert_eq!(axis_y.cross(axis_x), -1.0);
 	/// ```
 	//==============================================================================
-	pub fn cross(&self, other: Vector2) -> f32 {
+	pub fn cross(&self, other: Vector2) -> f64 {
 		self.x * other.y - self.y * other.x
 	}
 
@@ -397,7 +397,7 @@ impl Vector2 {
 	/// assert!(Vector2::zero().angle(Vector2::one()).is_nan());
 	/// ```
 	//==============================================================================
-	pub fn angle(&self, other: Vector2) -> f32 {
+	pub fn angle(&self, other: Vector2) -> f64 {
 		(self.dot(other) / (self.length() * other.length())).acos()
 	}
 
@@ -423,7 +423,7 @@ impl Vector2 {
 	/// assert_eq!(Vector2::lerp(from, to, 1.0), to);
 	/// ```
 	//==============================================================================
-	pub fn lerp(from: Vector2, to: Vector2, normalized_time: f32) -> Vector2 {
+	pub fn lerp(from: Vector2, to: Vector2, normalized_time: f64) -> Vector2 {
 		let from_weight = 1.0 - normalized_time;
 		let lerp_x = from.x * from_weight + to.x * normalized_time;
 		let lerp_y = from.y * from_weight + to.y * normalized_time;
@@ -475,12 +475,12 @@ impl Sub for Vector2 {
 	}
 }
 
-impl Mul<f32> for Vector2 {
+impl Mul<f64> for Vector2 {
 	type Output = Vector2;
 	//==============================================================================
 	/// `*` 스칼라 연산자. (multiply_scalar 와 같다)
 	//==============================================================================
-	fn mul(self, scalar: f32) -> Vector2 {
+	fn mul(self, scalar: f64) -> Vector2 {
 		Vector2::create(self.x * scalar, self.y * scalar)
 	}
 }
@@ -537,8 +537,8 @@ mod tests {
 	#[test]
 	fn constants_lerp_and_clamp() {
 		assert_eq!(Vector2::minus_one(), Vector2::create(-1.0, -1.0));
-		assert_eq!(Vector2::positive_infinity().x, f32::INFINITY);
-		assert_eq!(Vector2::negative_infinity().y, f32::NEG_INFINITY);
+		assert_eq!(Vector2::positive_infinity().x, f64::INFINITY);
+		assert_eq!(Vector2::negative_infinity().y, f64::NEG_INFINITY);
 		let from = Vector2::create(0.1, 10.0);
 		let to = Vector2::create(0.3, -4.0);
 		assert_eq!(Vector2::lerp(from, to, 0.0), from);

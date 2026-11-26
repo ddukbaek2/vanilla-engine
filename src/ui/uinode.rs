@@ -42,7 +42,7 @@ use crate::ui::autolayout::layoutvariable::LayoutVariable;
 //==============================================================================
 /// intrinsic 선호가 없다는 값. (UIKit 의 UIView.noIntrinsicMetric, 원본 UINode.noIntrinsicMetric)
 //==============================================================================
-pub const NO_INTRINSIC_METRIC: f32 = -1.0;
+pub const NO_INTRINSIC_METRIC: f64 = -1.0;
 
 //==============================================================================
 /// 레이아웃 여백. (UIKit 의 UIView.layoutMargins, 원본 { top, left, bottom, right })
@@ -193,10 +193,10 @@ impl UINode {
 	/// 컨텐트 크기 반환. (솔버가 푼 width, height)
 	///
 	/// # 돌려줌
-	/// (width, height) 의 f32 값. (update_variables 뒤에 맞는 값)
+	/// (width, height) 의 f64 값. (update_variables 뒤에 맞는 값)
 	//==============================================================================
 	pub fn get_content_size(&self) -> Vector2 {
-		Vector2::create(self.get_width() as f32, self.get_height() as f32)
+		Vector2::create(self.get_width(), self.get_height())
 	}
 
 	//==============================================================================
@@ -227,14 +227,14 @@ impl UINode {
 		if intrinsic_size.x != NO_INTRINSIC_METRIC {
 			let horizontal_hugging_strength = LayoutStrength::from_priority(self.horizontal_hugging_priority);
 			let horizontal_compression_strength = LayoutStrength::from_priority(self.horizontal_compression_resistance_priority);
-			result.push(self.width_anchor().less_than_or_equal_to(intrinsic_size.x as f64).with_strength(horizontal_hugging_strength));
-			result.push(self.width_anchor().greater_than_or_equal_to(intrinsic_size.x as f64).with_strength(horizontal_compression_strength));
+			result.push(self.width_anchor().less_than_or_equal_to(intrinsic_size.x).with_strength(horizontal_hugging_strength));
+			result.push(self.width_anchor().greater_than_or_equal_to(intrinsic_size.x).with_strength(horizontal_compression_strength));
 		}
 		if intrinsic_size.y != NO_INTRINSIC_METRIC {
 			let vertical_hugging_strength = LayoutStrength::from_priority(self.vertical_hugging_priority);
 			let vertical_compression_strength = LayoutStrength::from_priority(self.vertical_compression_resistance_priority);
-			result.push(self.height_anchor().less_than_or_equal_to(intrinsic_size.y as f64).with_strength(vertical_hugging_strength));
-			result.push(self.height_anchor().greater_than_or_equal_to(intrinsic_size.y as f64).with_strength(vertical_compression_strength));
+			result.push(self.height_anchor().less_than_or_equal_to(intrinsic_size.y).with_strength(vertical_hugging_strength));
+			result.push(self.height_anchor().greater_than_or_equal_to(intrinsic_size.y).with_strength(vertical_compression_strength));
 		}
 		result
 	}
@@ -931,7 +931,7 @@ impl UINode {
 	//==============================================================================
 	fn apply_to_node(&self, node: &mut WorldNode, parent_left_top: Option<(f64, f64)>) {
 		let (parent_left, parent_top) = parent_left_top.unwrap_or((0.0, 0.0));
-		node.set_local_position(Vector2::create((self.get_left() - parent_left) as f32, (self.get_top() - parent_top) as f32));
+		node.set_local_position(Vector2::create(self.get_left() - parent_left, self.get_top() - parent_top));
 		node.set_content_size(self.get_content_size());
 	}
 
@@ -957,7 +957,7 @@ impl UINode {
 			let layout_values = node.get_component::<UINode>().map(|ui_node| (ui_node.get_left(), ui_node.get_top(), ui_node.get_content_size()));
 			if let Some((left, top, content_size)) = layout_values {
 				let (parent_left, parent_top) = parent_left_top.unwrap_or((0.0, 0.0));
-				node.set_local_position(Vector2::create((left - parent_left) as f32, (top - parent_top) as f32));
+				node.set_local_position(Vector2::create(left - parent_left, top - parent_top));
 				node.set_content_size(content_size);
 			}
 		}
@@ -1061,7 +1061,7 @@ impl Component for UINode {
 	//==============================================================================
 	/// 갱신. (노드 컴포넌트의 intrinsic content size 가 바뀌었으면 제약을 다시 걸고, 솔버 값을 노드에 옮긴다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 		let intrinsic_content_size = UINode::collect_intrinsic_content_size(context.get_node());
 		let _ = self.set_intrinsic_content_size(intrinsic_content_size);
 		let node_id = context.get_node_id();

@@ -44,13 +44,13 @@ pub struct FloatingTextOptions {
 	/// 글자 색. (기본 흰색)
 	pub color: Color,
 	/// 글자 크기. (픽셀, 기본 22)
-	pub font_size: f32,
+	pub font_size: f64,
 	/// 떠오르는 높이. (픽셀)
-	pub rise: f32,
+	pub rise: f64,
 	/// 사라질 때까지 걸리는 시간. (초)
-	pub duration: f32,
+	pub duration: f64,
 	/// 가로로 흩뿌리는 폭. (±픽셀)
-	pub jitter: f32,
+	pub jitter: f64,
 	/// 굵게 그릴지. (기본 true)
 	pub is_bold: bool,
 }
@@ -78,9 +78,9 @@ impl Default for FloatingTextOptions {
 struct FloatingTextItem {
 	node_id: NodeId,
 	start_position: Vector2,
-	rise: f32,
-	duration: f32,
-	elapsed_seconds: f32,
+	rise: f64,
+	duration: f64,
+	elapsed_seconds: f64,
 }
 
 //==============================================================================
@@ -314,7 +314,7 @@ impl Component for FloatingText {
 	//==============================================================================
 	/// 갱신. (떠오름, 사라짐, 다 끝난 라벨 회수. 뒤에서부터 돈다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let node_tree = context.get_node_tree_mut();
 		let mut item_index = self.active_list.len();
 		while item_index > 0 {

@@ -24,9 +24,9 @@ use crate::core::node::worldnode::NodeTransform;
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 struct TrailPoint {
-	x: f32,
-	y: f32,
-	age: f32,
+	x: f64,
+	y: f64,
+	age: f64,
 }
 
 //==============================================================================
@@ -47,7 +47,7 @@ struct TrailPoint {
 /// trail.set_width(14.0, 0.0);
 /// trail.set_colors(Color::create(0.4, 0.8, 1.0, 0.9), Color::create(0.4, 0.8, 1.0, 0.0));
 /// for step in 0..5 {
-/// 	node_tree[comet_id].set_local_position(Vector2::create(step as f32 * 20.0, 0.0));
+/// 	node_tree[comet_id].set_local_position(Vector2::create(step as f64 * 20.0, 0.0));
 /// 	node_tree.tick(&engine, 0.1);
 /// }
 /// assert_eq!(node_tree[comet_id].get_component::<TrailRenderer>().map(|trail| trail.get_point_count()), Some(5));
@@ -58,11 +58,11 @@ pub struct TrailRenderer {
 	component_base: ComponentBase,
 	point_list: Vec<TrailPoint>,
 	/// 점이 남는 시간. (초)
-	point_lifetime: f32,
+	point_lifetime: f64,
 	/// 이보다 가까우면 점을 추가하지 않는다.
-	min_vertex_distance: f32,
-	start_width: f32,
-	end_width: f32,
+	min_vertex_distance: f64,
+	start_width: f64,
+	end_width: f64,
 	start_color: Color,
 	end_color: Color,
 	is_additive: bool,
@@ -105,7 +105,7 @@ impl TrailRenderer {
 	/// # 인자
 	/// - `point_lifetime`: 점이 남는 시간. (초, 기본 0.5) 나이가 이만큼 된 점은 tick 에서 지운다.
 	//==============================================================================
-	pub fn set_time(&mut self, point_lifetime: f32) {
+	pub fn set_time(&mut self, point_lifetime: f64) {
 		self.point_lifetime = point_lifetime;
 	}
 
@@ -115,7 +115,7 @@ impl TrailRenderer {
 	/// # 인자
 	/// - `min_vertex_distance`: 새 점을 찍을 가장 짧은 거리. (부모 좌표, 기본 3) 마지막 점에서 이보다 덜 움직였으면 점을 찍지 않는다.
 	//==============================================================================
-	pub fn set_min_vertex_distance(&mut self, min_vertex_distance: f32) {
+	pub fn set_min_vertex_distance(&mut self, min_vertex_distance: f64) {
 		self.min_vertex_distance = min_vertex_distance;
 	}
 
@@ -126,7 +126,7 @@ impl TrailRenderer {
 	/// - `start_width`: 새 점 쪽 굵기. (노드 좌표, 기본 10)
 	/// - `end_width`: 오래된 점 쪽 굵기. (노드 좌표, 기본 0. 그릴 때 0.1 보다 가늘게 하지 않는다)
 	//==============================================================================
-	pub fn set_width(&mut self, start_width: f32, end_width: f32) {
+	pub fn set_width(&mut self, start_width: f64, end_width: f64) {
 		self.start_width = start_width;
 		self.end_width = end_width;
 	}
@@ -210,7 +210,7 @@ impl Component for TrailRenderer {
 	//==============================================================================
 	/// 갱신. (점 기록 + 노화)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let local_position = context.get_transform().get_local_position();
 
 		let point_lifetime = self.point_lifetime;

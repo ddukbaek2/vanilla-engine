@@ -21,9 +21,9 @@ use vanilla::{BlendMode, Color, Engine, EngineConfiguration, Graphic, Image, Rec
 //==============================================================================
 // 전역 상수 목록.
 //==============================================================================
-const VIEW_WIDTH: f32 = 1120.0;
-const VIEW_HEIGHT: f32 = 640.0;
-const CELL_SIZE: f32 = 160.0;
+const VIEW_WIDTH: f64 = 1120.0;
+const VIEW_HEIGHT: f64 = 640.0;
+const CELL_SIZE: f64 = 160.0;
 const COLUMN_COUNT: usize = 7;
 const PAGE_FRAME_COUNT: u64 = 60;
 const PAGE_COUNT: u64 = 8;
@@ -71,8 +71,8 @@ void main() {
 //==============================================================================
 // 칸의 왼쪽 위.
 //==============================================================================
-fn get_cell_origin(mode_index: usize) -> (f32, f32) {
-	((mode_index % COLUMN_COUNT) as f32 * CELL_SIZE, (mode_index / COLUMN_COUNT) as f32 * CELL_SIZE)
+fn get_cell_origin(mode_index: usize) -> (f64, f64) {
+	((mode_index % COLUMN_COUNT) as f64 * CELL_SIZE, (mode_index / COLUMN_COUNT) as f64 * CELL_SIZE)
 }
 
 //==============================================================================
@@ -124,11 +124,11 @@ fn create_nine_slice_image() -> Rc<Image> {
 //==============================================================================
 // 원을 닮은 다각형의 꼭짓점. (Graphic::draw_circle 과 같은 분할)
 //==============================================================================
-fn create_polygon_positions(center_x: f32, center_y: f32, radius: f32) -> Vec<Vector2> {
+fn create_polygon_positions(center_x: f64, center_y: f64, radius: f64) -> Vec<Vector2> {
 	let segment_count = (radius * 0.5).ceil().clamp(16.0, 64.0) as usize;
 	let mut positions = Vec::with_capacity(segment_count);
 	for segment_index in 0..segment_count {
-		let radian = std::f32::consts::PI * 2.0 * (segment_index as f32 / segment_count as f32);
+		let radian = std::f64::consts::PI * 2.0 * (segment_index as f64 / segment_count as f64);
 		positions.push(Vector2::create(center_x + radian.cos() * radius, center_y + radian.sin() * radius));
 	}
 	positions
@@ -138,22 +138,22 @@ fn create_polygon_positions(center_x: f32, center_y: f32, radius: f32) -> Vec<Ve
 // 파티클 하나. (가운데, 크기, 색)
 //==============================================================================
 struct ParticleQuad {
-	x: f32,
-	y: f32,
-	size: f32,
+	x: f64,
+	y: f64,
+	size: f64,
 	color: [u8; 4],
 }
 
 //==============================================================================
 // 칸의 파티클. (서로 겹치는 부드러운 원 24 개, 색 여러 가지)
 //==============================================================================
-fn list_particle_quads(cell_x: f32, cell_y: f32) -> Vec<ParticleQuad> {
+fn list_particle_quads(cell_x: f64, cell_y: f64) -> Vec<ParticleQuad> {
 	let mut particle_quad_list = Vec::with_capacity(PARTICLE_COUNT);
 	for index in 0..PARTICLE_COUNT {
 		particle_quad_list.push(ParticleQuad {
-			x: cell_x + 20.0 + ((index * 37) % 120) as f32,
-			y: cell_y + 20.0 + ((index * 53) % 120) as f32,
-			size: 18.0 + ((index * 7) % 30) as f32,
+			x: cell_x + 20.0 + ((index * 37) % 120) as f64,
+			y: cell_y + 20.0 + ((index * 53) % 120) as f64,
+			size: 18.0 + ((index * 7) % 30) as f64,
 			color: [((index * 97) % 256) as u8, ((index * 61 + 80) % 256) as u8, ((index * 31 + 150) % 256) as u8, (120 + (index * 17) % 136) as u8],
 		});
 	}
@@ -175,10 +175,10 @@ impl BlendModeScene {
 	//==============================================================================
 	// 칸 바탕. (네 가지 색 줄무늬와 흰색, 회색, 검정, 보라 띠, 열마다 column_alpha_list 의 알파, source-over)
 	//==============================================================================
-	fn draw_cell_background(&self, graphic: &mut Graphic, cell_x: f32, cell_y: f32, column_alpha_list: [u8; 4]) {
+	fn draw_cell_background(&self, graphic: &mut Graphic, cell_x: f64, cell_y: f64, column_alpha_list: [u8; 4]) {
 		graphic.set_blend_mode(BlendMode::Normal);
 		for column_index in 0..4 {
-			let column_x = cell_x + column_index as f32 * 40.0;
+			let column_x = cell_x + column_index as f64 * 40.0;
 			let column_alpha = column_alpha_list[column_index];
 			let stripe_color = STRIPE_COLOR_LIST[column_index];
 			graphic.set_fill_color(Color::create_from_bytes(stripe_color[0], stripe_color[1], stripe_color[2], column_alpha));
@@ -192,8 +192,8 @@ impl BlendModeScene {
 	//==============================================================================
 	// 장면 0. (반투명 그림, 반투명 사각형, 반투명 다각형)
 	//==============================================================================
-	fn draw_shape_page(&self, graphic: &mut Graphic, cell_x: f32, cell_y: f32) {
-		graphic.draw_image(&self.test_image, Vector2::create(cell_x + 8.0, cell_y + 8.0), Vector2::create(IMAGE_SIZE as f32, IMAGE_SIZE as f32));
+	fn draw_shape_page(&self, graphic: &mut Graphic, cell_x: f64, cell_y: f64) {
+		graphic.draw_image(&self.test_image, Vector2::create(cell_x + 8.0, cell_y + 8.0), Vector2::create(IMAGE_SIZE as f64, IMAGE_SIZE as f64));
 		graphic.set_fill_color(Color::create_from_bytes(40, 220, 255, 140));
 		graphic.draw_rect(Rect::create(cell_x + 56.0, cell_y + 28.0, 88.0, 52.0));
 		let polygon_positions = create_polygon_positions(cell_x + 104.0, cell_y + 104.0, 38.0);
@@ -203,7 +203,7 @@ impl BlendModeScene {
 	//==============================================================================
 	// 장면 1. (글자, 나인슬라이스, 자르기 안의 그림)
 	//==============================================================================
-	fn draw_path_page(&self, graphic: &mut Graphic, cell_x: f32, cell_y: f32) {
+	fn draw_path_page(&self, graphic: &mut Graphic, cell_x: f64, cell_y: f64) {
 		graphic.set_font_string("bold 30px sans-serif");
 		graphic.set_fill_color(Color::create_from_bytes(255, 255, 255, 204));
 		graphic.set_text_baseline(TextBaseline::Alphabetic);
@@ -211,14 +211,14 @@ impl BlendModeScene {
 		graphic.draw_fill_text("Ag가", cell_x + 6.0, cell_y + 36.0);
 		graphic.draw_image_with_nine_slice(&self.nine_slice_image, Vector2::create(cell_x + 8.0, cell_y + 50.0), Vector2::create(92.0, 56.0), Rect::create(10.0, 10.0, 10.0, 10.0));
 		graphic.begin_clip_rect(Rect::create(cell_x + 104.0, cell_y + 8.0, 48.0, 144.0), 0.0);
-		graphic.draw_image(&self.test_image, Vector2::create(cell_x + 90.0, cell_y + 60.0), Vector2::create(IMAGE_SIZE as f32, IMAGE_SIZE as f32));
+		graphic.draw_image(&self.test_image, Vector2::create(cell_x + 90.0, cell_y + 60.0), Vector2::create(IMAGE_SIZE as f64, IMAGE_SIZE as f64));
 		graphic.end_clip_rect();
 	}
 
 	//==============================================================================
 	// 장면 2, 3. (겹치는 파티클, is_batched 면 draw_colored_quads 한 번, 아니면 쿼드마다 draw_vertices)
 	//==============================================================================
-	fn draw_particle_page(&self, graphic: &mut Graphic, cell_x: f32, cell_y: f32, is_batched: bool) {
+	fn draw_particle_page(&self, graphic: &mut Graphic, cell_x: f64, cell_y: f64, is_batched: bool) {
 		let soft_disc_texture = graphic.get_soft_disc_texture();
 		let particle_quad_list = list_particle_quads(cell_x, cell_y);
 		if is_batched {
@@ -226,10 +226,10 @@ impl BlendModeScene {
 			let mut offset = 0;
 			for particle_quad in particle_quad_list.iter() {
 				let half_size = particle_quad.size * 0.5;
-				let corner_list: [[f32; 4]; 6] = [[-half_size, -half_size, 0.0, 0.0], [half_size, -half_size, 1.0, 0.0], [half_size, half_size, 1.0, 1.0], [-half_size, -half_size, 0.0, 0.0], [half_size, half_size, 1.0, 1.0], [-half_size, half_size, 0.0, 1.0]];
+				let corner_list: [[f64; 4]; 6] = [[-half_size, -half_size, 0.0, 0.0], [half_size, -half_size, 1.0, 0.0], [half_size, half_size, 1.0, 1.0], [-half_size, -half_size, 0.0, 0.0], [half_size, half_size, 1.0, 1.0], [-half_size, half_size, 0.0, 1.0]];
 				for corner in corner_list {
-					let vertex = [particle_quad.x + corner[0], particle_quad.y + corner[1], corner[2], corner[3], particle_quad.color[0] as f32 / 255.0, particle_quad.color[1] as f32 / 255.0, particle_quad.color[2] as f32 / 255.0, particle_quad.color[3] as f32 / 255.0];
-					vertex_data[offset..offset + 8].copy_from_slice(&vertex);
+					let vertex = [particle_quad.x + corner[0], particle_quad.y + corner[1], corner[2], corner[3], particle_quad.color[0] as f64 / 255.0, particle_quad.color[1] as f64 / 255.0, particle_quad.color[2] as f64 / 255.0, particle_quad.color[3] as f64 / 255.0];
+					vertex_data[offset..offset + 8].copy_from_slice(&vertex.map(|value| value as f32));
 					offset += 8;
 				}
 			}
@@ -248,7 +248,7 @@ impl BlendModeScene {
 	//==============================================================================
 	// 장면 4, 5. (돌리고 틴트를 건 그림과 자르기 안의 나인슬라이스, is_overridden 이면 바꿔 끼운 셰이더로)
 	//==============================================================================
-	fn draw_override_page(&self, graphic: &mut Graphic, cell_x: f32, cell_y: f32, is_overridden: bool) {
+	fn draw_override_page(&self, graphic: &mut Graphic, cell_x: f64, cell_y: f64, is_overridden: bool) {
 		if is_overridden {
 			let identity_shader_program = graphic.resolve_shader_program("blendmodes", "identity", || (IDENTITY_VERTEXSHADER_SOURCE.to_string(), IDENTITY_FRAGMENTSHADER_SOURCE.to_string()));
 			graphic.set_shader_program_override(identity_shader_program);
@@ -258,7 +258,7 @@ impl BlendModeScene {
 		graphic.rotate(0.3);
 		graphic.set_global_alpha(0.85);
 		graphic.set_image_tint_color(Some(Color::create(1.0, 0.0, 0.5, 0.3)));
-		graphic.draw_image(&self.test_image, Vector2::create(-48.0, -48.0), Vector2::create(IMAGE_SIZE as f32, IMAGE_SIZE as f32));
+		graphic.draw_image(&self.test_image, Vector2::create(-48.0, -48.0), Vector2::create(IMAGE_SIZE as f64, IMAGE_SIZE as f64));
 		graphic.set_image_tint_color(None);
 		graphic.pop_state();
 		graphic.begin_clip_rect(Rect::create(cell_x + 80.0, cell_y + 70.0, 70.0, 80.0), 0.0);

@@ -29,9 +29,9 @@ use crate::base::vector2::Vector2;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointerGestureOptions {
 	/// 누른 곳에서 이만큼 움직이면 드래그로 친다. (픽셀)
-	pub drag_threshold: f32,
+	pub drag_threshold: f64,
 	/// 움직이지 않고 이만큼 누르고 있으면 롱프레스. (초)
-	pub long_press_seconds: f32,
+	pub long_press_seconds: f64,
 }
 
 impl Default for PointerGestureOptions {
@@ -92,9 +92,9 @@ pub struct PointerGesture {
 	is_long_pressed: bool,
 	press_position: Vector2,
 	current_position: Vector2,
-	pressed_seconds: f32,
-	drag_threshold: f32,
-	long_press_seconds: f32,
+	pressed_seconds: f64,
+	drag_threshold: f64,
+	long_press_seconds: f64,
 	tap_event: Option<PositionEvent>,
 	drag_event: Option<DragEvent>,
 	drag_end_event: Option<DragEvent>,
@@ -136,7 +136,7 @@ impl PointerGesture {
 	/// - `x`: 누른 위치 x. (픽셀, 좌표계는 넘기는 쪽이 정한다)
 	/// - `y`: 누른 위치 y. (픽셀)
 	//==============================================================================
-	pub fn press(&mut self, x: f32, y: f32) {
+	pub fn press(&mut self, x: f64, y: f64) {
 		self.is_pressed = true;
 		self.is_dragging = false;
 		self.is_long_pressed = false;
@@ -153,7 +153,7 @@ impl PointerGesture {
 	/// - `x`: 지금 위치 x. (픽셀, press 와 같은 좌표계)
 	/// - `y`: 지금 위치 y. (픽셀)
 	//==============================================================================
-	pub fn r#move(&mut self, x: f32, y: f32) {
+	pub fn r#move(&mut self, x: f64, y: f64) {
 		if !self.is_pressed {
 			return;
 		}
@@ -207,7 +207,7 @@ impl PointerGesture {
 	/// assert_eq!(tap_count.get(), 0);
 	/// ```
 	//==============================================================================
-	pub fn tick(&mut self, time_delta: f32) {
+	pub fn tick(&mut self, time_delta: f64) {
 		if !self.is_pressed || self.is_dragging || self.is_long_pressed {
 			return;
 		}
@@ -261,7 +261,7 @@ impl PointerGesture {
 	/// # 돌려줌
 	/// 누른 시간 / 롱프레스 시간. (1 에서 자른다) 눌려 있지 않거나, 드래그 중이거나, 롱프레스 시간이 0 이하면 0.
 	//==============================================================================
-	pub fn get_long_press_ratio(&self) -> f32 {
+	pub fn get_long_press_ratio(&self) -> f64 {
 		if !self.is_pressed || self.is_dragging || self.long_press_seconds <= 0.0 {
 			return 0.0;
 		}
@@ -334,7 +334,7 @@ impl PointerGesture {
 	/// # 인자
 	/// - `drag_threshold`: 드래그로 칠 거리. (픽셀)
 	//==============================================================================
-	pub fn set_drag_threshold(&mut self, drag_threshold: f32) {
+	pub fn set_drag_threshold(&mut self, drag_threshold: f64) {
 		self.drag_threshold = drag_threshold;
 	}
 
@@ -344,7 +344,7 @@ impl PointerGesture {
 	/// # 인자
 	/// - `long_press_seconds`: 롱프레스로 칠 누른 시간. (초)
 	//==============================================================================
-	pub fn set_long_press_seconds(&mut self, long_press_seconds: f32) {
+	pub fn set_long_press_seconds(&mut self, long_press_seconds: f64) {
 		self.long_press_seconds = long_press_seconds;
 	}
 }

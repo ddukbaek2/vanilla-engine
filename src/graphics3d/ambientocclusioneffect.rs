@@ -9,6 +9,7 @@ use crate::core::graphic::GlTexture;
 use crate::graphics3d::fullscreenpass::FullscreenPass;
 use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 use glow::HasContext;
+use crate::core::gluniform::GlUniformF64;
 
 //==============================================================================
 // 전역 상수 목록.
@@ -148,10 +149,10 @@ pub struct AmbientOcclusionEffect {
 	ping_render_target: RenderTarget,
 	pong_render_target: RenderTarget,
 	sample_kernel: [f32; SAMPLE_COUNT * 3],
-	radius: f32,
-	intensity: f32,
-	bias: f32,
-	scale: f32,
+	radius: f64,
+	intensity: f64,
+	bias: f64,
+	scale: f64,
 }
 
 impl AmbientOcclusionEffect {
@@ -224,9 +225,9 @@ impl AmbientOcclusionEffect {
 			let ring = (1.0 - height * height).sqrt();
 			let mut scale = (sample_index as f64 + 1.0) / SAMPLE_COUNT as f64;
 			scale = 0.15 + 0.85 * scale * scale;
-			sample_kernel[sample_index * 3] = (angle.cos() * ring * scale) as f32;
-			sample_kernel[sample_index * 3 + 1] = (angle.sin() * ring * scale) as f32;
-			sample_kernel[sample_index * 3 + 2] = (height * scale) as f32;
+			sample_kernel[sample_index * 3] = ((angle.cos() * ring * scale)) as f32;
+			sample_kernel[sample_index * 3 + 1] = ((angle.sin() * ring * scale)) as f32;
+			sample_kernel[sample_index * 3 + 2] = ((height * scale)) as f32;
 		}
 		sample_kernel
 	}
@@ -243,8 +244,8 @@ impl AmbientOcclusionEffect {
 	/// 판을 맞췄으면 Ok. 다시 짓다 GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
 	pub fn resize(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
-		let scaled_width = ((width as f32 * self.scale).floor() as i32).max(1);
-		let scaled_height = ((height as f32 * self.scale).floor() as i32).max(1);
+		let scaled_width = ((width as f64 * self.scale).floor() as i32).max(1);
+		let scaled_height = ((height as f64 * self.scale).floor() as i32).max(1);
 		self.occlusion_render_target.resize(gl, scaled_width, scaled_height)?;
 		self.ping_render_target.resize(gl, scaled_width, scaled_height)?;
 		self.pong_render_target.resize(gl, scaled_width, scaled_height)?;
@@ -267,7 +268,7 @@ impl AmbientOcclusionEffect {
 	/// - `near_distance`: 투영의 가까운 거리. (깊이를 선형으로 풀 때)
 	/// - `far_distance`: 투영의 먼 거리.
 	//==============================================================================
-	pub fn render(&self, gl: &glow::Context, depth_texture: Option<GlTexture>, normal_texture: Option<GlTexture>, view_matrix_elements: &[f32; 16], field_of_view_radian: f32, aspect_ratio: f32, near_distance: f32, far_distance: f32) {
+	pub fn render(&self, gl: &glow::Context, depth_texture: Option<GlTexture>, normal_texture: Option<GlTexture>, view_matrix_elements: &[f32; 16], field_of_view_radian: f64, aspect_ratio: f64, near_distance: f64, far_distance: f64) {
 		unsafe {
 			gl.disable(glow::DEPTH_TEST);
 			gl.disable(glow::BLEND);
@@ -282,12 +283,12 @@ impl AmbientOcclusionEffect {
 			gl.uniform_1_i32(occlusion_pass.get_uniform_location(gl, "depthTexture").as_ref(), 0);
 			gl.uniform_1_i32(occlusion_pass.get_uniform_location(gl, "normalTexture").as_ref(), 2);
 			gl.uniform_matrix_3_f32_slice(occlusion_pass.get_uniform_location(gl, "viewRotation").as_ref(), false, &view_rotation);
-			gl.uniform_2_f32(occlusion_pass.get_uniform_location(gl, "depthRange").as_ref(), near_distance, far_distance);
-			gl.uniform_2_f32(occlusion_pass.get_uniform_location(gl, "projectionScale").as_ref(), tangent_half_field_of_view * aspect_ratio, tangent_half_field_of_view);
+			gl.uniform_2_f64(occlusion_pass.get_uniform_location(gl, "depthRange").as_ref(), near_distance, far_distance);
+			gl.uniform_2_f64(occlusion_pass.get_uniform_location(gl, "projectionScale").as_ref(), tangent_half_field_of_view * aspect_ratio, tangent_half_field_of_view);
 			gl.uniform_3_f32_slice(occlusion_pass.get_uniform_location(gl, "sampleKernel[0]").as_ref(), &self.sample_kernel);
-			gl.uniform_1_f32(occlusion_pass.get_uniform_location(gl, "radius").as_ref(), self.radius);
-			gl.uniform_1_f32(occlusion_pass.get_uniform_location(gl, "intensity").as_ref(), self.intensity);
-			gl.uniform_1_f32(occlusion_pass.get_uniform_location(gl, "bias").as_ref(), self.bias);
+			gl.uniform_1_f64(occlusion_pass.get_uniform_location(gl, "radius").as_ref(), self.radius);
+			gl.uniform_1_f64(occlusion_pass.get_uniform_location(gl, "intensity").as_ref(), self.intensity);
+			gl.uniform_1_f64(occlusion_pass.get_uniform_location(gl, "bias").as_ref(), self.bias);
 			gl.active_texture(glow::TEXTURE2);
 			gl.bind_texture(glow::TEXTURE_2D, normal_texture);
 			gl.active_texture(glow::TEXTURE0);
@@ -301,23 +302,23 @@ impl AmbientOcclusionEffect {
 		let blur_pass = &self.blur_pass;
 		blur_pass.use_program(gl);
 		let blur_direction_location = blur_pass.get_uniform_location(gl, "blurDirection");
-		let occlusion_width = occlusion_render_target.get_width() as f32;
-		let occlusion_height = occlusion_render_target.get_height() as f32;
+		let occlusion_width = occlusion_render_target.get_width() as f64;
+		let occlusion_height = occlusion_render_target.get_height() as f64;
 		unsafe {
 			gl.uniform_1_i32(blur_pass.get_uniform_location(gl, "sourceTexture").as_ref(), 0);
-			gl.uniform_2_f32(blur_pass.get_uniform_location(gl, "texelSize").as_ref(), 1.0 / occlusion_width, 1.0 / occlusion_height);
+			gl.uniform_2_f64(blur_pass.get_uniform_location(gl, "texelSize").as_ref(), 1.0 / occlusion_width, 1.0 / occlusion_height);
 		}
 		let ping_render_target = &self.ping_render_target;
 		ping_render_target.bind(gl);
 		unsafe {
-			gl.uniform_2_f32(blur_direction_location.as_ref(), 1.0, 0.0);
+			gl.uniform_2_f64(blur_direction_location.as_ref(), 1.0, 0.0);
 			gl.bind_texture(glow::TEXTURE_2D, occlusion_render_target.get_color_texture(0));
 		}
 		blur_pass.draw(gl);
 		let pong_render_target = &self.pong_render_target;
 		pong_render_target.bind(gl);
 		unsafe {
-			gl.uniform_2_f32(blur_direction_location.as_ref(), 0.0, 1.0);
+			gl.uniform_2_f64(blur_direction_location.as_ref(), 0.0, 1.0);
 			gl.bind_texture(glow::TEXTURE_2D, ping_render_target.get_color_texture(0));
 		}
 		blur_pass.draw(gl);
@@ -347,7 +348,7 @@ impl AmbientOcclusionEffect {
 	/// - `intensity`: 차폐 강도. (가림 몫에 곱한다, 기본 1)
 	/// - `bias`: 깊이 바이어스. (월드 단위, 자기 가림을 막는다, 기본 0.002)
 	//==============================================================================
-	pub fn set_parameters(&mut self, radius: f32, intensity: f32, bias: f32) {
+	pub fn set_parameters(&mut self, radius: f64, intensity: f64, bias: f64) {
 		self.radius = radius;
 		self.intensity = intensity;
 		self.bias = bias;
@@ -359,7 +360,7 @@ impl AmbientOcclusionEffect {
 	/// # 인자
 	/// - `scale`: 판의 해상도 배율. (본 패스 크기에 곱한다, 기본 0.5, 다음 resize 부터 쓴다)
 	//==============================================================================
-	pub fn set_scale(&mut self, scale: f32) {
+	pub fn set_scale(&mut self, scale: f64) {
 		self.scale = scale;
 	}
 
@@ -433,7 +434,7 @@ impl AmbientOcclusionEffect {
 	/// # 돌려줌
 	/// 표본 반경. (월드 단위)
 	//==============================================================================
-	pub fn get_radius(&self) -> f32 {
+	pub fn get_radius(&self) -> f64 {
 		self.radius
 	}
 
@@ -443,7 +444,7 @@ impl AmbientOcclusionEffect {
 	/// # 돌려줌
 	/// 차폐 강도.
 	//==============================================================================
-	pub fn get_intensity(&self) -> f32 {
+	pub fn get_intensity(&self) -> f64 {
 		self.intensity
 	}
 
@@ -453,7 +454,7 @@ impl AmbientOcclusionEffect {
 	/// # 돌려줌
 	/// 깊이 바이어스. (월드 단위)
 	//==============================================================================
-	pub fn get_bias(&self) -> f32 {
+	pub fn get_bias(&self) -> f64 {
 		self.bias
 	}
 
@@ -463,7 +464,7 @@ impl AmbientOcclusionEffect {
 	/// # 돌려줌
 	/// 판의 해상도 배율.
 	//==============================================================================
-	pub fn get_scale(&self) -> f32 {
+	pub fn get_scale(&self) -> f64 {
 		self.scale
 	}
 }
@@ -486,8 +487,8 @@ mod tests {
 		// 0 번: 각 0, 높이 1/32, 크기 0.15 + 0.85 / 256.
 		let first_scale = 0.15 + 0.85 / 256.0;
 		let first_height = 0.5 / 16.0;
-		assert!((sample_kernel[0] - ((1.0f64 - first_height * first_height).sqrt() * first_scale) as f32).abs() < 1.0e-6);
+		assert!((sample_kernel[0] - (((1.0f64 - first_height * first_height).sqrt() * first_scale)) as f32).abs() < 1.0e-6);
 		assert!(sample_kernel[1].abs() < 1.0e-6);
-		assert!((sample_kernel[2] - (first_height * first_scale) as f32).abs() < 1.0e-6);
+		assert!((sample_kernel[2] - ((first_height * first_scale)) as f32).abs() < 1.0e-6);
 	}
 }

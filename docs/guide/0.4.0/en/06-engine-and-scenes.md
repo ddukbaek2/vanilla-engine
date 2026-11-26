@@ -146,7 +146,7 @@ impl Scene for LifecycleScene {
 		println!("initialize");
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.tick_count += 1;
 		if self.tick_count == 1 {
@@ -330,7 +330,7 @@ impl Scene for MainScene {
 
 struct SplashScene {
 	scene_base: SceneBase,
-	elapsed_seconds: f32,
+	elapsed_seconds: f64,
 	is_leaving: bool,
 }
 
@@ -343,7 +343,7 @@ impl Scene for SplashScene {
 		&mut self.scene_base
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.elapsed_seconds += time_delta;
 		if self.is_leaving || self.elapsed_seconds < 0.5 {
@@ -401,7 +401,7 @@ The `time_delta` in `tick(engine, time_delta)` is the seconds since the last fra
 
 | Function | Contents |
 | --- | --- |
-| `get_time_delta()` | Frame interval with the scale applied (seconds, `f32`). The value scene and component `tick` receive |
+| `get_time_delta()` | Frame interval with the scale applied (seconds, `f64`). The value scene and component `tick` receive |
 | `get_unscale_delta_time()` | Frame interval before the scale is applied (seconds, 0 to the limit) |
 | `get_time()` | Accumulated time from adding the clamped intervals (seconds, `f64`, scale not applied) |
 | `get_realtime_since_startup()` | Seconds since the engine started (the value at the last update, `f64`) |
@@ -453,7 +453,7 @@ impl Scene for TimeScene {
 		time_manager.set_maximum_time_delta(0.1);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		let time_manager = engine.get_time_manager();
 		let frame_per_second = time_manager.get_frame_per_second();
@@ -625,7 +625,7 @@ struct PausingScene {
 	scene_base: SceneBase,
 	is_paused: Rc<Cell<bool>>,
 	page_event_listener: Option<PageEventListener>,
-	play_seconds: f32,
+	play_seconds: f64,
 }
 
 impl Scene for PausingScene {
@@ -656,7 +656,7 @@ impl Scene for PausingScene {
 		println!("hidden at start {}", engine.is_page_hidden());
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		if self.is_paused.get() {
 			return;
