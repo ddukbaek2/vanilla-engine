@@ -6,10 +6,10 @@ This chapter covers how the Rust version loads files made by the authoring tools
 
 | Tool | Demo | File it makes | Where the Rust version reads it |
 | --- | --- | --- | --- |
-| UI Editor | [Open](https://ddukbaek2.com/portfolio/uieditor/) | `.uiasset.json` (default name `ui.uiasset.json`) | `UIDocument::from_json_text` |
-| Timeline Editor | [Open](https://ddukbaek2.com/portfolio/timelineeditor/) | `.timeline.json` (default name `titlecard.timeline.json`) | `Timeline::load_from_text`, `load_from_url`, `create_from_json_asset` |
-| Particle Editor | [Open](https://ddukbaek2.com/portfolio/particleeditor/) | `.vfx.json` (default name `effect.vfx.json`) | `ParticleSystem::apply_description` |
-| Visual Editor | [Open](https://ddukbaek2.com/portfolio/visualeditor/) | `scenes/*.scene.json`, `prefabs/*.prefab.json` | `UIDocument::from_json_text` |
+| UI Editor | [Open](https://vanillapunch.com/tools/editor/uieditor/) | `.uiasset.json` (default name `ui.uiasset.json`) | `UIDocument::from_json_text` |
+| Timeline Editor | [Open](https://vanillapunch.com/tools/editor/timelineeditor/) | `.timeline.json` (default name `titlecard.timeline.json`) | `Timeline::load_from_text`, `load_from_url`, `create_from_json_asset` |
+| Particle Editor | [Open](https://vanillapunch.com/tools/editor/particleeditor/) | `.vfx.json` (default name `effect.vfx.json`) | `ParticleSystem::apply_description` |
+| Visual Editor | [Open](https://vanillapunch.com/tools/editor/visualeditor/) | `scenes/*.scene.json`, `prefabs/*.prefab.json` | `UIDocument::from_json_text` |
 
 - Each editor is `tools/<tool name>/<tool name>.html` in the [vanilla.js repository](https://github.com/ddukbaek2/vanilla.js). It is a build that bundles the engine into one file, so it works when opened as a file without a server.
 - The UI Editor, Timeline Editor, and Particle Editor save through a browser download. The Visual Editor writes straight into a folder opened with the folder picker in Chromium-based browsers, and uses a download in other browsers.
