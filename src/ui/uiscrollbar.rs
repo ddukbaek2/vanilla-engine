@@ -79,6 +79,8 @@ pub struct UIScrollBar {
 	drag_start_scroll_offset: Vector2,
 	min_thumb_size: f32,
 	auto_hide: bool,
+	/// 자동 숨김으로 숨겼는지. (노드는 켜 둔 채 보이지 않게만 해 tick 이 돌아 다시 보일 수 있다, 원본 isAutoHidden)
+	is_auto_hidden: bool,
 }
 
 #[crate::reflect]
@@ -100,6 +102,7 @@ impl UIScrollBar {
 			drag_start_scroll_offset: Vector2::zero(),
 			min_thumb_size: 24.0,
 			auto_hide: true,
+			is_auto_hidden: false,
 		}
 	}
 
@@ -183,9 +186,28 @@ impl UIScrollBar {
 
 	//==============================================================================
 	/// 자동 숨김 설정. (콘텐트가 보이는 영역에 들어오면 트랙까지 숨긴다)
+	/// - 노드는 켜 둔 채 보이지 않게만 해, 콘텐트가 길어지거나 자동 숨김을 끄면 다음 tick 에 다시 보인다.
 	//==============================================================================
 	pub fn set_auto_hide(&mut self, auto_hide: bool) {
 		self.auto_hide = auto_hide;
+	}
+
+	//==============================================================================
+	/// 자동 숨김으로 숨어 있는지. (원본 isAutoHidden)
+	//==============================================================================
+	pub fn is_auto_hidden(&self) -> bool {
+		self.is_auto_hidden
+	}
+
+	//==============================================================================
+	/// 자동 숨김 상태 바꾸기. (바뀔 때만 노드의 보이기를 바꿔, 숨긴 적 없는 노드의 보이기는 건드리지 않는다)
+	//==============================================================================
+	fn set_auto_hidden(&mut self, context: &mut ComponentContext, is_auto_hidden: bool) {
+		if self.is_auto_hidden == is_auto_hidden {
+			return;
+		}
+		self.is_auto_hidden = is_auto_hidden;
+		context.get_node_mut().set_visible(!is_auto_hidden);
 	}
 
 	//==============================================================================
@@ -265,15 +287,14 @@ impl UIScrollBar {
 				thumb_metrics
 			}
 			None => {
-				// 콘텐트가 보이는 영역 안이면 스크롤할 것이 없다.
+				// 콘텐트가 보이는 영역 안이면 스크롤할 것이 없다. (노드를 끄면 tick 이 멈춰 다시 켜지 못하므로 보이지 않게만 한다)
 				self.is_thumb_active = false;
-				if self.auto_hide {
-					context.get_node_mut().set_active(false);
-				}
+				let is_auto_hidden = self.auto_hide;
+				self.set_auto_hidden(context, is_auto_hidden);
 				return;
 			}
 		};
-		context.get_node_mut().set_active(true);
+		self.set_auto_hidden(context, false);
 
 		let offset_along_axis = self.pick_axis(scroll_state.scroll_offset);
 		let progress = if thumb_metrics.scrollable_content > 0.0 {
@@ -558,5 +579,40 @@ mod tests {
 		node_tree.dispatch_touch(scroll_bar_id, &engine, TouchKind::Press, Vector2::create(188.0, 7.0));
 		let jumped_offset = node_tree[scroll_id].get_component::<UIScrollView>().expect("scroll view").get_scroll_offset();
 		assert_eq!(jumped_offset.y, 0.0);
+	}
+
+	//==============================================================================
+	/// 자동 숨김은 노드를 켜 둔 채 숨겨, 콘텐트가 길어지거나 자동 숨김을 끄면 다시 보인다. (원본과 같다)
+	//==============================================================================
+	#[test]
+	fn auto_hidden_scroll_bar_comes_back() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let scroll_id = node_tree.create_child(root_id, "scroll");
+		node_tree[scroll_id].set_content_size(Vector2::create(200.0, 112.0));
+		{
+			let scroll_view = node_tree.add_component(scroll_id, UIScrollView::new()).expect("scroll view");
+			scroll_view.set_scroll_content_size(Vector2::create(200.0, 50.0));
+			scroll_view.set_shows_vertical_scroll_bar(true);
+		}
+		node_tree.tick(&engine, 0.016);
+		node_tree.tick(&engine, 0.016);
+		let scroll_bar_id = node_tree[scroll_id].get_component::<UIScrollView>().expect("scroll view").get_vertical_scroll_bar().expect("scroll bar");
+		assert!(node_tree[scroll_bar_id].is_active());
+		assert!(!node_tree[scroll_bar_id].is_visible());
+		assert!(node_tree[scroll_bar_id].get_component::<UIScrollBar>().expect("scroll bar").is_auto_hidden());
+
+		node_tree[scroll_id].get_component_mut::<UIScrollView>().expect("scroll view").set_scroll_content_size(Vector2::create(200.0, 448.0));
+		node_tree.tick(&engine, 0.016);
+		assert!(node_tree[scroll_bar_id].is_visible());
+
+		node_tree[scroll_id].get_component_mut::<UIScrollView>().expect("scroll view").set_scroll_content_size(Vector2::create(200.0, 50.0));
+		node_tree.tick(&engine, 0.016);
+		assert!(!node_tree[scroll_bar_id].is_visible());
+		node_tree[scroll_bar_id].get_component_mut::<UIScrollBar>().expect("scroll bar").set_auto_hide(false);
+		node_tree.tick(&engine, 0.016);
+		assert!(node_tree[scroll_bar_id].is_visible());
+		assert!(!node_tree[scroll_bar_id].get_component::<UIScrollBar>().expect("scroll bar").is_auto_hidden());
 	}
 }
