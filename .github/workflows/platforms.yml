@@ -115,6 +115,10 @@ jobs:
       - name: 크롬 경로 (견주기 스크립트가 CHROME_PATH 로 읽는다)
         run: |
           echo "CHROME_PATH=${{ steps.chrome.outputs.chrome-path }}" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # 우분투 23.10 뒤로는 AppArmor 가 권한 없는 사용자 이름공간을 막아, AppArmor 프로필이 없는 Chrome for Testing 이 샌드박스를 못 띄운다. (deb 로 깐 google-chrome 은 프로필이 있다)
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
           echo "크롬 ${{ steps.chrome.outputs.chrome-version }}: ${{ steps.chrome.outputs.chrome-path }}"
 
       - name: 소리 크롬 견주기 (같은 기계의 크롬으로 기대값을 다시 찍는다)
@@ -132,11 +136,13 @@ jobs:
           exit $status
 
       - name: 시험 (cargo test --workspace)
+        id: tests
+        if: success() || failure()
         timeout-minutes: 90
         run: cargo test --workspace --no-fail-fast 2>&1 | tee "$OUT/logs/${{ matrix.tag }}_test.log"
 
       - name: 리눅스 라이브러리 시험이 죽으면 gdb 로 다시 돌려 죽은 스레드 보기
-        if: failure() && runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.tests.outcome == 'failure'
         run: |
           test_binary=$(cargo test --lib --no-run --message-format=json 2>/dev/null | jq -r 'select(.reason == "compiler-artifact" and .profile.test == true and (.target.kind | index("lib"))) | .executable' | head -n 1)
           echo "시험 실행 파일: $test_binary"
