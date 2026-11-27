@@ -237,7 +237,7 @@ impl Scene for BatchClipScene {
 	//==============================================================================
 	// 생성.
 	//==============================================================================
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 		match self.scene_kind {
 			SceneKind::Clip => {
 				self.create_clip_scene();
@@ -251,7 +251,7 @@ impl Scene for BatchClipScene {
 	//==============================================================================
 	// 출력. (씬이 그려진 다섯째 프레임을 찍고, 그다음 프레임에 끝낸다)
 	//==============================================================================
-	fn draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		if let Some(capture_frame_number) = self.capture_frame_number {
 			if engine.get_frame_number() > capture_frame_number {
 				println!("drawCalls={:?}", self.draw_call_count_list);
@@ -308,7 +308,7 @@ fn main() {
 	engine_configuration.window_size = Vector2::create(window_width, window_height);
 	engine_configuration.reference_resolution_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
 	engine_configuration.view_scale_mode = ViewScaleMode::StretchShort;
-	let mut engine = Engine::new(engine_configuration);
+	let engine = Engine::new(engine_configuration);
 	let pixel_ratio = std::env::var("BATCHCLIP_PIXEL_RATIO").ok().and_then(|value| value.parse::<f64>().ok()).unwrap_or(1.5);
 	engine.get_view_manager_mut().set_max_render_pixel_ratio(pixel_ratio);
 	let batch_clip_scene = BatchClipScene {

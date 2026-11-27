@@ -11,7 +11,7 @@
 //!     impl UIScene for MenuScene {
 //!         fn get_ui_scene_base(&self) -> &UISceneBase { &self.ui_scene_base }
 //!         fn get_ui_scene_base_mut(&mut self) -> &mut UISceneBase { &mut self.ui_scene_base }
-//!         fn initialize(&mut self, engine: &mut Engine) { /* UINode 를 붙인 노드를 만들고 get_safe_area_layout_guide 의 앵커로 제약을 건다 */ }
+//!         fn initialize(&mut self, engine: &Engine) { /* UINode 를 붙인 노드를 만들고 get_safe_area_layout_guide 의 앵커로 제약을 건다 */ }
 //!     }
 //!     vanilla::ui_scene!(MenuScene);
 //!   ```
@@ -42,11 +42,11 @@ use crate::ui::uinode::{LayoutMargins, UINode};
 /// ```rust
 /// use vanilla::{Engine, EngineConfiguration, SafeAreaInsets, UINode, UISceneBase, Vector2};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 /// engine.get_view_manager_mut().set_safe_area_override(Some(SafeAreaInsets::create(40.0, 0.0, 20.0, 10.0)));
 /// let mut ui_scene_base = UISceneBase::new();
-/// ui_scene_base.initialize(&mut engine);
+/// ui_scene_base.initialize(engine);
 ///
 /// let guide_left = ui_scene_base.get_safe_area_layout_guide().left_anchor();
 /// let guide_top = ui_scene_base.get_safe_area_layout_guide().top_anchor();
@@ -62,7 +62,7 @@ use crate::ui::uinode::{LayoutMargins, UINode};
 /// 	bar.add_constraint(&bar.height_anchor().equal_to(50)).unwrap();
 /// });
 ///
-/// ui_scene_base.tick(&mut engine, 0.016);
+/// ui_scene_base.tick(engine, 0.016);
 /// let bar_node = &ui_scene_base.get_scene_base().get_node_tree()[bar_id];
 /// assert_eq!(bar_node.get_local_position(), Vector2::create(10.0, 40.0));
 /// assert_eq!(bar_node.get_content_size(), Vector2::create(790.0, 50.0));
@@ -155,7 +155,7 @@ impl UISceneBase {
 	/// - `view_scale_mode`: 뷰 배율 방식.
 	/// - `engine`: 바로 반영할 엔진. None 이면 initialize 에서 적용한다.
 	//==============================================================================
-	pub fn set_view_scale_mode(&mut self, view_scale_mode: ViewScaleMode, engine: Option<&mut Engine>) {
+	pub fn set_view_scale_mode(&mut self, view_scale_mode: ViewScaleMode, engine: Option<&Engine>) {
 		self.game_scene_base.set_view_scale_mode(view_scale_mode, engine);
 	}
 
@@ -205,7 +205,7 @@ impl UISceneBase {
 	/// # 인자
 	/// - `engine`: 엔진.
 	//==============================================================================
-	pub fn create(&mut self, engine: &mut Engine) {
+	pub fn create(&mut self, engine: &Engine) {
 		self.game_scene_base.create(engine);
 	}
 
@@ -216,7 +216,7 @@ impl UISceneBase {
 	/// - `engine`: 엔진.
 	/// - `graphic`: 그릴 그래픽.
 	//==============================================================================
-	pub fn draw_on_load(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	pub fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.game_scene_base.draw_on_load(engine, graphic);
 	}
 
@@ -226,7 +226,7 @@ impl UISceneBase {
 	/// # 인자
 	/// - `engine`: 엔진. (뷰 크기와 세이프 에어리어를 읽는다)
 	//==============================================================================
-	pub fn initialize(&mut self, engine: &mut Engine) {
+	pub fn initialize(&mut self, engine: &Engine) {
 		self.game_scene_base.initialize(engine);
 		self.layout(engine);
 	}
@@ -238,7 +238,7 @@ impl UISceneBase {
 	/// - `engine`: 엔진.
 	/// - `canvas_native_size`: 바뀐 캔버스 크기. (공통 틀에 넘기고, 솔버 레이아웃은 이 값 대신 뷰 매니저의 뷰 크기를 읽는다)
 	//==============================================================================
-	pub fn resize(&mut self, engine: &mut Engine, canvas_native_size: Vector2) {
+	pub fn resize(&mut self, engine: &Engine, canvas_native_size: Vector2) {
 		self.game_scene_base.resize(engine, canvas_native_size);
 		self.layout(engine);
 	}
@@ -274,7 +274,7 @@ impl UISceneBase {
 	/// # 돌려줌
 	/// 뷰 크기가 바뀌어 레이아웃을 다시 했으면 true.
 	//==============================================================================
-	pub fn tick(&mut self, engine: &mut Engine, time_delta: f64) -> bool {
+	pub fn tick(&mut self, engine: &Engine, time_delta: f64) -> bool {
 		let is_layout_changed = self.game_scene_base.tick(engine, time_delta);
 		if is_layout_changed {
 			self.layout(engine);
@@ -510,7 +510,7 @@ impl Default for UISceneBase {
 /// 		&mut self.ui_scene_base
 /// 	}
 ///
-/// 	fn initialize(&mut self, _engine: &mut Engine) {
+/// 	fn initialize(&mut self, _engine: &Engine) {
 /// 		let guide_left = self.ui_scene_base.get_safe_area_layout_guide().left_anchor();
 /// 		let guide_top = self.ui_scene_base.get_safe_area_layout_guide().top_anchor();
 /// 		let node_tree = self.ui_scene_base.get_scene_base_mut().get_node_tree_mut();
@@ -563,7 +563,7 @@ pub trait UIScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn load_assets(&mut self, _engine: &mut Engine) {
+	fn load_assets(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -573,7 +573,7 @@ pub trait UIScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn draw_on_load(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	fn draw_on_load(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -582,7 +582,7 @@ pub trait UIScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -591,7 +591,7 @@ pub trait UIScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn destroy(&mut self, _engine: &mut Engine) {
+	fn destroy(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -600,7 +600,7 @@ pub trait UIScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn layout(&mut self, _engine: &mut Engine) {
+	fn layout(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -610,7 +610,7 @@ pub trait UIScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_time_delta`: 지난 프레임부터 흐른 시간. (초)
 	//==============================================================================
-	fn tick(&mut self, _engine: &mut Engine, _time_delta: f64) {
+	fn tick(&mut self, _engine: &Engine, _time_delta: f64) {
 	}
 
 	//==============================================================================
@@ -620,7 +620,7 @@ pub trait UIScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn pre_draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	fn pre_draw(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -630,7 +630,7 @@ pub trait UIScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -640,7 +640,7 @@ pub trait UIScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn post_draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	fn post_draw(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -649,7 +649,7 @@ pub trait UIScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn finalize(&mut self, _engine: &mut Engine) {
+	fn finalize(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -658,7 +658,7 @@ pub trait UIScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn unload(&mut self, _engine: &mut Engine) {
+	fn unload(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -667,7 +667,7 @@ pub trait UIScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn on_page_process_restored(&mut self, _engine: &mut Engine) {
+	fn on_page_process_restored(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -676,7 +676,7 @@ pub trait UIScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn on_page_visibility_restored(&mut self, _engine: &mut Engine) {
+	fn on_page_visibility_restored(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -686,7 +686,7 @@ pub trait UIScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 누른 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
@@ -696,7 +696,7 @@ pub trait UIScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 지금 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_move(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_move(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
@@ -706,7 +706,7 @@ pub trait UIScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 뗀 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_release(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_release(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
@@ -716,7 +716,7 @@ pub trait UIScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 마지막 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_cancel(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_cancel(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
@@ -727,7 +727,7 @@ pub trait UIScene: 'static {
 	/// - `_view_input_position`: 포인터 자리. (뷰 좌표)
 	/// - `_wheel_delta`: 이번 프레임에 쌓인 휠 이동량. (픽셀, x 는 오른쪽으로, y 는 내용을 아래로 넘기면 양수)
 	//==============================================================================
-	fn touch_wheel(&mut self, _engine: &mut Engine, _view_input_position: Vector2, _wheel_delta: Vector2) {
+	fn touch_wheel(&mut self, _engine: &Engine, _view_input_position: Vector2, _wheel_delta: Vector2) {
 	}
 }
 
@@ -746,67 +746,67 @@ macro_rules! ui_scene {
 				$crate::ui::uiscene::UIScene::get_ui_scene_base_mut(self).get_scene_base_mut()
 			}
 
-			fn create(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn create(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::ui::uiscene::UIScene::get_ui_scene_base_mut(self).create(engine);
 				$crate::ui::uiscene::UIScene::load_assets(self, engine);
 			}
 
-			fn draw_on_load(&mut self, engine: &mut $crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
+			fn draw_on_load(&mut self, engine: &$crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
 				$crate::ui::uiscene::UIScene::get_ui_scene_base_mut(self).draw_on_load(engine, graphic);
 				$crate::ui::uiscene::UIScene::draw_on_load(self, engine, graphic);
 			}
 
-			fn initialize(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn initialize(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::ui::uiscene::UIScene::get_ui_scene_base_mut(self).initialize(engine);
 				$crate::ui::uiscene::UIScene::initialize(self, engine);
 			}
 
-			fn destroy(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn destroy(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::ui::uiscene::UIScene::destroy(self, engine);
 			}
 
-			fn finalize(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn finalize(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::ui::uiscene::UIScene::finalize(self, engine);
 			}
 
-			fn unload(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn unload(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::ui::uiscene::UIScene::unload(self, engine);
 			}
 
-			fn on_page_process_restored(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn on_page_process_restored(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::ui::uiscene::UIScene::on_page_process_restored(self, engine);
 			}
 
-			fn on_page_visibility_restored(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn on_page_visibility_restored(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::ui::uiscene::UIScene::on_page_visibility_restored(self, engine);
 			}
 
-			fn touch_press(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
+			fn touch_press(&mut self, engine: &$crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
 				$crate::ui::uiscene::UIScene::touch_press(self, engine, view_input_position);
 			}
 
-			fn touch_move(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
+			fn touch_move(&mut self, engine: &$crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
 				$crate::ui::uiscene::UIScene::touch_move(self, engine, view_input_position);
 			}
 
-			fn touch_release(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
+			fn touch_release(&mut self, engine: &$crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
 				$crate::ui::uiscene::UIScene::touch_release(self, engine, view_input_position);
 			}
 
-			fn touch_cancel(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
+			fn touch_cancel(&mut self, engine: &$crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
 				$crate::ui::uiscene::UIScene::touch_cancel(self, engine, view_input_position);
 			}
 
-			fn touch_wheel(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2, wheel_delta: $crate::base::vector2::Vector2) {
+			fn touch_wheel(&mut self, engine: &$crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2, wheel_delta: $crate::base::vector2::Vector2) {
 				$crate::ui::uiscene::UIScene::touch_wheel(self, engine, view_input_position, wheel_delta);
 			}
 
-			fn resize(&mut self, engine: &mut $crate::core::engine::Engine, canvas_native_size: $crate::base::vector2::Vector2) {
+			fn resize(&mut self, engine: &$crate::core::engine::Engine, canvas_native_size: $crate::base::vector2::Vector2) {
 				$crate::ui::uiscene::UIScene::get_ui_scene_base_mut(self).resize(engine, canvas_native_size);
 				$crate::ui::uiscene::UIScene::layout(self, engine);
 			}
 
-			fn tick(&mut self, engine: &mut $crate::core::engine::Engine, time_delta: f64) {
+			fn tick(&mut self, engine: &$crate::core::engine::Engine, time_delta: f64) {
 				if $crate::ui::uiscene::UIScene::get_ui_scene_base_mut(self).tick(engine, time_delta) {
 					$crate::ui::uiscene::UIScene::layout(self, engine);
 				}
@@ -816,17 +816,17 @@ macro_rules! ui_scene {
 				$crate::ui::uiscene::UIScene::tick(self, engine, time_delta);
 			}
 
-			fn pre_draw(&mut self, engine: &mut $crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
+			fn pre_draw(&mut self, engine: &$crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
 				$crate::ui::uiscene::UIScene::get_ui_scene_base(self).pre_draw(engine, graphic);
 				$crate::ui::uiscene::UIScene::pre_draw(self, engine, graphic);
 			}
 
-			fn draw(&mut self, engine: &mut $crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
+			fn draw(&mut self, engine: &$crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
 				$crate::ui::uiscene::UIScene::get_ui_scene_base_mut(self).get_scene_base_mut().draw(graphic);
 				$crate::ui::uiscene::UIScene::draw(self, engine, graphic);
 			}
 
-			fn post_draw(&mut self, engine: &mut $crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
+			fn post_draw(&mut self, engine: &$crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
 				$crate::ui::uiscene::UIScene::post_draw(self, engine, graphic);
 				$crate::ui::uiscene::UIScene::get_ui_scene_base_mut(self).post_draw(engine, graphic);
 			}
@@ -845,11 +845,11 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn ui_nodes_follow_safe_area_guide() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 		engine.get_view_manager_mut().set_safe_area_override(Some(SafeAreaInsets::create(40.0, 0.0, 20.0, 10.0)));
 		let mut ui_scene_base = UISceneBase::new();
-		ui_scene_base.initialize(&mut engine);
+		ui_scene_base.initialize(engine);
 		let guide_left = ui_scene_base.get_safe_area_layout_guide().left_anchor();
 		let guide_top = ui_scene_base.get_safe_area_layout_guide().top_anchor();
 		let guide_right = ui_scene_base.get_safe_area_layout_guide().right_anchor();
@@ -864,14 +864,14 @@ mod tests {
 			bar.add_constraint(&bar.height_anchor().equal_to(50)).expect("height");
 		});
 		assert!(ui_scene_base.get_scene_base().get_node_tree().find_child_by_name(root_id, "safeArea").is_none());
-		ui_scene_base.tick(&mut engine, 0.016);
+		ui_scene_base.tick(engine, 0.016);
 		let bar_node = &ui_scene_base.get_scene_base().get_node_tree()[bar_id];
 		assert_eq!(bar_node.get_local_position(), Vector2::create(10.0, 40.0));
 		assert_eq!(bar_node.get_content_size(), Vector2::create(790.0, 50.0));
 		assert_eq!(ui_scene_base.get_safe_area_insets(), LayoutMargins::create(40.0, 10.0, 20.0, 0.0));
 
 		engine.get_view_manager_mut().calculate_view_rect(1000, 600, 1.0);
-		assert!(ui_scene_base.tick(&mut engine, 0.016));
+		assert!(ui_scene_base.tick(engine, 0.016));
 		let bar_node = &ui_scene_base.get_scene_base().get_node_tree()[bar_id];
 		assert_eq!(bar_node.get_content_size(), Vector2::create(990.0, 50.0));
 		assert!((ui_scene_base.get_screen_node().get_width() - 1000.0).abs() < 0.001);

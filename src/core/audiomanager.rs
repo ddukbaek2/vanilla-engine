@@ -101,7 +101,7 @@ pub(crate) fn resume_audio_manager_state(state_cell: &Rc<RefCell<AudioManagerSta
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn create(&mut self, engine: &mut Engine) {
+/// 	fn create(&mut self, engine: &Engine) {
 /// 		let audio_asset = engine.load_audio_asset("tests/assets/audio/wav_s16_stereo.wav").unwrap();
 /// 		let mut audio_player = engine.get_audio_manager().create_audio_player();
 /// 		audio_player.set_audio_asset(audio_asset);

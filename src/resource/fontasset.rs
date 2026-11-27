@@ -29,9 +29,9 @@ use std::task::{Context, Poll};
 /// ```rust
 /// use vanilla::{Engine, EngineConfiguration, FontAsset};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let mut font_asset = FontAsset::new();
-/// let font_load_handle = font_asset.load_font(&mut engine, "Title", "examples/assets/missing.ttf");
+/// let font_load_handle = font_asset.load_font(engine, "Title", "examples/assets/missing.ttf");
 /// assert!(font_load_handle.get_load_handle().is_failed());
 /// assert!(!font_load_handle.is_finished());
 /// ```
@@ -90,9 +90,9 @@ impl FontLoadHandle {
 /// ```rust
 /// use vanilla::{Engine, EngineConfiguration, FontAsset};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let mut font_asset = FontAsset::new();
-/// let font_load_handle = font_asset.load_font_from_bytes(&mut engine, "Pixel", vec![0, 1, 0, 0]);
+/// let font_load_handle = font_asset.load_font_from_bytes(engine, "Pixel", vec![0, 1, 0, 0]);
 /// let task_handle = engine.spawn_task(|_engine_context| async move {
 /// 	let _ = font_load_handle.await;
 /// });
@@ -147,15 +147,15 @@ impl IntoFuture for FontLoadHandle {
 /// ```rust
 /// use vanilla::{Asset, Engine, EngineConfiguration, FontAsset, FontFaceDescriptors};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let mut font_asset = FontAsset::new();
-/// font_asset.load_font_from_bytes_with_descriptors(&mut engine, "Pixel", vec![0, 1, 0, 0], FontFaceDescriptors::create_with_bold(true));
+/// font_asset.load_font_from_bytes_with_descriptors(engine, "Pixel", vec![0, 1, 0, 0], FontFaceDescriptors::create_with_bold(true));
 /// assert!(font_asset.is_loaded());
 /// assert_eq!(font_asset.get_family(), "Pixel");
 /// assert!(font_asset.is_bold());
 /// assert_eq!(font_asset.get_descriptors().source_key, "Pixel");
 /// assert_eq!(engine.get_pending_font_face_count(), 1);
-/// font_asset.unload(&mut engine);
+/// font_asset.unload(engine);
 /// assert!(!font_asset.is_loaded());
 /// assert_eq!(engine.get_pending_font_face_count(), 0);
 /// ```
@@ -193,7 +193,7 @@ impl FontAsset {
 	/// # 돌려줌
 	/// await 할 수 있는 글꼴 받기 손잡이. (받기나 올리기에 실패하면 까닭으로 끝난다)
 	//==============================================================================
-	pub fn load(&mut self, engine: &mut Engine, asset_path: &str) -> FontLoadHandle {
+	pub fn load(&mut self, engine: &Engine, asset_path: &str) -> FontLoadHandle {
 		let family = read_font_family_from_path(asset_path);
 		self.load_font(engine, &family, asset_path)
 	}
@@ -210,7 +210,7 @@ impl FontAsset {
 	/// # 돌려줌
 	/// 엔진이 글꼴 목록에 올리면(또는 실패하면) 끝나는 손잡이.
 	//==============================================================================
-	pub fn load_font(&mut self, engine: &mut Engine, family: &str, asset_path: &str) -> FontLoadHandle {
+	pub fn load_font(&mut self, engine: &Engine, family: &str, asset_path: &str) -> FontLoadHandle {
 		self.load_font_with_bold(engine, family, asset_path, false)
 	}
 
@@ -227,7 +227,7 @@ impl FontAsset {
 	/// # 돌려줌
 	/// 엔진이 글꼴 목록에 올리면(또는 실패하면) 끝나는 손잡이.
 	//==============================================================================
-	pub fn load_font_with_bold(&mut self, engine: &mut Engine, family: &str, asset_path: &str, is_bold: bool) -> FontLoadHandle {
+	pub fn load_font_with_bold(&mut self, engine: &Engine, family: &str, asset_path: &str, is_bold: bool) -> FontLoadHandle {
 		self.load_font_with_descriptors(engine, family, asset_path, FontFaceDescriptors::create_with_bold(is_bold))
 	}
 
@@ -249,19 +249,19 @@ impl FontAsset {
 	/// ```rust
 	/// use vanilla::{Engine, EngineConfiguration, FontAsset, FontFaceDescriptors};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// let mut descriptors = FontFaceDescriptors::new();
 	/// descriptors.is_italic = true;
 	/// descriptors.unicode_range_list = vec![(0x0020, 0x007e)];
 	/// let mut font_asset = FontAsset::new();
-	/// let font_load_handle = font_asset.load_font_with_descriptors(&mut engine, "Body", "examples/assets/missing.ttf", descriptors);
+	/// let font_load_handle = font_asset.load_font_with_descriptors(engine, "Body", "examples/assets/missing.ttf", descriptors);
 	/// assert_eq!(font_asset.get_descriptors().source_key, "examples/assets/missing.ttf");
 	/// assert!(font_asset.get_descriptors().is_italic);
 	/// assert!(!font_asset.is_bold());
 	/// assert!(font_load_handle.get_load_handle().is_failed());
 	/// ```
 	//==============================================================================
-	pub fn load_font_with_descriptors(&mut self, engine: &mut Engine, family: &str, asset_path: &str, mut descriptors: FontFaceDescriptors) -> FontLoadHandle {
+	pub fn load_font_with_descriptors(&mut self, engine: &Engine, family: &str, asset_path: &str, mut descriptors: FontFaceDescriptors) -> FontLoadHandle {
 		if let Some(font_load_handle) = &self.font_load_handle {
 			return font_load_handle.clone();
 		}
@@ -288,7 +288,7 @@ impl FontAsset {
 	/// # 돌려줌
 	/// 엔진이 글꼴 목록에 올리면(또는 실패하면) 끝나는 손잡이.
 	//==============================================================================
-	pub fn load_font_from_bytes(&mut self, engine: &mut Engine, family: &str, bytes: Vec<u8>) -> FontLoadHandle {
+	pub fn load_font_from_bytes(&mut self, engine: &Engine, family: &str, bytes: Vec<u8>) -> FontLoadHandle {
 		self.load_font_from_bytes_with_descriptors(engine, family, bytes, FontFaceDescriptors::new())
 	}
 
@@ -305,7 +305,7 @@ impl FontAsset {
 	/// # 돌려줌
 	/// 엔진이 글꼴 목록에 올리면(또는 실패하면) 끝나는 손잡이.
 	//==============================================================================
-	pub fn load_font_from_bytes_with_descriptors(&mut self, engine: &mut Engine, family: &str, bytes: Vec<u8>, mut descriptors: FontFaceDescriptors) -> FontLoadHandle {
+	pub fn load_font_from_bytes_with_descriptors(&mut self, engine: &Engine, family: &str, bytes: Vec<u8>, mut descriptors: FontFaceDescriptors) -> FontLoadHandle {
 		if let Some(font_load_handle) = &self.font_load_handle {
 			return font_load_handle.clone();
 		}
@@ -327,7 +327,7 @@ impl FontAsset {
 	/// # 인자
 	/// - `engine`: 얼굴을 뺄 엔진.
 	//==============================================================================
-	pub fn unload(&mut self, engine: &mut Engine) {
+	pub fn unload(&mut self, engine: &Engine) {
 		if self.asset_base.get_load_handle().is_none() {
 			return;
 		}
@@ -436,9 +436,9 @@ mod tests {
 		assert_eq!(read_font_family_from_path("fonts/Pixel.Bold.ttf?v=2#x"), "Pixel.Bold");
 		assert_eq!(read_font_family_from_path("Plain"), "Plain");
 		assert_eq!(read_font_family_from_path(".hidden"), ".hidden");
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let mut font_asset = FontAsset::new();
-		font_asset.load(&mut engine, "examples/assets/DOSGothic.woff");
+		font_asset.load(engine, "examples/assets/DOSGothic.woff");
 		assert_eq!(font_asset.get_family(), "DOSGothic");
 	}
 
@@ -447,17 +447,17 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn load_from_bytes_and_unload() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let mut font_asset = FontAsset::new();
-		font_asset.load_font_from_bytes_with_descriptors(&mut engine, "Pixel", vec![0u8, 1, 0, 0], FontFaceDescriptors::create_with_bold(true));
+		font_asset.load_font_from_bytes_with_descriptors(engine, "Pixel", vec![0u8, 1, 0, 0], FontFaceDescriptors::create_with_bold(true));
 		assert!(font_asset.is_loaded());
 		assert_eq!(font_asset.get_family(), "Pixel");
 		assert!(font_asset.is_bold());
 		assert_eq!(font_asset.get_descriptors().source_key, "Pixel");
-		font_asset.load_font_from_bytes(&mut engine, "Other", vec![0u8]);
+		font_asset.load_font_from_bytes(engine, "Other", vec![0u8]);
 		assert_eq!(font_asset.get_family(), "Pixel");
 		assert_eq!(engine.get_pending_font_face_count(), 1);
-		font_asset.unload(&mut engine);
+		font_asset.unload(engine);
 		assert!(!font_asset.is_loaded());
 		assert_eq!(engine.get_pending_font_face_count(), 0);
 	}

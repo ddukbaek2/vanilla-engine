@@ -1210,13 +1210,13 @@ impl LayerReader<'_> {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn create(&mut self, engine: &mut Engine) {
+/// 	fn create(&mut self, engine: &Engine) {
 /// 		let fbx_load_handle = FbxLoader::load_from_url(engine, "anims/walk.fbx");
 /// 		self.scene_base.track_load_handle(fbx_load_handle.get_load_handle());
 /// 		self.fbx_load_handle = Some(fbx_load_handle);
 /// 	}
 ///
-/// 	fn initialize(&mut self, _engine: &mut Engine) {
+/// 	fn initialize(&mut self, _engine: &Engine) {
 /// 		let scene_data_result = self.fbx_load_handle.as_ref().and_then(|fbx_load_handle| fbx_load_handle.get_scene_data());
 /// 		match scene_data_result {
 /// 			Some(Ok(scene_data)) => {
@@ -1304,7 +1304,7 @@ impl FbxLoadHandle {
 /// use vanilla::{Engine, FbxLoadFuture};
 /// use vanilla::graphics3d::fbxloader::FbxLoader;
 ///
-/// fn start_loading(engine: &mut Engine) {
+/// fn start_loading(engine: &Engine) {
 /// 	let fbx_load_future: FbxLoadFuture = FbxLoader::load_from_url(engine, "anims/walk.fbx").into_future();
 /// 	engine.spawn_task(move |_engine_context| async move {
 /// 		match fbx_load_future.await {

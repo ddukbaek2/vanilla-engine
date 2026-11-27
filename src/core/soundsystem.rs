@@ -62,7 +62,7 @@ use crate::resource::audioasset::{AudioAsset, AudioLoadHandle};
 /// use std::rc::Rc;
 /// use vanilla::{Engine, EngineConfiguration, SoundRow, SoundSystem};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let sound_table = vec![SoundRow::create_music("field", "tests/assets/audio/vorbis_stereo.ogg", 0.6)];
 /// let sound_system = Rc::new(RefCell::new(SoundSystem::new(&engine, sound_table)));
 /// let sound_load_handle = sound_system.borrow_mut().load_sounds(&engine);
@@ -101,7 +101,7 @@ impl std::future::IntoFuture for SoundLoadHandle {
 /// ```rust
 /// use vanilla::{Engine, EngineConfiguration, SoundRow, SoundSystem};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let hit_row = SoundRow::create_effect("hit", &["tests/assets/audio/wav_s16_stereo.wav", "tests/assets/audio/missing.wav"], 0.8);
 /// let mut sound_system = SoundSystem::new(&engine, vec![hit_row.clone()]);
 /// sound_system.load_sound(&engine, &hit_row);
@@ -386,7 +386,7 @@ impl SoundMuteState {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn create(&mut self, engine: &mut Engine) {
+/// 	fn create(&mut self, engine: &Engine) {
 /// 		let sound_table = vec![
 /// 			SoundRow::create_effect("hit", &["tests/assets/audio/wav_s16_stereo.wav"], 0.8),
 /// 			SoundRow::create_music("field", "tests/assets/audio/vorbis_stereo.ogg", 0.6),
@@ -397,14 +397,14 @@ impl SoundMuteState {
 /// 		self.sound_system = Some(sound_system);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 /// 		self.scene_base.tick(engine, time_delta);
 /// 		if let Some(sound_system) = &mut self.sound_system {
 /// 			sound_system.update();
 /// 		}
 /// 	}
 ///
-/// 	fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+/// 	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 /// 		if let Some(sound_system) = &mut self.sound_system {
 /// 			sound_system.play_effect("hit", 1.0, 0.0);
 /// 		}
@@ -847,7 +847,7 @@ impl SoundSystem {
 	/// ```rust
 	/// use vanilla::{Engine, EngineConfiguration, SoundRow, SoundSystem};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// let sound_system = SoundSystem::new(&engine, vec![SoundRow::create_effect("hit", &["tests/assets/audio/wav_s16_stereo.wav"], 1.0)]);
 	/// let sound_load_future = sound_system.wait_for_load();
 	/// let task_handle = engine.spawn_task(|_engine_context| async move {
@@ -1629,7 +1629,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn page_events_mute_and_unmute() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let mut sound_system = SoundSystem::new(&engine, Vec::new());
 		sound_system.update();
 		assert!(!sound_system.is_blur_mute_enabled());
@@ -1681,7 +1681,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn hidden_page_stops_effects() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let mut sound_system = SoundSystem::new(&engine, vec![SoundRow::create_effect("hit", &[], 1.0)]);
 		sound_system.add_sound_asset("hit", create_silent_asset(1.0));
 		sound_system.update();

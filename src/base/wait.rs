@@ -44,7 +44,7 @@ fn read_poll_frame_number() -> u64 {
 /// ```rust,no_run
 /// use vanilla::{wait, Engine};
 ///
-/// fn show_loading(engine: &mut Engine) {
+/// fn show_loading(engine: &Engine) {
 /// 	engine.spawn_task(move |mut engine_context| async move {
 /// 		let minimum_wait: wait::WaitSeconds = wait::seconds(2.0);
 /// 		engine_context.with(|engine| engine.set_title("Loading"));
@@ -85,7 +85,7 @@ impl Future for WaitSeconds {
 /// ```rust,no_run
 /// use vanilla::{wait, Engine};
 ///
-/// fn read_next_frame_number(engine: &mut Engine) {
+/// fn read_next_frame_number(engine: &Engine) {
 /// 	engine.spawn_task(move |mut engine_context| async move {
 /// 		let start_frame_number = engine_context.with(|engine| engine.get_frame_number());
 /// 		wait::next_frame().await;
@@ -151,7 +151,7 @@ fn convert_to_timeout_milliseconds(seconds: f64) -> u64 {
 /// ```rust,no_run
 /// use vanilla::{wait, Engine};
 ///
-/// fn start_countdown(engine: &mut Engine) {
+/// fn start_countdown(engine: &Engine) {
 /// 	engine.spawn_task(move |mut engine_context| async move {
 /// 		for count in (1..=3).rev() {
 /// 			engine_context.with(|engine| engine.set_title(&format!("{}", count)));

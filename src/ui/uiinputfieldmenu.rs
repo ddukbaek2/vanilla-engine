@@ -217,6 +217,7 @@ impl Component for UIInputFieldQuickMenu {
 		let view_input_position = input_manager.get_view_input_position();
 		let is_touch_pressed = input_manager.is_touch_pressed();
 		let is_touch_released = input_manager.is_touch_released();
+		drop(input_manager);
 		let node_id = context.get_node_id();
 		let button_index = context.get_node_tree().convert_view_position_to_node_position(node_id, view_input_position).and_then(|local_position| self.find_button_index(local_position));
 		if is_touch_pressed {

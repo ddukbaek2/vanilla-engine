@@ -36,14 +36,14 @@ impl Scene for PreviewScene {
 	//==============================================================================
 	// 이전 출력. (배경을 칠하고 기준 해상도 좌표계를 건다)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
 	//==============================================================================
 	// 출력.
 	//==============================================================================
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		graphic.set_fill_color(Colors::VANILLA);
 		graphic.draw_rect(Rect::create(60.0, 60.0, 240.0, 140.0));
 	}
@@ -243,7 +243,7 @@ impl vanilla::Scene for DesktopPaneScene {
 	//==============================================================================
 	// 창 구성. (웹 판 build_layout 과 같은 패널과 요소)
 	//==============================================================================
-	fn create(&mut self, _engine: &mut vanilla::Engine) {
+	fn create(&mut self, _engine: &vanilla::Engine) {
 		use vanilla::{Pane, PaneDirection, PaneElement, PaneOptions, PaneSize, PaneStyle, PaneStyleOptions};
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
@@ -350,14 +350,14 @@ impl vanilla::Scene for DesktopPaneScene {
 	//==============================================================================
 	// 갱신. (60 프레임에 왼쪽 리사이저를 오른쪽으로 80 끈다)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut vanilla::Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &vanilla::Engine, time_delta: f64) {
 		self.frame_count += 1;
 		let resizer_x = self.left_pane.as_ref().map(|left_pane| {
 			let left_size = self.scene_base.get_node_tree()[left_pane.get_container()].get_content_size();
 			left_size.x + 2.0
 		});
 		if let Some(resizer_x) = resizer_x {
-			let input_manager = engine.get_input_manager_mut();
+			let mut input_manager = engine.get_input_manager_mut();
 			match self.frame_count {
 				60 => {
 					input_manager.set_view_input_position(vanilla::Vector2::create(resizer_x, 300.0));
@@ -382,14 +382,14 @@ impl vanilla::Scene for DesktopPaneScene {
 	//==============================================================================
 	// 이전 출력. (배경과 뷰 좌표계)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut vanilla::Engine, graphic: &mut vanilla::Graphic) {
+	fn pre_draw(&mut self, engine: &vanilla::Engine, graphic: &mut vanilla::Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
 	//==============================================================================
 	// 출력. (패널 노드를 그리고, 오른쪽 패널 자리에 웹 판 PreviewScene 과 같은 사각형)
 	//==============================================================================
-	fn draw(&mut self, _engine: &mut vanilla::Engine, graphic: &mut vanilla::Graphic) {
+	fn draw(&mut self, _engine: &vanilla::Engine, graphic: &mut vanilla::Graphic) {
 		self.scene_base.draw(graphic);
 		if let Some(preview_pane) = self.preview_pane.as_ref() {
 			let node_tree = self.scene_base.get_node_tree();

@@ -51,7 +51,7 @@ const DELAY_PRESS_SECONDS: f64 = 0.15;
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 /// 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 /// 		self.touch_recognizer.tick_touch(self.scene_base.get_node_tree_mut(), engine);
 /// 		self.scene_base.tick_tweens(time_delta);
@@ -162,6 +162,7 @@ impl TouchRecognizer {
 		let view_input_position = input_manager.get_view_input_position();
 		let wheel_delta_x = input_manager.get_wheel_delta_x();
 		let wheel_delta_y = input_manager.get_wheel_delta_y();
+		drop(input_manager);
 		let wheel_delta = Vector2::create(wheel_delta_x, wheel_delta_y);
 		self.is_wheel_handled = false;
 		if wheel_delta.x != 0.0 || wheel_delta.y != 0.0 {
@@ -188,22 +189,28 @@ impl TouchRecognizer {
 		let elapsed_seconds = engine.get_time_manager().get_unscale_delta_time();
 		self.update_press_delay(node_tree, engine, elapsed_seconds);
 
+		// 입력 값은 먼저 읽어 두고 빌림을 놓는다. (아래 터치 함수가 부르는 컴포넌트가 입력 매니저를 고칠 수 있다)
 		let input_manager = engine.get_input_manager();
 		let view_input_position = input_manager.get_view_input_position();
-		if input_manager.is_touch_pressed() {
+		let is_touch_pressed = input_manager.is_touch_pressed();
+		let is_touch_released = input_manager.is_touch_released();
+		let is_touch_moved = input_manager.is_touch_moved();
+		let is_touch_cancelled = input_manager.is_touch_cancelled();
+		drop(input_manager);
+		if is_touch_pressed {
 			self.touch_press(node_tree, engine, view_input_position);
 		}
 		if !self.is_touching {
 			return;
 		}
 		// 원본 Scene.tickTouch 처럼 뗌이 먼저, 누르고 있음은 누른 프레임에는 넘기지 않는다.
-		if input_manager.is_touch_released() {
+		if is_touch_released {
 			self.touch_release(node_tree, engine, view_input_position);
 		}
-		else if input_manager.is_touch_moved() && !input_manager.is_touch_pressed() {
+		else if is_touch_moved && !is_touch_pressed {
 			self.touch_move(node_tree, engine, view_input_position);
 		}
-		else if input_manager.is_touch_cancelled() {
+		else if is_touch_cancelled {
 			self.touch_cancel(node_tree, engine, view_input_position);
 		}
 	}

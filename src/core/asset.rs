@@ -324,7 +324,7 @@ impl AssetLoadHandle {
 /// ```rust
 /// use vanilla::{AssetLoadFuture, AssetLoadHandle, Engine, EngineConfiguration};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let load_handle = AssetLoadHandle::create_loaded("greeting.txt", b"hello".to_vec());
 /// let task_handle = engine.spawn_task(|_engine_context| async move {
 /// 	let bytes = AssetLoadFuture::new(Some(load_handle)).await.expect("loaded");
@@ -704,7 +704,7 @@ pub trait Asset {
 	/// ```rust
 	/// use vanilla::{Asset, Engine, EngineConfiguration, TextAsset};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// let mut text_asset = TextAsset::new();
 	/// text_asset.load_from_bytes("note.txt", b"hello".to_vec());
 	/// let load_future = text_asset.wait_for_load();

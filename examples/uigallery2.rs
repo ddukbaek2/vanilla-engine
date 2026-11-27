@@ -448,7 +448,7 @@ impl UIGallery2Scene {
 	//==============================================================================
 	// 흉내 낸 입력. (정해 둔 프레임에 누름 / 이동 / 뗌 / 휠)
 	//==============================================================================
-	fn simulate_input(&mut self, engine: &mut Engine) {
+	fn simulate_input(&mut self, engine: &Engine) {
 		let frame_count = self.frame_count;
 		let node_tree = self.scene_base.get_node_tree();
 		let mut input_action = InputAction::None;
@@ -588,7 +588,7 @@ impl UIGallery2Scene {
 		}
 
 		let input_position = self.input_position;
-		let input_manager = engine.get_input_manager_mut();
+		let mut input_manager = engine.get_input_manager_mut();
 		input_manager.set_view_input_position(input_position);
 		if wheel_delta_y != 0.0 {
 			input_manager.add_wheel_delta(0.0, wheel_delta_y);
@@ -658,7 +658,7 @@ impl Scene for UIGallery2Scene {
 	//==============================================================================
 	// 생성. (위젯을 모두 놓고, 겹 위젯을 맨 뒤에 붙인다)
 	//==============================================================================
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 		self.scene_base.set_scene_background_color(BACKGROUND_COLOR);
 		let root_id = self.scene_base.get_root_id();
 		self.scene_base.get_root_mut().set_content_size(Vector2::create(VIEW_WIDTH, VIEW_HEIGHT));
@@ -680,7 +680,7 @@ impl Scene for UIGallery2Scene {
 	//==============================================================================
 	// 주기적 갱신. (흉내 낸 입력 → 상태 글자 → 노드 갱신 → TouchRecognizer)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.frame_count += 1;
 		self.elapsed_seconds += time_delta;
 		if self.frame_count >= EXIT_FRAME_COUNT {
@@ -696,7 +696,7 @@ impl Scene for UIGallery2Scene {
 	//==============================================================================
 	// 이전 출력. (배경 칠하고 뷰 좌표계 걸기)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 }

@@ -55,11 +55,11 @@
 //! 		&mut self.scene_base
 //! 	}
 //!
-//! 	fn create(&mut self, _engine: &mut Engine) {
+//! 	fn create(&mut self, _engine: &Engine) {
 //! 		self.dev_tools.set_root_nodes(vec![self.scene_base.get_root_id()]);
 //! 	}
 //!
-//! 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+//! 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 //! 		let is_capturing_input = self.dev_tools.is_visible() && self.dev_tools.is_pointer_inside_panel(engine);
 //! 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 //! 		if !is_capturing_input {
@@ -70,7 +70,7 @@
 //! 		self.dev_tools.tick(engine, self.scene_base.get_node_tree_mut(), unscaled_time_delta);
 //! 	}
 //!
-//! 	fn post_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+//! 	fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 //! 		self.dev_tools.draw(engine, self.scene_base.get_node_tree(), graphic);
 //! 	}
 //! }
@@ -341,7 +341,7 @@ struct LocalStorageDialogRequest {
 /// ```rust
 /// use vanilla::{DevTools, Engine, EngineConfiguration, NodeTree};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// engine.get_view_manager_mut().calculate_view_rect(1280, 720, 1.0);
 /// let mut node_tree = NodeTree::new();
 /// let root_id = node_tree.get_root_id();
@@ -674,10 +674,10 @@ impl DevTools {
 	/// - `node_tree`: 트리에 보일 노드 트리. (A, G 칸을 누르면 노드의 액티브와 기즈모를 바꾼다)
 	/// - `_time_delta`: 지난 프레임부터 흐른 시간. (초, 쓰지 않는다. 원본처럼 시간 배율을 거치지 않은 값을 넘긴다)
 	//==============================================================================
-	pub fn tick(&mut self, engine: &mut Engine, node_tree: &mut NodeTree, _time_delta: f64) {
+	pub fn tick(&mut self, engine: &Engine, node_tree: &mut NodeTree, _time_delta: f64) {
 		self.tick_panel(engine, node_tree);
-		if let Some(graphic) = engine.get_graphic_mut() {
-			self.apply_pending_force_gizmos_visible(graphic);
+		if let Some(mut graphic) = engine.get_graphic_mut() {
+			self.apply_pending_force_gizmos_visible(&mut graphic);
 		}
 	}
 
@@ -693,7 +693,7 @@ impl DevTools {
 	//==============================================================================
 	/// 패널 갱신. (tick 의 몸, F2 토글, 트리 목록, 터치)
 	//==============================================================================
-	fn tick_panel(&mut self, engine: &mut Engine, node_tree: &mut NodeTree) {
+	fn tick_panel(&mut self, engine: &Engine, node_tree: &mut NodeTree) {
 		// 검사 부탁. (입력 필드 문맥 메뉴의 검사, 크롬이 개발자 도구를 열어 그 요소를 고르는 자리)
 		if let Some(inspect_node_id) = engine.take_dev_tools_inspect_request(node_tree) {
 			self.inspect_node(engine, node_tree, inspect_node_id);
@@ -734,6 +734,7 @@ impl DevTools {
 		let is_touch_moved = input_manager.is_touch_moved();
 		// canvas-native 좌표로 입력 처리. (패널 좌표계와 같다)
 		let touch_position = input_manager.get_canvas_native_input_position();
+		drop(input_manager);
 		let touch_x = touch_position.x;
 		let touch_y = touch_position.y;
 
@@ -775,7 +776,7 @@ impl DevTools {
 	//==============================================================================
 	/// 로컬 스토리지 질문 이어 가기. (답이 왔으면 할 일을 하고, 부탁이 있으면 띄운다. 웹은 그 자리에서 답해 이어서 다음 질문을 띄운다)
 	//==============================================================================
-	fn process_local_storage_dialog(&mut self, engine: &mut Engine) {
+	fn process_local_storage_dialog(&mut self, engine: &Engine) {
 		loop {
 			let is_answered = match &self.local_storage_dialog_wait {
 				Some((handle, _)) => {
@@ -1519,6 +1520,7 @@ impl DevTools {
 		// 패널 렌더링은 뷰 스케일 모드와 상관없이 canvas-native 좌표계에서.
 		let view_manager = engine.get_view_manager();
 		view_manager.apply_canvas_native_rect(graphic);
+		drop(view_manager);
 
 		// 배경.
 		graphic.set_fill_color(COLOR_BACKGROUND);
@@ -1653,6 +1655,7 @@ impl DevTools {
 		}
 		let time_manager = engine.get_time_manager();
 		let frame_per_second_text = DevTools::format_frame_per_second_text(time_manager.get_frame_per_second());
+		drop(time_manager);
 
 		graphic.push_state();
 		let view_manager = engine.get_view_manager();
@@ -2738,8 +2741,8 @@ mod tests {
 	//==============================================================================
 	/// 1280 x 720 창의 엔진.
 	//==============================================================================
-	fn create_test_engine() -> Engine {
-		let mut engine = Engine::new(EngineConfiguration::new());
+	fn create_test_engine() -> &'static Engine {
+		let engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(1280, 720, 1.0);
 		engine
 	}
@@ -3107,13 +3110,13 @@ mod tests {
 	#[test]
 	fn inspect_request_opens_and_selects_node() {
 		let storage_directory_path = use_temporary_storage_directory("inspect");
-		let mut engine = create_test_engine();
+		let engine = create_test_engine();
 		let (mut node_tree, [root_id, _a_id, _b_id, _c_id, d_id, _e_id]) = create_test_tree();
 		let mut dev_tools = DevTools::new();
 		dev_tools.set_root_nodes(vec![root_id]);
 		dev_tools.set_active_tab(3);
 		engine.request_dev_tools_inspect(d_id);
-		dev_tools.tick(&mut engine, &mut node_tree, 0.016);
+		dev_tools.tick(engine, &mut node_tree, 0.016);
 		assert!(dev_tools.is_visible());
 		assert_eq!(dev_tools.get_active_tab(), 1);
 		assert_eq!(dev_tools.get_selected_node(), Some(d_id));
@@ -3128,19 +3131,19 @@ mod tests {
 	#[test]
 	fn tick_toggles_with_f2_and_tree_press_changes_nodes() {
 		let storage_directory_path = use_temporary_storage_directory("tick");
-		let mut engine = create_test_engine();
+		let engine = create_test_engine();
 		let (mut node_tree, [root_id, a_id, b_id, _c_id, _d_id, _e_id]) = create_test_tree();
 		let mut dev_tools = DevTools::new();
 		dev_tools.set_root_nodes(vec![root_id]);
 
 		engine.get_input_manager_mut().push_key(KeyCode::F2);
-		dev_tools.tick(&mut engine, &mut node_tree, 0.016);
+		dev_tools.tick(engine, &mut node_tree, 0.016);
 		assert!(dev_tools.is_visible());
 		assert_eq!(dev_tools.get_panel_rect(), Rect::create(1280.0 - DEFAULT_PANEL_WIDTH, 720.0 - DEFAULT_PANEL_HEIGHT, DEFAULT_PANEL_WIDTH, DEFAULT_PANEL_HEIGHT));
 		assert_eq!(dev_tools.pending_force_gizmos_visible, Some(true));
 
 		// 누른 채면 다시 토글하지 않는다.
-		dev_tools.tick(&mut engine, &mut node_tree, 0.016);
+		dev_tools.tick(engine, &mut node_tree, 0.016);
 		assert!(dev_tools.is_visible());
 
 		// 둘째 줄(a)의 이름을 누르면 고르고 펼친다.
@@ -3185,16 +3188,16 @@ mod tests {
 	fn local_storage_dialog_actions() {
 		let storage_directory_path = use_temporary_storage_directory("dialog");
 		let mut dev_tools = DevTools::new();
-		let mut engine = Engine::new(crate::core::engine::EngineConfiguration::new());
+		let engine = Engine::new(crate::core::engine::EngineConfiguration::new());
 		dev_tools.complete_local_storage_dialog(LocalStorageDialogAction::AddKey, Some(String::from("  game.name ")));
 		let dialog_action = dev_tools.local_storage_dialog_request.as_ref().map(|request| request.action.clone());
 		assert_eq!(dialog_action, Some(LocalStorageDialogAction::AddValue(String::from("game.name"))));
 		// 엔진 질문 창으로 띄우고, 답하면 다음 tick 에 받는다.
-		dev_tools.process_local_storage_dialog(&mut engine);
+		dev_tools.process_local_storage_dialog(engine);
 		assert!(engine.is_modal_dialog_open());
 		let handle = dev_tools.local_storage_dialog_wait.as_ref().map(|(handle, _)| handle.clone()).expect("handle");
 		handle.finish(crate::core::modaldialog::ModalDialogResult::Confirmed(String::from("바닐라")));
-		dev_tools.process_local_storage_dialog(&mut engine);
+		dev_tools.process_local_storage_dialog(engine);
 		assert_eq!(LocalStorage::get_string("game.name", ""), "바닐라");
 		assert!(dev_tools.local_storage_dialog_wait.is_none());
 		assert!(dev_tools.local_storage_dialog_request.is_none());

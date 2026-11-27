@@ -167,11 +167,11 @@ impl Scene for ToonFxScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 		self.scene_base.set_scene_background_color("#21242b");
 	}
 
-	fn tick(&mut self, _engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, _engine: &Engine, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 		let vfx = match self.vfx.as_mut() {
 			Some(vfx) => {
@@ -195,7 +195,7 @@ impl Scene for ToonFxScene {
 	//==============================================================================
 	// 3D 출력. (2D 묶음 내보내기 → 선 번호 → 툰 몸 → 바깥선 → 2D 상태 복구)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 		graphic.flush_batch();
 		if self.renderer.is_none() {

@@ -85,7 +85,7 @@ impl TrackedLoad {
 /// 	}
 /// }
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let first_scene_id: SceneId = engine.load_scene(Box::new(EmptyScene { scene_base: SceneBase::new() }));
 /// let second_scene_id: SceneId = engine.load_scene(Box::new(EmptyScene { scene_base: SceneBase::new() }));
 /// assert_ne!(first_scene_id, second_scene_id);
@@ -318,7 +318,7 @@ impl SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&mut self, engine: &mut Engine) {
+	/// 	fn create(&mut self, engine: &Engine) {
 	/// 		let task_handle = engine.spawn_scene_task(self, |mut scene_context: SceneContext<StageScene>| async move {
 	/// 			let load_handle = scene_context.with(|_scene, engine| engine.request_asset_bytes("examples/assets/scenedocument.scene.json"));
 	/// 			if let Ok(bytes) = load_handle.await {
@@ -330,7 +330,7 @@ impl SceneBase {
 	/// 		self.scene_base.track_task(&task_handle);
 	/// 	}
 	///
-	/// 	fn initialize(&mut self, _engine: &mut Engine) {
+	/// 	fn initialize(&mut self, _engine: &Engine) {
 	/// 		println!("{}", self.stage_byte_count);
 	/// 	}
 	/// }
@@ -492,7 +492,7 @@ impl SceneBase {
 	/// # 돌려줌
 	/// 전역 엔진, 못 꺼내면 그 까닭.
 	//==============================================================================
-	pub fn get_engine(&self) -> Result<crate::core::globalengine::EngineRef, crate::core::globalengine::EngineAccessError> {
+	pub fn get_engine(&self) -> Result<&'static crate::core::engine::Engine, crate::core::globalengine::EngineAccessError> {
 		crate::core::globalengine::get_global_engine()
 	}
 
@@ -719,8 +719,15 @@ impl SceneBase {
 	/// - `engine`: 엔진. (입력 매니저의 뷰 입력 위치와 누름, 뗌, 휠을 읽는다)
 	//==============================================================================
 	pub fn tick_touch(&mut self, engine: &Engine) {
+		// 입력 값은 먼저 읽어 두고 빌림을 놓는다. (아래에서 넘기는 노드의 컴포넌트가 입력 매니저를 고칠 수 있다)
 		let input_manager = engine.get_input_manager();
 		let view_input_position = input_manager.get_view_input_position();
+		let wheel_delta = Vector2::create(input_manager.get_wheel_delta_x(), input_manager.get_wheel_delta_y());
+		let is_touch_pressed = input_manager.is_touch_pressed();
+		let is_touch_released = input_manager.is_touch_released();
+		let is_touch_moved = input_manager.is_touch_moved();
+		let is_touch_cancelled = input_manager.is_touch_cancelled();
+		drop(input_manager);
 		self.is_wheel_handled = false;
 		// 넘기기를 껐으면 노드에 넘기지 않는다. (원본 setTouchRaycaster(null))
 		if !self.is_touch_dispatch_enabled {
@@ -728,13 +735,12 @@ impl SceneBase {
 		}
 
 		// 휠. (누름과 상관없이 그 자리의 가장 앞 스크롤 칸이나 누를 수 있는 노드부터 부모 쪽으로)
-		let wheel_delta = Vector2::create(input_manager.get_wheel_delta_x(), input_manager.get_wheel_delta_y());
 		self.is_wheel_handled = false;
 		if wheel_delta.x != 0.0 || wheel_delta.y != 0.0 {
 			self.is_wheel_handled = self.node_tree.dispatch_wheel_at(view_input_position, engine, wheel_delta);
 		}
 
-		if input_manager.is_touch_pressed() {
+		if is_touch_pressed {
 			if !self.has_ever_touched {
 				self.has_ever_touched = true;
 				if let Some(first_touch_callback) = self.first_touch_callback.as_mut() {
@@ -757,14 +763,14 @@ impl SceneBase {
 			}
 		};
 		// 원본처럼 뗌이 먼저, 누르고 있음은 누른 프레임에는 넘기지 않는다. (한 프레임 안에 눌렀다 떼면 누름 뒤에 바로 뗌)
-		if input_manager.is_touch_released() {
+		if is_touch_released {
 			self.node_tree.dispatch_touch(pressed_node_id, engine, TouchKind::Release, view_input_position);
 			self.pressed_node_id = None;
 		}
-		else if input_manager.is_touch_moved() && !input_manager.is_touch_pressed() {
+		else if is_touch_moved && !is_touch_pressed {
 			self.node_tree.dispatch_touch(pressed_node_id, engine, TouchKind::Moved, view_input_position);
 		}
-		else if input_manager.is_touch_cancelled() {
+		else if is_touch_cancelled {
 			self.node_tree.dispatch_touch(pressed_node_id, engine, TouchKind::Cancel, view_input_position);
 			self.pressed_node_id = None;
 		}
@@ -805,11 +811,11 @@ impl SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&mut self, _engine: &mut Engine) {
+	/// 	fn create(&mut self, _engine: &Engine) {
 	/// 		self.scene_base.set_scene_background_color("#203040");
 	/// 	}
 	///
-	/// 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	/// 	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 	/// 		self.scene_base.draw_scene_background(engine, graphic);
 	/// 	}
 	/// }
@@ -906,11 +912,11 @@ impl<T: Scene + 'static> SceneAny for T {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+/// 	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 /// 		self.scene_base.draw_scene_background(engine, graphic);
 /// 	}
 ///
-/// 	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+/// 	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 /// 		graphic.set_fill_color(Colors::WHITE);
 /// 		graphic.draw_rect(Rect::create(100.0, 100.0, 200.0, 120.0));
 /// 	}
@@ -945,7 +951,7 @@ impl<T: Scene + 'static> SceneAny for T {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn touch_press(&mut self, _engine: &mut Engine, view_input_position: Vector2) {
+/// 	fn touch_press(&mut self, _engine: &Engine, view_input_position: Vector2) {
 /// 		self.last_touch_position = view_input_position;
 /// 	}
 /// }
@@ -975,7 +981,7 @@ pub trait Scene: SceneAny {
 	/// # 인자
 	/// - `_engine`: 엔진. (애셋 읽기, 작업 맡기기, 매니저)
 	//==============================================================================
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -985,7 +991,7 @@ pub trait Scene: SceneAny {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -995,7 +1001,7 @@ pub trait Scene: SceneAny {
 	/// - `_engine`: 엔진.
 	/// - `_graphic`: 로딩 화면을 그릴 그래픽.
 	//==============================================================================
-	fn draw_on_load(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	fn draw_on_load(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -1004,7 +1010,7 @@ pub trait Scene: SceneAny {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn finalize(&mut self, _engine: &mut Engine) {
+	fn finalize(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -1013,7 +1019,7 @@ pub trait Scene: SceneAny {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn unload(&mut self, _engine: &mut Engine) {
+	fn unload(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -1022,7 +1028,7 @@ pub trait Scene: SceneAny {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn destroy(&mut self, _engine: &mut Engine) {
+	fn destroy(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -1032,7 +1038,7 @@ pub trait Scene: SceneAny {
 	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 누른 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
@@ -1042,7 +1048,7 @@ pub trait Scene: SceneAny {
 	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 지금 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_move(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_move(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
@@ -1052,7 +1058,7 @@ pub trait Scene: SceneAny {
 	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 뗀 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_release(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_release(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
@@ -1062,7 +1068,7 @@ pub trait Scene: SceneAny {
 	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 취소된 때의 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_cancel(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_cancel(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
@@ -1073,7 +1079,7 @@ pub trait Scene: SceneAny {
 	/// - `_view_input_position`: 마우스 자리. (뷰 좌표)
 	/// - `_wheel_delta`: 이번 프레임에 쌓인 휠 양. (x 가로, y 세로, 입력 매니저의 get_wheel_delta_x, get_wheel_delta_y)
 	//==============================================================================
-	fn touch_wheel(&mut self, _engine: &mut Engine, _view_input_position: Vector2, _wheel_delta: Vector2) {
+	fn touch_wheel(&mut self, _engine: &Engine, _view_input_position: Vector2, _wheel_delta: Vector2) {
 	}
 
 	//==============================================================================
@@ -1083,7 +1089,7 @@ pub trait Scene: SceneAny {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn on_page_process_restored(&mut self, _engine: &mut Engine) {
+	fn on_page_process_restored(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -1093,7 +1099,7 @@ pub trait Scene: SceneAny {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn on_page_visibility_restored(&mut self, _engine: &mut Engine) {
+	fn on_page_visibility_restored(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -1103,7 +1109,7 @@ pub trait Scene: SceneAny {
 	/// - `_engine`: 엔진. (뷰 매니저에 새 뷰 영역이 셈해져 있다)
 	/// - `_canvas_native_size`: 창 안쪽 논리 크기. (뷰 매니저의 get_canvas_native_size)
 	//==============================================================================
-	fn resize(&mut self, _engine: &mut Engine, _canvas_native_size: Vector2) {
+	fn resize(&mut self, _engine: &Engine, _canvas_native_size: Vector2) {
 	}
 
 	//==============================================================================
@@ -1114,7 +1120,7 @@ pub trait Scene: SceneAny {
 	/// - `engine`: 엔진.
 	/// - `time_delta`: 배율을 곱한 프레임 간격. (초, 시간 관리자의 get_time_delta)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.get_scene_base_mut().tick(engine, time_delta);
 	}
 
@@ -1125,7 +1131,7 @@ pub trait Scene: SceneAny {
 	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn pre_draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	fn pre_draw(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -1136,7 +1142,7 @@ pub trait Scene: SceneAny {
 	/// - `_engine`: 엔진.
 	/// - `graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.get_scene_base_mut().draw(graphic);
 	}
 
@@ -1147,7 +1153,7 @@ pub trait Scene: SceneAny {
 	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn post_draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	fn post_draw(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -1158,6 +1164,6 @@ pub trait Scene: SceneAny {
 	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn draw_gizmos(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	fn draw_gizmos(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
 	}
 }

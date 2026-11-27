@@ -42,13 +42,13 @@
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn create(&mut self, engine: &mut Engine) {
-/// 		let time_manager = engine.get_time_manager_mut();
+/// 	fn create(&mut self, engine: &Engine) {
+/// 		let mut time_manager = engine.get_time_manager_mut();
 /// 		time_manager.set_time_scale(0.5);
 /// 		time_manager.set_maximum_time_delta(0.1);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 /// 		self.scene_base.tick(engine, time_delta);
 /// 		let time_manager = engine.get_time_manager();
 /// 		let unscaled_time_delta = time_manager.get_unscale_delta_time();

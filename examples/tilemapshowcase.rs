@@ -278,7 +278,7 @@ impl Scene for TilemapShowcaseScene {
 	//==============================================================================
 	// 생성. (지도, 바깥 타일셋, 그림을 요청해 맡긴다)
 	//==============================================================================
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.scene_base.set_scene_background_color(Color::create(0.08, 0.09, 0.12, 1.0));
 		for file_name in MAP_FILE_LIST.iter().chain(TILESET_FILE_LIST.iter()) {
 			let mut json_asset = JsonAsset::new();
@@ -297,7 +297,7 @@ impl Scene for TilemapShowcaseScene {
 	//==============================================================================
 	// 초기화. (지도를 읽는 작업을 맡기고, 다 읽으면 노드를 짓는다)
 	//==============================================================================
-	fn initialize(&mut self, engine: &mut Engine) {
+	fn initialize(&mut self, engine: &Engine) {
 		let mut json_table: HashMap<String, Value> = HashMap::new();
 		for (file_name, json_asset) in self.json_asset_list.iter() {
 			if let Some(data) = json_asset.get_data() {
@@ -345,7 +345,7 @@ impl Scene for TilemapShowcaseScene {
 	//==============================================================================
 	// 이전 출력. (바탕색, 점 그림이 번지지 않게 가장 가까운 화소로)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 		graphic.set_image_smoothing_enabled(false);
 	}

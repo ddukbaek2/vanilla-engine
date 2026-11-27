@@ -205,7 +205,7 @@ pub fn read_target_weights(weight_descriptor: &str, weights: &[u16]) -> Vec<u16>
 /// # 돌려줌
 /// await 할 수 있는 불러오기 손잡이.
 //==============================================================================
-pub fn load_ui_font(engine: &mut Engine, font_group: &str, text: &str) -> UiFontLoadHandle {
+pub fn load_ui_font(engine: &Engine, font_group: &str, text: &str) -> UiFontLoadHandle {
 	let primary_group = with_state(|state| {
 		state.pending_initial_load = Some((font_group.to_string(), text.to_string()));
 		state.initial_load_instant = Some(Instant::now());
@@ -221,7 +221,7 @@ pub fn load_ui_font(engine: &mut Engine, font_group: &str, text: &str) -> UiFont
 //==============================================================================
 /// 글꼴 목록의 색인 받기 요청. (한 번만)
 //==============================================================================
-fn load_font_index(engine: &mut Engine) {
+fn load_font_index(engine: &Engine) {
 	let manifest_path = with_state(|state| {
 		if state.font_index.is_some() || state.index_handle.is_some() {
 			return None;
@@ -280,7 +280,7 @@ fn poll_font_index() {
 //==============================================================================
 /// 글꼴 묶음 하나의 목록 받기 요청. (이미 있거나 받는 중이면 그대로, 색인을 아직 못 받았으면 받은 뒤 update 가 다시 청한다)
 //==============================================================================
-fn request_font_group(engine: &mut Engine, group: &str) {
+fn request_font_group(engine: &Engine, group: &str) {
 	let request = with_state(|state| {
 		let font_index = state.font_index.as_ref()?;
 		if state.font_groups.iter().any(|font_group| font_group.group == group) || state.group_handle_list.iter().any(|(pending_group, _, _)| pending_group == group) {
@@ -363,7 +363,7 @@ fn poll_font_groups() {
 /// # 인자
 /// - `engine`: 애셋을 받고 글꼴 얼굴을 올릴 엔진.
 //==============================================================================
-pub fn update(engine: &mut Engine) {
+pub fn update(engine: &Engine) {
 	poll_font_index();
 	// 그린 글 가운데 받은 조각에 없던 글자의 조각을 받는다. (원본 브라우저가 그 글자의 범위에 든 FontFace 를 받기 시작하는 자리)
 	let (family, is_ready_to_request) = with_state(|state| (state.family.clone(), !state.font_groups.is_empty()));
@@ -448,7 +448,7 @@ pub fn update(engine: &mut Engine) {
 /// - `engine`: 얼굴 차례를 걸 엔진.
 /// - `font_group`: 앞세울 묶음 이름. (언어를 바꿀 때 그 언어의 묶음)
 //==============================================================================
-pub fn apply_ui_font_group(engine: &mut Engine, font_group: &str) {
+pub fn apply_ui_font_group(engine: &Engine, font_group: &str) {
 	let order_request = with_state(|state| {
 		if state.font_groups.is_empty() {
 			return None;
@@ -512,13 +512,13 @@ fn find_drawing_face(state: &UiFontState, code_point: u32, target_weight: u16) -
 /// ```rust
 /// use vanilla::{uifont, Engine, EngineConfiguration};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
-/// let text_load_handle = uifont::load_ui_font_text(&mut engine, "Player One");
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let text_load_handle = uifont::load_ui_font_text(engine, "Player One");
 /// assert!(text_load_handle.get_font_load_handles().is_empty());
 /// assert!(text_load_handle.is_finished());
 /// ```
 //==============================================================================
-pub fn load_ui_font_text(engine: &mut Engine, text: &str) -> UiFontTextLoadHandle {
+pub fn load_ui_font_text(engine: &Engine, text: &str) -> UiFontTextLoadHandle {
 	let request_list = with_state(|state| {
 		let mut request_list: Vec<(usize, usize)> = Vec::new();
 		if state.font_groups.is_empty() || text.is_empty() {
@@ -571,7 +571,7 @@ pub fn load_ui_font_text(engine: &mut Engine, text: &str) -> UiFontTextLoadHandl
 /// - `engine`: 애셋을 받고 글꼴 얼굴을 올릴 엔진.
 /// - `text`: 쓸 글자. (앞서 청한 글자는 뺀다)
 //==============================================================================
-pub fn request_ui_font_text(engine: &mut Engine, text: &str) {
+pub fn request_ui_font_text(engine: &Engine, text: &str) {
 	let new_text: String = with_state(|state| {
 		if state.font_groups.is_empty() {
 			return String::new();
@@ -610,7 +610,7 @@ pub fn wait_for_load() -> UiFontLoadFuture {
 /// 	manifest_path: Some(String::from("missing-fonts/fonts.json")),
 /// 	..UiFontOptions::default()
 /// });
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let is_ready = Rc::new(Cell::new(false));
 /// let is_ready_for_task = is_ready.clone();
 /// engine.spawn_task(move |mut engine_context| async move {
@@ -636,7 +636,7 @@ pub struct UiFontLoadHandle;
 /// use std::rc::Rc;
 /// use vanilla::{uifont, Engine, EngineConfiguration};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let is_finished = Rc::new(Cell::new(false));
 /// let is_finished_for_task = is_finished.clone();
 /// engine.spawn_task(move |_engine_context| async move {
@@ -685,8 +685,8 @@ impl IntoFuture for UiFontLoadHandle {
 /// ```rust
 /// use vanilla::{uifont, Engine, EngineConfiguration};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
-/// let text_load_handle = uifont::load_ui_font_text(&mut engine, "Ready");
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let text_load_handle = uifont::load_ui_font_text(engine, "Ready");
 /// if !text_load_handle.is_finished() {
 /// 	engine.spawn_task(move |_engine_context| async move {
 /// 		text_load_handle.await;
@@ -733,8 +733,8 @@ impl UiFontTextLoadHandle {
 /// use std::rc::Rc;
 /// use vanilla::{uifont, Engine, EngineConfiguration, UiFontTextLoadFuture};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
-/// let text_load_future: UiFontTextLoadFuture = uifont::load_ui_font_text(&mut engine, "Ready").into_future();
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let text_load_future: UiFontTextLoadFuture = uifont::load_ui_font_text(engine, "Ready").into_future();
 /// let is_finished = Rc::new(Cell::new(false));
 /// let is_finished_for_task = is_finished.clone();
 /// engine.spawn_task(move |_engine_context| async move {

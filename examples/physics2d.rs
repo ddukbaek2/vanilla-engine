@@ -90,7 +90,7 @@ impl Scene for Physics2DScene {
 	//==============================================================================
 	// 초기화. (월드와 노드)
 	//==============================================================================
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		self.scene_base.get_root_mut().set_content_size(Vector2::create(VIEW_WIDTH, VIEW_HEIGHT));
 		let shape_definition = ShapeDefinition2D::new();
 
@@ -265,7 +265,7 @@ impl Scene for Physics2DScene {
 	//==============================================================================
 	// 갱신. (멈추지 않았으면 프레임마다 한 걸음)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		if self.prestep_count == 0 {
 			self.step_world();
 		}
@@ -275,7 +275,7 @@ impl Scene for Physics2DScene {
 	//==============================================================================
 	// 이전 출력. (배경)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		let view_manager = engine.get_view_manager();
 		let canvas_native_size = view_manager.get_canvas_native_size();
 		view_manager.apply_canvas_native_rect(graphic);
@@ -287,7 +287,7 @@ impl Scene for Physics2DScene {
 	//==============================================================================
 	// 출력. (센서 칸, 물리 모양, 광선, 노드)
 	//==============================================================================
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		if self.sensor_visitor_count > 0 {
 			graphic.set_fill_color(SENSOR_ACTIVE_COLOR);
 			graphic.draw_rect(Rect::create(SENSOR_CENTER.x - SENSOR_HALF_SIZE.x, SENSOR_CENTER.y - SENSOR_HALF_SIZE.y, SENSOR_HALF_SIZE.x * 2.0, SENSOR_HALF_SIZE.y * 2.0));

@@ -106,7 +106,7 @@ impl Scene for MainScene {
 	//==============================================================================
 	// 생성.
 	//==============================================================================
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.scene_base.set_scene_background_color(BACKGROUND_COLOR);
 		#[cfg(not(target_arch = "wasm32"))]
 		let arabic_font_path = ARABIC_FONT_PATHS.iter().find(|font_path| std::path::Path::new(font_path).exists()).copied();
@@ -212,7 +212,7 @@ impl Scene for MainScene {
 	//==============================================================================
 	// 이전 출력. (글을 1:1 로 굽고 배경을 칠한다)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		graphic.set_text_bake_scale_step(0.0);
 		self.scene_base.draw_scene_background(engine, graphic);
 	}

@@ -23,7 +23,7 @@ mod tests {
 	//==============================================================================
 	/// 시험용 엔진. (애셋 폴더를 임시 폴더 하나로)
 	//==============================================================================
-	fn create_test_engine(asset_directory_name: &str) -> (Engine, std::path::PathBuf) {
+	fn create_test_engine(asset_directory_name: &str) -> (&'static Engine, std::path::PathBuf) {
 		let asset_directory_path = std::env::temp_dir().join(asset_directory_name);
 		std::fs::create_dir_all(&asset_directory_path).expect("asset directory");
 		let mut engine_configuration = EngineConfiguration::new();

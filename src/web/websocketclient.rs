@@ -59,11 +59,11 @@ pub type WebSocketReceiveEvent = Box<dyn FnMut(&Value)>;
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn create(&mut self, _engine: &mut Engine) {
+/// 	fn create(&mut self, _engine: &Engine) {
 /// 		self.web_socket_client.connect("ws://localhost:8080");
 /// 	}
 ///
-/// 	fn tick(&mut self, _engine: &mut Engine, _time_delta: f64) {
+/// 	fn tick(&mut self, _engine: &Engine, _time_delta: f64) {
 /// 		self.web_socket_client.tick();
 /// 		for message in self.web_socket_client.take_received_messages() {
 /// 			if message["type"] == "ping" {

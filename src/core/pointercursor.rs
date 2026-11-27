@@ -15,8 +15,8 @@
 //! ```rust
 //! use vanilla::{Engine, EngineConfiguration};
 //!
-//! let mut engine = Engine::new(EngineConfiguration::new());
-//! let pointer_cursor = engine.get_pointer_cursor_mut();
+//! let engine = Engine::new(EngineConfiguration::new());
+//! let mut pointer_cursor = engine.get_pointer_cursor_mut();
 //! pointer_cursor.set_enabled(true);
 //! pointer_cursor.set_screen_cursor("crosshair");
 //! assert_eq!(engine.get_pointer_cursor().get_screen_cursor(), "crosshair");

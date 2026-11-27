@@ -1204,21 +1204,21 @@ fn find_effect_body(pass_name: &str) -> Option<&'static str> {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn create(&mut self, _engine: &mut Engine) {
+/// 	fn create(&mut self, _engine: &Engine) {
 /// 		self.screen_effect.set_enabled(ScreenEffectType::Vignette, true);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 /// 		self.scene_base.tick(engine, time_delta);
 /// 		self.screen_effect.tick(time_delta);
 /// 	}
 ///
-/// 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+/// 	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 /// 		self.screen_effect.begin(graphic);
 /// 		self.scene_base.draw_scene_background(engine, graphic);
 /// 	}
 ///
-/// 	fn post_draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+/// 	fn post_draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 /// 		self.screen_effect.end(graphic);
 /// 	}
 /// }

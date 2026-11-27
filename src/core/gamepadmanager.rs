@@ -440,8 +440,8 @@ struct GamepadState {
 /// ```rust,no_run
 /// use vanilla::{Engine, GamepadAnalogStickCode, GamepadButtonCode};
 ///
-/// fn read_first_gamepad(engine: &mut Engine) {
-/// 	let gamepad_manager = engine.get_input_manager_mut().get_gamepad_manager_mut();
+/// fn read_first_gamepad(engine: &Engine) {
+/// 	let mut gamepad_manager = engine.get_input_manager_mut().get_gamepad_manager_mut();
 /// 	let gamepad_index = match gamepad_manager.get_connected_gamepad(0) {
 /// 		Some(gamepad) => {
 /// 			gamepad.index
@@ -631,8 +631,8 @@ impl GamepadManager {
 	/// ```rust,no_run
 	/// use vanilla::Engine;
 	///
-	/// fn shake_on_hit(engine: &mut Engine) {
-	/// 	let gamepad_manager = engine.get_input_manager_mut().get_gamepad_manager_mut();
+	/// fn shake_on_hit(engine: &Engine) {
+	/// 	let mut gamepad_manager = engine.get_input_manager_mut().get_gamepad_manager_mut();
 	/// 	gamepad_manager.vibrate(1.0, 0.5, 0.2);
 	/// }
 	/// ```

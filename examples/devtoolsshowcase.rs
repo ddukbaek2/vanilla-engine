@@ -100,7 +100,7 @@ impl Scene for MainScene {
 	//==============================================================================
 	// 초기화. (노드 트리를 만들고 DevTools 에 루트를 준다)
 	//==============================================================================
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		self.scene_base.set_scene_background_color("#1e1915");
 		let root_id = self.scene_base.get_root_id();
 		self.create_label(root_id, "title", "개발자 도구 (F2)", Vector2::create(40.0, 30.0));
@@ -165,7 +165,7 @@ impl Scene for MainScene {
 	//==============================================================================
 	// 주기적 갱신. (노드 다음에 DevTools, 처음 한 번 패널을 연다)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		if !self.is_dev_tools_opened {
 			self.is_dev_tools_opened = true;
@@ -182,14 +182,14 @@ impl Scene for MainScene {
 	//==============================================================================
 	// 이전 출력. (배경을 칠하고 기준 해상도 좌표계를 건다)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
 	//==============================================================================
 	// 이후 출력. (DevTools 패널)
 	//==============================================================================
-	fn post_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.dev_tools.draw(engine, self.scene_base.get_node_tree(), graphic);
 	}
 }

@@ -68,14 +68,14 @@ impl UIScene for LayoutScene {
 	//==============================================================================
 	// 애셋 읽기 자리. (세이프 에어리어를 흉내 낸다)
 	//==============================================================================
-	fn load_assets(&mut self, engine: &mut Engine) {
+	fn load_assets(&mut self, engine: &Engine) {
 		engine.get_view_manager_mut().set_safe_area_override(Some(SafeAreaInsets::create(40.0, 0.0, 30.0, 0.0)));
 	}
 
 	//==============================================================================
 	// 초기화. (노드를 짓고 제약을 건다)
 	//==============================================================================
-	fn initialize(&mut self, engine: &mut Engine) {
+	fn initialize(&mut self, engine: &Engine) {
 		let screen = self.ui_scene_base.get_screen_node();
 		let screen_width = screen.width_anchor();
 		let safe_area = self.ui_scene_base.get_safe_area_layout_guide();
@@ -184,7 +184,7 @@ impl UIScene for LayoutScene {
 	//==============================================================================
 	// 갱신. (1 초 뒤 제목 글을 바꿔 자연 크기가 따라가는지 보인다)
 	//==============================================================================
-	fn tick(&mut self, _engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, _engine: &Engine, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 		if self.is_title_changed || self.elapsed_seconds < 1.0 {
 			return;

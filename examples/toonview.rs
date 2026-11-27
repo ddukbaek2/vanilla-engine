@@ -233,7 +233,7 @@ impl Scene for ToonViewScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		self.scene_base.set_scene_background_color("#000000");
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
@@ -266,7 +266,7 @@ impl Scene for ToonViewScene {
 	//==============================================================================
 	// 카메라를 돌리고, 같은 카메라로 3D 점 위에 2D 표시를 놓는다.
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		let elapsed_seconds = self.elapsed_seconds.get() + time_delta;
 		self.elapsed_seconds.set(elapsed_seconds);
 		let eye_position = Vector3::create((elapsed_seconds * 0.2).sin() * 1.5, 4.2, 6.5);
@@ -301,7 +301,7 @@ impl Scene for ToonViewScene {
 	//==============================================================================
 	// 처음 그릴 때 렌더러 하나를 지어 두 판에 나눠 준다. (ToonView3D::set_renderer)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		if !self.is_renderer_shared {
 			self.is_renderer_shared = true;
 			match ToonRenderer::new(graphic.get_gl()) {

@@ -24,11 +24,11 @@
 //! 		&mut self.scene_base
 //! 	}
 //!
-//! 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+//! 	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 //! 		self.scene_base.draw_scene_background(engine, graphic);
 //! 	}
 //!
-//! 	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+//! 	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 //! 		graphic.set_fill_color(Colors::WHITE);
 //! 		graphic.draw_rect(Rect::create(100.0, 100.0, 200.0, 120.0));
 //! 	}
@@ -106,7 +106,7 @@ pub use crate::core::reflection::{FromReflectValue, Reflect, ReflectedGetter, Re
 // 반사 매크로. (컴포넌트의 impl 블록과 impl Component 블록에 #[vanilla::reflect] 로 붙인다. 원본의 실행 중 반사 자리)
 pub use vanilla_engine_macros::reflect;
 pub use crate::core::engine::{Engine, EngineConfiguration};
-pub use crate::core::globalengine::{EngineAccessError, EngineRef};
+pub use crate::core::globalengine::EngineAccessError;
 pub use crate::core::engine::{PageEvent, PageEventListener};
 pub use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind, ModalDialogResult};
 pub use crate::core::frame::Frame;

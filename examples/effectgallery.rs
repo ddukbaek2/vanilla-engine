@@ -746,7 +746,7 @@ impl Scene for EffectGalleryScene {
 	//==============================================================================
 	// 초기화. (그림은 코드로 만든다)
 	//==============================================================================
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		self.scene_base.set_scene_background_color(BACKGROUND_COLOR);
 		let root_id = self.scene_base.get_root_id();
 		self.scene_base.get_root_mut().set_content_size(Vector2::create(VIEW_WIDTH, VIEW_HEIGHT));
@@ -761,7 +761,7 @@ impl Scene for EffectGalleryScene {
 	//==============================================================================
 	// 갱신. (효과 묶음 바꾸기, 충격파 반지름 움직이기)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		let frame_number = engine.get_frame_number();
 		if frame_number == COMPILE_CHECK_FRAME {
 			self.enable_all_effects();
@@ -785,7 +785,7 @@ impl Scene for EffectGalleryScene {
 	//==============================================================================
 	// 이전 출력. (영역을 정하고 효과 시작, 배경)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.apply_stage_region(engine);
 		self.screen_effect.begin(graphic);
 		self.scene_base.draw_scene_background(engine, graphic);
@@ -794,7 +794,7 @@ impl Scene for EffectGalleryScene {
 	//==============================================================================
 	// 이후 출력. (화면을 떠 와 효과를 건다)
 	//==============================================================================
-	fn post_draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn post_draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.screen_effect.end(graphic);
 	}
 }

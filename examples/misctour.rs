@@ -176,7 +176,7 @@ impl Scene for MiscTourScene {
 	//==============================================================================
 	// 생성. (노드와 도구들)
 	//==============================================================================
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 		self.scene_base.set_scene_background_color(Color::create(0.08, 0.08, 0.12, 1.0));
 		self.scene_base.get_root_mut().set_content_size(Vector2::create(VIEW_WIDTH, VIEW_HEIGHT));
 
@@ -251,7 +251,7 @@ impl Scene for MiscTourScene {
 	//==============================================================================
 	// 갱신.
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 		self.spawn_seconds += time_delta;
 
@@ -300,7 +300,7 @@ impl Scene for MiscTourScene {
 	//==============================================================================
 	// 이전 출력. (배경색, 흐르는 줄무늬)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 		self.image_scroller.draw(graphic);
 	}
@@ -308,7 +308,7 @@ impl Scene for MiscTourScene {
 	//==============================================================================
 	// 출력. (카메라 + 흔들림으로 월드, 그 위에 노드)
 	//==============================================================================
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		graphic.push_state();
 		let shake_offset = self.shaker.get_offset();
 		graphic.translate(shake_offset.x, shake_offset.y);
@@ -322,7 +322,7 @@ impl Scene for MiscTourScene {
 	//==============================================================================
 	// 이후 출력. (조이스틱)
 	//==============================================================================
-	fn post_draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn post_draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.virtual_pad.draw(graphic);
 	}
 }

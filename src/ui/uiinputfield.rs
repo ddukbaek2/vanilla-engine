@@ -2444,6 +2444,7 @@ impl UIInputField {
 			return;
 		}
 		let view_input_position = input_manager.get_view_input_position();
+		drop(input_manager);
 		let node_id = context.get_node_id();
 		let node_tree = context.get_node_tree();
 		let is_inside = is_node_visible_in_hierarchy(node_tree, node_id) && is_view_position_inside_node(node_tree, node_id, view_input_position);
@@ -3552,7 +3553,8 @@ impl Component for UIInputField {
 			let composition = self.edit_buffer.get_composition().to_string();
 			self.edit_buffer.set_composition("");
 			self.is_composing = false;
-			let text_input = context.get_engine().get_input_manager().get_text_input();
+			let input_manager = context.get_engine().get_input_manager();
+			let text_input = input_manager.get_text_input();
 			text_input.set_ime_commit_guard(&composition);
 			text_input.request_ime_reset();
 			self.replace_selection(context, &composition);
@@ -4005,6 +4007,7 @@ impl Component for UIInputFieldContextMenu {
 		let view_input_position = input_manager.get_view_input_position();
 		let is_touch_pressed = input_manager.is_touch_pressed();
 		let context_menu_request_position = input_manager.get_text_input().get_context_menu_request_position();
+		drop(input_manager);
 		let node_id = context.get_node_id();
 		self.hovered_item_index = self.find_item_index(context, view_input_position);
 		if !self.is_first_tick {
@@ -4118,7 +4121,7 @@ mod tests {
 	//==============================================================================
 	/// 포커스를 가진 필드에 갈 이벤트 넣기.
 	//==============================================================================
-	fn push_event(engine: &mut Engine, event_kind: TextInputEventKind) {
+	fn push_event(engine: &Engine, event_kind: TextInputEventKind) {
 		engine.get_input_manager_mut().get_text_input_mut().push_focused_field_event(event_kind);
 	}
 
@@ -4135,7 +4138,7 @@ mod tests {
 	//==============================================================================
 	/// 한 프레임. (트리 tick 다음 엔진 프레임 끝처럼 글 입력 줄 마무리)
 	//==============================================================================
-	fn run_frame(node_tree: &mut NodeTree, engine: &mut Engine) {
+	fn run_frame(node_tree: &mut NodeTree, engine: &Engine) {
 		node_tree.tick(engine, 1.0 / 60.0);
 		engine.get_input_manager_mut().get_text_input_mut().finish_frame();
 	}
@@ -4195,24 +4198,24 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn undo_keys_in_dom_input_field() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		get_field(&mut node_tree, field_id).focus();
 		for character in ["h", "i"] {
-			push_event(&mut engine, TextInputEventKind::Commit(String::from(character)));
+			push_event(engine, TextInputEventKind::Commit(String::from(character)));
 		}
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "hi");
 		assert!(get_field(&mut node_tree, field_id).can_undo());
-		push_event(&mut engine, TextInputEventKind::Key { key: TextInputKey::Undo, is_shift: false });
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, TextInputEventKind::Key { key: TextInputKey::Undo, is_shift: false });
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "");
-		push_event(&mut engine, TextInputEventKind::Key { key: TextInputKey::Redo, is_shift: true });
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, TextInputEventKind::Key { key: TextInputKey::Redo, is_shift: true });
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "hi");
 		get_field(&mut node_tree, field_id).set_use_dom_input(false);
-		push_event(&mut engine, TextInputEventKind::Key { key: TextInputKey::Undo, is_shift: false });
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, TextInputEventKind::Key { key: TextInputKey::Undo, is_shift: false });
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "hi");
 	}
 
@@ -4221,17 +4224,17 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn direct_touch_field_opens_engine_context_menu() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		let root_id = node_tree.get_root_id();
 		get_field(&mut node_tree, field_id).set_use_direct_touch(true);
 		get_field(&mut node_tree, field_id).set_text("hello");
 		engine.get_input_manager_mut().get_text_input_mut().set_context_menu_request_position(Some(Vector2::create(200.0, 120.0)));
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
 		let menu_id = node_tree.find_child_by_name(root_id, "uiInputFieldContextMenu").expect("engine context menu");
 		assert_eq!(node_tree[menu_id].get_content_size(), Vector2::create(CONTEXT_MENU_WIDTH, CONTEXT_MENU_PADDING_Y * 2.0 + CONTEXT_MENU_ITEM_HEIGHT * 4.0));
 		get_field(&mut node_tree, field_id).request_menu_action(UIInputFieldMenuAction::SelectAll);
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_selection_text(), "hello");
 	}
 
@@ -4241,7 +4244,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn long_press_selects_word_and_opens_quick_menu() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		let root_id = node_tree.get_root_id();
 		{
@@ -4266,14 +4269,15 @@ mod tests {
 		}
 		let word_offset = get_field(&mut node_tree, field_id).character_offsets[8];
 		let press_position = Vector2::create(100.0 + 16.0 + word_offset, 130.0);
-		let press = |node_tree: &mut NodeTree, engine: &mut Engine, position: Vector2| {
-			let input_manager = engine.get_input_manager_mut();
+		let press = |node_tree: &mut NodeTree, engine: &Engine, position: Vector2| {
+			let mut input_manager = engine.get_input_manager_mut();
 			input_manager.set_touch_input(true);
 			input_manager.set_view_input_position(position);
 			input_manager.set_touch_down(true);
+			drop(input_manager);
 			node_tree.dispatch_touch(field_id, engine, TouchKind::Press, position);
 		};
-		press(&mut node_tree, &mut engine, press_position);
+		press(&mut node_tree, engine, press_position);
 		for _ in 0..30 {
 			node_tree.tick(&engine, 0.02);
 		}
@@ -4306,7 +4310,7 @@ mod tests {
 		engine.get_input_manager_mut().get_text_input_mut().finish_frame();
 
 		// 허용 거리(15)를 넘게 움직이면 길게 누르기가 아니다.
-		press(&mut node_tree, &mut engine, press_position);
+		press(&mut node_tree, engine, press_position);
 		let moved_position = Vector2::create(press_position.x + 20.0, press_position.y);
 		engine.get_input_manager_mut().set_view_input_position(moved_position);
 		node_tree.dispatch_touch(field_id, &engine, TouchKind::Moved, moved_position);
@@ -4431,7 +4435,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn typing_and_edit_keys() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		let change_count = Rc::new(Cell::new(0));
 		let submitted_text = Rc::new(RefCell::new(String::new()));
@@ -4450,12 +4454,12 @@ mod tests {
 		node_tree.dispatch_touch(field_id, &engine, TouchKind::Release, Vector2::create(150.0, 120.0));
 		assert!(get_field(&mut node_tree, field_id).is_focused());
 
-		push_event(&mut engine, TextInputEventKind::Commit(String::from("abc")));
-		push_event(&mut engine, key_event(TextInputKey::Left, false));
-		push_event(&mut engine, key_event(TextInputKey::Backspace, false));
-		push_event(&mut engine, TextInputEventKind::Commit(String::from("X")));
-		push_event(&mut engine, key_event(TextInputKey::Home, true));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, TextInputEventKind::Commit(String::from("abc")));
+		push_event(engine, key_event(TextInputKey::Left, false));
+		push_event(engine, key_event(TextInputKey::Backspace, false));
+		push_event(engine, TextInputEventKind::Commit(String::from("X")));
+		push_event(engine, key_event(TextInputKey::Home, true));
+		run_frame(&mut node_tree, engine);
 		{
 			let field = get_field(&mut node_tree, field_id);
 			assert_eq!(field.get_text(), "aXc");
@@ -4464,10 +4468,10 @@ mod tests {
 		}
 		assert_eq!(change_count.get(), 3);
 
-		push_event(&mut engine, key_event(TextInputKey::Delete, false));
-		push_event(&mut engine, key_event(TextInputKey::End, false));
-		push_event(&mut engine, key_event(TextInputKey::Enter, false));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, key_event(TextInputKey::Delete, false));
+		push_event(engine, key_event(TextInputKey::End, false));
+		push_event(engine, key_event(TextInputKey::Enter, false));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "c");
 		assert_eq!(get_field(&mut node_tree, field_id).get_cursor_index(), 1);
 		assert_eq!(*submitted_text.borrow(), "c");
@@ -4479,7 +4483,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn ime_preedit_then_commit() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		{
 			let field = get_field(&mut node_tree, field_id);
@@ -4487,16 +4491,16 @@ mod tests {
 			field.move_cursor(1, false);
 			field.focus();
 		}
-		push_event(&mut engine, TextInputEventKind::CompositionStart);
-		push_event(&mut engine, TextInputEventKind::Preedit {
+		push_event(engine, TextInputEventKind::CompositionStart);
+		push_event(engine, TextInputEventKind::Preedit {
 			text: String::from("ㄴ"),
 			cursor_index: Some(1),
 		});
-		push_event(&mut engine, TextInputEventKind::Preedit {
+		push_event(engine, TextInputEventKind::Preedit {
 			text: String::from("나"),
 			cursor_index: Some(1),
 		});
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
 		{
 			let field = get_field(&mut node_tree, field_id);
 			assert!(field.is_composing());
@@ -4504,13 +4508,13 @@ mod tests {
 			assert_eq!(field.get_composition(), "나");
 			assert_eq!(field.get_display_text(), "가나다");
 		}
-		push_event(&mut engine, TextInputEventKind::Preedit {
+		push_event(engine, TextInputEventKind::Preedit {
 			text: String::new(),
 			cursor_index: None,
 		});
-		push_event(&mut engine, TextInputEventKind::CompositionEnd);
-		push_event(&mut engine, TextInputEventKind::Commit(String::from("나")));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, TextInputEventKind::CompositionEnd);
+		push_event(engine, TextInputEventKind::Commit(String::from("나")));
+		run_frame(&mut node_tree, engine);
 		let field = get_field(&mut node_tree, field_id);
 		assert!(!field.is_composing());
 		assert_eq!(field.get_text(), "가나다");
@@ -4523,15 +4527,15 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn press_while_composing_commits() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		get_field(&mut node_tree, field_id).focus();
-		push_event(&mut engine, TextInputEventKind::CompositionStart);
-		push_event(&mut engine, TextInputEventKind::Preedit {
+		push_event(engine, TextInputEventKind::CompositionStart);
+		push_event(engine, TextInputEventKind::Preedit {
 			text: String::from("글"),
 			cursor_index: Some(1),
 		});
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
 		node_tree.dispatch_touch(field_id, &engine, TouchKind::Press, Vector2::create(110.0, 130.0));
 		{
 			let field = get_field(&mut node_tree, field_id);
@@ -4540,7 +4544,8 @@ mod tests {
 			assert!(!field.is_composing());
 			assert!(field.is_focused());
 		}
-		let text_input = engine.get_input_manager_mut().get_text_input_mut();
+		let mut input_manager = engine.get_input_manager_mut();
+		let text_input = input_manager.get_text_input_mut();
 		assert!(text_input.take_ime_reset_request());
 		assert!(!text_input.take_ime_reset_request());
 		assert!(text_input.consume_ime_commit_guard("글"));
@@ -4551,17 +4556,17 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn max_length_limits_commit() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		{
 			let field = get_field(&mut node_tree, field_id);
 			field.set_max_length(5);
 			field.focus();
 		}
-		push_event(&mut engine, TextInputEventKind::Commit(String::from("닉네임")));
-		push_event(&mut engine, TextInputEventKind::Commit(String::from("길게씀")));
-		push_event(&mut engine, TextInputEventKind::Paste(String::from("더")));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, TextInputEventKind::Commit(String::from("닉네임")));
+		push_event(engine, TextInputEventKind::Commit(String::from("길게씀")));
+		push_event(engine, TextInputEventKind::Paste(String::from("더")));
+		run_frame(&mut node_tree, engine);
 		let field = get_field(&mut node_tree, field_id);
 		assert_eq!(field.get_text(), "닉네임길게");
 		assert_eq!(field.get_cursor_index(), 5);
@@ -4573,7 +4578,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn focus_changes() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, first_field_id) = create_field_tree();
 		let root_id = node_tree.get_root_id();
 		let second_field_id = node_tree.create_child(root_id, "second");
@@ -4582,14 +4587,14 @@ mod tests {
 		node_tree.add_component(second_field_id, UIInputField::new()).expect("field").set_use_dom_input(true);
 
 		get_field(&mut node_tree, first_field_id).focus();
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
 		assert_eq!(engine.get_input_manager().get_text_input().get_active_field_state().map(|field_state| field_state.field_id), Some(get_field(&mut node_tree, first_field_id).get_field_id()));
 
 		// attach 하지 않은 두 번째 필드에 포커스: 첫 필드는 다음 tick 에 포커스를 내준다. 글은 아무도 받지 않는다.
 		get_field(&mut node_tree, second_field_id).focus();
-		run_frame(&mut node_tree, &mut engine);
-		push_event(&mut engine, TextInputEventKind::Commit(String::from("z")));
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
+		push_event(engine, TextInputEventKind::Commit(String::from("z")));
+		run_frame(&mut node_tree, engine);
 		assert!(!get_field(&mut node_tree, first_field_id).is_focused());
 		assert!(get_field(&mut node_tree, second_field_id).is_focused());
 		assert_eq!(get_field(&mut node_tree, first_field_id).get_text(), "");
@@ -4598,20 +4603,20 @@ mod tests {
 
 		// 첫 필드를 다시 누르고 조합하다가 밖을 누른다.
 		node_tree.dispatch_touch(first_field_id, &engine, TouchKind::Press, Vector2::create(150.0, 120.0));
-		push_event(&mut engine, TextInputEventKind::CompositionStart);
-		push_event(&mut engine, TextInputEventKind::Preedit {
+		push_event(engine, TextInputEventKind::CompositionStart);
+		push_event(engine, TextInputEventKind::Preedit {
 			text: String::from("한"),
 			cursor_index: Some(1),
 		});
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
 		assert!(get_field(&mut node_tree, first_field_id).is_focused());
 		assert_eq!(get_field(&mut node_tree, first_field_id).get_composition(), "한");
 		{
-			let input_manager = engine.get_input_manager_mut();
+			let mut input_manager = engine.get_input_manager_mut();
 			input_manager.set_view_input_position(Vector2::create(700.0, 600.0));
 			input_manager.set_touch_pressed(true);
 		}
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
 		engine.get_input_manager_mut().set_touch_pressed(false);
 		assert!(!get_field(&mut node_tree, second_field_id).is_focused());
 		let first_field = get_field(&mut node_tree, first_field_id);
@@ -4627,32 +4632,32 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn dom_synchronization_events() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		let field_id_value = get_field(&mut node_tree, field_id).get_field_id();
-		let push_targeted_event = |engine: &mut Engine, event_kind: TextInputEventKind| {
+		let push_targeted_event = |engine: &Engine, event_kind: TextInputEventKind| {
 			engine.get_input_manager_mut().get_text_input_mut().push_event(TextInputEvent {
 				target_field_id: field_id_value,
 				kind: event_kind,
 			});
 		};
-		push_targeted_event(&mut engine, TextInputEventKind::FocusGained);
-		push_targeted_event(&mut engine, TextInputEventKind::ReplaceValue {
+		push_targeted_event(engine, TextInputEventKind::FocusGained);
+		push_targeted_event(engine, TextInputEventKind::ReplaceValue {
 			value: String::from("hello"),
 			selection_start: 5,
 			selection_end: 5,
 		});
-		push_targeted_event(&mut engine, TextInputEventKind::Selection {
+		push_targeted_event(engine, TextInputEventKind::Selection {
 			start: 1,
 			end: 3,
 		});
-		push_targeted_event(&mut engine, TextInputEventKind::CompositionStart);
-		push_targeted_event(&mut engine, TextInputEventKind::ReplaceValue {
+		push_targeted_event(engine, TextInputEventKind::CompositionStart);
+		push_targeted_event(engine, TextInputEventKind::ReplaceValue {
 			value: String::from("hello?"),
 			selection_start: 6,
 			selection_end: 6,
 		});
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
 		{
 			let field = get_field(&mut node_tree, field_id);
 			assert!(field.is_focused());
@@ -4660,9 +4665,9 @@ mod tests {
 			assert_eq!(field.get_selection_range(), Some((1, 3)));
 			assert!(field.is_composing());
 		}
-		push_targeted_event(&mut engine, TextInputEventKind::CompositionEnd);
-		push_targeted_event(&mut engine, TextInputEventKind::FocusLost);
-		run_frame(&mut node_tree, &mut engine);
+		push_targeted_event(engine, TextInputEventKind::CompositionEnd);
+		push_targeted_event(engine, TextInputEventKind::FocusLost);
+		run_frame(&mut node_tree, engine);
 		assert!(!get_field(&mut node_tree, field_id).is_focused());
 	}
 
@@ -4672,23 +4677,23 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn context_menu_opens_and_closes() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		let root_id = node_tree.get_root_id();
 		engine.get_input_manager_mut().get_text_input_mut().set_context_menu_request_position(Some(Vector2::create(200.0, 120.0)));
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
 		assert!(get_field(&mut node_tree, field_id).is_focused());
 		let menu_id = node_tree.find_child_by_name(root_id, "uiInputFieldContextMenu").expect("menu");
 		assert_eq!(node_tree[menu_id].get_local_position(), Vector2::create(200.0, 120.0));
 		assert!(node_tree[menu_id].is_interactable());
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
 		assert!(node_tree.contains(menu_id));
 		{
-			let input_manager = engine.get_input_manager_mut();
+			let mut input_manager = engine.get_input_manager_mut();
 			input_manager.set_view_input_position(Vector2::create(900.0, 600.0));
 			input_manager.set_touch_pressed(true);
 		}
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
 		engine.get_input_manager_mut().set_touch_pressed(false);
 		assert!(!node_tree.contains(menu_id));
 		assert!(!get_field(&mut node_tree, field_id).is_focused());
@@ -4782,31 +4787,31 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn edit_keys_follow_grapheme_clusters() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		{
 			let field = get_field(&mut node_tree, field_id);
 			field.focus();
 			field.set_text("a\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}e\u{301}");
 		}
-		run_frame(&mut node_tree, &mut engine);
-		let press = |node_tree: &mut NodeTree, engine: &mut Engine, key: TextInputKey, is_shift: bool| -> (usize, usize) {
+		run_frame(&mut node_tree, engine);
+		let press = |node_tree: &mut NodeTree, engine: &Engine, key: TextInputKey, is_shift: bool| -> (usize, usize) {
 			push_event(engine, key_event(key, is_shift));
 			run_frame(node_tree, engine);
 			let field = get_field(node_tree, field_id);
 			(field.edit_buffer.get_selection_start(), field.edit_buffer.get_cursor_index())
 		};
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::Left, false), (6, 6));
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::Left, true), (6, 1));
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::Right, false), (6, 6));
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::Left, true), (6, 1));
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::Left, false), (1, 1));
-		push_event(&mut engine, key_event(TextInputKey::Delete, false));
-		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::Left, false), (6, 6));
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::Left, true), (6, 1));
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::Right, false), (6, 6));
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::Left, true), (6, 1));
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::Left, false), (1, 1));
+		push_event(engine, key_event(TextInputKey::Delete, false));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "ae\u{301}");
-		push_event(&mut engine, key_event(TextInputKey::End, false));
-		push_event(&mut engine, key_event(TextInputKey::Backspace, false));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, key_event(TextInputKey::End, false));
+		push_event(engine, key_event(TextInputKey::Backspace, false));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "ae");
 	}
 
@@ -4816,7 +4821,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn word_keys_move_select_and_delete_like_chrome() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		{
 			let field = get_field(&mut node_tree, field_id);
@@ -4824,8 +4829,8 @@ mod tests {
 			field.focus();
 			field.set_text("hello world foo\nbar");
 		}
-		run_frame(&mut node_tree, &mut engine);
-		let press = |node_tree: &mut NodeTree, engine: &mut Engine, key: TextInputKey, is_shift: bool| -> (usize, usize) {
+		run_frame(&mut node_tree, engine);
+		let press = |node_tree: &mut NodeTree, engine: &Engine, key: TextInputKey, is_shift: bool| -> (usize, usize) {
 			push_event(engine, key_event(key, is_shift));
 			run_frame(node_tree, engine);
 			let field = get_field(node_tree, field_id);
@@ -4843,61 +4848,61 @@ mod tests {
 			11
 		};
 		set_selection(&mut node_tree, 8, 8);
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordLeft, false), (6, 6));
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordRight, false), (right_end, right_end));
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::WordLeft, false), (6, 6));
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::WordRight, false), (right_end, right_end));
 		// 고른 것이 있어도 커서(focus)에서 찾는다.
 		set_selection(&mut node_tree, 2, 8);
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordRight, false), (right_end, right_end));
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::WordRight, false), (right_end, right_end));
 		set_selection(&mut node_tree, 8, 2);
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordLeft, false), (0, 0));
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::WordLeft, false), (0, 0));
 		// 넓히기: 맥은 고정 끝을 넘으면 고정 끝에서 멈춘다.
 		set_selection(&mut node_tree, 8, 8);
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordLeft, true), (8, 6));
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::WordLeft, true), (8, 6));
 		let across_anchor = if cfg!(target_os = "macos") {
 			(8, 8)
 		}
 		else {
 			(8, right_end)
 		};
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordRight, true), across_anchor);
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::WordRight, true), across_anchor);
 		// 글자가 있는 줄 앞: 왼쪽 낱말은 그대로, 낱말 지우기는 줄바꿈 하나.
 		set_selection(&mut node_tree, 16, 16);
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordLeft, false), (16, 16));
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::DeleteWordBackward, false), (15, 15));
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::WordLeft, false), (16, 16));
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::DeleteWordBackward, false), (15, 15));
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "hello world foobar");
 
 		// 되돌리기 묶음: [낱말 지우기 + 뒤로 지우기] / [낱말 지우기]
 		get_field(&mut node_tree, field_id).set_text("one two three");
-		run_frame(&mut node_tree, &mut engine);
-		push_event(&mut engine, key_event(TextInputKey::DeleteWordBackward, false));
-		push_event(&mut engine, key_event(TextInputKey::Backspace, false));
-		push_event(&mut engine, key_event(TextInputKey::DeleteWordBackward, false));
-		run_frame(&mut node_tree, &mut engine);
+		run_frame(&mut node_tree, engine);
+		push_event(engine, key_event(TextInputKey::DeleteWordBackward, false));
+		push_event(engine, key_event(TextInputKey::Backspace, false));
+		push_event(engine, key_event(TextInputKey::DeleteWordBackward, false));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "one ");
-		push_event(&mut engine, key_event(TextInputKey::Undo, false));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, key_event(TextInputKey::Undo, false));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "one two");
-		push_event(&mut engine, key_event(TextInputKey::Undo, false));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, key_event(TextInputKey::Undo, false));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "one two three");
 
 		// 고른 것은 고른 것만 지우고 따로 한 묶음이다. 그 뒤 친 글자도 새 묶음.
 		set_selection(&mut node_tree, 4, 7);
-		push_event(&mut engine, key_event(TextInputKey::DeleteWordForward, false));
-		push_event(&mut engine, TextInputEventKind::Commit(String::from("x")));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, key_event(TextInputKey::DeleteWordForward, false));
+		push_event(engine, TextInputEventKind::Commit(String::from("x")));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "one x three");
-		push_event(&mut engine, key_event(TextInputKey::Undo, false));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, key_event(TextInputKey::Undo, false));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "one  three");
-		push_event(&mut engine, key_event(TextInputKey::Undo, false));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, key_event(TextInputKey::Undo, false));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "one two three");
 
 		// 앞으로 낱말 지우기: 맥과 리눅스는 낱말 끝까지, 윈도우는 다음 낱말 앞까지. (여기서는 공백 하나)
 		set_selection(&mut node_tree, 3, 3);
-		push_event(&mut engine, key_event(TextInputKey::DeleteWordForward, false));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, key_event(TextInputKey::DeleteWordForward, false));
+		run_frame(&mut node_tree, engine);
 		let expected_text = if cfg!(target_os = "windows") {
 			"onetwo three"
 		}
@@ -4912,7 +4917,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn mac_scroll_keys_scroll_like_chrome() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		{
 			let field = get_field(&mut node_tree, field_id);
@@ -4923,25 +4928,25 @@ mod tests {
 			field.focus();
 			field.set_text("line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8");
 		}
-		run_frame(&mut node_tree, &mut engine);
-		let press = |node_tree: &mut NodeTree, engine: &mut Engine, key: TextInputKey, is_shift: bool| -> (usize, usize, f64) {
+		run_frame(&mut node_tree, engine);
+		let press = |node_tree: &mut NodeTree, engine: &Engine, key: TextInputKey, is_shift: bool| -> (usize, usize, f64) {
 			push_event(engine, key_event(key, is_shift));
 			run_frame(node_tree, engine);
 			let field = get_field(node_tree, field_id);
 			(field.edit_buffer.get_selection_start(), field.edit_buffer.get_cursor_index(), field.get_scroll_top())
 		};
 		// 글 끝의 커서가 보이게 넘겨 둔 상태에서 Home: 커서는 그대로, 맨 위로.
-		let (_, _, scroll_top_at_end) = press(&mut node_tree, &mut engine, TextInputKey::DocumentEnd, false);
+		let (_, _, scroll_top_at_end) = press(&mut node_tree, engine, TextInputKey::DocumentEnd, false);
 		assert!(scroll_top_at_end > 0.0);
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::ScrollToDocumentStart, false), (47, 47, 0.0));
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::ScrollToDocumentStart, false), (47, 47, 0.0));
 		// 넘길 것이 없으면 줄 앞으로. (블링크 키 표 MoveToBeginningOfLine)
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::ScrollToDocumentStart, false).1, 42);
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::ScrollToDocumentStart, false).1, 42);
 		// page 넘기기는 커서를 두고 한 화면만큼.
-		let (_, cursor_index, scroll_top) = press(&mut node_tree, &mut engine, TextInputKey::ScrollPageUp, false);
+		let (_, cursor_index, scroll_top) = press(&mut node_tree, engine, TextInputKey::ScrollPageUp, false);
 		assert_eq!(cursor_index, 42);
 		assert!(scroll_top < scroll_top_at_end);
 		// Shift + Home 은 글 앞까지 고른다.
-		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::ScrollToDocumentStart, true).0, 42);
+		assert_eq!(press(&mut node_tree, engine, TextInputKey::ScrollToDocumentStart, true).0, 42);
 		assert_eq!(get_field(&mut node_tree, field_id).edit_buffer.get_cursor_index(), 0);
 	}
 
@@ -4950,7 +4955,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn multiline_field_edits_like_textarea() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		let submit_count = Rc::new(Cell::new(0));
 		{
@@ -4965,40 +4970,40 @@ mod tests {
 		}
 		node_tree.dispatch_touch(field_id, &engine, TouchKind::Press, Vector2::create(150.0, 120.0));
 		node_tree.dispatch_touch(field_id, &engine, TouchKind::Release, Vector2::create(150.0, 120.0));
-		push_event(&mut engine, TextInputEventKind::Commit(String::from("abc")));
-		push_event(&mut engine, key_event(TextInputKey::Enter, false));
-		push_event(&mut engine, TextInputEventKind::Commit(String::from("d")));
-		push_event(&mut engine, key_event(TextInputKey::Enter, false));
-		push_event(&mut engine, TextInputEventKind::Commit(String::from("fghij")));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, TextInputEventKind::Commit(String::from("abc")));
+		push_event(engine, key_event(TextInputKey::Enter, false));
+		push_event(engine, TextInputEventKind::Commit(String::from("d")));
+		push_event(engine, key_event(TextInputKey::Enter, false));
+		push_event(engine, TextInputEventKind::Commit(String::from("fghij")));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "abc\nd\nfghij");
 		assert_eq!(submit_count.get(), 0);
 		// Enter 는 글자 넣기 묶음에 붙어 한 번에 되돌린다.
 		assert!(get_field(&mut node_tree, field_id).can_undo());
 
 		// 끝(셋째 줄 다섯 글자 뒤)에서 위로: 둘째 줄은 짧아 그 끝, 다시 위로: 가로 자리를 지켜 첫째 줄 끝, 아래로 둘: 셋째 줄 다섯 글자 뒤.
-		let cursor_after = |node_tree: &mut NodeTree, engine: &mut Engine, key: TextInputKey| -> usize {
+		let cursor_after = |node_tree: &mut NodeTree, engine: &Engine, key: TextInputKey| -> usize {
 			push_event(engine, key_event(key, false));
 			run_frame(node_tree, engine);
 			get_field(node_tree, field_id).get_cursor_index()
 		};
-		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Up), 5);
-		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Up), 3);
-		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Down), 5);
-		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Down), 11);
+		assert_eq!(cursor_after(&mut node_tree, engine, TextInputKey::Up), 5);
+		assert_eq!(cursor_after(&mut node_tree, engine, TextInputKey::Up), 3);
+		assert_eq!(cursor_after(&mut node_tree, engine, TextInputKey::Down), 5);
+		assert_eq!(cursor_after(&mut node_tree, engine, TextInputKey::Down), 11);
 		// 첫 줄 위는 글 앞, 마지막 줄 아래는 글 끝.
-		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Up), 5);
-		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Up), 3);
-		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Up), 0);
-		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::DocumentEnd), 11);
-		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Down), 11);
-		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Home), 6);
-		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::End), 11);
-		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::DocumentStart), 0);
+		assert_eq!(cursor_after(&mut node_tree, engine, TextInputKey::Up), 5);
+		assert_eq!(cursor_after(&mut node_tree, engine, TextInputKey::Up), 3);
+		assert_eq!(cursor_after(&mut node_tree, engine, TextInputKey::Up), 0);
+		assert_eq!(cursor_after(&mut node_tree, engine, TextInputKey::DocumentEnd), 11);
+		assert_eq!(cursor_after(&mut node_tree, engine, TextInputKey::Down), 11);
+		assert_eq!(cursor_after(&mut node_tree, engine, TextInputKey::Home), 6);
+		assert_eq!(cursor_after(&mut node_tree, engine, TextInputKey::End), 11);
+		assert_eq!(cursor_after(&mut node_tree, engine, TextInputKey::DocumentStart), 0);
 
 		// 붙여넣기의 CR, CRLF 는 LF.
-		push_event(&mut engine, TextInputEventKind::Paste(String::from("x\r\ny\rz")));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, TextInputEventKind::Paste(String::from("x\r\ny\rz")));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "x\ny\nzabc\nd\nfghij");
 
 		// 줄이 높이를 넘치면 휠로 넘기고, 끝이면 부모에게 넘긴다. 글 끝으로 가면 커서가 보이게 스크롤한다.
@@ -5009,8 +5014,8 @@ mod tests {
 		assert!(node_tree.dispatch_wheel_at(field_center, &engine, Vector2::create(0.0, -1000.0)));
 		assert_eq!(get_field(&mut node_tree, field_id).get_scroll_top(), 0.0);
 		assert!(!node_tree.dispatch_wheel_at(field_center, &engine, Vector2::create(0.0, -10.0)));
-		push_event(&mut engine, key_event(TextInputKey::DocumentEnd, false));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, key_event(TextInputKey::DocumentEnd, false));
+		run_frame(&mut node_tree, engine);
 		let field = get_field(&mut node_tree, field_id);
 		let line_height = field.get_line_height();
 		// 글 끝 커서 보이기는 블링크 RevealSelection 처럼 맥은 가운데 맞춤이라 끝(아래 안쪽 여백까지), 그 밖은 가장자리 맞춤이라 커서 아래가 보이는 데까지다.
@@ -5028,7 +5033,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn multiline_field_wraps_visual_lines() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		{
 			let field = get_field(&mut node_tree, field_id);
@@ -5039,10 +5044,10 @@ mod tests {
 		node_tree.dispatch_touch(field_id, &engine, TouchKind::Press, Vector2::create(150.0, 120.0));
 		node_tree.dispatch_touch(field_id, &engine, TouchKind::Release, Vector2::create(150.0, 120.0));
 		let long_text = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor";
-		push_event(&mut engine, TextInputEventKind::Commit(String::from(long_text)));
-		push_event(&mut engine, key_event(TextInputKey::DocumentStart, false));
-		push_event(&mut engine, key_event(TextInputKey::End, false));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, TextInputEventKind::Commit(String::from(long_text)));
+		push_event(engine, key_event(TextInputKey::DocumentStart, false));
+		push_event(engine, key_event(TextInputKey::End, false));
+		run_frame(&mut node_tree, engine);
 		let field = get_field(&mut node_tree, field_id);
 		let line_list = field.text_area_layout.line_list.clone();
 		assert!(line_list.len() >= 2);
@@ -5051,11 +5056,11 @@ mod tests {
 		assert_eq!(field.get_cursor_index(), line_list[0].end);
 		assert!(field.is_caret_upstream);
 		// Home 은 그 줄 앞(0), 오른쪽은 다음 줄 앞으로 친화를 푼다.
-		push_event(&mut engine, key_event(TextInputKey::Home, false));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, key_event(TextInputKey::Home, false));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_cursor_index(), 0);
-		push_event(&mut engine, key_event(TextInputKey::Down, false));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, key_event(TextInputKey::Down, false));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_cursor_index(), line_list[1].start);
 	}
 
@@ -5064,17 +5069,17 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn single_line_dom_field_sanitizes_line_breaks() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let (mut node_tree, field_id) = create_field_tree();
 		node_tree.dispatch_touch(field_id, &engine, TouchKind::Press, Vector2::create(150.0, 120.0));
 		node_tree.dispatch_touch(field_id, &engine, TouchKind::Release, Vector2::create(150.0, 120.0));
-		push_event(&mut engine, TextInputEventKind::Paste(String::from("a\r\nb\nc\n\r\n")));
-		push_event(&mut engine, key_event(TextInputKey::Up, false));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, TextInputEventKind::Paste(String::from("a\r\nb\nc\n\r\n")));
+		push_event(engine, key_event(TextInputKey::Up, false));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "a b c");
 		assert_eq!(get_field(&mut node_tree, field_id).get_cursor_index(), 0);
-		push_event(&mut engine, key_event(TextInputKey::Down, false));
-		run_frame(&mut node_tree, &mut engine);
+		push_event(engine, key_event(TextInputKey::Down, false));
+		run_frame(&mut node_tree, engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_cursor_index(), 5);
 	}
 }

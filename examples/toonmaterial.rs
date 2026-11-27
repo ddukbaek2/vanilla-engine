@@ -285,7 +285,7 @@ impl Scene for ToonMaterialScene {
 	//==============================================================================
 	// 생성. (원본 생성자처럼 렌더러, 메시, 텍스처를 엔진의 그래픽으로 짓는다)
 	//==============================================================================
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.scene_base.set_scene_background_color("#10121a");
 		if let Some(graphic) = engine.get_graphic() {
 			match MaterialResources::new(graphic.get_gl()) {
@@ -302,7 +302,7 @@ impl Scene for ToonMaterialScene {
 	//==============================================================================
 	// 3D 출력. (2D 묶음 내보내기 → 깊이 비우기 → 툰 그리기 줄 → 2D 상태 복구)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 		graphic.flush_batch();
 		let gl = graphic.get_gl();

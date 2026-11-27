@@ -160,7 +160,7 @@ impl InputGalleryScene {
 	//==============================================================================
 	// 흉내 낸 키와 손가락. (씬 tick 에서 넣으므로 입력 동작은 다음 프레임에 본다, 손가락의 캔버스 자리는 보이지 않아 0 으로 넣는다)
 	//==============================================================================
-	fn simulate_action_input(&mut self, engine: &mut Engine) {
+	fn simulate_action_input(&mut self, engine: &Engine) {
 		let frame_count = self.frame_count;
 		let first_finger_view = Vector2::create(900.0, 300.0);
 		let second_finger_view = Vector2::create(1000.0, 330.0);
@@ -168,7 +168,7 @@ impl InputGalleryScene {
 		let first_finger_canvas = Vector2::zero();
 		let second_finger_canvas = Vector2::zero();
 		let moved_finger_canvas = Vector2::zero();
-		let input_manager = engine.get_input_manager_mut();
+		let mut input_manager = engine.get_input_manager_mut();
 		match frame_count {
 			40 => {
 				input_manager.push_key("ArrowRight");
@@ -223,8 +223,9 @@ impl InputGalleryScene {
 	//==============================================================================
 	// 패드 진동 시험. (실제 패드의 앞면 단추를 누르면 연결된 패드를 모두 떤다)
 	//==============================================================================
-	fn update_gamepad_vibration(&mut self, engine: &mut Engine) {
-		let gamepad_manager = engine.get_input_manager_mut().get_gamepad_manager_mut();
+	fn update_gamepad_vibration(&mut self, engine: &Engine) {
+		let mut input_manager = engine.get_input_manager_mut();
+		let gamepad_manager = input_manager.get_gamepad_manager_mut();
 		let gamepad_index_list: Vec<usize> = gamepad_manager.get_all_connected_gamepads().iter().map(|gamepad| gamepad.index).collect();
 		let vibration_list = [
 			(GamepadButtonCode::A_CROSS, 1.0, 0.0, 0.5, "무거운 모터 0.5초"),
@@ -251,13 +252,13 @@ impl InputGalleryScene {
 	//==============================================================================
 	// 흉내 낸 입력. (누름, 확정 글, 조합 글, 문맥 메뉴)
 	//==============================================================================
-	fn simulate_input(&mut self, engine: &mut Engine) {
+	fn simulate_input(&mut self, engine: &Engine) {
 		let frame_count = self.frame_count;
 		let node_tree = self.scene_base.get_node_tree();
 		let typing_point = self.typing_field_id.map(|field_id| calculate_node_point(node_tree, field_id, Vector2::create(FIELD_WIDTH - 40.0, FIELD_HEIGHT * 0.5)));
 		let selection_point = self.selection_field_id.map(|field_id| calculate_node_point(node_tree, field_id, Vector2::create(160.0, FIELD_HEIGHT * 0.5)));
 
-		let input_manager = engine.get_input_manager_mut();
+		let mut input_manager = engine.get_input_manager_mut();
 		let input_position = if frame_count < 20 {
 			typing_point
 		}
@@ -326,9 +327,9 @@ impl Scene for InputGalleryScene {
 	//==============================================================================
 	// 생성. (필드와 리치텍스트 라벨을 놓는다)
 	//==============================================================================
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		// 입력 동작. (키를 묶고 반복을 걸고, 흉내 낸 바깥 입력원을 끼운다)
-		let input_manager = engine.get_input_manager_mut();
+		let mut input_manager = engine.get_input_manager_mut();
 		input_manager.set_prevented_keys(&["Tab", "Space"]);
 		let input_actions = input_manager.get_input_actions_mut();
 		input_actions.bind_key("confirm", "Space");
@@ -400,7 +401,7 @@ impl Scene for InputGalleryScene {
 	//==============================================================================
 	// 주기적 갱신. (흉내 낸 입력 → 패드 진동 시험 → 노드 갱신과 터치)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.frame_count += 1;
 		let connected_gamepad_count = engine.get_input_manager().get_gamepad_manager().get_connected_gamepad_count();
 		if self.frame_count >= EXIT_FRAME_COUNT && connected_gamepad_count == 0 {
@@ -418,7 +419,7 @@ impl Scene for InputGalleryScene {
 	//==============================================================================
 	// 이전 출력. (배경 칠하고 뷰 좌표계 걸기)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 }

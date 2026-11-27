@@ -3,13 +3,13 @@
 //! - 원본은 캔버스를 잡고 request_animation_frame 으로 프레임을 돈다.
 //!   러스트 판은 창, GL 컨텍스트, 입력 이벤트, 화면 넘기기를 플랫폼 층(crate::platform)이 맡고,
 //!   여기 EngineRunner 는 플랫폼을 모른 채 씬과 프레임 흐름만 돈다. (데스크탑: platform/desktop.rs, 웹: platform/web.rs)
-//! - 씬에는 &mut Engine 을 넘긴다. 씬은 여기서 매니저(시간, 뷰, 입력)를 꺼내 쓴다. 엔진을 받지 않는 자리는 원본 Engine.getEngine() 처럼 Engine::get_engine() 으로 전역 엔진을 꺼낸다. (core/globalengine.rs)
+//! - 씬에는 &Engine 을 넘긴다. 씬은 여기서 매니저(시간, 뷰, 입력)를 꺼내 쓴다. 엔진을 받지 않는 자리는 원본 Engine.getEngine() 처럼 Engine::get_engine() 으로 전역 엔진을 꺼낸다. (core/globalengine.rs)
 //! - Graphic 은 플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘겨받아 엔진이 든다. 원본 getGraphic 처럼 씬의 어느 훅에서나 get_graphic, get_graphic_mut 로 꺼낸다.
-//!   씬의 draw 계열은 지금처럼 graphic 인자를 받는다. 그 인자는 엔진이 든 그래픽을 Option::take 로 잠깐 꺼내 넘긴 것이다. (&mut Engine 과 &mut Graphic 을 함께 넘기려면
+//!   씬의 draw 계열은 지금처럼 graphic 인자를 받는다. 그 인자는 엔진이 든 그래픽을 Option::take 로 잠깐 꺼내 넘긴 것이다. (&Engine 과 &mut Graphic 을 함께 넘기려면
 //!   그래픽이 엔진 밖에 있어야 해서, 그동안 engine.get_graphic() 은 None 이고 인자의 graphic 이 곧 그 그래픽이다. with_graphic 도 같다. RefCell 도 unsafe 도 쓰지 않는다)
 //! - 오디오 매니저를 원본처럼 생성할 때 만들어 든다. AudioContext(소리 장치)는 처음 쓸 때 만든다. 프레임마다 하는 오디오 일은 없다.
 //!   웹은 플랫폼이 click / touchstart / keydown 에서 resume_on_user_gesture, focus / visibilitychange 에서 resume 을 부른다.
-//! - 원본 SceneManager.getAllLoadedScenes 는 get_all_loaded_scenes 로, 씬 객체 대신 핸들(SceneId)을 돌려준다. (씬마다 &mut Engine 을 받아 도는 동안 다른 씬을 빌릴 수 없다)
+//! - 원본 SceneManager.getAllLoadedScenes 는 get_all_loaded_scenes 로, 씬 객체 대신 핸들(SceneId)을 돌려준다. (씬마다 &Engine 을 받아 도는 동안 다른 씬을 빌릴 수 없다)
 //! - 원본처럼 씬을 불러오면 루트를 뷰 크기로 맞추고(create 바로 뒤), 맡긴 애셋이 다 끝난 뒤에도 로딩 화면을 0.3초 더 보이고 initialize 를 부른다.
 //! - 글자 입력칸 포커스(is_text_input_focused)는 원본처럼 문서의 초점을 보고, 문서가 없는 데스크탑은 엔진 입력 필드의 포커스를 본다.
 //! - 씬 하나만 내리기(unload_scene)는 원본 SceneManager.unloadScene 자리다. 원본은 씬 객체로, 러스트 판은 load_scene 이 돌려준 SceneId 로 가리키고,
@@ -63,7 +63,7 @@ use crate::core::viewmanager::{ViewManager, ViewScaleMode};
 use crate::platform::{self, PlatformWindow};
 use crate::resource::audioasset::AudioAsset;
 use crate::resource::fontasset::FontLoadHandle;
-use std::cell::RefCell;
+use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::future::Future;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
@@ -262,7 +262,7 @@ enum PendingFontOperation {
 
 //==============================================================================
 /// 엔진.
-/// - 설정으로 만들고 run 에 첫 씬을 넘겨 돌린다. 씬의 훅은 &mut Engine 을 받아 매니저(시간, 뷰, 입력, 오디오, 커서)와 그래픽(get_graphic, 데스크탑 주 스레드는 Engine::new 직후부터)을 꺼내 쓴다.
+/// - 설정으로 만들고 run 에 첫 씬을 넘겨 돌린다. 씬의 훅은 &Engine 을 받아 매니저(시간, 뷰, 입력, 오디오, 커서)와 그래픽(get_graphic, 데스크탑 주 스레드는 Engine::new 직후부터)을 꺼내 쓴다.
 ///
 /// # 예제
 /// 첫 씬으로 엔진 돌리기 (examples/quickstart.rs)
@@ -300,7 +300,7 @@ enum PendingFontOperation {
 /// ```rust
 /// use vanilla::{Engine, EngineConfiguration};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// assert_eq!(engine.get_frame_number(), 1);
 /// assert!(!engine.get_version_string().is_empty());
 /// engine.get_time_manager_mut().set_time_scale(0.5);
@@ -311,45 +311,45 @@ enum PendingFontOperation {
 /// ```
 //==============================================================================
 pub struct Engine {
-	engine_configuration: EngineConfiguration,
-	time_manager: TimeManager,
-	view_manager: ViewManager,
-	input_manager: InputManager,
-	pointer_cursor: PointerCursor,
-	audio_manager: AudioManager,
-	pub(crate) platform_window: Option<PlatformWindow>,
-	frame_number: u64,
+	engine_configuration: RefCell<EngineConfiguration>,
+	time_manager: RefCell<TimeManager>,
+	view_manager: RefCell<ViewManager>,
+	input_manager: RefCell<InputManager>,
+	pointer_cursor: RefCell<PointerCursor>,
+	audio_manager: RefCell<AudioManager>,
+	pub(crate) platform_window: RefCell<Option<PlatformWindow>>,
+	frame_number: Cell<u64>,
 	version: Version,
-	is_exit_requested: bool,
+	is_exit_requested: Cell<bool>,
 	/// 그래픽. (플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넣는다. 그리기 함수와 with_graphic 에 내어 준 동안은 비어 있다)
-	graphic: Option<Graphic>,
+	graphic: RefCell<Option<Graphic>>,
 	/// 프레임 번호마다 화면 저장을 받을 함수. (request_frame_capture)
-	frame_capture_handler_map: std::collections::HashMap<u64, Vec<FrameCaptureHandler>>,
+	frame_capture_handler_map: RefCell<std::collections::HashMap<u64, Vec<FrameCaptureHandler>>>,
 	/// 다음 프레임 첫머리에 캔버스와 뷰 영역을 다시 맞춰 달라고 했는지. (resize)
-	pub(crate) is_resize_requested: bool,
-	pending_scene_list: Vec<Box<dyn Scene>>,
-	is_unload_all_scenes_requested: bool,
-	pending_font_registration_list: Vec<(String, FontFaceDescriptors, FontLoadHandle)>,
+	pub(crate) is_resize_requested: Cell<bool>,
+	pending_scene_list: RefCell<Vec<Box<dyn Scene>>>,
+	is_unload_all_scenes_requested: Cell<bool>,
+	pending_font_registration_list: RefCell<Vec<(String, FontFaceDescriptors, FontLoadHandle)>>,
 	/// 글꼴 얼굴 지우기, 차례 정하기, 구운 글자 비우기 부탁. (Graphic 이 있는 프레임 시작에 한다)
-	pending_font_operation_list: Vec<PendingFontOperation>,
-	pending_default_font_handle: Option<AssetLoadHandle>,
-	platform: Platform,
+	pending_font_operation_list: RefCell<Vec<PendingFontOperation>>,
+	pending_default_font_handle: RefCell<Option<AssetLoadHandle>>,
+	platform: RefCell<Platform>,
 	/// 개발 정보 글이 차지한 영역. (원본 #statisticsTextRect, 배경 판은 앞 프레임의 영역으로 그린다. 너비는 늘기만 한다)
-	statistics_text_rect: Rect,
-	next_scene_number: u64,
-	pending_unload_scene_id_list: Vec<SceneId>,
+	statistics_text_rect: Cell<Rect>,
+	next_scene_number: Cell<u64>,
+	pending_unload_scene_id_list: RefCell<Vec<SceneId>>,
 	/// 불러온(create 를 부른) 씬의 핸들. (불러온 차례, get_all_loaded_scenes)
-	loaded_scene_id_list: Vec<SceneId>,
-	is_page_hidden: bool,
+	loaded_scene_id_list: RefCell<Vec<SceneId>>,
+	is_page_hidden: Cell<bool>,
 	page_event_listener_list: RefCell<Vec<Weak<RefCell<dyn FnMut(PageEvent)>>>>,
 	/// 떠 있거나 기다리는 질문 창. (맨 앞 것이 떠 있다)
-	modal_dialog_list: std::collections::VecDeque<crate::core::modaldialog::ModalDialog>,
+	modal_dialog_list: RefCell<std::collections::VecDeque<crate::core::modaldialog::ModalDialog>>,
 	/// 개발자 도구에서 고를 노드. (크롬 문맥 메뉴의 검사 자리, 그 노드를 가진 씬의 DevTools 가 꺼낸다)
 	dev_tools_inspect_request: std::cell::Cell<Option<crate::core::node::nodetree::NodeId>>,
 	/// async 작업의 실행기. (EngineRunner 가 프레임마다 폴링한다)
 	pub(crate) task_executor: TaskExecutor,
 	/// 씬 내리기가 끝나면 풀 Promise. (unload_scene_async 는 그 씬, unload_all_scenes_async 는 그때의 모든 씬)
-	pending_unload_resolver_list: Vec<(Option<SceneId>, PromiseResolver<()>)>,
+	pending_unload_resolver_list: RefCell<Vec<(Option<SceneId>, PromiseResolver<()>)>>,
 }
 
 impl Engine {
@@ -364,64 +364,58 @@ impl Engine {
 	/// # 돌려줌
 	/// 새 엔진. (프레임 번호 1, 씬 없음)
 	//==============================================================================
-	pub fn new(engine_configuration: EngineConfiguration) -> Engine {
+	pub fn new(engine_configuration: EngineConfiguration) -> &'static Engine {
 		let reference_resolution_size = engine_configuration.reference_resolution_size;
 		let view_scale_mode = engine_configuration.view_scale_mode;
 		crate::platform::document::apply_engine_configuration(&engine_configuration.document_language, &engine_configuration.document_meta_list);
-		crate::core::globalengine::mark_engine_created();
 		let engine = Engine {
-			engine_configuration,
-			time_manager: TimeManager::new(),
-			view_manager: ViewManager::new(reference_resolution_size, view_scale_mode),
-			input_manager: InputManager::new(),
-			pointer_cursor: PointerCursor::new(),
-			audio_manager: AudioManager::new(),
-			platform_window: None,
-			graphic: None,
-			frame_number: 1,
+			engine_configuration: RefCell::new(engine_configuration),
+			time_manager: RefCell::new(TimeManager::new()),
+			view_manager: RefCell::new(ViewManager::new(reference_resolution_size, view_scale_mode)),
+			input_manager: RefCell::new(InputManager::new()),
+			pointer_cursor: RefCell::new(PointerCursor::new()),
+			audio_manager: RefCell::new(AudioManager::new()),
+			platform_window: RefCell::new(None),
+			graphic: RefCell::new(None),
+			frame_number: Cell::new(1),
 			version: ENGINE_VERSION,
-			is_exit_requested: false,
-			frame_capture_handler_map: std::collections::HashMap::new(),
-			is_resize_requested: false,
-			pending_scene_list: Vec::new(),
-			is_unload_all_scenes_requested: false,
-			pending_font_registration_list: Vec::new(),
-			pending_font_operation_list: Vec::new(),
-			pending_default_font_handle: None,
-			platform: Platform::new(),
-			statistics_text_rect: Rect::zero(),
-			next_scene_number: 0,
-			pending_unload_scene_id_list: Vec::new(),
-			loaded_scene_id_list: Vec::new(),
-			is_page_hidden: false,
+			is_exit_requested: Cell::new(false),
+			frame_capture_handler_map: RefCell::new(std::collections::HashMap::new()),
+			is_resize_requested: Cell::new(false),
+			pending_scene_list: RefCell::new(Vec::new()),
+			is_unload_all_scenes_requested: Cell::new(false),
+			pending_font_registration_list: RefCell::new(Vec::new()),
+			pending_font_operation_list: RefCell::new(Vec::new()),
+			pending_default_font_handle: RefCell::new(None),
+			platform: RefCell::new(Platform::new()),
+			statistics_text_rect: Cell::new(Rect::zero()),
+			next_scene_number: Cell::new(0),
+			pending_unload_scene_id_list: RefCell::new(Vec::new()),
+			loaded_scene_id_list: RefCell::new(Vec::new()),
+			is_page_hidden: Cell::new(false),
 			page_event_listener_list: RefCell::new(Vec::new()),
-			modal_dialog_list: std::collections::VecDeque::new(),
+			modal_dialog_list: RefCell::new(std::collections::VecDeque::new()),
 			dev_tools_inspect_request: std::cell::Cell::new(None),
 			task_executor: TaskExecutor::new(),
-			pending_unload_resolver_list: Vec::new(),
+			pending_unload_resolver_list: RefCell::new(Vec::new()),
 		};
 		// 데스크탑: 원본 생성자처럼 지금 그래픽을 짓는다. (주 스레드면 이벤트 루프와 숨긴 창, GL 컨텍스트를 만들고 run 은 그 창을 보인다. 못 지으면 지금처럼 run 이 짓는다)
+		// 엔진은 지우지 않는다. 프로그램 끝까지 사는 자리에 두고 전역 엔진으로 적어, 만든 직후부터 Engine::get_engine 이 이 엔진을 준다.
+		let engine = crate::core::globalengine::install_global_engine(engine);
 		#[cfg(not(target_arch = "wasm32"))]
-		let engine = {
-			let mut engine = engine;
-			if let Some(graphic) = crate::platform::prepare_graphic(&mut engine) {
-				engine.attach_graphic(graphic);
-			}
-			engine
-		};
+		if let Some(graphic) = crate::platform::prepare_graphic(engine) {
+			engine.attach_graphic(graphic);
+		}
 		engine
 	}
 
 	//==============================================================================
-	/// 전역 엔진. (원본 static Engine.getEngine(), 마지막으로 만든 엔진. 러스트 판은 이 스레드에서 지금 도는 엔진)
-	/// - 엔진은 주 스레드에 하나다. 처음 한 번 만들고 지우지 않는다. 언리얼 GEngine, 고도 Engine 싱글톤과 같은 꼴이다.
-	/// - 꺼낸 것은 &Engine 이다. (EngineRef, Deref) &self 함수를 부른다. &mut self 함수는 엔진이 &mut 로 빌려 준 자리의 인자로 부른다.
-	/// - 엔진이 &Engine 으로 빌려 준 동안 꺼낸다: 컴포넌트 tick, 터치, 휠과 그 안에서 부른 모든 코드(위젯 콜백, attach_to_tree, attach, detach),
-	///   페이지 이벤트 리스너.
-	/// - 엔진이 &mut 로 빌려 준 동안(씬 함수와 그 안의 컴포넌트 draw, with_graphic, 작업 문맥의 with, 작업의 with 바깥)은 Err(MutablyBorrowed) 다.
-	///   그 자리는 인자로 받은 엔진을 쓴다. (같은 엔진이다) &mut 로 고치는 엔진을 &Engine 으로 또 주면 러스트 빌림 규칙이 깨지기 때문이다.
-	/// - 다른 스레드에서 부르면 Err(OtherThread), 엔진을 만든 적이 없으면 Err(NotCreated), 돌기 전이면 Err(NotRunning) 이다.
-	/// - 꺼낸 EngineRef 는 그 자리 안에서만 쓴다. 필드나 static 에 넣거나 await 너머로 들고 가면, 빌려 준 자리가 끝날 때 엔진이 까닭을 적고 프로세스를 멈춘다.
+	/// 전역 엔진. (원본 static Engine.getEngine(), 마지막으로 만든 엔진)
+	/// - 엔진은 처음 한 번 만들고 지우지 않는다. Engine::new 가 프로그램 끝까지 사는 자리에 두므로 &'static Engine 을 준다. (언리얼 GEngine, 고도 Engine 싱글톤과 같은 꼴)
+	/// - Engine::new 직후부터 어디서나 꺼낸다: 씬 함수(create, tick, draw 같은), 컴포넌트 tick 과 draw, 위젯 콜백, 페이지 이벤트 리스너, async 작업 안.
+	///   씬 함수가 받은 engine 인자와 같은 엔진이다.
+	/// - 엔진의 공개 함수는 모두 &self 다. (고치는 칸은 안쪽 가변성) 매니저의 get_x_mut 으로 받은 것을 쥔 채 같은 매니저를 또 빌리면 함수 이름을 적은 패닉으로 멈춘다.
+	/// - 엔진을 만든 스레드가 아닌 스레드에서 부르면 Err(OtherThread), 엔진을 만든 적이 없으면 Err(NotCreated) 다.
 	///
 	/// # 돌려줌
 	/// 꺼낸 엔진, 못 꺼내면 그 까닭.
@@ -429,7 +423,7 @@ impl Engine {
 	/// # 예제
 	/// 엔진을 받지 않는 함수에서 전역 엔진 꺼내기
 	/// ```rust
-	/// use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineAccessError, EngineConfiguration, NodeTree};
+	/// use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineConfiguration, NodeTree};
 	///
 	/// fn read_frame_number() -> u64 {
 	/// 	let engine = Engine::get_engine().unwrap();
@@ -449,19 +443,19 @@ impl Engine {
 	/// # 	fn get_component_base(&self) -> &ComponentBase {
 	/// # 		&self.component_base
 	/// # 	}
-	/// # 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+	/// # 	fn get_component_base_mut(&self) -> &mut ComponentBase {
 	/// # 		&mut self.component_base
 	/// # 	}
 	/// # 	fn get_component_type(&self) -> &'static str {
 	/// # 		"FrameReader"
 	/// # 	}
-	/// 	fn tick(&mut self, _context: &mut ComponentContext, _time_delta: f64) {
-	/// 		self.frame_number = read_frame_number();
+	/// 	fn tick(&self, _context: &mut ComponentContext, _time_delta: f64) {
+	/// 		self.frame_number.set(read_frame_number());
 	/// 	}
 	/// }
 	///
 	/// let engine = Engine::new(EngineConfiguration::new());
-	/// assert_eq!(Engine::get_engine().unwrap_err(), EngineAccessError::NotRunning);
+	/// assert!(std::ptr::eq(Engine::get_engine().unwrap(), engine));
 	/// let mut node_tree = NodeTree::new();
 	/// let root_id = node_tree.get_root_id();
 	/// let reader_id = node_tree.create_child(root_id, "reader");
@@ -469,13 +463,23 @@ impl Engine {
 	/// 	component_base: ComponentBase::new(),
 	/// 	frame_number: 0,
 	/// });
-	/// node_tree.tick(&engine, 0.016);
+	/// node_tree.tick(engine, 0.016);
 	/// let frame_number = node_tree[reader_id].get_component::<FrameReader>().unwrap().frame_number;
 	/// assert_eq!(frame_number, engine.get_frame_number());
 	/// ```
 	//==============================================================================
-	pub fn get_engine() -> Result<crate::core::globalengine::EngineRef, crate::core::globalengine::EngineAccessError> {
+	pub fn get_engine() -> Result<&'static crate::core::engine::Engine, crate::core::globalengine::EngineAccessError> {
 		crate::core::globalengine::get_global_engine()
+	}
+
+	//==============================================================================
+	/// 이 엔진의 &'static. (엔진은 Engine::new 만 짓고, 지을 때 프로그램 끝까지 사는 자리에 두어 지우지 않는다)
+	//==============================================================================
+	pub(crate) fn as_static(&self) -> &'static Engine {
+		// SAFETY: Engine 은 칸이 비공개라 크레이트 밖에서 지을 수 없고, 크레이트 안에서는 Engine::new 만 짓는다.
+		// Engine::new 는 지은 엔진을 Box::leak 으로 놓아 지우지 않고 &'static Engine 만 내준다. &mut Engine 이나 Engine 값을 내주는 길이 없어
+		// 옮기거나 바꿔치우거나 지울 수도 없다. 그래서 모든 &Engine 은 프로그램 끝까지 사는 엔진을 가리킨다.
+		unsafe { &*(self as *const Engine) }
 	}
 
 	//==============================================================================
@@ -510,7 +514,7 @@ impl Engine {
 	/// # 돌려줌
 	/// 질문 창 손잡이. (확인하면 끝난다)
 	//==============================================================================
-	pub fn alert(&mut self, message: &str) -> ModalDialogHandle {
+	pub fn alert(&self, message: &str) -> ModalDialogHandle {
 		self.show_modal_dialog(ModalDialogKind::Alert, message, "")
 	}
 
@@ -523,7 +527,7 @@ impl Engine {
 	/// # 돌려줌
 	/// 질문 창 손잡이. (확인이나 취소로 답하면 끝난다)
 	//==============================================================================
-	pub fn confirm(&mut self, message: &str) -> ModalDialogHandle {
+	pub fn confirm(&self, message: &str) -> ModalDialogHandle {
 		self.show_modal_dialog(ModalDialogKind::Confirm, message, "")
 	}
 
@@ -537,7 +541,7 @@ impl Engine {
 	/// # 돌려줌
 	/// 질문 창 손잡이. (확인이나 취소로 답하면 끝난다)
 	//==============================================================================
-	pub fn prompt(&mut self, message: &str, default_value: &str) -> ModalDialogHandle {
+	pub fn prompt(&self, message: &str, default_value: &str) -> ModalDialogHandle {
 		self.show_modal_dialog(ModalDialogKind::Prompt, message, default_value)
 	}
 
@@ -550,7 +554,7 @@ impl Engine {
 	/// # 돌려줌
 	/// 창이 닫히면 풀리는 Promise.
 	//==============================================================================
-	pub fn alert_async(&mut self, message: &str) -> Promise<()> {
+	pub fn alert_async(&self, message: &str) -> Promise<()> {
 		let (alert_promise, alert_resolver) = Promise::create();
 		self.alert(message).set_callback(move |_result| {
 			alert_resolver.resolve(());
@@ -572,7 +576,7 @@ impl Engine {
 	/// ```rust,no_run
 	/// use vanilla::Engine;
 	///
-	/// fn ask_exit(engine: &mut Engine) {
+	/// fn ask_exit(engine: &Engine) {
 	/// 	engine.spawn_task(|mut engine_context| async move {
 	/// 		let is_confirmed = engine_context.with(|engine| engine.confirm_async("Exit?")).await;
 	/// 		if is_confirmed {
@@ -582,7 +586,7 @@ impl Engine {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn confirm_async(&mut self, message: &str) -> Promise<bool> {
+	pub fn confirm_async(&self, message: &str) -> Promise<bool> {
 		let (confirm_promise, confirm_resolver) = Promise::create();
 		self.confirm(message).set_callback(move |result| {
 			confirm_resolver.resolve(matches!(result, crate::core::modaldialog::ModalDialogResult::Confirmed(_)));
@@ -600,7 +604,7 @@ impl Engine {
 	/// # 돌려줌
 	/// 답하면 풀리는 Promise. (확인이면 입력한 글, 취소면 None)
 	//==============================================================================
-	pub fn prompt_async(&mut self, message: &str, default_value: &str) -> Promise<Option<String>> {
+	pub fn prompt_async(&self, message: &str, default_value: &str) -> Promise<Option<String>> {
 		let (prompt_promise, prompt_resolver) = Promise::create();
 		self.prompt(message, default_value).set_callback(move |result| {
 			let prompt_text = match result {
@@ -619,9 +623,9 @@ impl Engine {
 	//==============================================================================
 	/// 질문 창 띄우기. (목록 끝에 더한다)
 	//==============================================================================
-	fn show_modal_dialog(&mut self, kind: ModalDialogKind, message: &str, default_value: &str) -> ModalDialogHandle {
+	fn show_modal_dialog(&self, kind: ModalDialogKind, message: &str, default_value: &str) -> ModalDialogHandle {
 		let handle = ModalDialogHandle::create_pending();
-		self.modal_dialog_list.push_back(crate::core::modaldialog::ModalDialog::new(kind, message, default_value, handle.clone()));
+		self.modal_dialog_list.borrow_mut().push_back(crate::core::modaldialog::ModalDialog::new(kind, message, default_value, handle.clone()));
 		handle
 	}
 
@@ -632,28 +636,29 @@ impl Engine {
 	/// 떠 있거나 기다리는 질문 창이 있으면 true.
 	//==============================================================================
 	pub fn is_modal_dialog_open(&self) -> bool {
-		!self.modal_dialog_list.is_empty()
+		!self.modal_dialog_list.borrow().is_empty()
 	}
 
 	//==============================================================================
 	/// 맨 앞 질문 창 꺼내기. (갱신하는 동안 엔진을 함께 빌리려고 꺼냈다가 put_back_front_modal_dialog 로 돌려놓는다)
 	//==============================================================================
-	pub(crate) fn take_front_modal_dialog(&mut self) -> Option<crate::core::modaldialog::ModalDialog> {
-		self.modal_dialog_list.pop_front()
+	pub(crate) fn take_front_modal_dialog(&self) -> Option<crate::core::modaldialog::ModalDialog> {
+		self.modal_dialog_list.borrow_mut().pop_front()
 	}
 
 	//==============================================================================
 	/// 맨 앞 질문 창 돌려놓기.
 	//==============================================================================
-	pub(crate) fn put_back_front_modal_dialog(&mut self, modal_dialog: crate::core::modaldialog::ModalDialog) {
-		self.modal_dialog_list.push_front(modal_dialog);
+	pub(crate) fn put_back_front_modal_dialog(&self, modal_dialog: crate::core::modaldialog::ModalDialog) {
+		self.modal_dialog_list.borrow_mut().push_front(modal_dialog);
 	}
 
 	//==============================================================================
 	/// 맨 앞 질문 창.
 	//==============================================================================
-	pub(crate) fn get_front_modal_dialog_mut(&mut self) -> Option<&mut crate::core::modaldialog::ModalDialog> {
-		self.modal_dialog_list.front_mut()
+	#[track_caller]
+	pub(crate) fn get_front_modal_dialog_mut(&self) -> Option<RefMut<'_, crate::core::modaldialog::ModalDialog>> {
+		RefMut::filter_map(crate::core::globalengine::borrow_engine_field_mut(&self.modal_dialog_list, "Engine::get_front_modal_dialog_mut", "질문 창 목록"), |modal_dialog_list| modal_dialog_list.front_mut()).ok()
 	}
 
 	//==============================================================================
@@ -667,7 +672,7 @@ impl Engine {
 	/// # 돌려줌
 	/// 정상으로 끝나면 Ok. (데스크탑은 창이 닫혀 이벤트 루프가 끝날 때, 웹은 프레임을 걸어 둔 뒤 바로) 이벤트 루프나 창, GL 컨텍스트를 만들지 못하는 등 플랫폼이 실패하면 Err(까닭).
 	//==============================================================================
-	pub fn run(self, scene: Box<dyn Scene>) -> Result<(), String> {
+	pub fn run(&'static self, scene: Box<dyn Scene>) -> Result<(), String> {
 		platform::run(EngineRunner::new(self, scene))
 	}
 
@@ -681,11 +686,11 @@ impl Engine {
 	/// # 돌려줌
 	/// 그 씬의 핸들. (1 부터 매긴다)
 	//==============================================================================
-	pub fn load_scene(&mut self, mut scene: Box<dyn Scene>) -> SceneId {
-		self.next_scene_number += 1;
-		let scene_id = SceneId(self.next_scene_number);
+	pub fn load_scene(&self, mut scene: Box<dyn Scene>) -> SceneId {
+		self.next_scene_number.set(self.next_scene_number.get() + 1);
+		let scene_id = SceneId(self.next_scene_number.get());
 		scene.get_scene_base_mut().set_scene_id(scene_id);
-		self.pending_scene_list.push(scene);
+		self.pending_scene_list.borrow_mut().push(scene);
 		scene_id
 	}
 
@@ -711,25 +716,25 @@ impl Engine {
 	/// 		&self.scene_base
 	/// 	}
 	///
-	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+	/// 	fn get_scene_base_mut(&self) -> &mut SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn touch_release(&mut self, engine: &mut Engine, _view_input_position: Vector2) {
+	/// 	fn touch_release(&self, engine: &Engine, _view_input_position: Vector2) {
 	/// 		engine.unload_scene(&self.scene_base);
 	/// 	}
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn unload_scene(&mut self, scene: impl Into<SceneId>) {
-		self.pending_unload_scene_id_list.push(scene.into());
+	pub fn unload_scene(&self, scene: impl Into<SceneId>) {
+		self.pending_unload_scene_id_list.borrow_mut().push(scene.into());
 	}
 
 	//==============================================================================
 	/// 모든 씬 내리기. (이번 프레임이 끝난 뒤, load_scene 과 같이 부르면 내린 다음 불러온다)
 	//==============================================================================
-	pub fn unload_all_scenes(&mut self) {
-		self.is_unload_all_scenes_requested = true;
+	pub fn unload_all_scenes(&self) {
+		self.is_unload_all_scenes_requested.set(true);
 	}
 
 	//==============================================================================
@@ -747,7 +752,7 @@ impl Engine {
 	/// ```rust,no_run
 	/// use vanilla::{Engine, Scene, SceneId};
 	///
-	/// fn change_scene(engine: &mut Engine, current_scene_id: SceneId, next_scene: Box<dyn Scene>) {
+	/// fn change_scene(engine: &Engine, current_scene_id: SceneId, next_scene: Box<dyn Scene>) {
 	/// 	engine.spawn_task(move |mut engine_context| async move {
 	/// 		let next_scene_id = engine_context.with(|engine| engine.load_scene_async(next_scene)).await;
 	/// 		engine_context.with(|engine| engine.unload_scene_async(current_scene_id)).await;
@@ -756,7 +761,7 @@ impl Engine {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn load_scene_async(&mut self, mut scene: Box<dyn Scene>) -> Promise<SceneId> {
+	pub fn load_scene_async(&self, mut scene: Box<dyn Scene>) -> Promise<SceneId> {
 		let (load_promise, load_resolver) = Promise::create();
 		scene.get_scene_base_mut().add_load_resolver(load_resolver);
 		self.load_scene(scene);
@@ -773,11 +778,11 @@ impl Engine {
 	/// # 돌려줌
 	/// 내리기가 끝나면 풀리는 Promise.
 	//==============================================================================
-	pub fn unload_scene_async(&mut self, scene: impl Into<SceneId>) -> Promise<()> {
+	pub fn unload_scene_async(&self, scene: impl Into<SceneId>) -> Promise<()> {
 		let scene_id = scene.into();
 		let (unload_promise, unload_resolver) = Promise::create();
 		self.unload_scene(scene_id);
-		self.pending_unload_resolver_list.push((Some(scene_id), unload_resolver));
+		self.pending_unload_resolver_list.borrow_mut().push((Some(scene_id), unload_resolver));
 		unload_promise
 	}
 
@@ -787,10 +792,10 @@ impl Engine {
 	/// # 돌려줌
 	/// 그때 불러와 있던 모든 씬의 내리기가 끝나면 풀리는 Promise.
 	//==============================================================================
-	pub fn unload_all_scenes_async(&mut self) -> Promise<()> {
+	pub fn unload_all_scenes_async(&self) -> Promise<()> {
 		let (unload_promise, unload_resolver) = Promise::create();
 		self.unload_all_scenes();
-		self.pending_unload_resolver_list.push((None, unload_resolver));
+		self.pending_unload_resolver_list.borrow_mut().push((None, unload_resolver));
 		unload_promise
 	}
 
@@ -810,7 +815,7 @@ impl Engine {
 	/// ```rust
 	/// use vanilla::{Engine, EngineConfiguration};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// let task_handle = engine.spawn_task(|mut engine_context| async move {
 	/// 	engine_context.with(|engine| {
 	/// 		engine.set_maximum_frame_per_second(30.0);
@@ -820,12 +825,12 @@ impl Engine {
 	/// assert_eq!(engine.get_maximum_frame_per_second(), 30.0);
 	/// ```
 	//==============================================================================
-	pub fn spawn_task<F, TaskFuture>(&mut self, task_function: F) -> TaskHandle
+	pub fn spawn_task<F, TaskFuture>(&self, task_function: F) -> TaskHandle
 	where
 		F: FnOnce(EngineContext) -> TaskFuture,
 		TaskFuture: Future<Output = ()> + 'static,
 	{
-		task::spawn_engine_task(self, task_function)
+		task::spawn_engine_task(self.as_static(), task_function)
 	}
 
 	//==============================================================================
@@ -857,11 +862,11 @@ impl Engine {
 	/// 		&self.scene_base
 	/// 	}
 	///
-	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+	/// 	fn get_scene_base_mut(&self) -> &mut SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&mut self, engine: &mut Engine) {
+	/// 	fn create(&self, engine: &Engine) {
 	/// 		let task_handle = engine.spawn_scene_task(self, |mut scene_context: SceneContext<StageScene>| async move {
 	/// 			let load_handle = scene_context.with(|_scene, engine| engine.request_asset_bytes("examples/assets/scenedocument.scene.json"));
 	/// 			let stage_bytes = load_handle.await.map(|bytes| bytes.to_vec()).unwrap_or_default();
@@ -874,13 +879,13 @@ impl Engine {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn spawn_scene_task<S, F, TaskFuture>(&mut self, scene: &mut S, task_function: F) -> TaskHandle
+	pub fn spawn_scene_task<S, F, TaskFuture>(&self, scene: &mut S, task_function: F) -> TaskHandle
 	where
 		S: Scene + 'static,
 		F: FnOnce(SceneContext<S>) -> TaskFuture,
 		TaskFuture: Future<Output = ()> + 'static,
 	{
-		task::spawn_scene_task(self, scene, task_function)
+		task::spawn_scene_task(self.as_static(), scene, task_function)
 	}
 
 	//==============================================================================
@@ -933,14 +938,15 @@ impl Engine {
 
 	//==============================================================================
 	/// 불러온 모든 씬의 핸들. (원본 SceneManager.getAllLoadedScenes, 불러온 차례, 로딩 중인 씬도 든다)
-	/// - 원본은 씬 객체를 돌려준다. 러스트 판은 씬마다 &mut Engine 을 받아 도는 동안 다른 씬을 빌릴 수 없어서 핸들을 돌려준다.
+	/// - 원본은 씬 객체를 돌려준다. 러스트 판은 씬마다 &Engine 을 받아 도는 동안 다른 씬을 빌릴 수 없어서 핸들을 돌려준다.
 	///   load_scene 한 프레임이 끝나 create 가 불린 씬부터 들고, 내린 씬은 빠진다.
 	///
 	/// # 돌려줌
 	/// 불러온 씬의 핸들 목록. (불러온 차례)
 	//==============================================================================
-	pub fn get_all_loaded_scenes(&self) -> &[SceneId] {
-		&self.loaded_scene_id_list
+	#[track_caller]
+	pub fn get_all_loaded_scenes(&self) -> Ref<'_, [SceneId]> {
+		Ref::map(crate::core::globalengine::borrow_engine_field(&self.loaded_scene_id_list, "Engine::get_all_loaded_scenes", "불러온 씬 목록"), |loaded_scene_id_list| loaded_scene_id_list.as_slice())
 	}
 
 	//==============================================================================
@@ -953,13 +959,13 @@ impl Engine {
 	/// 파일이 있는 첫 후보 폴더의 경로. (어디에도 없으면 첫 후보 기준 경로, 후보가 없으면 상대 경로 그대로)
 	//==============================================================================
 	pub fn resolve_asset_path(&self, relative_path: &str) -> PathBuf {
-		for asset_directory_path in &self.engine_configuration.asset_directory_paths {
+		for asset_directory_path in &self.engine_configuration.borrow_mut().asset_directory_paths {
 			let candidate_path = asset_directory_path.join(relative_path);
 			if candidate_path.exists() {
 				return candidate_path;
 			}
 		}
-		match self.engine_configuration.asset_directory_paths.first() {
+		match self.engine_configuration.borrow_mut().asset_directory_paths.first() {
 			Some(first_asset_directory_path) => {
 				first_asset_directory_path.join(relative_path)
 			}
@@ -1102,7 +1108,7 @@ impl Engine {
 		if crate::base::dataurl::is_data_url(relative_path) {
 			return relative_path.to_string();
 		}
-		format!("{}{}", self.engine_configuration.asset_base_url, relative_path)
+		format!("{}{}", self.engine_configuration.borrow_mut().asset_base_url, relative_path)
 	}
 
 	//==============================================================================
@@ -1116,7 +1122,7 @@ impl Engine {
 	/// # 돌려줌
 	/// 글꼴 목록에 올리면(또는 받기나 올리기에 실패하면) 끝나는 손잡이.
 	//==============================================================================
-	pub fn register_font_when_loaded(&mut self, family: &str, is_bold: bool, load_handle: AssetLoadHandle) -> FontLoadHandle {
+	pub fn register_font_when_loaded(&self, family: &str, is_bold: bool, load_handle: AssetLoadHandle) -> FontLoadHandle {
 		self.register_font_face_when_loaded(family, FontFaceDescriptors::create_with_bold(is_bold), load_handle)
 	}
 
@@ -1133,12 +1139,12 @@ impl Engine {
 	/// # 돌려줌
 	/// 글꼴 목록에 올리면(또는 받기나 올리기에 실패하면) 끝나는 손잡이.
 	//==============================================================================
-	pub fn register_font_face_when_loaded(&mut self, family: &str, mut font_face_descriptors: FontFaceDescriptors, load_handle: AssetLoadHandle) -> FontLoadHandle {
+	pub fn register_font_face_when_loaded(&self, family: &str, mut font_face_descriptors: FontFaceDescriptors, load_handle: AssetLoadHandle) -> FontLoadHandle {
 		if font_face_descriptors.source_key.is_empty() {
 			font_face_descriptors.source_key = load_handle.get_asset_path().to_string();
 		}
 		let font_load_handle = FontLoadHandle::new(load_handle);
-		self.pending_font_registration_list.push((family.to_string(), font_face_descriptors, font_load_handle.clone()));
+		self.pending_font_registration_list.borrow_mut().push((family.to_string(), font_face_descriptors, font_load_handle.clone()));
 		font_load_handle
 	}
 
@@ -1150,9 +1156,9 @@ impl Engine {
 	/// - `family`: 글꼴 이름.
 	/// - `source_key`: 지울 얼굴의 열쇠.
 	//==============================================================================
-	pub fn unregister_font_face(&mut self, family: &str, source_key: &str) {
-		self.pending_font_registration_list.retain(|(pending_family, font_face_descriptors, _)| !(pending_family.eq_ignore_ascii_case(family) && font_face_descriptors.source_key == source_key));
-		self.pending_font_operation_list.push(PendingFontOperation::Unregister(family.to_string(), source_key.to_string()));
+	pub fn unregister_font_face(&self, family: &str, source_key: &str) {
+		self.pending_font_registration_list.borrow_mut().retain(|(pending_family, font_face_descriptors, _)| !(pending_family.eq_ignore_ascii_case(family) && font_face_descriptors.source_key == source_key));
+		self.pending_font_operation_list.borrow_mut().push(PendingFontOperation::Unregister(family.to_string(), source_key.to_string()));
 	}
 
 	//==============================================================================
@@ -1162,15 +1168,15 @@ impl Engine {
 	/// - `family`: 글꼴 이름.
 	/// - `source_key_list`: 얼굴 열쇠 목록. (뒤의 얼굴이 먼저 그린다, 다음 프레임 시작에 건다)
 	//==============================================================================
-	pub fn set_font_face_order(&mut self, family: &str, source_key_list: Vec<String>) {
-		self.pending_font_operation_list.push(PendingFontOperation::Order(family.to_string(), source_key_list));
+	pub fn set_font_face_order(&self, family: &str, source_key_list: Vec<String>) {
+		self.pending_font_operation_list.borrow_mut().push(PendingFontOperation::Order(family.to_string(), source_key_list));
 	}
 
 	//==============================================================================
 	/// 구운 글자 모두 버리기 맡기기. (원본 textStringTextureCache.clear, 다음 프레임 시작에)
 	//==============================================================================
-	pub fn clear_text_cache(&mut self) {
-		self.pending_font_operation_list.push(PendingFontOperation::ClearTextCache);
+	pub fn clear_text_cache(&self) {
+		self.pending_font_operation_list.borrow_mut().push(PendingFontOperation::ClearTextCache);
 	}
 
 	//==============================================================================
@@ -1180,7 +1186,7 @@ impl Engine {
 	/// 등록을 기다리는 글꼴 얼굴 수. (바이트를 기다리는 것과 다음 프레임 시작에 올릴 것)
 	//==============================================================================
 	pub fn get_pending_font_face_count(&self) -> usize {
-		self.pending_font_registration_list.len()
+		self.pending_font_registration_list.borrow().len()
 	}
 
 	//==============================================================================
@@ -1255,8 +1261,8 @@ impl Engine {
 	//==============================================================================
 	/// 종료 요청. (원본 exitApplication, 데스크탑은 이번 프레임 뒤 창을 닫고, 웹은 원본처럼 Capacitor App.exitApp 이나 window.close 를 시도하고 프레임을 멈춘다)
 	//==============================================================================
-	pub fn exit_application(&mut self) {
-		self.is_exit_requested = true;
+	pub fn exit_application(&self) {
+		self.is_exit_requested.set(true);
 		platform::exit_application();
 	}
 
@@ -1267,7 +1273,7 @@ impl Engine {
 	/// exit_application 을 불렀으면 true.
 	//==============================================================================
 	pub fn is_exit_requested(&self) -> bool {
-		self.is_exit_requested
+		self.is_exit_requested.get()
 	}
 
 	//==============================================================================
@@ -1277,14 +1283,14 @@ impl Engine {
 	/// - `is_visible`: false 면 창이나 캔버스 위에서 마우스 커서를 숨긴다. (플랫폼이 붙이기 전에는 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn set_visible_cursor(&self, is_visible: bool) {
-		platform::set_cursor_visible(self.platform_window.as_ref(), is_visible);
+		platform::set_cursor_visible(self.platform_window.borrow().as_ref(), is_visible);
 	}
 
 	//==============================================================================
 	/// 해상도 다시 맞추기. (원본 resize, 설정을 바꾼 뒤 부르면 플랫폼이 다음 프레임 첫머리에 캔버스와 뷰 영역을 다시 셈하고 씬마다 resize 를 부른다)
 	//==============================================================================
-	pub fn resize(&mut self) {
-		self.is_resize_requested = true;
+	pub fn resize(&self) {
+		self.is_resize_requested.set(true);
 	}
 
 	//==============================================================================
@@ -1293,30 +1299,31 @@ impl Engine {
 	/// # 돌려줌
 	/// 플랫폼 창 손잡이. (데스크탑 주 스레드는 Engine::new 가 숨긴 채 지은 창, 그 밖에는 run 이 창이나 캔버스를 잡기 전에는 None)
 	//==============================================================================
-	pub fn get_canvas(&self) -> Option<&PlatformWindow> {
-		self.platform_window.as_ref()
+	#[track_caller]
+	pub fn get_canvas(&self) -> Option<Ref<'_, PlatformWindow>> {
+		Ref::filter_map(crate::core::globalengine::borrow_engine_field(&self.platform_window, "Engine::get_canvas", "캔버스"), |platform_window| platform_window.as_ref()).ok()
 	}
 
 	//==============================================================================
 	/// 그래픽 넘겨받기. (데스크탑 Engine::new 나 플랫폼이 GL 컨텍스트를 만든 뒤 한 번. 기본 폰트를 읽고 엔진에 넣는다)
 	//==============================================================================
-	pub(crate) fn attach_graphic(&mut self, mut graphic: Graphic) {
-		let is_rebake_text_on_font_load = self.engine_configuration.rebake_text_on_font_load;
+	pub(crate) fn attach_graphic(&self, mut graphic: Graphic) {
+		let is_rebake_text_on_font_load = self.engine_configuration.borrow_mut().rebake_text_on_font_load;
 		graphic.get_text_string_texture_cache().set_rebake_text_on_font_load(is_rebake_text_on_font_load);
 		self.load_default_fonts(&mut graphic);
 
 		// 웹: 기본 폰트가 아직 없고 default_font_url 이 있으면 거기서 받는다. (받는 동안은 시스템 글꼴로 그린다)
 		#[cfg(target_arch = "wasm32")]
 		{
-			let default_font_url = self.engine_configuration.default_font_url.clone();
+			let default_font_url = self.engine_configuration.borrow_mut().default_font_url.clone();
 			let has_default_font = graphic.get_text_string_texture_cache().has_default_font();
 			if !has_default_font && !default_font_url.is_empty() {
 				let load_handle = AssetLoadHandle::create_pending(&default_font_url);
 				platform::request_asset_bytes(default_font_url, load_handle.clone(), false);
-				self.pending_default_font_handle = Some(load_handle);
+				*self.pending_default_font_handle.borrow_mut() = Some(load_handle);
 			}
 		}
-		self.graphic = Some(graphic);
+		*self.graphic.borrow_mut() = Some(graphic);
 	}
 
 	//==============================================================================
@@ -1420,11 +1427,11 @@ impl Engine {
 	/// 		&self.scene_base
 	/// 	}
 	///
-	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+	/// 	fn get_scene_base_mut(&self) -> &mut SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&mut self, engine: &mut Engine) {
+	/// 	fn create(&self, engine: &Engine) {
 	/// 		if let Some(graphic) = engine.get_graphic() {
 	/// 			self.shader_program = ShaderProgram::new(graphic.get_gl(), VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE).ok();
 	/// 		}
@@ -1443,8 +1450,9 @@ impl Engine {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn get_graphic(&self) -> Option<&Graphic> {
-		self.graphic.as_ref()
+	#[track_caller]
+	pub fn get_graphic(&self) -> Option<Ref<'_, Graphic>> {
+		Ref::filter_map(crate::core::globalengine::borrow_engine_field(&self.graphic, "Engine::get_graphic", "그래픽"), |graphic| graphic.as_ref()).ok()
 	}
 
 	//==============================================================================
@@ -1468,11 +1476,11 @@ impl Engine {
 	/// 		&self.scene_base
 	/// 	}
 	///
-	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+	/// 	fn get_scene_base_mut(&self) -> &mut SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	/// 	fn tick(&self, engine: &Engine, time_delta: f64) {
 	/// 		self.scene_base.tick(engine, time_delta);
 	/// 		let is_key_g = engine.get_input_manager().is_key_pressed(KeyCode::G);
 	/// 		if let Some(graphic) = engine.get_graphic_mut() {
@@ -1482,8 +1490,9 @@ impl Engine {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn get_graphic_mut(&mut self) -> Option<&mut Graphic> {
-		self.graphic.as_mut()
+	#[track_caller]
+	pub fn get_graphic_mut(&self) -> Option<RefMut<'_, Graphic>> {
+		RefMut::filter_map(crate::core::globalengine::borrow_engine_field_mut(&self.graphic, "Engine::get_graphic_mut", "그래픽"), |graphic| graphic.as_mut()).ok()
 	}
 
 	//==============================================================================
@@ -1502,7 +1511,7 @@ impl Engine {
 	/// ```rust
 	/// use vanilla::{Engine, EngineConfiguration};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// let has_graphic = engine.get_graphic().is_some();
 	/// let result = engine.with_graphic(|_engine, graphic| graphic.get_global_alpha());
 	/// assert_eq!(result.is_some(), has_graphic);
@@ -1521,11 +1530,11 @@ impl Engine {
 	/// 		&self.scene_base
 	/// 	}
 	///
-	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+	/// 	fn get_scene_base_mut(&self) -> &mut SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn initialize(&mut self, engine: &mut Engine) {
+	/// 	fn initialize(&self, engine: &Engine) {
 	/// 		engine.with_graphic(|engine, graphic| {
 	/// 			engine.get_time_manager_mut().set_time_scale(1.0);
 	/// 			graphic.set_force_gizmos_visible(false);
@@ -1534,12 +1543,10 @@ impl Engine {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn with_graphic<R>(&mut self, graphic_function: impl FnOnce(&mut Engine, &mut Graphic) -> R) -> Option<R> {
-		let mut graphic = self.graphic.take()?;
-		let engine_scope = crate::core::globalengine::MutableEngineScope::enter(std::ptr::NonNull::from(&mut *self), "Engine::with_graphic");
+	pub fn with_graphic<R>(&self, graphic_function: impl FnOnce(&Engine, &mut Graphic) -> R) -> Option<R> {
+		let mut graphic = crate::core::globalengine::borrow_engine_field_mut(&self.graphic, "Engine::with_graphic", "그래픽").take()?;
 		let result = graphic_function(self, &mut graphic);
-		drop(engine_scope);
-		self.graphic = Some(graphic);
+		*self.graphic.borrow_mut() = Some(graphic);
 		Some(result)
 	}
 
@@ -1552,7 +1559,7 @@ impl Engine {
 	/// 글자 입력칸에 초점이 있으면 true.
 	//==============================================================================
 	pub fn is_text_input_focused(&self) -> bool {
-		self.input_manager.is_typing_in_text_field()
+		self.input_manager.borrow().is_typing_in_text_field()
 	}
 
 	//==============================================================================
@@ -1562,7 +1569,7 @@ impl Engine {
 	/// - `title`: 새 창 제목. (웹은 문서 제목, 데스크탑은 창이 생기기 전에는 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn set_title(&self, title: &str) {
-		platform::set_title(self.platform_window.as_ref(), title);
+		platform::set_title(self.platform_window.borrow().as_ref(), title);
 	}
 
 	//==============================================================================
@@ -1620,7 +1627,7 @@ impl Engine {
 	/// ```rust,no_run
 	/// use vanilla::Engine;
 	///
-	/// fn paste_text(engine: &mut Engine) {
+	/// fn paste_text(engine: &Engine) {
 	/// 	engine.spawn_task(|mut engine_context| async move {
 	/// 		let clipboard_text = engine_context.with(|engine| engine.read_clipboard_text_async()).await;
 	/// 		println!("{}", clipboard_text.unwrap_or_default());
@@ -1642,8 +1649,9 @@ impl Engine {
 	/// # 돌려줌
 	/// Engine::new 에 넘긴 설정. (set_maximum_frame_per_second 가 바꾼 최대 FPS 도 여기에 있다)
 	//==============================================================================
-	pub fn get_engine_configuration(&self) -> &EngineConfiguration {
-		&self.engine_configuration
+	#[track_caller]
+	pub fn get_engine_configuration(&self) -> Ref<'_, EngineConfiguration> {
+		crate::core::globalengine::borrow_engine_field(&self.engine_configuration, "Engine::get_engine_configuration", "설정")
 	}
 
 	//==============================================================================
@@ -1658,19 +1666,19 @@ impl Engine {
 	/// ```rust
 	/// use vanilla::{Engine, EngineConfiguration};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// engine.set_maximum_frame_per_second(30.0);
 	/// assert_eq!(engine.get_maximum_frame_per_second(), 30.0);
 	/// engine.set_maximum_frame_per_second(-5.0);
 	/// assert_eq!(engine.get_maximum_frame_per_second(), 0.0);
 	/// ```
 	//==============================================================================
-	pub fn set_maximum_frame_per_second(&mut self, maximum_frame_per_second: f64) {
+	pub fn set_maximum_frame_per_second(&self, maximum_frame_per_second: f64) {
 		if !maximum_frame_per_second.is_finite() || maximum_frame_per_second < 0.0 {
-			self.engine_configuration.maximum_frame_per_second = 0.0;
+			self.engine_configuration.borrow_mut().maximum_frame_per_second = 0.0;
 			return;
 		}
-		self.engine_configuration.maximum_frame_per_second = maximum_frame_per_second;
+		self.engine_configuration.borrow_mut().maximum_frame_per_second = maximum_frame_per_second;
 	}
 
 	//==============================================================================
@@ -1680,7 +1688,7 @@ impl Engine {
 	/// 초당 최대 프레임 수. (기본 0)
 	//==============================================================================
 	pub fn get_maximum_frame_per_second(&self) -> f64 {
-		self.engine_configuration.maximum_frame_per_second
+		self.engine_configuration.borrow_mut().maximum_frame_per_second
 	}
 
 	//==============================================================================
@@ -1689,8 +1697,9 @@ impl Engine {
 	/// # 돌려줌
 	/// 엔진의 시간 관리자. (프레임 간격, 누적 시간, 초당 프레임 수)
 	//==============================================================================
-	pub fn get_time_manager(&self) -> &TimeManager {
-		&self.time_manager
+	#[track_caller]
+	pub fn get_time_manager(&self) -> Ref<'_, TimeManager> {
+		crate::core::globalengine::borrow_engine_field(&self.time_manager, "Engine::get_time_manager", "시간 매니저")
 	}
 
 	//==============================================================================
@@ -1699,8 +1708,9 @@ impl Engine {
 	/// # 돌려줌
 	/// 엔진의 시간 관리자. (시간 배율, 프레임 간격 상한을 바꾼다)
 	//==============================================================================
-	pub fn get_time_manager_mut(&mut self) -> &mut TimeManager {
-		&mut self.time_manager
+	#[track_caller]
+	pub fn get_time_manager_mut(&self) -> RefMut<'_, TimeManager> {
+		crate::core::globalengine::borrow_engine_field_mut(&self.time_manager, "Engine::get_time_manager_mut", "시간 매니저")
 	}
 
 	//==============================================================================
@@ -1709,8 +1719,9 @@ impl Engine {
 	/// # 돌려줌
 	/// 엔진의 뷰 매니저. (뷰 크기, 뷰 영역, 세이프 에어리어)
 	//==============================================================================
-	pub fn get_view_manager(&self) -> &ViewManager {
-		&self.view_manager
+	#[track_caller]
+	pub fn get_view_manager(&self) -> Ref<'_, ViewManager> {
+		crate::core::globalengine::borrow_engine_field(&self.view_manager, "Engine::get_view_manager", "뷰 매니저")
 	}
 
 	//==============================================================================
@@ -1719,8 +1730,9 @@ impl Engine {
 	/// # 돌려줌
 	/// 엔진의 뷰 매니저. (뷰 스케일 모드, 렌더 배율 상한 같은 설정을 바꾼다)
 	//==============================================================================
-	pub fn get_view_manager_mut(&mut self) -> &mut ViewManager {
-		&mut self.view_manager
+	#[track_caller]
+	pub fn get_view_manager_mut(&self) -> RefMut<'_, ViewManager> {
+		crate::core::globalengine::borrow_engine_field_mut(&self.view_manager, "Engine::get_view_manager_mut", "뷰 매니저")
 	}
 
 	//==============================================================================
@@ -1729,8 +1741,9 @@ impl Engine {
 	/// # 돌려줌
 	/// 엔진의 입력 매니저. (키, 마우스, 터치, 휠)
 	//==============================================================================
-	pub fn get_input_manager(&self) -> &InputManager {
-		&self.input_manager
+	#[track_caller]
+	pub fn get_input_manager(&self) -> Ref<'_, InputManager> {
+		crate::core::globalengine::borrow_engine_field(&self.input_manager, "Engine::get_input_manager", "입력 매니저")
 	}
 
 	//==============================================================================
@@ -1739,8 +1752,9 @@ impl Engine {
 	/// # 돌려줌
 	/// 엔진의 입력 매니저.
 	//==============================================================================
-	pub fn get_input_manager_mut(&mut self) -> &mut InputManager {
-		&mut self.input_manager
+	#[track_caller]
+	pub fn get_input_manager_mut(&self) -> RefMut<'_, InputManager> {
+		crate::core::globalengine::borrow_engine_field_mut(&self.input_manager, "Engine::get_input_manager_mut", "입력 매니저")
 	}
 
 	//==============================================================================
@@ -1749,8 +1763,9 @@ impl Engine {
 	/// # 돌려줌
 	/// 엔진의 마우스 커서. (단추는 &Engine 으로 mark_over_button 을 부른다)
 	//==============================================================================
-	pub fn get_pointer_cursor(&self) -> &PointerCursor {
-		&self.pointer_cursor
+	#[track_caller]
+	pub fn get_pointer_cursor(&self) -> Ref<'_, PointerCursor> {
+		crate::core::globalengine::borrow_engine_field(&self.pointer_cursor, "Engine::get_pointer_cursor", "포인터 커서")
 	}
 
 	//==============================================================================
@@ -1759,8 +1774,9 @@ impl Engine {
 	/// # 돌려줌
 	/// 엔진의 마우스 커서. (켜기, 화면 커서, 그림 커서를 정한다)
 	//==============================================================================
-	pub fn get_pointer_cursor_mut(&mut self) -> &mut PointerCursor {
-		&mut self.pointer_cursor
+	#[track_caller]
+	pub fn get_pointer_cursor_mut(&self) -> RefMut<'_, PointerCursor> {
+		crate::core::globalengine::borrow_engine_field_mut(&self.pointer_cursor, "Engine::get_pointer_cursor_mut", "포인터 커서")
 	}
 
 	//==============================================================================
@@ -1779,8 +1795,9 @@ impl Engine {
 	/// # 돌려줌
 	/// 엔진의 오디오 매니저.
 	//==============================================================================
-	pub fn get_audio_manager(&self) -> &AudioManager {
-		&self.audio_manager
+	#[track_caller]
+	pub fn get_audio_manager(&self) -> Ref<'_, AudioManager> {
+		crate::core::globalengine::borrow_engine_field(&self.audio_manager, "Engine::get_audio_manager", "소리 매니저")
 	}
 
 	//==============================================================================
@@ -1789,8 +1806,9 @@ impl Engine {
 	/// # 돌려줌
 	/// 엔진의 오디오 매니저.
 	//==============================================================================
-	pub fn get_audio_manager_mut(&mut self) -> &mut AudioManager {
-		&mut self.audio_manager
+	#[track_caller]
+	pub fn get_audio_manager_mut(&self) -> RefMut<'_, AudioManager> {
+		crate::core::globalengine::borrow_engine_field_mut(&self.audio_manager, "Engine::get_audio_manager_mut", "소리 매니저")
 	}
 
 	//==============================================================================
@@ -1799,8 +1817,9 @@ impl Engine {
 	/// # 돌려줌
 	/// 엔진을 만들 때 읽은 플랫폼 정보.
 	//==============================================================================
-	pub fn get_platform(&self) -> &Platform {
-		&self.platform
+	#[track_caller]
+	pub fn get_platform(&self) -> Ref<'_, Platform> {
+		crate::core::globalengine::borrow_engine_field(&self.platform, "Engine::get_platform", "플랫폼")
 	}
 
 	//==============================================================================
@@ -1810,7 +1829,7 @@ impl Engine {
 	/// 마지막 페이지 이벤트가 Hidden 이면 true. (Visible 이 오면 false, 처음 false)
 	//==============================================================================
 	pub fn is_page_hidden(&self) -> bool {
-		self.is_page_hidden
+		self.is_page_hidden.get()
 	}
 
 	//==============================================================================
@@ -1826,7 +1845,7 @@ impl Engine {
 	/// use std::rc::Rc;
 	/// use vanilla::{Engine, EngineConfiguration, PageEvent, PageEventListener};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// let received_list: Rc<RefCell<Vec<PageEvent>>> = Rc::new(RefCell::new(Vec::new()));
 	/// let listener_received_list = received_list.clone();
 	/// let page_event_listener: PageEventListener = Rc::new(RefCell::new(move |page_event: PageEvent| {
@@ -1864,13 +1883,13 @@ impl Engine {
 	/// # 인자
 	/// - `page_event`: 알릴 이벤트. (Hidden 이면 가려짐을 적고 Visible 이면 지운다)
 	//==============================================================================
-	pub fn dispatch_page_event(&mut self, page_event: PageEvent) {
+	pub fn dispatch_page_event(&self, page_event: PageEvent) {
 		match page_event {
 			PageEvent::Hidden => {
-				self.is_page_hidden = true;
+				self.is_page_hidden.set(true);
 			}
 			PageEvent::Visible => {
-				self.is_page_hidden = false;
+				self.is_page_hidden.set(false);
 			}
 			_ => {
 			}
@@ -1880,9 +1899,6 @@ impl Engine {
 			page_event_listener_list.retain(|weak_listener| weak_listener.strong_count() > 0);
 			page_event_listener_list.iter().filter_map(|weak_listener| weak_listener.upgrade()).collect()
 		};
-		// 리스너는 엔진을 받지 않는다. 그동안 &Engine 으로 빌려 주어 리스너가 Engine::get_engine 으로 꺼낸다.
-		let engine: &Engine = self;
-		let _engine_scope = crate::core::globalengine::SharedEngineScope::enter(engine);
 		for page_event_listener in listener_list {
 			if let Ok(mut listener) = page_event_listener.try_borrow_mut() {
 				(*listener)(page_event);
@@ -1897,7 +1913,7 @@ impl Engine {
 	/// 지금 프레임 번호. (프레임이 끝날 때마다 1 씩 는다)
 	//==============================================================================
 	pub fn get_frame_number(&self) -> u64 {
-		self.frame_number
+		self.frame_number.get()
 	}
 
 	//==============================================================================
@@ -1924,16 +1940,16 @@ impl Engine {
 	/// ```rust,no_run
 	/// use vanilla::Engine;
 	///
-	/// fn capture_frame(engine: &mut Engine) {
+	/// fn capture_frame(engine: &Engine) {
 	/// 	engine.request_frame_capture(120, Box::new(|png_bytes: &[u8]| {
 	/// 		std::fs::write("capture_120.png", png_bytes).unwrap();
 	/// 	}));
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn request_frame_capture(&mut self, frame_number: u64, capture_handler: FrameCaptureHandler) {
-		let target_frame_number = frame_number.max(self.frame_number);
-		self.frame_capture_handler_map.entry(target_frame_number).or_default().push(capture_handler);
+	pub fn request_frame_capture(&self, frame_number: u64, capture_handler: FrameCaptureHandler) {
+		let target_frame_number = frame_number.max(self.frame_number.get());
+		self.frame_capture_handler_map.borrow_mut().entry(target_frame_number).or_default().push(capture_handler);
 	}
 
 	//==============================================================================
@@ -1945,7 +1961,7 @@ impl Engine {
 	/// # 돌려줌
 	/// 그 프레임 화면의 PNG 바이트로 풀리는 Promise.
 	//==============================================================================
-	pub fn request_frame_capture_async(&mut self, frame_number: u64) -> Promise<Vec<u8>> {
+	pub fn request_frame_capture_async(&self, frame_number: u64) -> Promise<Vec<u8>> {
 		let (capture_promise, capture_resolver) = Promise::create();
 		self.request_frame_capture(frame_number, Box::new(move |png_bytes: &[u8]| {
 			capture_resolver.resolve(png_bytes.to_vec());
@@ -2023,7 +2039,7 @@ impl CaptureRequest {
 /// 		&self.scene_base
 /// 	}
 ///
-/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 	fn get_scene_base_mut(&self) -> &mut SceneBase {
 /// 		&mut self.scene_base
 /// 	}
 /// }
@@ -2033,10 +2049,8 @@ impl CaptureRequest {
 /// ```
 //==============================================================================
 pub struct EngineRunner {
-	pub(crate) engine: Engine,
+	pub(crate) engine: &'static Engine,
 	scene_list: Vec<Box<dyn Scene>>,
-	/// 러너가 도는 자리. (그동안 빌려 준 자리 밖에서 Engine::get_engine 을 부르면 MutablyBorrowed 다)
-	_running_scope: crate::core::globalengine::EngineRunningScope,
 	/// 내리는 중인 씬. (finalize, unload 를 불렀고 unload 가 맡긴 작업을 기다린다. 원본처럼 목록에 남아 tick 과 draw 를 받는다)
 	unloading_scene_id_list: Vec<SceneId>,
 	/// 목록에서 뺐지만 작업이 남아 살려 둔 씬. (tick, draw 는 받지 않고, 작업의 with 가 이 씬을 받는다)
@@ -2051,12 +2065,11 @@ impl EngineRunner {
 	//==============================================================================
 	/// 생성.
 	//==============================================================================
-	pub(crate) fn new(mut engine: Engine, scene: Box<dyn Scene>) -> EngineRunner {
+	pub(crate) fn new(engine: &'static Engine, scene: Box<dyn Scene>) -> EngineRunner {
 		engine.load_scene(scene);
 		EngineRunner {
 			engine,
 			scene_list: Vec::new(),
-			_running_scope: crate::core::globalengine::EngineRunningScope::enter(),
 			unloading_scene_id_list: Vec::new(),
 			detached_scene_list: Vec::new(),
 			unload_waiting_list: Vec::new(),
@@ -2077,7 +2090,7 @@ impl EngineRunner {
 	//==============================================================================
 	#[cfg(target_arch = "wasm32")]
 	pub(crate) fn invalidate_render_state_cache(&self) {
-		if let Some(graphic) = &self.engine.graphic {
+		if let Some(graphic) = self.engine.get_graphic() {
 			graphic.invalidate_render_state_cache();
 		}
 	}
@@ -2086,18 +2099,18 @@ impl EngineRunner {
 	/// 그래픽. (데스크탑 플랫폼이 프레임 끝에 렌더 영역을 늘일 때, 붙이기 전에는 None)
 	//==============================================================================
 	#[cfg(not(target_arch = "wasm32"))]
-	pub(crate) fn get_graphic(&self) -> Option<&Graphic> {
-		self.engine.graphic.as_ref()
+	pub(crate) fn get_graphic(&self) -> Option<Ref<'_, Graphic>> {
+		self.engine.get_graphic()
 	}
 
 	//==============================================================================
 	/// 요청된 프레임이면 화면을 PNG 로 저장. (화면을 넘기기 전에 부른다)
 	//==============================================================================
 	fn capture_frame_if_requested(&mut self) {
-		let frame_number = self.engine.frame_number;
+		let frame_number = self.engine.frame_number.get();
 		// request_frame_capture 로 건 함수들. (PNG 바이트)
-		if let Some(capture_handler_list) = self.engine.frame_capture_handler_map.remove(&frame_number) {
-			if let Some(graphic) = &self.engine.graphic {
+		if let Some(capture_handler_list) = self.engine.frame_capture_handler_map.borrow_mut().remove(&frame_number) {
+			if let Some(graphic) = self.engine.get_graphic() {
 				let (width, height, pixels) = graphic.read_framebuffer_pixels();
 				match encode_png(&pixels, width, height) {
 					Ok(png_bytes) => {
@@ -2126,7 +2139,7 @@ impl EngineRunner {
 		if !capture_request.frame_numbers.contains(&frame_number) {
 			return;
 		}
-		let graphic = match &self.engine.graphic {
+		let graphic = match self.engine.get_graphic() {
 			Some(graphic) => {
 				graphic
 			}
@@ -2156,10 +2169,10 @@ impl EngineRunner {
 	/// 씬마다 해상도 변경 알림.
 	//==============================================================================
 	pub(crate) fn notify_scene_resize(&mut self) {
-		let canvas_native_size = self.engine.view_manager.get_canvas_native_size();
+		let canvas_native_size = self.engine.view_manager.borrow().get_canvas_native_size();
 		let mut scene_list = std::mem::take(&mut self.scene_list);
 		for scene in scene_list.iter_mut() {
-			scene.resize(&mut self.engine, canvas_native_size);
+			scene.resize(self.engine, canvas_native_size);
 		}
 		self.scene_list = scene_list;
 	}
@@ -2169,10 +2182,10 @@ impl EngineRunner {
 	//==============================================================================
 	fn register_pending_fonts(&mut self) {
 		self.register_pending_default_font();
-		if self.engine.pending_font_registration_list.is_empty() && self.engine.pending_font_operation_list.is_empty() {
+		if self.engine.pending_font_registration_list.borrow().is_empty() && self.engine.pending_font_operation_list.borrow().is_empty() {
 			return;
 		}
-		let graphic = match self.engine.graphic.as_mut() {
+		let mut graphic = match self.engine.get_graphic_mut() {
 			Some(graphic) => {
 				graphic
 			}
@@ -2180,7 +2193,7 @@ impl EngineRunner {
 				return;
 			}
 		};
-		let pending_font_operation_list = std::mem::take(&mut self.engine.pending_font_operation_list);
+		let pending_font_operation_list = self.engine.pending_font_operation_list.take();
 		for pending_font_operation in pending_font_operation_list {
 			let text_string_texture_cache = graphic.get_text_string_texture_cache();
 			match pending_font_operation {
@@ -2195,11 +2208,11 @@ impl EngineRunner {
 				}
 			}
 		}
-		let pending_font_registration_list = std::mem::take(&mut self.engine.pending_font_registration_list);
+		let pending_font_registration_list = self.engine.pending_font_registration_list.take();
 		for (family, font_face_descriptors, font_load_handle) in pending_font_registration_list {
 			let load_handle = font_load_handle.get_load_handle().clone();
 			if !load_handle.is_finished() {
-				self.engine.pending_font_registration_list.push((family, font_face_descriptors, font_load_handle));
+				self.engine.pending_font_registration_list.borrow_mut().push((family, font_face_descriptors, font_load_handle));
 				continue;
 			}
 			let font_bytes = match load_handle.get_bytes() {
@@ -2228,7 +2241,7 @@ impl EngineRunner {
 	/// default_font_url 에서 받은 바이트를 기본 폰트(보통, 굵게 둘 다)로 등록. (웹)
 	//==============================================================================
 	fn register_pending_default_font(&mut self) {
-		let is_finished = match &self.engine.pending_default_font_handle {
+		let is_finished = match &*self.engine.pending_default_font_handle.borrow() {
 			Some(load_handle) => {
 				load_handle.is_finished()
 			}
@@ -2239,7 +2252,7 @@ impl EngineRunner {
 		if !is_finished {
 			return;
 		}
-		let load_handle = match self.engine.pending_default_font_handle.take() {
+		let load_handle = match self.engine.pending_default_font_handle.borrow_mut().take() {
 			Some(load_handle) => {
 				load_handle
 			}
@@ -2255,7 +2268,7 @@ impl EngineRunner {
 				return;
 			}
 		};
-		let graphic = match self.engine.graphic.as_mut() {
+		let mut graphic = match self.engine.get_graphic_mut() {
 			Some(graphic) => {
 				graphic
 			}
@@ -2277,7 +2290,7 @@ impl EngineRunner {
 		self.recover_engine_state();
 		let mut scene_list = std::mem::take(&mut self.scene_list);
 		for scene in scene_list.iter_mut() {
-			scene.on_page_visibility_restored(&mut self.engine);
+			scene.on_page_visibility_restored(self.engine);
 		}
 		scene_list.append(&mut self.scene_list);
 		self.scene_list = scene_list;
@@ -2290,7 +2303,7 @@ impl EngineRunner {
 		self.recover_engine_state();
 		let mut scene_list = std::mem::take(&mut self.scene_list);
 		for scene in scene_list.iter_mut() {
-			scene.on_page_process_restored(&mut self.engine);
+			scene.on_page_process_restored(self.engine);
 		}
 		scene_list.append(&mut self.scene_list);
 		self.scene_list = scene_list;
@@ -2309,9 +2322,9 @@ impl EngineRunner {
 	//==============================================================================
 	#[cfg(test)]
 	pub(crate) fn poll_tasks(&mut self) {
-		task::begin_poll_frame(&mut self.engine);
+		task::begin_poll_frame(self.engine);
 		loop {
-			task::poll_woken_tasks(&mut self.engine, &mut self.scene_list, &mut self.detached_scene_list);
+			task::poll_woken_tasks(self.engine, &mut self.scene_list, &mut self.detached_scene_list);
 			self.finish_scene_unloads();
 			if !self.engine.task_executor.has_woken_tasks() {
 				break;
@@ -2335,7 +2348,7 @@ impl EngineRunner {
 			return;
 		}
 		self.unloading_scene_id_list.push(scene_id);
-		begin_scene_instance_unload(&mut self.engine, self.scene_list[scene_index].as_mut());
+		begin_scene_instance_unload(self.engine, self.scene_list[scene_index].as_mut());
 	}
 
 	//==============================================================================
@@ -2343,30 +2356,30 @@ impl EngineRunner {
 	//==============================================================================
 	fn finish_scene_unloads(&mut self) {
 		let current_time = self.start_instant.elapsed().as_secs_f64();
-		finish_scene_unloads(&mut self.engine, &mut self.scene_list, &mut self.unloading_scene_id_list, &mut self.detached_scene_list, &mut self.unload_waiting_list, current_time);
+		finish_scene_unloads(self.engine, &mut self.scene_list, &mut self.unloading_scene_id_list, &mut self.detached_scene_list, &mut self.unload_waiting_list, current_time);
 	}
 
 	//==============================================================================
 	/// 미뤄 둔 씬 내리기 / 불러오기.
 	//==============================================================================
 	pub(crate) fn apply_pending_scenes(&mut self) {
-		if self.engine.is_unload_all_scenes_requested {
-			self.engine.is_unload_all_scenes_requested = false;
+		if self.engine.is_unload_all_scenes_requested.get() {
+			self.engine.is_unload_all_scenes_requested.set(false);
 			for scene_index in 0..self.scene_list.len() {
 				self.begin_scene_unload(scene_index);
 			}
 		}
-		while !self.engine.pending_unload_scene_id_list.is_empty() {
-			let pending_unload_scene_id_list = std::mem::take(&mut self.engine.pending_unload_scene_id_list);
+		while !self.engine.pending_unload_scene_id_list.borrow().is_empty() {
+			let pending_unload_scene_id_list = self.engine.pending_unload_scene_id_list.take();
 			for scene_id in pending_unload_scene_id_list {
-				self.engine.pending_scene_list.retain(|pending_scene| pending_scene.get_scene_base().get_scene_id() != Some(scene_id));
+				self.engine.pending_scene_list.borrow_mut().retain(|pending_scene| pending_scene.get_scene_base().get_scene_id() != Some(scene_id));
 				let scene_index = self.scene_list.iter().position(|scene| scene.get_scene_base().get_scene_id() == Some(scene_id));
 				if let Some(scene_index) = scene_index {
 					self.begin_scene_unload(scene_index);
 				}
 			}
 		}
-		for (scene_id, unload_resolver) in std::mem::take(&mut self.engine.pending_unload_resolver_list) {
+		for (scene_id, unload_resolver) in self.engine.pending_unload_resolver_list.take() {
 			let waiting_scene_id_list = match scene_id {
 				Some(scene_id) => {
 					vec![scene_id]
@@ -2378,16 +2391,16 @@ impl EngineRunner {
 			self.unload_waiting_list.push((waiting_scene_id_list, unload_resolver));
 		}
 		self.finish_scene_unloads();
-		while !self.engine.pending_scene_list.is_empty() {
-			let pending_scene_list = std::mem::take(&mut self.engine.pending_scene_list);
+		while !self.engine.pending_scene_list.borrow().is_empty() {
+			let pending_scene_list = self.engine.pending_scene_list.take();
 			for mut scene in pending_scene_list {
 				if let Some(scene_id) = scene.get_scene_base().get_scene_id() {
-					self.engine.loaded_scene_id_list.push(scene_id);
+					self.engine.loaded_scene_id_list.borrow_mut().push(scene_id);
 				}
-				scene.create(&mut self.engine);
+				scene.create(self.engine);
 				apply_scene_root_to_view_size(&self.engine, scene.as_mut());
 				let current_time = self.start_instant.elapsed().as_secs_f64();
-				initialize_scene_if_ready(&mut self.engine, scene.as_mut(), current_time);
+				initialize_scene_if_ready(self.engine, scene.as_mut(), current_time);
 				self.scene_list.push(scene);
 			}
 		}
@@ -2399,33 +2412,32 @@ impl EngineRunner {
 	pub(crate) fn update_engine(&mut self) {
 		// 바이트가 온 글꼴 등록.
 		self.register_pending_fonts();
-		let graphic = match self.engine.graphic.as_mut() {
-			Some(graphic) => {
-				graphic
+
+		// 렌더러 처리.
+		let canvas_pixel_size = self.engine.get_view_manager().get_canvas_pixel_size();
+		match self.engine.get_graphic_mut() {
+			Some(mut graphic) => {
+				graphic.apply_settings(canvas_pixel_size.x as i32, canvas_pixel_size.y as i32);
 			}
 			None => {
 				return;
 			}
-		};
-
-		// 렌더러 처리.
-		let canvas_pixel_size = self.engine.view_manager.get_canvas_pixel_size();
-		graphic.apply_settings(canvas_pixel_size.x as i32, canvas_pixel_size.y as i32);
+		}
 
 		// 시간 처리.
 		// 찍기 모드는 결정적으로 찍게 실제 시각 대신 프레임 번호 x 1/60 초를 쓴다. (기계 빠르기와 상관없이 같은 프레임에 같은 시간, 원본과 같은 셈)
 		let seconds_since_startup = self.start_instant.elapsed().as_secs_f64();
 		let engine_seconds_since_startup = if self.capture_request.is_some() {
-			read_capture_seconds_since_startup(self.engine.frame_number)
+			read_capture_seconds_since_startup(self.engine.frame_number.get())
 		}
 		else {
 			seconds_since_startup
 		};
-		self.engine.time_manager.update(engine_seconds_since_startup);
-		let time_delta = self.engine.time_manager.get_time_delta();
+		self.engine.time_manager.borrow_mut().update(engine_seconds_since_startup);
+		let time_delta = self.engine.time_manager.borrow().get_time_delta();
 
 		// 입력 처리.
-		self.engine.input_manager.tick(time_delta);
+		self.engine.input_manager.borrow_mut().tick(time_delta);
 
 		// 질문 창. (떠 있으면 원본에서 엔진 루프가 멈추듯 씬과 async 작업을 갱신하지 않고 창이 입력을 받는다)
 		let is_modal_dialog_open = self.engine.is_modal_dialog_open();
@@ -2439,10 +2451,10 @@ impl EngineRunner {
 		// 깨어난 작업 폴링. (await 다음 줄이 이번 프레임의 시간과 입력을 보고, 바꾼 것이 이번 프레임에 그려진다. 그래픽은 엔진에 있어 with_graphic 이 받는다)
 		if !is_modal_dialog_open {
 			// unload 가 맡긴 작업이 끝난 씬은 원본처럼 이번 프레임부터 목록에서 빠지고, 내리기를 기다리던 작업도 원본 마이크로태스크처럼 같은 차례에 이어 간다.
-			task::begin_poll_frame(&mut self.engine);
+			task::begin_poll_frame(self.engine);
 			loop {
-				task::poll_woken_tasks(&mut self.engine, &mut self.scene_list, &mut self.detached_scene_list);
-				finish_scene_unloads(&mut self.engine, &mut self.scene_list, &mut self.unloading_scene_id_list, &mut self.detached_scene_list, &mut self.unload_waiting_list, seconds_since_startup);
+				task::poll_woken_tasks(self.engine, &mut self.scene_list, &mut self.detached_scene_list);
+				finish_scene_unloads(self.engine, &mut self.scene_list, &mut self.unloading_scene_id_list, &mut self.detached_scene_list, &mut self.unload_waiting_list, seconds_since_startup);
 				if !self.engine.task_executor.has_woken_tasks() {
 					break;
 				}
@@ -2450,7 +2462,7 @@ impl EngineRunner {
 		}
 
 		// 그리기 통계. (지난 프레임 값을 넘겨 두고 이번 프레임을 새로 센다)
-		if let Some(graphic) = self.engine.graphic.as_mut() {
+		if let Some(mut graphic) = self.engine.get_graphic_mut() {
 			graphic.begin_frame_statistics();
 		}
 
@@ -2462,11 +2474,11 @@ impl EngineRunner {
 		for scene in scene_list.iter_mut() {
 			// 맡긴 애셋을 기다리는 씬은 로딩 화면만. (다 읽혔으면 이번 프레임부터 돈다, 원본처럼 내리는 중이어도 불러오기가 끝나면 initialize 한다)
 			if !scene.get_scene_base().is_loaded() {
-				initialize_scene_if_ready(&mut self.engine, scene.as_mut(), seconds_since_startup);
+				initialize_scene_if_ready(self.engine, scene.as_mut(), seconds_since_startup);
 			}
 			if !scene.get_scene_base().is_loaded() {
 				self.engine.with_graphic(|engine, graphic| {
-					engine.view_manager.apply_view_rect(graphic);
+					engine.view_manager.borrow_mut().apply_view_rect(graphic);
 					scene.draw_on_load(engine, graphic);
 				});
 				continue;
@@ -2474,13 +2486,13 @@ impl EngineRunner {
 
 			// 갱신. (씬의 터치 훅은 원본 Scene.tickTouch 처럼 tick 안의 터치 다음, 질문 창이 떠 있던 프레임은 건너뛴다)
 			if !is_modal_dialog_open {
-				scene.tick(&mut self.engine, time_delta);
-				dispatch_scene_touch(&mut self.engine, scene.as_mut());
+				scene.tick(self.engine, time_delta);
+				dispatch_scene_touch(self.engine, scene.as_mut());
 			}
 
 			// 출력.
 			self.engine.with_graphic(|engine, graphic| {
-				engine.view_manager.apply_view_rect(graphic);
+				engine.view_manager.borrow_mut().apply_view_rect(graphic);
 				scene.pre_draw(engine, graphic);
 				scene.draw(engine, graphic);
 				scene.post_draw(engine, graphic);
@@ -2495,7 +2507,7 @@ impl EngineRunner {
 		self.scene_list = scene_list;
 
 		// 개발 정보 출력.
-		if self.engine.engine_configuration.use_statistics {
+		if self.engine.get_engine_configuration().use_statistics {
 			self.engine.with_graphic(|engine, graphic| {
 				draw_statistics(engine, graphic);
 			});
@@ -2504,32 +2516,33 @@ impl EngineRunner {
 		// 질문 창. (모든 것 위에, 창 안쪽 논리 좌표)
 		if self.engine.is_modal_dialog_open() {
 			self.engine.with_graphic(|engine, graphic| {
-				engine.view_manager.apply_canvas_native_rect(graphic);
+				engine.view_manager.borrow_mut().apply_canvas_native_rect(graphic);
 				crate::core::modaldialog::draw_modal_dialog(engine, graphic);
 			});
 		}
 
 		// 마우스 커서. (켜져 있고 바뀌었을 때만 플랫폼에 넘긴다)
 		let is_coarse_pointer = platform::is_coarse_pointer();
-		if let Some(cursor_value) = self.engine.pointer_cursor.take_cursor_change(is_coarse_pointer) {
-			platform::set_cursor(self.engine.platform_window.as_ref(), &cursor_value);
+		if let Some(cursor_value) = self.engine.pointer_cursor.borrow_mut().take_cursor_change(is_coarse_pointer) {
+			platform::set_cursor(self.engine.platform_window.borrow().as_ref(), &cursor_value);
 		}
 
 		// 입력 관련해서 상태 유지가 아닌, 현재 프레임이 끝난 후에는 다음 프레임에서는 상태를 유지하지 않음. (1회성)
-		let input_manager = &mut self.engine.input_manager;
+		let mut input_manager = self.engine.get_input_manager_mut();
 		input_manager.set_touch_pressed(false);
 		input_manager.set_touch_released(false);
 		input_manager.set_touch_cancelled(false);
 		input_manager.clear_wheel_delta();
 		input_manager.update_frame_snapshot();
 		input_manager.get_text_input_mut().finish_frame();
+		drop(input_manager);
 
 		// 프레임 마무리. (묶음을 내보내고, 검증용 화면 저장은 플랫폼이 화면을 넘기기 전에 한다)
-		if let Some(graphic) = self.engine.graphic.as_mut() {
+		if let Some(mut graphic) = self.engine.get_graphic_mut() {
 			graphic.end_frame();
 		}
 		self.capture_frame_if_requested();
-		self.engine.frame_number += 1;
+		self.engine.frame_number.set(self.engine.frame_number.get() + 1);
 
 		// 씬 목록 바꾸기.
 		self.apply_pending_scenes();
@@ -2541,23 +2554,24 @@ impl EngineRunner {
 /// - 변환을 장치 픽셀 단위 기본으로 되돌리고 1.4 배로 그린다. 배경 판(검정 60%, 둥근 모서리 12)은 앞 프레임에 쌓은 글 영역으로 그린다.
 /// - 글꼴은 "16px DOSGothic"(없으면 시스템 글꼴), 왼쪽 위 기준, 흰색. 빈 글 줄은 그리지 않고 자리만 16 내린다.
 //==============================================================================
-fn draw_statistics(engine: &mut Engine, graphic: &mut Graphic) {
+fn draw_statistics(engine: &Engine, graphic: &mut Graphic) {
 	let mut text_position = Vector2::create(16.0, 16.0);
-	engine.statistics_text_rect.position = text_position;
+	let mut next_statistics_text_rect = engine.statistics_text_rect.get();
+	next_statistics_text_rect.position = text_position;
 
 	// 배경 출력.
 	// 기본 위치인 화면 좌상단으로 이동.
 	graphic.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
 	graphic.scale(1.4, 1.4);
 	graphic.set_fill_color(Color::create(0.0, 0.0, 0.0, 0.6));
-	let statistics_text_rect = engine.statistics_text_rect;
+	let statistics_text_rect = next_statistics_text_rect;
 	graphic.draw_round_rect(Rect::create(
 		statistics_text_rect.position.x - 10.0,
 		statistics_text_rect.position.y - 10.0,
 		statistics_text_rect.size.x + 20.0,
 		statistics_text_rect.size.y + 20.0,
 	), 12.0);
-	engine.statistics_text_rect.size.y = 0.0;
+	next_statistics_text_rect.size.y = 0.0;
 
 	graphic.set_font_string("16px DOSGothic");
 	graphic.set_text_align(TextAlign::Left);
@@ -2567,7 +2581,7 @@ fn draw_statistics(engine: &mut Engine, graphic: &mut Graphic) {
 	let mut text_list: Vec<String> = Vec::new();
 
 	// 플랫폼 정보 출력.
-	let (platform_type, browser_type) = engine.platform.get_platform_info();
+	let (platform_type, browser_type) = engine.platform.borrow_mut().get_platform_info();
 	text_list.push(format!("engineVersion: {}", engine.get_version_string()));
 	text_list.push(format!("platformName: {}", platform_type.get_name()));
 	text_list.push(format!("browserName: {}", browser_type.get_name()));
@@ -2600,6 +2614,7 @@ fn draw_statistics(engine: &mut Engine, graphic: &mut Graphic) {
 	text_list.push(format!("time: {}s", format_fixed(time_manager.get_time(), 2)));
 	text_list.push(format!("framePerSecond: {}", time_manager.get_frame_per_second()));
 	text_list.push(format!("timeDelta: {}s", format_fixed(time_manager.get_time_delta(), 3)));
+	drop(time_manager);
 	text_list.push(format!("drawCalls: {}", graphic.get_last_frame_draw_call_count()));
 	text_list.push(format!("vertices: {}", graphic.get_last_frame_vertex_count()));
 	text_list.push(format!("triangles: {}", graphic.get_last_frame_triangle_count()));
@@ -2615,9 +2630,10 @@ fn draw_statistics(engine: &mut Engine, graphic: &mut Graphic) {
 
 		// 영역 넓히기.
 		let text_metrics = graphic.measure_text(text);
-		engine.statistics_text_rect.size.x = engine.statistics_text_rect.size.x.max(text_metrics.width);
-		engine.statistics_text_rect.size.y += 16.0;
+		next_statistics_text_rect.size.x = next_statistics_text_rect.size.x.max(text_metrics.width);
+		next_statistics_text_rect.size.y += 16.0;
 	}
+	engine.statistics_text_rect.set(next_statistics_text_rect);
 }
 
 //==============================================================================
@@ -2659,7 +2675,7 @@ fn encode_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String>
 /// 내리기 마무리. (unload 가 맡긴 작업이 끝난 씬을 목록에서 빼 작업이 남았으면 살려 두고, 작업이 다 끝난 씬은 destroy 뒤 버리고, 기다리는 Promise 를 푼다)
 /// - 불러오는 도중에 내린 씬은 원본 SceneManager.loadScene 처럼 불러오기가 끝나면 initialize 하고, 그때까지 살려 둔다. (current_time 은 엔진 시작 뒤 초)
 //==============================================================================
-fn finish_scene_unloads(engine: &mut Engine, scene_list: &mut Vec<Box<dyn Scene>>, unloading_scene_id_list: &mut Vec<SceneId>, detached_scene_list: &mut Vec<Box<dyn Scene>>, unload_waiting_list: &mut Vec<(Vec<SceneId>, PromiseResolver<()>)>, current_time: f64) {
+fn finish_scene_unloads(engine: &Engine, scene_list: &mut Vec<Box<dyn Scene>>, unloading_scene_id_list: &mut Vec<SceneId>, detached_scene_list: &mut Vec<Box<dyn Scene>>, unload_waiting_list: &mut Vec<(Vec<SceneId>, PromiseResolver<()>)>, current_time: f64) {
 	let mut unloading_index = 0;
 	while unloading_index < unloading_scene_id_list.len() {
 		let scene_id = unloading_scene_id_list[unloading_index];
@@ -2669,7 +2685,7 @@ fn finish_scene_unloads(engine: &mut Engine, scene_list: &mut Vec<Box<dyn Scene>
 				continue;
 			}
 			let scene = scene_list.remove(scene_index);
-			engine.loaded_scene_id_list.retain(|loaded_scene_id| *loaded_scene_id != scene_id);
+			engine.loaded_scene_id_list.borrow_mut().retain(|loaded_scene_id| *loaded_scene_id != scene_id);
 			detached_scene_list.push(scene);
 		}
 		unloading_scene_id_list.remove(unloading_index);
@@ -2699,7 +2715,7 @@ fn finish_scene_unloads(engine: &mut Engine, scene_list: &mut Vec<Box<dyn Scene>
 //==============================================================================
 /// 씬 하나의 내리기 시작. (원본 SceneManager.unloadScene 의 finalize, unload. 내리기 맡기기로 바꾼 뒤 unload 를 불러, unload 가 track_task 로 맡긴 것만 기다린다)
 //==============================================================================
-fn begin_scene_instance_unload(engine: &mut Engine, scene: &mut dyn Scene) {
+fn begin_scene_instance_unload(engine: &Engine, scene: &mut dyn Scene) {
 	scene.finalize(engine);
 	scene.get_scene_base_mut().begin_unload_tracking();
 	scene.unload(engine);
@@ -2708,7 +2724,7 @@ fn begin_scene_instance_unload(engine: &mut Engine, scene: &mut dyn Scene) {
 //==============================================================================
 /// 씬의 터치 훅 부르기. (원본 Scene.tickTouch: 누름, 그다음 뗌 또는 누르고 있음(누른 프레임 빼고) 또는 취소, 그리고 휠)
 //==============================================================================
-fn dispatch_scene_touch(engine: &mut Engine, scene: &mut dyn Scene) {
+fn dispatch_scene_touch(engine: &Engine, scene: &mut dyn Scene) {
 	let input_manager = engine.get_input_manager();
 	let view_input_position = input_manager.get_view_input_position();
 	let is_touch_pressed = input_manager.is_touch_pressed();
@@ -2717,6 +2733,7 @@ fn dispatch_scene_touch(engine: &mut Engine, scene: &mut dyn Scene) {
 	let is_touch_cancelled = input_manager.is_touch_cancelled();
 	let wheel_delta = Vector2::create(input_manager.get_wheel_delta_x(), input_manager.get_wheel_delta_y());
 	let has_wheel_delta = input_manager.has_wheel_delta();
+	drop(input_manager);
 	if is_touch_pressed {
 		scene.touch_press(engine, view_input_position);
 	}
@@ -2738,7 +2755,7 @@ fn dispatch_scene_touch(engine: &mut Engine, scene: &mut dyn Scene) {
 /// 씬의 루트를 뷰 크기로 맞추기. (원본 Scene.load: 자리 0, 왼쪽 위 피벗, 콘텐츠 크기는 뷰 크기. create 바로 뒤에 부른다)
 //==============================================================================
 fn apply_scene_root_to_view_size(engine: &Engine, scene: &mut dyn Scene) {
-	let view_size = engine.view_manager.get_view_size();
+	let view_size = engine.view_manager.borrow().get_view_size();
 	let root = scene.get_scene_base_mut().get_root_mut();
 	root.set_local_position(Vector2::zero());
 	root.set_pivot(Pivot::TOP_LEFT);
@@ -2749,7 +2766,7 @@ fn apply_scene_root_to_view_size(engine: &Engine, scene: &mut dyn Scene) {
 /// 씬이 맡긴 애셋과 작업이 다 끝났으면 initialize 하고 불러온 것으로 친다. (원본 load 다음 0.3초 더 기다리고 set_loaded, initialize, 그리고 loadScene 의 Promise 를 푼다)
 /// - current_time 은 엔진 시작 뒤 지금까지의 실제 초다. (첫 프레임 전에도 맞는 시각이어야 해서 시간 관리자의 지난 값을 쓰지 않는다)
 //==============================================================================
-fn initialize_scene_if_ready(engine: &mut Engine, scene: &mut dyn Scene, current_time: f64) {
+fn initialize_scene_if_ready(engine: &Engine, scene: &mut dyn Scene, current_time: f64) {
 	if scene.get_scene_base().is_loaded() || !scene.get_scene_base().are_tracked_assets_finished() {
 		return;
 	}
@@ -2760,7 +2777,7 @@ fn initialize_scene_if_ready(engine: &mut Engine, scene: &mut dyn Scene, current
 	scene.get_scene_base_mut().clear_tracked_assets();
 	scene.initialize(engine);
 	scene.get_scene_base_mut().set_loaded(true);
-	let canvas_native_size = engine.view_manager.get_canvas_native_size();
+	let canvas_native_size = engine.view_manager.borrow().get_canvas_native_size();
 	scene.resize(engine, canvas_native_size);
 	scene.get_scene_base_mut().resolve_load_resolvers();
 }
@@ -2813,28 +2830,28 @@ mod tests {
 		//==============================================================================
 		/// 생성. (create 수를 센다)
 		//==============================================================================
-		fn create(&mut self, _engine: &mut Engine) {
+		fn create(&mut self, _engine: &Engine) {
 			self.create_count.set(self.create_count.get() + 1);
 		}
 
 		//==============================================================================
 		/// 해제. (destroy 수를 센다)
 		//==============================================================================
-		fn destroy(&mut self, _engine: &mut Engine) {
+		fn destroy(&mut self, _engine: &Engine) {
 			self.destroy_count.set(self.destroy_count.get() + 1);
 		}
 
 		//==============================================================================
 		/// 페이지 프로세스 복원. (복원 수에 100 을 더한다)
 		//==============================================================================
-		fn on_page_process_restored(&mut self, _engine: &mut Engine) {
+		fn on_page_process_restored(&mut self, _engine: &Engine) {
 			self.restore_count.set(self.restore_count.get() + 100);
 		}
 
 		//==============================================================================
 		/// 페이지 가시성 복원. (복원 수에 1 을 더한다)
 		//==============================================================================
-		fn on_page_visibility_restored(&mut self, _engine: &mut Engine) {
+		fn on_page_visibility_restored(&mut self, _engine: &Engine) {
 			self.restore_count.set(self.restore_count.get() + 1);
 		}
 	}
@@ -2931,7 +2948,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn page_events_reach_listeners() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let received_list: Rc<RefCell<Vec<PageEvent>>> = Rc::new(RefCell::new(Vec::new()));
 		let received_list_for_listener = received_list.clone();
 		let page_event_listener: PageEventListener = Rc::new(RefCell::new(move |page_event: PageEvent| {
@@ -2955,7 +2972,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn maximum_frame_per_second_changes_at_runtime() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		assert_eq!(engine.get_maximum_frame_per_second(), 0.0);
 		engine.set_maximum_frame_per_second(30.0);
 		assert_eq!(engine.get_engine_configuration().maximum_frame_per_second, 30.0);
@@ -2991,49 +3008,49 @@ mod tests {
 		//==============================================================================
 		/// 종료처리. (finalize 를 적는다)
 		//==============================================================================
-		fn finalize(&mut self, _engine: &mut Engine) {
+		fn finalize(&mut self, _engine: &Engine) {
 			self.record_list.borrow_mut().push("finalize");
 		}
 
 		//==============================================================================
 		/// 로딩 해제. (unload 를 적는다)
 		//==============================================================================
-		fn unload(&mut self, _engine: &mut Engine) {
+		fn unload(&mut self, _engine: &Engine) {
 			self.record_list.borrow_mut().push("unload");
 		}
 
 		//==============================================================================
 		/// 해제. (destroy 를 적는다)
 		//==============================================================================
-		fn destroy(&mut self, _engine: &mut Engine) {
+		fn destroy(&mut self, _engine: &Engine) {
 			self.record_list.borrow_mut().push("destroy");
 		}
 
 		//==============================================================================
 		/// 터치 누름. (press 를 적는다)
 		//==============================================================================
-		fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+		fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 			self.record_list.borrow_mut().push("press");
 		}
 
 		//==============================================================================
 		/// 터치 이동. (move 를 적는다)
 		//==============================================================================
-		fn touch_move(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+		fn touch_move(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 			self.record_list.borrow_mut().push("move");
 		}
 
 		//==============================================================================
 		/// 터치 뗌. (release 를 적는다)
 		//==============================================================================
-		fn touch_release(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+		fn touch_release(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 			self.record_list.borrow_mut().push("release");
 		}
 
 		//==============================================================================
 		/// 마우스 휠. (wheel 을 적는다)
 		//==============================================================================
-		fn touch_wheel(&mut self, _engine: &mut Engine, _view_input_position: Vector2, _wheel_delta: Vector2) {
+		fn touch_wheel(&mut self, _engine: &Engine, _view_input_position: Vector2, _wheel_delta: Vector2) {
 			self.record_list.borrow_mut().push("wheel");
 		}
 	}
@@ -3043,22 +3060,24 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn scene_touch_hooks_and_unload_order() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let record_list: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
 		let mut scene = RecordingScene { scene_base: SceneBase::new(), record_list: record_list.clone() };
-		let input_manager = engine.get_input_manager_mut();
+		let mut input_manager = engine.get_input_manager_mut();
 		input_manager.set_touch_pressed(true);
 		input_manager.set_touch_moved(true);
-		dispatch_scene_touch(&mut engine, &mut scene);
+		drop(input_manager);
+		dispatch_scene_touch(engine, &mut scene);
 		engine.get_input_manager_mut().set_touch_pressed(false);
-		dispatch_scene_touch(&mut engine, &mut scene);
-		let input_manager = engine.get_input_manager_mut();
+		dispatch_scene_touch(engine, &mut scene);
+		let mut input_manager = engine.get_input_manager_mut();
 		input_manager.set_touch_moved(false);
 		input_manager.set_touch_released(true);
 		input_manager.add_wheel_delta(0.0, 10.0);
-		dispatch_scene_touch(&mut engine, &mut scene);
-		begin_scene_instance_unload(&mut engine, &mut scene);
-		scene.destroy(&mut engine);
+		drop(input_manager);
+		dispatch_scene_touch(engine, &mut scene);
+		begin_scene_instance_unload(engine, &mut scene);
+		scene.destroy(engine);
 		assert_eq!(*record_list.borrow(), vec!["press", "move", "release", "wheel", "finalize", "unload", "destroy"]);
 	}
 
@@ -3079,13 +3098,13 @@ mod tests {
 
 	#[test]
 	fn frame_capture_request_and_frame_numbers() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		assert_eq!(engine.get_frame_number(), 1);
-		engine.frame_number = 5;
+		engine.frame_number.set(5);
 		engine.request_frame_capture(2, Box::new(|_png_bytes: &[u8]| {}));
 		engine.request_frame_capture(9, Box::new(|_png_bytes: &[u8]| {}));
-		assert!(engine.frame_capture_handler_map.contains_key(&5));
-		assert!(engine.frame_capture_handler_map.contains_key(&9));
+		assert!(engine.frame_capture_handler_map.borrow().contains_key(&5));
+		assert!(engine.frame_capture_handler_map.borrow().contains_key(&9));
 		assert_eq!(parse_capture_frame_numbers("240, 120,240,x"), vec![120, 240]);
 		assert_eq!(parse_capture_frame_numbers(""), vec![120]);
 		let png_bytes = encode_png(&[255, 0, 0, 255], 1, 1).expect("png");
@@ -3124,7 +3143,7 @@ mod tests {
 		//==============================================================================
 		/// 생성. (불러오기 작업을 맡겨 첫 구간에서 한 단계, 다음 프레임에 한 단계 센다)
 		//==============================================================================
-		fn create(&mut self, engine: &mut Engine) {
+		fn create(&mut self, engine: &Engine) {
 			let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 				let load_handle = AssetLoadHandle::create_pending("stage.json");
 				let task_load_handle = load_handle.clone();
@@ -3144,7 +3163,7 @@ mod tests {
 		//==============================================================================
 		/// 초기화. (초기화 수를 세고 오래 도는 작업을 맡긴다)
 		//==============================================================================
-		fn initialize(&mut self, engine: &mut Engine) {
+		fn initialize(&mut self, engine: &Engine) {
 			self.initialize_count += 1;
 			let long_promise = self.long_promise.take().expect("기다릴 Promise");
 			let seen_load_step_count = self.seen_load_step_count.clone();
@@ -3159,7 +3178,7 @@ mod tests {
 		//==============================================================================
 		/// 로딩 해제. (기다릴 Promise 가 있으면 내리기 작업을 맡긴다)
 		//==============================================================================
-		fn unload(&mut self, engine: &mut Engine) {
+		fn unload(&mut self, engine: &Engine) {
 			if let Some(unload_promise) = self.unload_promise.take() {
 				let unload_task_handle = engine.spawn_scene_task(self, move |_scene_context| async move {
 					unload_promise.await;
@@ -3171,7 +3190,7 @@ mod tests {
 		//==============================================================================
 		/// 해제. (destroy 수를 센다)
 		//==============================================================================
-		fn destroy(&mut self, _engine: &mut Engine) {
+		fn destroy(&mut self, _engine: &Engine) {
 			self.destroy_count.set(self.destroy_count.get() + 1);
 		}
 	}
@@ -3350,9 +3369,9 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn request_frame_capture_async_resolves_with_png_bytes() {
-		let mut engine_runner = EngineRunner::new(Engine::new(EngineConfiguration::new()), Box::new(RecordingScene { scene_base: SceneBase::new(), record_list: Rc::new(RefCell::new(Vec::new())) }));
+		let engine_runner = EngineRunner::new(Engine::new(EngineConfiguration::new()), Box::new(RecordingScene { scene_base: SceneBase::new(), record_list: Rc::new(RefCell::new(Vec::new())) }));
 		let mut capture_promise = engine_runner.engine.request_frame_capture_async(1);
-		let handler_list = engine_runner.engine.frame_capture_handler_map.remove(&1).expect("요청");
+		let handler_list = engine_runner.engine.frame_capture_handler_map.borrow_mut().remove(&1).expect("요청");
 		for capture_handler in handler_list {
 			capture_handler(&[1, 2, 3]);
 		}

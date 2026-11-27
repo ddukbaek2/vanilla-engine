@@ -61,7 +61,7 @@ struct ModalDialogHandleState {
 /// ```rust
 /// use vanilla::{Engine, EngineConfiguration, ModalDialogResult};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let modal_dialog_handle = engine.confirm("Delete the save data?");
 /// assert!(!modal_dialog_handle.is_finished());
 /// assert_eq!(modal_dialog_handle.get_result(), None);
@@ -77,7 +77,7 @@ struct ModalDialogHandleState {
 /// ```rust,no_run
 /// use vanilla::Engine;
 ///
-/// fn ask_player_name(engine: &mut Engine) {
+/// fn ask_player_name(engine: &Engine) {
 /// 	let modal_dialog_handle = engine.prompt("Name?", "Player");
 /// 	let callback_handle = modal_dialog_handle.clone();
 /// 	modal_dialog_handle.set_callback(move |_result| {
@@ -685,7 +685,7 @@ mod engine_dialog {
 	/// 맨 앞 질문 창 갱신. (엔진이 프레임마다 씬 대신 부른다. 답이 정해지면 창을 내리고 손잡이를 끝낸다)
 	//==============================================================================
 	/// - measure_width 는 입력 칸 글꼴로 글 폭을 잰다. (엔진은 Graphic 으로 잰다, measure_field_text_width)
-	pub fn tick_modal_dialog(engine: &mut Engine, measure_width: &dyn Fn(&str) -> f64, time_delta: f64) {
+	pub fn tick_modal_dialog(engine: &Engine, measure_width: &dyn Fn(&str) -> f64, time_delta: f64) {
 		let mut dialog = match engine.take_front_modal_dialog() {
 			Some(dialog) => {
 				dialog
@@ -717,6 +717,7 @@ mod engine_dialog {
 		let is_touch_pressed = input_manager.is_touch_pressed();
 		let is_touch_released = input_manager.is_touch_released();
 		let is_touch_down = input_manager.is_touch_down();
+		drop(input_manager);
 		if let Some(layout) = dialog.layout.clone() {
 			dialog.hovered_button = layout.button_rect_list.iter().find(|(_, button_rect)| is_inside(*button_rect, pointer_position)).map(|(button, _)| *button);
 			if is_touch_pressed {
@@ -798,9 +799,9 @@ mod engine_dialog {
 	//==============================================================================
 	/// 맨 앞 질문 창 그리기. (씬과 개발 정보 위에, 창 안쪽 논리 좌표로)
 	//==============================================================================
-	pub fn draw_modal_dialog(engine: &mut Engine, graphic: &mut Graphic) {
+	pub fn draw_modal_dialog(engine: &Engine, graphic: &mut Graphic) {
 		let canvas_native_size = engine.get_view_manager().get_canvas_native_size();
-		let dialog = match engine.get_front_modal_dialog_mut() {
+		let mut dialog = match engine.get_front_modal_dialog_mut() {
 			Some(dialog) => {
 				dialog
 			}
@@ -808,7 +809,7 @@ mod engine_dialog {
 				return;
 			}
 		};
-		let layout = calculate_layout(dialog, graphic, canvas_native_size);
+		let layout = calculate_layout(&dialog, graphic, canvas_native_size);
 		graphic.push_state();
 
 		// 그림자와 바탕. (bubble_border.cc 의 두 겹을 views 시그마의 가우스로, 윈도우와 리눅스는 1px 테두리)
@@ -939,7 +940,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn prompt_replaces_selected_default_and_confirms() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let handle = engine.prompt("이름:", "기본");
 		let callback_count = Rc::new(Cell::new(0));
 		let callback_count_for_callback = callback_count.clone();
@@ -950,13 +951,15 @@ mod tests {
 		assert!(engine.is_modal_dialog_open());
 		assert!(!handle.is_finished());
 		assert_eq!(engine.get_front_modal_dialog_mut().expect("dialog").get_text(), "기본");
-		let text_input = engine.get_input_manager_mut().get_text_input_mut();
+		let mut input_manager = engine.get_input_manager_mut();
+		let text_input = input_manager.get_text_input_mut();
 		text_input.push_focused_field_event(TextInputEventKind::Commit(String::from("바닐라")));
-		tick_modal_dialog(&mut engine, &measure_fixed_width, 0.016);
+		drop(input_manager);
+		tick_modal_dialog(engine, &measure_fixed_width, 0.016);
 		assert_eq!(engine.get_front_modal_dialog_mut().expect("dialog").get_text(), "바닐라");
 		engine.get_input_manager_mut().get_text_input_mut().finish_frame();
 		engine.get_input_manager_mut().get_text_input_mut().push_focused_field_event(TextInputEventKind::Key { key: TextInputKey::Enter, is_shift: false });
-		tick_modal_dialog(&mut engine, &measure_fixed_width, 0.016);
+		tick_modal_dialog(engine, &measure_fixed_width, 0.016);
 		assert!(!engine.is_modal_dialog_open());
 		assert_eq!(handle.get_prompt_text().as_deref(), Some("바닐라"));
 		assert!(handle.is_confirmed());
@@ -968,25 +971,25 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn escape_cancels_and_dialogs_queue() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let confirm_handle = engine.confirm("지울까요?");
 		let prompt_handle = engine.prompt("키:", "");
 		engine.get_input_manager_mut().push_key(KeyCode::ESCAPE);
-		tick_modal_dialog(&mut engine, &measure_fixed_width, 0.016);
+		tick_modal_dialog(engine, &measure_fixed_width, 0.016);
 		assert_eq!(confirm_handle.get_result(), Some(ModalDialogResult::Cancelled));
 		assert!(!confirm_handle.is_confirmed());
 		assert!(engine.is_modal_dialog_open());
 		assert!(!prompt_handle.is_finished());
 		engine.get_input_manager_mut().update_frame_snapshot();
 		engine.get_input_manager_mut().push_key(KeyCode::ESCAPE);
-		tick_modal_dialog(&mut engine, &measure_fixed_width, 0.016);
+		tick_modal_dialog(engine, &measure_fixed_width, 0.016);
 		assert_eq!(prompt_handle.get_prompt_text(), None);
 		assert!(!engine.is_modal_dialog_open());
 
 		// alert 는 Enter 로 닫힌다.
 		let alert_handle = engine.alert("끝");
 		engine.get_input_manager_mut().get_text_input_mut().push_focused_field_event(TextInputEventKind::Key { key: TextInputKey::Enter, is_shift: false });
-		tick_modal_dialog(&mut engine, &measure_fixed_width, 0.016);
+		tick_modal_dialog(engine, &measure_fixed_width, 0.016);
 		assert!(alert_handle.is_confirmed());
 	}
 
@@ -995,7 +998,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn prompt_async_resolves_in_task() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let mut scene_list: Vec<Box<dyn crate::core::scene::Scene>> = Vec::new();
 		let received_text = Rc::new(std::cell::RefCell::new(None));
 		let task_received_text = received_text.clone();
@@ -1003,11 +1006,11 @@ mod tests {
 			let prompt_promise = engine_context.with(|engine| engine.prompt_async("이름:", "기본"));
 			*task_received_text.borrow_mut() = Some(prompt_promise.await);
 		});
-		crate::core::task::poll_tasks(&mut engine, &mut scene_list, &mut Vec::new());
+		crate::core::task::poll_tasks(engine, &mut scene_list, &mut Vec::new());
 		assert!(engine.is_modal_dialog_open());
 		engine.get_input_manager_mut().get_text_input_mut().push_focused_field_event(TextInputEventKind::Key { key: TextInputKey::Enter, is_shift: false });
-		tick_modal_dialog(&mut engine, &measure_fixed_width, 0.016);
-		crate::core::task::poll_tasks(&mut engine, &mut scene_list, &mut Vec::new());
+		tick_modal_dialog(engine, &measure_fixed_width, 0.016);
+		crate::core::task::poll_tasks(engine, &mut scene_list, &mut Vec::new());
 		assert_eq!(*received_text.borrow(), Some(Some(String::from("기본"))));
 	}
 
@@ -1016,19 +1019,19 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn prompt_edit_keys() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		let handle = engine.prompt("", "abc");
 		let key_list = [(TextInputKey::Left, false), (TextInputKey::Right, false), (TextInputKey::Left, true), (TextInputKey::Backspace, false), (TextInputKey::Home, false), (TextInputKey::Delete, false)];
 		for (key, is_shift) in key_list {
 			engine.get_input_manager_mut().get_text_input_mut().push_focused_field_event(TextInputEventKind::Key { key, is_shift });
 		}
-		tick_modal_dialog(&mut engine, &measure_fixed_width, 0.016);
+		tick_modal_dialog(engine, &measure_fixed_width, 0.016);
 		// "abc" 모두 고름 → 왼쪽(맨 앞으로 접음) → 오른쪽 → Shift 왼쪽("a" 고름) → 뒤로 지우기("bc") → 맨 앞 → 앞으로 지우기("c")
 		assert_eq!(engine.get_front_modal_dialog_mut().expect("dialog").get_text(), "c");
 		engine.get_input_manager_mut().get_text_input_mut().push_focused_field_event(TextInputEventKind::Key { key: TextInputKey::SelectAll, is_shift: false });
 		engine.get_input_manager_mut().get_text_input_mut().push_focused_field_event(TextInputEventKind::Commit(String::from("z")));
 		engine.get_input_manager_mut().get_text_input_mut().push_focused_field_event(TextInputEventKind::Key { key: TextInputKey::Enter, is_shift: false });
-		tick_modal_dialog(&mut engine, &measure_fixed_width, 0.016);
+		tick_modal_dialog(engine, &measure_fixed_width, 0.016);
 		assert_eq!(handle.get_prompt_text().as_deref(), Some("z"));
 	}
 }

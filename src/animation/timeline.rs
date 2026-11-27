@@ -1896,14 +1896,14 @@ pub type TimelineImageResolver<'a> = &'a dyn Fn(&str) -> Option<Rc<Image>>;
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn initialize(&mut self, _engine: &mut Engine) {
+/// 	fn initialize(&mut self, _engine: &Engine) {
 /// 		self.timeline = Timeline::load_from_text(INTRO_TIMELINE).unwrap_or_default();
 /// 		let stage_id = self.scene_base.get_root_id();
 /// 		self.timeline.build_stage(self.scene_base.get_node_tree_mut(), stage_id, None);
 /// 		self.timeline.play();
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 /// 		self.scene_base.tick(engine, time_delta);
 /// 		self.timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
 /// 	}
@@ -2044,7 +2044,7 @@ impl Timeline {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&mut self, engine: &mut Engine) {
+	/// 	fn create(&mut self, engine: &Engine) {
 	/// 		let timeline_future = Timeline::load_from_url(engine, "data:application/json,{\"duration\":2,\"loop\":true}");
 	/// 		let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 	/// 			match timeline_future.await {
@@ -2721,7 +2721,7 @@ impl Timeline {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn initialize(&mut self, engine: &mut Engine) {
+	/// 	fn initialize(&mut self, engine: &Engine) {
 	/// 		self.timeline = Timeline::new(Some(json!({
 	/// 			"duration": 2,
 	/// 			"stage": { "nodes": [{ "name": "Hit", "type": "sound", "audio": "tests/assets/audio/wav_s16_stereo.wav" }] },
@@ -2736,7 +2736,7 @@ impl Timeline {
 	/// 		self.timeline.play();
 	/// 	}
 	///
-	/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 	/// 		self.scene_base.tick(engine, time_delta);
 	/// 		self.timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
 	/// 	}

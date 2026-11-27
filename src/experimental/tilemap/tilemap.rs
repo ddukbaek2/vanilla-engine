@@ -522,7 +522,7 @@ struct TilemapDrawState {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn initialize(&mut self, _engine: &mut Engine) {
+/// 	fn initialize(&mut self, _engine: &Engine) {
 /// 		let image = Image::load(std::path::Path::new("terrain.png")).expect("terrain image");
 /// 		let mut tilemap = Tilemap::new();
 /// 		tilemap.set_tile_size(16.0, 16.0);

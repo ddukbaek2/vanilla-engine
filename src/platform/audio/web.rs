@@ -26,7 +26,7 @@
 //! use std::rc::Rc;
 //! use vanilla::{AudioAsset, Engine, EngineConfiguration};
 //!
-//! let mut engine = Engine::new(EngineConfiguration::new());
+//! let engine = Engine::new(EngineConfiguration::new());
 //! let audio_asset = Rc::new(AudioAsset::new());
 //! let audio_load_handle = audio_asset.load_from_asset(&engine, "tests/assets/audio/wav_s16_stereo.wav");
 //! engine.spawn_task(move |_engine_context| async move {

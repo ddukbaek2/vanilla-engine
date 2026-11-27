@@ -215,7 +215,7 @@ impl ImageDescriptionLoadHandle {
 /// ```rust,no_run
 /// use vanilla::{Engine, ImageDescriptionOptions, Material};
 ///
-/// fn load_texture_description(engine: &mut Engine) {
+/// fn load_texture_description(engine: &Engine) {
 /// 	engine.spawn_task(|mut engine_context| async move {
 /// 		let options = ImageDescriptionOptions { is_color_data: true, ..ImageDescriptionOptions::default() };
 /// 		let load_handle = engine_context.with(|engine| Material::load_image_description(engine, "examples/assets/atlas/icons.png", Some(options)));
@@ -616,14 +616,14 @@ impl Material {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&mut self, engine: &mut Engine) {
+	/// 	fn create(&mut self, engine: &Engine) {
 	/// 		let options = ImageDescriptionOptions { is_color_data: true, ..ImageDescriptionOptions::default() };
 	/// 		let load_handle = Material::load_image_description(engine, "examples/assets/atlas/icons.png", Some(options));
 	/// 		self.scene_base.track_load_handle(load_handle.get_load_handle());
 	/// 		self.load_handle = Some(load_handle);
 	/// 	}
 	///
-	/// 	fn initialize(&mut self, _engine: &mut Engine) {
+	/// 	fn initialize(&mut self, _engine: &Engine) {
 	/// 		if let Some(Some(Ok(image_description))) = self.load_handle.as_ref().map(|load_handle| load_handle.get_image_description()) {
 	/// 			assert!(!image_description.bytes.is_empty());
 	/// 		}

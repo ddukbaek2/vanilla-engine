@@ -244,7 +244,7 @@ impl SpriteAtlasLoad {
 /// ```rust
 /// use vanilla::{Engine, EngineConfiguration, SpriteAtlas};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let mut sprite_atlas = SpriteAtlas::new();
 /// let atlas_load_handle = sprite_atlas.load(&engine, "examples/assets/atlas/icons.json");
 /// assert!(atlas_load_handle.is_finished());
@@ -295,7 +295,7 @@ impl IntoFuture for SpriteAtlasLoadHandle {
 /// ```rust
 /// use vanilla::{Engine, EngineConfiguration, SpriteAtlas};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let mut sprite_atlas = SpriteAtlas::new();
 /// sprite_atlas.load(&engine, "examples/assets/atlas/icons.json");
 /// let atlas_load_future = sprite_atlas.wait_for_load();
@@ -779,7 +779,7 @@ mod tests {
 	//==============================================================================
 	/// 시험용 엔진과 쪽 그림 둘. (애셋 폴더를 임시 폴더 하나로)
 	//==============================================================================
-	fn create_test_engine(asset_directory_name: &str) -> (Engine, std::path::PathBuf) {
+	fn create_test_engine(asset_directory_name: &str) -> (&'static Engine, std::path::PathBuf) {
 		let asset_directory_path = std::env::temp_dir().join(asset_directory_name);
 		std::fs::create_dir_all(asset_directory_path.join("atlas")).expect("asset directory");
 		for (page_index, page_width) in [(0, 64u32), (1, 32u32)] {

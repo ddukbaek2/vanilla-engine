@@ -280,11 +280,11 @@ impl Scene for ToonPostScene {
 	//==============================================================================
 	// 바탕을 칠하고 화면 배율을 건다. (3D 판은 노드가 그린다)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		self.scene_base.set_scene_background_color("#000000");
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();

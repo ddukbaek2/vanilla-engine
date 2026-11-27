@@ -326,8 +326,8 @@ impl EngineExtrasScene {
 	//==============================================================================
 	// 카메라 손짓을 가운데 사각형에 걸기.
 	//==============================================================================
-	fn apply_gestures(&mut self, engine: &mut Engine) {
-		self.camera_gestures.update(engine.get_input_manager(), engine.get_view_manager());
+	fn apply_gestures(&mut self, engine: &Engine) {
+		self.camera_gestures.update(&engine.get_input_manager(), &engine.get_view_manager());
 		self.target_rotation += self.camera_gestures.take_rotation().to_degrees();
 		let pan = self.camera_gestures.take_pan();
 		self.target_position = self.target_position.add(pan);
@@ -375,7 +375,7 @@ impl Scene for EngineExtrasScene {
 	//==============================================================================
 	// 생성.
 	//==============================================================================
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.scene_base.set_scene_background_color(BACKGROUND_COLOR);
 		let root_id = self.scene_base.get_root_id();
 		self.scene_base.get_root_mut().set_content_size(Vector2::create(VIEW_WIDTH, VIEW_HEIGHT));
@@ -391,7 +391,7 @@ impl Scene for EngineExtrasScene {
 	//==============================================================================
 	// 주기적 갱신.
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 		let ring_ratio = (self.elapsed_seconds * 0.25).fract();
 		for (ring_index, ring_id) in self.ring_ids.clone().into_iter().enumerate() {
@@ -408,7 +408,7 @@ impl Scene for EngineExtrasScene {
 	//==============================================================================
 	// 이전 출력.
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 }

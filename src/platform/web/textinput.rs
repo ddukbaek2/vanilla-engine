@@ -520,17 +520,19 @@ fn ensure_global_hidden_input_style() -> Result<(), String> {
 //==============================================================================
 /// 프레임 시작. (대기 줄을 엔진으로 옮기고, 포커스를 가진 <input> 의 선택을 폴링한다. 원본 tick 의 selection 폴링)
 //==============================================================================
-pub(super) fn begin_frame(engine: &mut Engine) {
+pub(super) fn begin_frame(engine: &Engine) {
 	DISPOSED_LISTENER_LIST.with(|disposed_cell| {
 		if let Ok(mut disposed_listener_list) = disposed_cell.try_borrow_mut() {
 			disposed_listener_list.clear();
 		}
 	});
 	let pending_event_list = PENDING_EVENT_LIST.with(|pending_event_cell| std::mem::take(&mut *pending_event_cell.borrow_mut()));
-	let text_input = engine.get_input_manager_mut().get_text_input_mut();
+	let mut input_manager = engine.get_input_manager_mut();
+	let text_input = input_manager.get_text_input_mut();
 	if let Some(pointer_click_count) = PENDING_POINTER_CLICK_COUNT.with(|click_count_cell| click_count_cell.take()) {
 		text_input.set_pointer_click_count(pointer_click_count);
 	}
+	drop(input_manager);
 	// 오른쪽 클릭한 필드 자리. (데스크탑 오른쪽 단추처럼 엔진 문맥 메뉴 요청, 필드가 tick 에서 연다)
 	// 캔버스 오른쪽 클릭은 데스크탑처럼 그 mousedown 의 뷰 자리다. (메뉴 왼쪽 위가 누른 자리라 같은 프레임의 누름이 메뉴에 가고 필드에 가지 않는다)
 	if let Some(context_menu_request) = PENDING_CONTEXT_MENU_REQUEST.with(|request_cell| request_cell.take()) {
@@ -544,7 +546,8 @@ pub(super) fn begin_frame(engine: &mut Engine) {
 		};
 		engine.get_input_manager_mut().get_text_input_mut().set_context_menu_request_position(Some(view_position));
 	}
-	let text_input = engine.get_input_manager_mut().get_text_input_mut();
+	let mut input_manager = engine.get_input_manager_mut();
+	let text_input = input_manager.get_text_input_mut();
 	WEB_TEXT_INPUT.with(|state_cell| {
 		let mut web_text_input_state = state_cell.borrow_mut();
 		for pending_event in pending_event_list {
@@ -661,6 +664,7 @@ pub(super) fn apply_frame(engine: &Engine) {
 	let view_manager = engine.get_view_manager();
 	let target_resolution_scale = view_manager.get_target_resolution_scale();
 	let view_native_rect = view_manager.get_view_native_rect();
+	drop(view_manager);
 	let menu_canvas_rect_list: Vec<crate::base::rect::Rect> = engine.get_input_manager().get_text_input().get_published_menu_rects().iter().map(|menu_rect| {
 		crate::base::rect::Rect::create(menu_rect.position.x * target_resolution_scale + view_native_rect.position.x, menu_rect.position.y * target_resolution_scale + view_native_rect.position.y, menu_rect.size.x * target_resolution_scale, menu_rect.size.y * target_resolution_scale)
 	}).collect();

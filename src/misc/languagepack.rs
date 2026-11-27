@@ -125,10 +125,10 @@ impl LanguageEntry {
 }
 
 /// 언어를 불러온 뒤 부르는 함수. (엔진, 언어 한 줄, 그 언어의 모든 글자)
-pub type LanguageLoadedHandler = Box<dyn FnMut(&mut Engine, &LanguageEntry, &str)>;
+pub type LanguageLoadedHandler = Box<dyn FnMut(&Engine, &LanguageEntry, &str)>;
 
 /// 언어를 불러온 뒤 부르는 async 함수. (원본처럼 돌려준 퓨처가 끝날 때까지 apply_language_setting 이 끝나지 않는다)
-pub type LanguageLoadedAsyncHandler = Box<dyn FnMut(&mut Engine, &LanguageEntry, &str) -> Pin<Box<dyn Future<Output = ()>>>>;
+pub type LanguageLoadedAsyncHandler = Box<dyn FnMut(&Engine, &LanguageEntry, &str) -> Pin<Box<dyn Future<Output = ()>>>>;
 
 //==============================================================================
 /// 언어 불러오기 손잡이. (load_language_list, load_language, apply_language_setting 이 돌려준다. 원본 async 함수의 Promise 자리)
@@ -147,7 +147,7 @@ pub type LanguageLoadedAsyncHandler = Box<dyn FnMut(&mut Engine, &LanguageEntry,
 /// std::fs::write(asset_directory_path.join("localization/en.json"), r#"{ "greeting": "Hello" }"#).unwrap();
 /// let mut engine_configuration = EngineConfiguration::new();
 /// engine_configuration.asset_directory_paths = vec![asset_directory_path.clone()];
-/// let mut engine = Engine::new(engine_configuration);
+/// let engine = Engine::new(engine_configuration);
 /// languagepack::set_language_paths("localization/languages.json", "localization/");
 ///
 /// let is_loaded = Rc::new(Cell::new(false));
@@ -175,7 +175,7 @@ pub struct LanguageLoadHandle;
 /// use std::rc::Rc;
 /// use vanilla::{languagepack, Engine, EngineConfiguration};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let is_finished = Rc::new(Cell::new(false));
 /// let is_finished_for_task = is_finished.clone();
 /// engine.spawn_task(move |_engine_context| async move {
@@ -343,7 +343,7 @@ fn apply_language_list_object(object: &serde_json::Map<String, serde_json::Value
 /// # 돌려줌
 /// await 할 수 있는 불러오기 손잡이.
 //==============================================================================
-pub fn load_language_list(engine: &mut Engine) -> LanguageLoadHandle {
+pub fn load_language_list(engine: &Engine) -> LanguageLoadHandle {
 	let language_list_path = with_state(|state| {
 		if state.language_list.is_some() || state.language_list_handle.is_some() {
 			return None;
@@ -526,7 +526,7 @@ pub fn resolve_language_code(setting_language_code: &str) -> String {
 /// # 돌려줌
 /// await 할 수 있는 불러오기 손잡이.
 //==============================================================================
-pub fn load_language(engine: &mut Engine, language_code: &str) -> LanguageLoadHandle {
+pub fn load_language(engine: &Engine, language_code: &str) -> LanguageLoadHandle {
 	start_language_load(engine, language_code, false)
 }
 
@@ -553,28 +553,28 @@ pub fn load_language(engine: &mut Engine, language_code: &str) -> LanguageLoadHa
 /// std::fs::write(asset_directory_path.join("localization/en.json"), r#"{ "greeting": "Hello" }"#).unwrap();
 /// let mut engine_configuration = EngineConfiguration::new();
 /// engine_configuration.asset_directory_paths = vec![asset_directory_path.clone()];
-/// let mut engine = Engine::new(engine_configuration);
+/// let engine = Engine::new(engine_configuration);
 /// languagepack::set_language_paths("localization/languages.json", "localization/");
 ///
 /// let loaded_text = Rc::new(RefCell::new(String::new()));
 /// let loaded_text_for_handler = loaded_text.clone();
-/// languagepack::set_language_loaded_handler(Some(Box::new(move |_engine: &mut Engine, language: &LanguageEntry, all_texts: &str| {
+/// languagepack::set_language_loaded_handler(Some(Box::new(move |_engine: &Engine, language: &LanguageEntry, all_texts: &str| {
 /// 	*loaded_text_for_handler.borrow_mut() = format!("{} {}", language.code, all_texts);
 /// })));
-/// languagepack::apply_language_setting(&mut engine, "en");
+/// languagepack::apply_language_setting(engine, "en");
 /// assert!(!languagepack::is_loading());
 /// assert_eq!(*loaded_text.borrow(), "en Hello");
 /// std::fs::remove_dir_all(&asset_directory_path).unwrap();
 /// ```
 //==============================================================================
-pub fn apply_language_setting(engine: &mut Engine, setting_language_code: &str) -> LanguageLoadHandle {
+pub fn apply_language_setting(engine: &Engine, setting_language_code: &str) -> LanguageLoadHandle {
 	start_language_load(engine, setting_language_code, true)
 }
 
 //==============================================================================
 /// 언어 불러오기 시작. (목록을 먼저 받는다)
 //==============================================================================
-fn start_language_load(engine: &mut Engine, language_code: &str, is_setting: bool) -> LanguageLoadHandle {
+fn start_language_load(engine: &Engine, language_code: &str, is_setting: bool) -> LanguageLoadHandle {
 	with_state(|state| {
 		state.pending_load = Some(PendingLanguageLoad {
 			setting_language_code: language_code.to_string(),
@@ -594,7 +594,7 @@ fn start_language_load(engine: &mut Engine, language_code: &str, is_setting: boo
 /// # 인자
 /// - `engine`: 애셋 손잡이를 받고 불러온 뒤 함수에 넘길 엔진.
 //==============================================================================
-pub fn update(engine: &mut Engine) {
+pub fn update(engine: &Engine) {
 	// 목록.
 	let list_bytes = with_state(|state| {
 		let load_handle = state.language_list_handle.as_ref()?;
@@ -765,7 +765,7 @@ pub fn update(engine: &mut Engine) {
 //==============================================================================
 /// 페이지의 언어와 제목을 지금 언어로. (원본 applyDocumentLanguage: html 의 lang 과 탭의 제목, 데스크탑은 엔진이 든 문서 언어와 창 제목)
 //==============================================================================
-fn apply_document_language(engine: &mut Engine, language: &LanguageEntry) {
+fn apply_document_language(engine: &Engine, language: &LanguageEntry) {
 	Document::set_language(&language.code);
 	let document_title_key = with_state(|state| state.document_title_key.clone());
 	if document_title_key.is_empty() {
@@ -1136,7 +1136,7 @@ pub fn set_language_loaded_handler(handler: Option<LanguageLoadedHandler>) {
 /// ```rust
 /// use vanilla::{languagepack, wait, Engine, LanguageEntry};
 ///
-/// languagepack::set_language_loaded_async_handler(Some(Box::new(|_engine: &mut Engine, _language: &LanguageEntry, _all_texts: &str| {
+/// languagepack::set_language_loaded_async_handler(Some(Box::new(|_engine: &Engine, _language: &LanguageEntry, _all_texts: &str| {
 /// 	Box::pin(async move {
 /// 		wait::seconds(0.5).await;
 /// 	})
@@ -1218,11 +1218,11 @@ mod tests {
 		let mut engine_configuration = crate::core::engine::EngineConfiguration::new();
 		engine_configuration.asset_directory_paths = vec![asset_directory_path.clone()];
 		engine_configuration.document_language = String::from("en");
-		let mut engine = Engine::new(engine_configuration);
+		let engine = Engine::new(engine_configuration);
 		assert_eq!(Document::get_language(), "en");
 		set_language_paths("localization/languages.json", "localization/");
-		load_language(&mut engine, "zh-Hant");
-		update(&mut engine);
+		load_language(engine, "zh-Hant");
+		update(engine);
 		assert!(!is_loading());
 		assert_eq!(read_language_code(), "zh-Hant");
 		assert_eq!(Document::get_language(), "zh-Hant");
@@ -1245,13 +1245,13 @@ mod tests {
 		std::fs::write(asset_directory_path.join("localization").join("en.json"), r#"{ "greeting": "Hello" }"#).expect("en");
 		let mut engine_configuration = EngineConfiguration::new();
 		engine_configuration.asset_directory_paths = vec![asset_directory_path];
-		let mut engine = Engine::new(engine_configuration);
+		let engine = Engine::new(engine_configuration);
 		set_language_paths("localization/languages.json", "localization/");
 		let (handler_promise, handler_resolver) = Promise::<()>::create();
 		let handler_promise = Rc::new(std::cell::RefCell::new(Some(handler_promise)));
 		let handler_called_texts = Rc::new(std::cell::RefCell::new(String::new()));
 		let handler_called_texts_inner = handler_called_texts.clone();
-		set_language_loaded_async_handler(Some(Box::new(move |_engine: &mut Engine, language: &LanguageEntry, _all_texts: &str| {
+		set_language_loaded_async_handler(Some(Box::new(move |_engine: &Engine, language: &LanguageEntry, _all_texts: &str| {
 			*handler_called_texts_inner.borrow_mut() = format!("{} {}", language.code, translate("greeting"));
 			let handler_promise = handler_promise.borrow_mut().take();
 			Box::pin(async move {
@@ -1269,10 +1269,10 @@ mod tests {
 		let mut scene_list: Vec<Box<dyn crate::core::scene::Scene>> = Vec::new();
 		assert_eq!(*handler_called_texts.borrow(), "en Hello");
 		assert!(is_loading());
-		crate::core::task::poll_tasks(&mut engine, &mut scene_list, &mut Vec::new());
+		crate::core::task::poll_tasks(engine, &mut scene_list, &mut Vec::new());
 		assert!(!is_applied.get());
 		handler_resolver.resolve(());
-		crate::core::task::poll_tasks(&mut engine, &mut scene_list, &mut Vec::new());
+		crate::core::task::poll_tasks(engine, &mut scene_list, &mut Vec::new());
 		assert!(is_applied.get());
 		assert!(!is_loading());
 		set_language_loaded_async_handler(None);

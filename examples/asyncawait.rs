@@ -7,7 +7,7 @@
 //   아이콘을 한 프레임씩 옮기고(wait::next_frame), 화면이 어두운 동안 아이콘을 바꾼다(fade_screen_async). 페이드가 끝나기는 Promise 로 기다린다.
 //   await 다음 줄은 scene_context.with(|씬, 엔진| ...) 안에서 씬과 엔진을 만진다. (원본 async 함수 안의 this 자리)
 // - 원본 JS 와 나란히:
-//     async loadAssets() {                                   fn load_assets(&mut self, engine: &mut Engine) {
+//     async loadAssets() {                                   fn load_assets(&mut self, engine: &Engine) {
 //         await super.loadAssets();                              let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 //         await this.atlas.load("atlas/icons.json");                 scene_context.with(|scene, engine| scene.sprite_atlas.load(engine, "atlas/icons.json")).await;
 //         await Wait.seconds(0.5);                                   wait::seconds(0.5).await;
@@ -186,7 +186,7 @@ impl GameScene for AsyncAwaitScene {
 	//==============================================================================
 	// 불러오기. (원본 async loadAssets: 아틀라스를 await 로 받고 0.5초 쉰다. 맡긴 작업이 끝나야 initialize 가 불린다)
 	//==============================================================================
-	fn load_assets(&mut self, engine: &mut Engine) {
+	fn load_assets(&mut self, engine: &Engine) {
 		let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 			scene_context.with(|scene, engine| scene.sprite_atlas.load(engine, "atlas/icons.json")).await;
 			wait::seconds(0.5).await;
@@ -197,7 +197,7 @@ impl GameScene for AsyncAwaitScene {
 	//==============================================================================
 	// 초기화. (노드를 만들고, 원본 async 함수처럼 차례로 도는 이야기 작업을 맡긴다)
 	//==============================================================================
-	fn initialize(&mut self, engine: &mut Engine) {
+	fn initialize(&mut self, engine: &Engine) {
 		self.create_nodes();
 		engine.spawn_scene_task(self, |mut scene_context| async move {
 			let mut round = 0;

@@ -218,7 +218,7 @@ thread_local! {
 /// # 돌려줌
 /// 지은 그래픽. (못 지으면 None)
 //==============================================================================
-pub(crate) fn prepare_graphic(engine: &mut Engine) -> Option<Graphic> {
+pub(crate) fn prepare_graphic(engine: &Engine) -> Option<Graphic> {
 	if std::thread::current().name() != Some("main") {
 		return None;
 	}
@@ -237,12 +237,12 @@ pub(crate) fn prepare_graphic(engine: &mut Engine) -> Option<Graphic> {
 			// 앞서 버린 엔진이 지은 창이 남았으면 그 컨텍스트에 그래픽만 새로 짓는다.
 			Some(window_state) => {
 				let graphic = create_graphic(&window_state.context.display(), engine.get_engine_configuration().preserve_drawing_buffer).ok()?;
-				engine.platform_window = Some(window_state.window.clone());
+				*engine.platform_window.borrow_mut() = Some(window_state.window.clone());
 				Some(graphic)
 			}
 			None => {
 				let (window_state, graphic) = create_window_state(WindowEventLoop::EventLoop(&prepared_desktop.event_loop), engine, false).ok()?;
-				engine.platform_window = Some(window_state.window.clone());
+				*engine.platform_window.borrow_mut() = Some(window_state.window.clone());
 				prepared_desktop.window_state = Some(window_state);
 				Some(graphic)
 			}
@@ -951,7 +951,7 @@ impl DesktopApplication {
 			windowsplatform::install_power_broadcast_hook(&window);
 			self.virtual_keyboard_controller = windowsinputpane::VirtualKeyboardController::new(&window);
 		}
-		self.engine_runner.engine.platform_window = Some(window);
+		*self.engine_runner.engine.platform_window.borrow_mut() = Some(window);
 		self.window_state = Some(window_state);
 		self.resize();
 		Ok(())
@@ -982,6 +982,7 @@ impl DesktopApplication {
 		let is_auto_resize = engine_configuration.auto_resize_on_window_resize;
 		let is_virtual_keyboard_ignored = engine_configuration.ignore_virtual_keyboard_resize;
 		let max_canvas_aspect_ratio = engine_configuration.max_canvas_aspect_ratio;
+		drop(engine_configuration);
 		let is_text_field_focused = self.engine_runner.engine.get_input_manager().get_text_input().get_active_field_state().map(|field_state| field_state.use_dominput).unwrap_or(false);
 		let (canvas_left, canvas_top, canvas_width, canvas_height) = if is_auto_resize {
 			// 원본 engine.resize: visualViewport 크기에 맞춘다. (창 안쪽에서 화면 키보드가 가린 아래를 뺀 것)
@@ -1014,11 +1015,12 @@ impl DesktopApplication {
 		CANVAS_CLIENT_POSITION.with(|canvas_client_position| canvas_client_position.set(Vector2::create(canvas_left, canvas_top)));
 		self.canvas_physical_rect = [(canvas_left * scale_factor).round() as i32, (canvas_top * scale_factor).round() as i32, (canvas_width * scale_factor).round() as i32, (canvas_height * scale_factor).round() as i32];
 		// 렌더 배율 상한을 넘으면 그 배율로 줄인 크기로 그린다. (웹 캔버스 드로잉 버퍼와 같은 셈)
-		let view_manager = self.engine_runner.engine.get_view_manager_mut();
+		let mut view_manager = self.engine_runner.engine.get_view_manager_mut();
 		let render_pixel_ratio = view_manager.limit_render_pixel_ratio(scale_factor);
 		let render_width = ((canvas_width * render_pixel_ratio).round() as u32).max(1);
 		let render_height = ((canvas_height * render_pixel_ratio).round() as u32).max(1);
 		view_manager.calculate_view_rect(render_width, render_height, render_pixel_ratio);
+		drop(view_manager);
 		self.window_scale_factor = scale_factor;
 		self.engine_runner.notify_scene_resize();
 	}
@@ -1120,7 +1122,7 @@ impl DesktopApplication {
 		let engine = &mut self.engine_runner.engine;
 		let canvas_native_input_position = Vector2::create(physical_x / window_scale_factor - canvas_client_position.x, physical_y / window_scale_factor - canvas_client_position.y);
 		let view_input_position = engine.get_view_manager().canvas_position_to_view_position(canvas_native_input_position);
-		let input_manager = engine.get_input_manager_mut();
+		let mut input_manager = engine.get_input_manager_mut();
 		input_manager.set_canvas_native_input_position(canvas_native_input_position);
 		input_manager.set_view_input_position(view_input_position);
 	}
@@ -1134,8 +1136,10 @@ impl DesktopApplication {
 		let canvas_native_position = Vector2::create(touch.location.x / window_scale_factor - canvas_client_position.x, touch.location.y / window_scale_factor - canvas_client_position.y);
 		let view_position = self.engine_runner.engine.get_view_manager().canvas_position_to_view_position(canvas_native_position);
 		let identifier = touch.id as i64;
-		let touch_points = self.engine_runner.engine.get_input_manager().get_touch_points();
+		let input_manager = self.engine_runner.engine.get_input_manager();
+		let touch_points = input_manager.get_touch_points();
 		let is_first_finger = touch_points.is_empty() || touch_points[0].identifier == identifier;
+		drop(input_manager);
 		#[cfg(target_os = "windows")]
 		if touch.phase == TouchPhase::Started {
 			self.touch_started_position = Some(Vector2::create(touch.location.x as f64 / window_scale_factor, touch.location.y as f64 / window_scale_factor));
@@ -1143,7 +1147,7 @@ impl DesktopApplication {
 		if is_first_finger {
 			self.update_input_position(touch.location.x, touch.location.y);
 		}
-		let input_manager = self.engine_runner.engine.get_input_manager_mut();
+		let mut input_manager = self.engine_runner.engine.get_input_manager_mut();
 		match touch.phase {
 			TouchPhase::Started => {
 				input_manager.begin_touch_point(identifier, canvas_native_position, view_position);
@@ -1198,11 +1202,11 @@ impl DesktopApplication {
 		let virtual_keyboard_inset = read_virtual_keyboard_inset();
 		if virtual_keyboard_inset != self.virtual_keyboard_inset {
 			self.virtual_keyboard_inset = virtual_keyboard_inset;
-			self.engine_runner.engine.is_resize_requested = true;
+			self.engine_runner.engine.is_resize_requested.set(true);
 		}
 		// 렌더 배율 상한을 바꿨으면 프레임 머리에서 창 크기 바뀜과 같은 길로 맞춘다. (원본 Engine 의 isViewRectPending, 그리는 중에 바꾸면 그 프레임이 까맣다)
-		if self.engine_runner.engine.get_view_manager().is_view_rect_pending() || self.engine_runner.engine.is_resize_requested {
-			self.engine_runner.engine.is_resize_requested = false;
+		if self.engine_runner.engine.get_view_manager().is_view_rect_pending() || self.engine_runner.engine.is_resize_requested.get() {
+			self.engine_runner.engine.is_resize_requested.set(false);
 			self.resize();
 		}
 		self.restore_preserved_drawing_buffer();
@@ -1434,7 +1438,7 @@ impl ApplicationHandler for DesktopApplication {
 			WindowEvent::Focused(is_focused) => {
 				// 원본처럼 창이 포커스를 잃으면 누르던 것을 뗀 것으로 넘긴다.
 				if !is_focused {
-					let input_manager = self.engine_runner.engine.get_input_manager_mut();
+					let mut input_manager = self.engine_runner.engine.get_input_manager_mut();
 					input_manager.clear();
 					input_manager.set_touch_released(true);
 				}
@@ -1457,7 +1461,7 @@ impl ApplicationHandler for DesktopApplication {
 			WindowEvent::KeyboardInput { event: key_event, .. } => {
 				if let PhysicalKey::Code(key_code) = key_event.physical_key {
 					let key = convert_key_code_to_code_name(key_code);
-					let input_manager = self.engine_runner.engine.get_input_manager_mut();
+					let mut input_manager = self.engine_runner.engine.get_input_manager_mut();
 					match key_event.state {
 						ElementState::Pressed => {
 							input_manager.push_key(&key);
@@ -1478,7 +1482,7 @@ impl ApplicationHandler for DesktopApplication {
 			}
 			WindowEvent::CursorMoved { position, .. } => {
 				self.update_input_position(position.x, position.y);
-				let input_manager = self.engine_runner.engine.get_input_manager_mut();
+				let mut input_manager = self.engine_runner.engine.get_input_manager_mut();
 				input_manager.set_touch_input(false);
 				input_manager.set_last_input_device(InputDevice::Mouse);
 			}
@@ -1497,7 +1501,7 @@ impl ApplicationHandler for DesktopApplication {
 						return;
 					}
 				};
-				let input_manager = self.engine_runner.engine.get_input_manager_mut();
+				let mut input_manager = self.engine_runner.engine.get_input_manager_mut();
 				input_manager.set_mouse_button_down(engine_mouse_button, state == ElementState::Pressed);
 				input_manager.set_touch_input(false);
 				input_manager.set_last_input_device(InputDevice::Mouse);
@@ -1528,7 +1532,7 @@ impl ApplicationHandler for DesktopApplication {
 				self.handle_touch(touch);
 			}
 			WindowEvent::MouseWheel { delta, .. } => {
-				let input_manager = self.engine_runner.engine.get_input_manager_mut();
+				let mut input_manager = self.engine_runner.engine.get_input_manager_mut();
 				let is_ctrl_pressed = input_manager.is_key_pressed("ControlLeft") || input_manager.is_key_pressed("ControlRight");
 				input_manager.set_wheel_with_ctrl(is_ctrl_pressed);
 				input_manager.set_last_input_device(InputDevice::Mouse);

@@ -118,7 +118,7 @@ impl UIView {
 	/// 전역 엔진, 못 꺼내면 그 까닭.
 	//==============================================================================
 	#[reflect(skip)]
-	pub fn get_engine(&self) -> Result<crate::core::globalengine::EngineRef, crate::core::globalengine::EngineAccessError> {
+	pub fn get_engine(&self) -> Result<&'static crate::core::engine::Engine, crate::core::globalengine::EngineAccessError> {
 		crate::core::globalengine::get_global_engine()
 	}
 

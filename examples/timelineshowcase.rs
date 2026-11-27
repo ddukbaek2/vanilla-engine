@@ -168,7 +168,7 @@ impl Scene for TimelineShowcaseScene {
 	//==============================================================================
 	// 생성. (로딩 화면을 시작하고 문서와 그림을 요청해 맡긴다)
 	//==============================================================================
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.game_scene_base.set_view_scale_mode(ViewScaleMode::StretchShort, None);
 		self.game_scene_base.set_loading_min_duration_ms(0.0);
 		self.game_scene_base.set_scene_background_color(Color::create_from_hex("#14171e"));
@@ -190,14 +190,14 @@ impl Scene for TimelineShowcaseScene {
 	//==============================================================================
 	// 로딩 화면.
 	//==============================================================================
-	fn draw_on_load(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.game_scene_base.draw_on_load(engine, graphic);
 	}
 
 	//==============================================================================
 	// 초기화. (머리 글, 무대, 모드마다 무대 뿌리와 타임라인)
 	//==============================================================================
-	fn initialize(&mut self, engine: &mut Engine) {
+	fn initialize(&mut self, engine: &Engine) {
 		self.game_scene_base.initialize(engine);
 		let safe_area_id = self.game_scene_base.get_safe_area_node_id().expect("safe area node");
 		let mut image_table: HashMap<String, Rc<Image>> = HashMap::new();
@@ -288,7 +288,7 @@ impl Scene for TimelineShowcaseScene {
 	//==============================================================================
 	// 화면 크기 변경.
 	//==============================================================================
-	fn resize(&mut self, engine: &mut Engine, canvas_native_size: Vector2) {
+	fn resize(&mut self, engine: &Engine, canvas_native_size: Vector2) {
 		self.game_scene_base.resize(engine, canvas_native_size);
 		self.layout();
 	}
@@ -296,7 +296,7 @@ impl Scene for TimelineShowcaseScene {
 	//==============================================================================
 	// 갱신. (노드 / 터치 / 레이아웃 → 타임라인 → 화면 효과, 150 프레임마다 또는 누르면 다음 문서)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, _time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, _time_delta: f64) {
 		if self.game_scene_base.tick(engine, TIMELINE_FRAME_STEP) {
 			self.layout();
 		}
@@ -323,7 +323,7 @@ impl Scene for TimelineShowcaseScene {
 	//==============================================================================
 	// 이전 출력. (화면 효과 시작 → 배경)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.screen_effect.borrow_mut().begin(graphic);
 		self.game_scene_base.pre_draw(engine, graphic);
 	}
@@ -331,7 +331,7 @@ impl Scene for TimelineShowcaseScene {
 	//==============================================================================
 	// 이후 출력. (화면 효과 끝)
 	//==============================================================================
-	fn post_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		let view_size = engine.get_view_manager().get_view_size();
 		self.indicator.set_position(view_size.x - 40.0, 36.0);
 		self.indicator.draw(graphic);
@@ -341,7 +341,7 @@ impl Scene for TimelineShowcaseScene {
 	//==============================================================================
 	// 해제.
 	//==============================================================================
-	fn destroy(&mut self, _engine: &mut Engine) {
+	fn destroy(&mut self, _engine: &Engine) {
 	}
 }
 

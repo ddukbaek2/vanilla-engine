@@ -186,7 +186,7 @@ struct AssetLoaderState {
 /// ```rust
 /// use vanilla::{Asset, AssetLoader, Engine, EngineConfiguration};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let asset_loader = AssetLoader::new();
 /// let json_asset = asset_loader.add_json("examples/assets/atlas/icons.json");
 /// asset_loader.add_text("examples/assets/missing.txt");
@@ -228,7 +228,7 @@ impl IntoFuture for AssetLoaderLoadHandle {
 /// ```rust
 /// use vanilla::{AssetLoader, Engine, EngineConfiguration};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let asset_loader = AssetLoader::new();
 /// let mut image_asset = asset_loader.add_image("examples/assets/atlas/icons.png");
 /// asset_loader.load(&engine);
@@ -436,7 +436,7 @@ impl AssetLoader {
 	/// # 돌려줌
 	/// 글꼴 바이트의 읽기 손잡이. (차례가 오면 받는다, 못 받으면 실패로 끝난다)
 	//==============================================================================
-	pub fn add_font(&self, engine: &mut Engine, family: &str, path: &str, font_face_descriptors: FontFaceDescriptors) -> AssetLoadHandle {
+	pub fn add_font(&self, engine: &Engine, family: &str, path: &str, font_face_descriptors: FontFaceDescriptors) -> AssetLoadHandle {
 		let load_handle = self.add_entry(path, AssetLoaderEntryKind::Bytes);
 		engine.register_font_face_when_loaded(family, font_face_descriptors, load_handle.clone());
 		load_handle
@@ -889,7 +889,7 @@ mod tests {
 	//==============================================================================
 	/// 시험용 엔진. (애셋 폴더를 임시 폴더 하나로)
 	//==============================================================================
-	fn create_test_engine(asset_directory_name: &str) -> (Engine, std::path::PathBuf) {
+	fn create_test_engine(asset_directory_name: &str) -> (&'static Engine, std::path::PathBuf) {
 		let asset_directory_path = std::env::temp_dir().join(format!("{}-{}", asset_directory_name, std::process::id()));
 		std::fs::create_dir_all(&asset_directory_path).expect("asset directory");
 		let mut engine_configuration = EngineConfiguration::new();
@@ -902,7 +902,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn load_fills_assets_and_reports_failures() {
-		let (mut engine, asset_directory_path) = create_test_engine("vanillaAssetLoaderTest");
+		let (engine, asset_directory_path) = create_test_engine("vanillaAssetLoaderTest");
 		std::fs::write(asset_directory_path.join("hello.txt"), "안녕 vanilla").expect("text file");
 		std::fs::write(asset_directory_path.join("data.json"), "{\"count\": 3}").expect("json file");
 		std::fs::write(asset_directory_path.join("data.bin"), [1u8, 2, 3]).expect("blob file");
@@ -914,7 +914,7 @@ mod tests {
 		let mut broken_json_asset = asset_loader.add_json("broken.json");
 		let blob_asset = asset_loader.add_blob("data.bin");
 		let missing_image_asset = asset_loader.add_image("missing.png");
-		let font_handle = asset_loader.add_font(&mut engine, "MissingFont", "missing.ttf", FontFaceDescriptors::create_with_bold(true));
+		let font_handle = asset_loader.add_font(engine, "MissingFont", "missing.ttf", FontFaceDescriptors::create_with_bold(true));
 		let external_handle = AssetLoadHandle::create_pending("external");
 		asset_loader.add_load_handle(&external_handle);
 		let progress_call_count = Rc::new(Cell::new(0));

@@ -98,7 +98,7 @@ impl std::fmt::Debug for AudioLoadHandle {
 /// use std::rc::Rc;
 /// use vanilla::{AudioAsset, Engine, EngineConfiguration};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// let audio_asset = Rc::new(AudioAsset::new());
 /// audio_asset.load(Path::new("tests/assets/audio/wav_s16_stereo.wav"));
 /// let audio_load_future = audio_asset.wait_for_load();

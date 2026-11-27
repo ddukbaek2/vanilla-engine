@@ -311,7 +311,7 @@ impl Scene for ModelViewerScene {
 	//==============================================================================
 	// 생성. (모델 받기 부탁, 데스크탑은 그 자리에서 읽힌다. 받기 손잡이를 맡겨 다 받은 뒤 initialize)
 	//==============================================================================
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		let female_mannequin_load_handle = SkinnedModel::load_from_url(engine, "mannequin_female.glb");
 		let fox_load_handle = SkinnedModel::load_from_url(engine, "fox.glb");
 		let mannequin_load_handle = SkinnedModel::load_from_fbx_url(engine, "mannequin.fbx");
@@ -326,7 +326,7 @@ impl Scene for ModelViewerScene {
 	//==============================================================================
 	// 초기화. (맡긴 모델을 다 받은 뒤, GL 리소스와 모델을 엔진의 그래픽으로 만든다)
 	//==============================================================================
-	fn initialize(&mut self, engine: &mut Engine) {
+	fn initialize(&mut self, engine: &Engine) {
 		let graphic = match engine.get_graphic() {
 			Some(graphic) => {
 				graphic
@@ -355,7 +355,7 @@ impl Scene for ModelViewerScene {
 	//==============================================================================
 	// 갱신. (클립 바꾸기 + 모델 포즈 계산, 정해진 시각에 끝내기)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, _time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, _time_delta: f64) {
 		let delta_time = FIXED_TIME_STEP;
 		self.elapsed_time += delta_time;
 		if self.elapsed_time >= EXIT_SECONDS {
@@ -392,7 +392,7 @@ impl Scene for ModelViewerScene {
 	//==============================================================================
 	// 3D 출력. (2D 묶음 내보내기 → 3D 패스 → 2D 상태 복구)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		graphic.flush_batch();
 		let canvas_pixel_size = engine.get_view_manager().get_canvas_pixel_size();
 		let elapsed_time = self.elapsed_time;
@@ -407,7 +407,7 @@ impl Scene for ModelViewerScene {
 	//==============================================================================
 	// 2D HUD 출력. (3D 위에 반투명 판과 글)
 	//==============================================================================
-	fn draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		engine.get_view_manager().apply_canvas_native_rect(graphic);
 		let mut line_list = vec![String::from("바닐라엔진 graphics3d modelviewer")];
 		match &self.resources {

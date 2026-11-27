@@ -906,7 +906,7 @@ impl AnimationLoad {
 /// use std::rc::Rc;
 /// use vanilla::{Engine, SkinnedModel};
 ///
-/// fn add_walk_clip(engine: &mut Engine, skinned_model: Rc<RefCell<SkinnedModel>>) {
+/// fn add_walk_clip(engine: &Engine, skinned_model: Rc<RefCell<SkinnedModel>>) {
 /// 	let animation_load_handle = skinned_model.borrow_mut().add_animations_from_fbx_url(engine, "anims/walk.fbx", "Walk", true);
 /// 	engine.spawn_task(move |_engine_context| async move {
 /// 		if animation_load_handle.await.is_ok() {
@@ -961,7 +961,7 @@ impl std::fmt::Debug for AnimationLoadHandle {
 /// use std::future::IntoFuture;
 /// use vanilla::{AnimationLoadFuture, Engine, SkinnedModel};
 ///
-/// fn request_idle_clip(engine: &mut Engine, skinned_model: &mut SkinnedModel) {
+/// fn request_idle_clip(engine: &Engine, skinned_model: &mut SkinnedModel) {
 /// 	let animation_load_future: AnimationLoadFuture = skinned_model.add_animations_from_fbx_url(engine, "anims/idle.fbx", "Idle", false).into_future();
 /// 	engine.spawn_task(move |_engine_context| async move {
 /// 		if let Err(error_message) = animation_load_future.await {
@@ -1127,20 +1127,20 @@ fn register_loaded_model(asset_key: &str, model_result: Result<SkinnedModel, Str
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn create(&mut self, engine: &mut Engine) {
+/// 	fn create(&mut self, engine: &Engine) {
 /// 		let model_load_handle = SkinnedModel::load_from_url(engine, "fox.glb");
 /// 		self.scene_base.track_load_handle(model_load_handle.get_load_handle());
 /// 		self.model_load_handle = Some(model_load_handle);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 /// 		self.scene_base.tick(engine, time_delta);
 /// 		if let Some(skinned_model) = &mut self.skinned_model {
 /// 			skinned_model.update(time_delta);
 /// 		}
 /// 	}
 ///
-/// 	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+/// 	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 /// 		let gl = graphic.get_gl();
 /// 		if self.skinned_model_renderer.is_none() {
 /// 			self.skinned_model_renderer = SkinnedModelRenderer::new(gl, None, None).ok();
@@ -1472,7 +1472,7 @@ impl SkinnedModel {
 	/// use std::rc::Rc;
 	/// use vanilla::{Engine, SkinnedModel, SkinnedModelRenderer};
 	///
-	/// fn start_model_load(engine: &mut Engine, skinned_model_renderer: &SkinnedModelRenderer, model_slot: Rc<RefCell<Option<SkinnedModel>>>) {
+	/// fn start_model_load(engine: &Engine, skinned_model_renderer: &SkinnedModelRenderer, model_slot: Rc<RefCell<Option<SkinnedModel>>>) {
 	/// 	let model_future = SkinnedModel::load_from_url_async(engine, "fox.glb", skinned_model_renderer);
 	/// 	engine.spawn_task(move |_engine_context| async move {
 	/// 		match model_future.await {

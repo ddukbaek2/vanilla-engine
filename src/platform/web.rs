@@ -576,7 +576,7 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 	add_audio_listeners(&web_application_cell)?;
 	add_page_listeners(&web_application_cell)?;
 	add_context_listeners(&web_application_cell)?;
-	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.clone();
+	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.borrow().clone();
 	if let Some(canvas) = canvas {
 		textinput::add_text_input_listeners(&canvas)?;
 	}
@@ -635,7 +635,7 @@ fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) ->
 	let key_down_callback: Closure<dyn FnMut(web_sys::KeyboardEvent)> = Closure::new(move |keyboard_event: web_sys::KeyboardEvent| {
 		dispatch_web_event(&web_application_cell_for_key_down, move |web_application| {
 			let key_code = keyboard_event.code();
-			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+			let mut input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			// 막을 키의 브라우저 기본 동작. (되풀이도 막는다, 글자 입력칸에 쓰는 중이면 그대로)
 			if input_manager.is_key_prevented(&key_code) && !input_manager.is_typing_in_text_field() {
 				keyboard_event.prevent_default();
@@ -658,7 +658,7 @@ fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) ->
 	let blur_callback: Closure<dyn FnMut()> = Closure::new(move || {
 		// 원본처럼 창이 포커스를 잃으면 키, 마우스 단추, 손가락 눌림을 모두 놓고 터치는 뗀 것으로 넘긴다. (keyup, mouseup 이 오지 않는다)
 		dispatch_web_event(&web_application_cell_for_blur, |web_application| {
-			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+			let mut input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			input_manager.clear();
 			input_manager.set_touch_released(true);
 		});
@@ -688,7 +688,7 @@ const MOUSE_DEVICE_MOVE_THRESHOLD: i32 = 6;
 //==============================================================================
 fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
-	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.clone().ok_or_else(|| String::from("캔버스 없음"))?;
+	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.borrow().clone().ok_or_else(|| String::from("캔버스 없음"))?;
 	let last_touch_time = Rc::new(std::cell::Cell::new(-COMPATIBILITY_MOUSE_MILLISECONDS));
 
 	// 마우스 누름. (캔버스 위에서만)
@@ -698,7 +698,7 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 		let is_compatibility_mouse_event = is_compatibility_mouse(last_touch_time_for_mouse_down.get());
 		dispatch_web_event(&web_application_cell_for_mouse_down, move |web_application| {
 			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
-			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+			let mut input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			if !is_compatibility_mouse_event {
 				input_manager.set_touch_input(false);
 				input_manager.set_last_input_device(InputDevice::Mouse);
@@ -728,7 +728,7 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 			if is_compatibility_mouse_event {
 				return;
 			}
-			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+			let mut input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			input_manager.set_touch_input(false);
 			// 창이 흔들릴 때 나는 작은 움직임은 마우스를 쓴 것으로 보지 않는다.
 			let movement = mouse_event.movement_x().abs() + mouse_event.movement_y().abs();
@@ -741,7 +741,7 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 	let mouse_up_callback: Closure<dyn FnMut(web_sys::MouseEvent)> = Closure::new(move |mouse_event: web_sys::MouseEvent| {
 		dispatch_web_event(&web_application_cell_for_mouse_up, move |web_application| {
 			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
-			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+			let mut input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			let mouse_button = read_mouse_button(mouse_event.button());
 			if let Some(mouse_button) = mouse_button {
 				input_manager.set_mouse_button_down(mouse_button, false);
@@ -761,7 +761,7 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 		wheel_event.prevent_default();
 		dispatch_web_event(&web_application_cell_for_wheel, move |web_application| {
 			web_application.update_pointer_position(wheel_event.client_x() as f64, wheel_event.client_y() as f64);
-			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+			let mut input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			input_manager.add_wheel_delta(wheel_event.delta_x() as f64, wheel_event.delta_y() as f64);
 			input_manager.set_wheel_with_ctrl(wheel_event.ctrl_key());
 			input_manager.set_last_input_device(InputDevice::Mouse);
@@ -978,7 +978,7 @@ fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Res
 /// - 컨텍스트를 잃거나 되살리면 GL 의 묶음이 처음으로 돌아가므로 기억을 잊는다. 프레임 콜백 안에서 겹쳐 불리지 않게 try_borrow 로 본다.
 //==============================================================================
 fn add_context_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
-	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.clone().ok_or_else(|| String::from("캔버스 없음"))?;
+	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.borrow().clone().ok_or_else(|| String::from("캔버스 없음"))?;
 	let web_application_cell_for_context = web_application_cell.clone();
 	let context_change_callback: Closure<dyn FnMut()> = Closure::new(move || {
 		if let Ok(web_application) = web_application_cell_for_context.try_borrow() {
@@ -1045,7 +1045,7 @@ impl WebApplication {
 		};
 		let engine = &mut self.engine_runner.engine;
 		let view_input_position = engine.get_view_manager().canvas_position_to_view_position(canvas_native_position);
-		let input_manager = engine.get_input_manager_mut();
+		let mut input_manager = engine.get_input_manager_mut();
 		input_manager.set_canvas_native_input_position(canvas_native_position);
 		input_manager.set_view_input_position(view_input_position);
 	}
@@ -1054,7 +1054,7 @@ impl WebApplication {
 	/// 화면(client) 좌표를 캔버스 논리 좌표로. (캔버스의 실제 자리를 읽는다)
 	//==============================================================================
 	fn read_canvas_native_position(&self, client_x: f64, client_y: f64) -> Option<Vector2> {
-		let canvas = self.engine_runner.engine.platform_window.as_ref()?;
+		let canvas = self.engine_runner.engine.platform_window.borrow().as_ref()?;
 		let canvas_rect = canvas.get_bounding_client_rect();
 		Some(Vector2::create((client_x - canvas_rect.left()) as f64, (client_y - canvas_rect.top()) as f64))
 	}
@@ -1091,7 +1091,7 @@ impl WebApplication {
 				self.update_pointer_position(changed_touch.client_x() as f64, changed_touch.client_y() as f64);
 			}
 		}
-		let input_manager = self.engine_runner.engine.get_input_manager_mut();
+		let mut input_manager = self.engine_runner.engine.get_input_manager_mut();
 		for (identifier, canvas_native_position, view_position) in changed_touch_point_list {
 			match event_type.as_str() {
 				"touchstart" => {
@@ -1188,7 +1188,7 @@ impl WebApplication {
 		let graphic = Graphic::new(gl, preserve_drawing_buffer)?;
 
 		self.engine_runner.attach_graphic(graphic);
-		self.engine_runner.engine.platform_window = Some(canvas.clone());
+		*self.engine_runner.engine.platform_window.borrow_mut() = Some(canvas.clone());
 		ENGINE_CANVAS.with(|engine_canvas| {
 			*engine_canvas.borrow_mut() = Some(canvas.clone());
 		});
@@ -1222,6 +1222,7 @@ impl WebApplication {
 		let is_auto_resize = engine_configuration.auto_resize_on_window_resize;
 		let is_virtual_keyboard_ignored = engine_configuration.ignore_virtual_keyboard_resize;
 		let max_canvas_aspect_ratio = engine_configuration.max_canvas_aspect_ratio as f64;
+		drop(engine_configuration);
 		let device_pixel_ratio = if window.device_pixel_ratio() > 0.0 {
 			window.device_pixel_ratio()
 		}
@@ -1271,7 +1272,7 @@ impl WebApplication {
 			(canvas_rect.width().round(), canvas_rect.height().round(), None, None)
 		};
 		// 렌더 배율 상한을 바꿨으면 프레임 머리에서 창 크기 바뀜과 같은 길로 맞춘다. (원본 Engine 의 isViewRectPending, 그리는 중에 바꾸면 그 프레임이 까맣다)
-		let is_resize_requested = std::mem::take(&mut self.engine_runner.engine.is_resize_requested) || self.engine_runner.engine.get_view_manager().is_view_rect_pending();
+		let is_resize_requested = self.engine_runner.engine.is_resize_requested.take() || self.engine_runner.engine.get_view_manager().is_view_rect_pending();
 		if !is_resize_requested && window_state.canvas_width == canvas_width && window_state.canvas_height == canvas_height && window_state.device_pixel_ratio == device_pixel_ratio {
 			return;
 		}

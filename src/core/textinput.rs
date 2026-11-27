@@ -4,7 +4,7 @@
 //!   러스트 판은 플랫폼이 창 이벤트(데스크탑 winit 의 KeyboardInput / Ime, 웹 숨긴 <input> 의 input / composition / keydown)를
 //!   여기 줄에 넣고, 포커스를 가진 입력 필드가 tick 에서 꺼내 쓴다. (ui/uiinputfield.rs)
 //! - 컴포넌트는 &Engine 만 받는다. 그래서 필드가 쓰는 쪽(꺼내기, 상태 올리기)은 RefCell 로 &self 에서 되게 했다.
-//!   플랫폼은 &mut Engine 을 쥐므로 넣는 쪽은 &mut self 다.
+//!   플랫폼은 &Engine 을 쥐므로 넣는 쪽은 &mut self 다.
 //! - 프레임 흐름:
 //!   1. 플랫폼이 프레임 사이에 이벤트를 넣는다. (push_event)
 //!   2. 씬 tick 에서 필드가 자기 몫을 꺼낸다. (take_events_for_field) 붙어 있는(attach) 필드와 포커스를 가진 필드는 상태를 올린다. (register_field_state)

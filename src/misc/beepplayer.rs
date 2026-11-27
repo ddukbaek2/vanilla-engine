@@ -206,11 +206,11 @@ pub(crate) struct BeepSchedule {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn create(&mut self, engine: &mut Engine) {
+/// 	fn create(&mut self, engine: &Engine) {
 /// 		self.beep_player = Some(BeepPlayer::new(engine.get_audio_manager(), 0.3));
 /// 	}
 ///
-/// 	fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+/// 	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 /// 		if let Some(beep_player) = &self.beep_player {
 /// 			beep_player.play_preset("confirm");
 /// 		}

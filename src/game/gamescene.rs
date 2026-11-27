@@ -11,14 +11,14 @@
 //!     impl GameScene for TitleScene {
 //!         fn get_game_scene_base(&self) -> &GameSceneBase { &self.game_scene_base }
 //!         fn get_game_scene_base_mut(&mut self) -> &mut GameSceneBase { &mut self.game_scene_base }
-//!         fn load_assets(&mut self, engine: &mut Engine) {                       // 원본 loadAssets 재정의 자리 (바탕의 로딩 이미지 요청 뒤)
+//!         fn load_assets(&mut self, engine: &Engine) {                       // 원본 loadAssets 재정의 자리 (바탕의 로딩 이미지 요청 뒤)
 //!             self.logo_asset.load(engine, "logo.png");
 //!             self.game_scene_base.get_scene_base_mut().track_asset(&self.logo_asset);
 //!         }
-//!         fn initialize(&mut self, engine: &mut Engine) {                          // 바탕 initialize 뒤
+//!         fn initialize(&mut self, engine: &Engine) {                          // 바탕 initialize 뒤
 //!             let safe_area_id = self.game_scene_base.get_safe_area_node_id().unwrap();   // 콘텐츠는 여기 아래에 붙인다
 //!         }
-//!         fn layout(&mut self, engine: &mut Engine) { /* game_scene_base.get_safe_area_rect() 를 읽어 콘텐츠를 놓는다 */ }
+//!         fn layout(&mut self, engine: &Engine) { /* game_scene_base.get_safe_area_rect() 를 읽어 콘텐츠를 놓는다 */ }
 //!     }
 //!     vanilla::game_scene!(TitleScene);
 //!   ```
@@ -110,7 +110,7 @@ const SCREEN_FADE_MAXIMUM_STEP_SECONDS: f64 = 0.1;
 /// ```rust
 /// use vanilla::{Engine, EngineConfiguration, GameSceneBase, NodeTree, ScreenFadeHold};
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 /// let mut game_scene_base = GameSceneBase::new();
 /// game_scene_base.set_screen_fade_seconds(0.0);
@@ -119,13 +119,13 @@ const SCREEN_FADE_MAXIMUM_STEP_SECONDS: f64 = 0.1;
 /// assert!(game_scene_base.fade_screen(Some(Box::new(move |_node_tree: &mut NodeTree, _engine: &Engine| {
 /// 	Some(returned_hold)
 /// }))));
-/// game_scene_base.tick(&mut engine, 0.016);
-/// game_scene_base.tick(&mut engine, 0.016);
+/// game_scene_base.tick(engine, 0.016);
+/// game_scene_base.tick(engine, 0.016);
 /// assert_eq!(game_scene_base.get_screen_fade_alpha(), 1.0);
 /// screen_fade_hold.release();
 /// assert!(screen_fade_hold.is_released());
-/// game_scene_base.tick(&mut engine, 0.016);
-/// game_scene_base.tick(&mut engine, 0.016);
+/// game_scene_base.tick(engine, 0.016);
+/// game_scene_base.tick(engine, 0.016);
 /// assert_eq!(game_scene_base.get_screen_fade_alpha(), 0.0);
 /// assert!(!game_scene_base.is_screen_fading());
 /// ```
@@ -186,7 +186,7 @@ impl Drop for ScreenFadeHoldRelease {
 /// 화면 페이드 작업을 시작하는 자리. (다 어두워진 tick 의 씬과 엔진에서 바로, 또는 다음 폴링 차례로)
 //==============================================================================
 enum ScreenFadeDarkStartPlace<'a> {
-	Now(&'a mut Engine, &'a mut dyn Scene),
+	Now(&'a Engine, &'a mut dyn Scene),
 	Deferred(&'a Engine, SceneId),
 }
 
@@ -213,7 +213,7 @@ enum ScreenFadeDarkStartPlace<'a> {
 /// 		self.game_scene_base.get_scene_base_mut()
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 /// 		self.game_scene_base.tick(engine, time_delta);
 /// 		if let Some(screen_fade_dark_starter) = self.game_scene_base.take_screen_fade_dark_starter() {
 /// 			screen_fade_dark_starter.start(self, engine);
@@ -221,7 +221,7 @@ enum ScreenFadeDarkStartPlace<'a> {
 /// 	}
 /// }
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 /// let mut puzzle_scene = PuzzleScene {
 /// 	game_scene_base: GameSceneBase::new(),
@@ -233,10 +233,10 @@ enum ScreenFadeDarkStartPlace<'a> {
 /// 		scene.stage_number += 1;
 /// 	});
 /// }));
-/// puzzle_scene.tick(&mut engine, 0.016);
+/// puzzle_scene.tick(engine, 0.016);
 /// assert_eq!(puzzle_scene.stage_number, 2);
-/// puzzle_scene.tick(&mut engine, 0.016);
-/// puzzle_scene.tick(&mut engine, 0.016);
+/// puzzle_scene.tick(engine, 0.016);
+/// puzzle_scene.tick(engine, 0.016);
 /// assert!(!puzzle_scene.game_scene_base.is_screen_fading());
 /// ```
 //==============================================================================
@@ -253,7 +253,7 @@ impl ScreenFadeDarkStarter {
 	/// - `scene`: 이 바탕을 든 씬. (보통 tick 안의 self, fade_screen_async 의 S 타입이어야 한다)
 	/// - `engine`: 작업을 맡길 엔진.
 	//==============================================================================
-	pub fn start(self, scene: &mut dyn Scene, engine: &mut Engine) {
+	pub fn start(self, scene: &mut dyn Scene, engine: &Engine) {
 		(self.start_function)(ScreenFadeDarkStartPlace::Now(engine, scene), self.screen_fade_hold);
 	}
 
@@ -310,7 +310,7 @@ pub enum PlayInput {
 /// }
 ///
 /// impl PuzzleScene {
-/// 	fn layout(&mut self, _engine: &mut Engine) {
+/// 	fn layout(&mut self, _engine: &Engine) {
 /// 		self.layout_count += 1;
 /// 	}
 /// }
@@ -324,24 +324,24 @@ pub enum PlayInput {
 /// 		self.game_scene_base.get_scene_base_mut()
 /// 	}
 ///
-/// 	fn create(&mut self, engine: &mut Engine) {
+/// 	fn create(&mut self, engine: &Engine) {
 /// 		self.game_scene_base.create(engine);
 /// 	}
 ///
-/// 	fn draw_on_load(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+/// 	fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
 /// 		self.game_scene_base.draw_on_load(engine, graphic);
 /// 	}
 ///
-/// 	fn initialize(&mut self, engine: &mut Engine) {
+/// 	fn initialize(&mut self, engine: &Engine) {
 /// 		self.game_scene_base.initialize(engine);
 /// 	}
 ///
-/// 	fn resize(&mut self, engine: &mut Engine, canvas_native_size: Vector2) {
+/// 	fn resize(&mut self, engine: &Engine, canvas_native_size: Vector2) {
 /// 		self.game_scene_base.resize(engine, canvas_native_size);
 /// 		self.layout(engine);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 /// 		if self.game_scene_base.tick(engine, time_delta) {
 /// 			self.layout(engine);
 /// 		}
@@ -350,27 +350,27 @@ pub enum PlayInput {
 /// 		}
 /// 	}
 ///
-/// 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+/// 	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 /// 		self.game_scene_base.pre_draw(engine, graphic);
 /// 	}
 ///
-/// 	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+/// 	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 /// 		self.game_scene_base.get_scene_base_mut().draw(graphic);
 /// 	}
 ///
-/// 	fn post_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+/// 	fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 /// 		self.game_scene_base.post_draw(engine, graphic);
 /// 	}
 /// }
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 /// let mut puzzle_scene = PuzzleScene {
 /// 	game_scene_base: GameSceneBase::new(),
 /// 	layout_count: 0,
 /// };
-/// puzzle_scene.initialize(&mut engine);
-/// puzzle_scene.tick(&mut engine, 0.016);
+/// puzzle_scene.initialize(engine);
+/// puzzle_scene.tick(engine, 0.016);
 /// assert_eq!(puzzle_scene.layout_count, 1);
 /// assert!(puzzle_scene.game_scene_base.get_safe_area_node_id().is_some());
 /// assert_eq!(puzzle_scene.game_scene_base.get_safe_area_rect().size, Vector2::create(800.0, 600.0));
@@ -564,15 +564,15 @@ impl GameSceneBase {
 	/// ```rust
 	/// use vanilla::{Engine, EngineConfiguration, GameSceneBase, Vector2, ViewScaleMode};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 	/// let mut game_scene_base = GameSceneBase::new();
-	/// game_scene_base.set_view_scale_mode(ViewScaleMode::ReferenceResolution, Some(&mut engine));
+	/// game_scene_base.set_view_scale_mode(ViewScaleMode::ReferenceResolution, Some(engine));
 	/// assert_eq!(game_scene_base.get_view_scale_mode(), ViewScaleMode::ReferenceResolution);
 	/// assert_eq!(engine.get_view_manager().get_view_size(), Vector2::create(1280.0, 720.0));
 	/// ```
 	//==============================================================================
-	pub fn set_view_scale_mode(&mut self, view_scale_mode: ViewScaleMode, engine: Option<&mut Engine>) {
+	pub fn set_view_scale_mode(&mut self, view_scale_mode: ViewScaleMode, engine: Option<&Engine>) {
 		self.view_scale_mode = view_scale_mode;
 		if let Some(engine) = engine {
 			self.apply_view_scale_mode(engine);
@@ -592,8 +592,8 @@ impl GameSceneBase {
 	//==============================================================================
 	/// 뷰 매니저에 ViewScaleMode 반영. (바뀌었으면 지금 캔버스 크기로 뷰 영역을 다시 계산한다. 원본 viewManager.set_view_scale_mode)
 	//==============================================================================
-	fn apply_view_scale_mode(&self, engine: &mut Engine) {
-		let view_manager = engine.get_view_manager_mut();
+	fn apply_view_scale_mode(&self, engine: &Engine) {
+		let mut view_manager = engine.get_view_manager_mut();
 		if view_manager.get_view_scale_mode() == self.view_scale_mode {
 			return;
 		}
@@ -859,7 +859,7 @@ impl GameSceneBase {
 	/// # 인자
 	/// - `engine`: 시각을 읽고 로딩 이미지를 부탁할 엔진.
 	//==============================================================================
-	pub fn create(&mut self, engine: &mut Engine) {
+	pub fn create(&mut self, engine: &Engine) {
 		let current_time = engine.get_time_manager().get_realtime_since_startup();
 		self.begin_loading(current_time);
 		// 엔진 시계가 아직 돌지 않았으면(첫 프레임 전) 첫 로딩 화면 프레임의 시각부터 잰다. (원본 load 와 같은 규칙)
@@ -993,7 +993,7 @@ impl GameSceneBase {
 	/// - `engine`: 시각, 입력, 뷰 영역을 읽을 엔진.
 	/// - `graphic`: 로딩 화면을 그릴 그래픽.
 	//==============================================================================
-	pub fn draw_on_load(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	pub fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		let current_time = engine.get_time_manager().get_realtime_since_startup();
 		if self.is_load_start_time_pending {
 			self.load_start_time = current_time;
@@ -1072,7 +1072,7 @@ impl GameSceneBase {
 	/// # 인자
 	/// - `engine`: 뷰 매니저와 설정을 가진 엔진.
 	//==============================================================================
-	pub fn initialize(&mut self, engine: &mut Engine) {
+	pub fn initialize(&mut self, engine: &Engine) {
 		self.apply_view_scale_mode(engine);
 		self.apply_play_area_reference(engine);
 		// 터치 인식기. (원본처럼 initialize 에서 만든다)
@@ -1116,7 +1116,7 @@ impl GameSceneBase {
 	/// - `engine`: 새 뷰 영역이 셈해진 엔진.
 	/// - `_canvas_native_size`: 창 안쪽 논리 크기. (쓰지 않는다, 뷰 매니저에서 읽는다)
 	//==============================================================================
-	pub fn resize(&mut self, engine: &mut Engine, _canvas_native_size: Vector2) {
+	pub fn resize(&mut self, engine: &Engine, _canvas_native_size: Vector2) {
 		self.apply_play_area_reference(engine);
 		self.layout(engine);
 	}
@@ -1258,20 +1258,20 @@ impl GameSceneBase {
 	/// ```rust
 	/// use vanilla::{Engine, EngineConfiguration, GameSceneBase, Rect, SafeAreaInsets};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 	/// let mut game_scene_base = GameSceneBase::new();
 	/// game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(10.0, 0.0, 20.0, 5.0)));
-	/// game_scene_base.initialize(&mut engine);
-	/// assert!(game_scene_base.tick(&mut engine, 0.016));
+	/// game_scene_base.initialize(engine);
+	/// assert!(game_scene_base.tick(engine, 0.016));
 	/// assert_eq!(game_scene_base.get_safe_area_rect(), Rect::create(5.0, 10.0, 795.0, 570.0));
-	/// assert!(!game_scene_base.tick(&mut engine, 0.016));
+	/// assert!(!game_scene_base.tick(engine, 0.016));
 	/// engine.get_view_manager_mut().calculate_view_rect(1024, 768, 1.0);
-	/// assert!(game_scene_base.tick(&mut engine, 0.016));
+	/// assert!(game_scene_base.tick(engine, 0.016));
 	/// assert_eq!(game_scene_base.get_safe_area_rect(), Rect::create(5.0, 10.0, 1019.0, 738.0));
 	/// ```
 	//==============================================================================
-	pub fn tick(&mut self, engine: &mut Engine, time_delta: f64) -> bool {
+	pub fn tick(&mut self, engine: &Engine, time_delta: f64) -> bool {
 		self.start_left_screen_fade_dark_starter(engine);
 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 		self.tick_touch(engine);
@@ -1298,6 +1298,10 @@ impl GameSceneBase {
 		let is_touch_moved = input_manager.is_touch_moved();
 		let is_touch_ended = input_manager.is_touch_released() || input_manager.is_touch_cancelled();
 		let wheel_delta = Vector2::create(input_manager.get_wheel_delta_x(), input_manager.get_wheel_delta_y());
+		let is_touch_released = input_manager.is_touch_released();
+		let is_touch_cancelled = input_manager.is_touch_cancelled();
+		// 입력 값은 먼저 읽어 두고 빌림을 놓는다. (아래 터치 인식기가 부르는 컴포넌트가 입력 매니저를 고칠 수 있다)
+		drop(input_manager);
 		let is_wheel = wheel_delta.x != 0.0 || wheel_delta.y != 0.0;
 		// 개발자 도구 판 위의 입력은 UI 와 놀이로 넘기지 않는다. (원본 isDevToolsCapturingInput)
 		if self.is_dev_tools_capturing_input(engine) {
@@ -1314,10 +1318,10 @@ impl GameSceneBase {
 				if is_touch_moved {
 					touch_recognizer.touch_move(node_tree, engine, view_input_position);
 				}
-				if input_manager.is_touch_released() {
+				if is_touch_released {
 					touch_recognizer.touch_release(node_tree, engine, view_input_position);
 				}
-				else if input_manager.is_touch_cancelled() {
+				else if is_touch_cancelled {
 					touch_recognizer.touch_cancel(node_tree, engine, view_input_position);
 				}
 			}
@@ -1479,7 +1483,7 @@ impl GameSceneBase {
 	/// ```rust
 	/// use vanilla::{Engine, EngineConfiguration, GameSceneBase, NodeTree};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 	/// let mut game_scene_base = GameSceneBase::new();
 	/// game_scene_base.set_screen_fade_seconds(0.0);
@@ -1489,9 +1493,9 @@ impl GameSceneBase {
 	/// 	None
 	/// }))));
 	/// assert!(!game_scene_base.fade_screen(None));
-	/// game_scene_base.tick(&mut engine, 0.016);
+	/// game_scene_base.tick(engine, 0.016);
 	/// assert_eq!(game_scene_base.get_screen_fade_alpha(), 1.0);
-	/// game_scene_base.tick(&mut engine, 0.016);
+	/// game_scene_base.tick(engine, 0.016);
 	/// assert!(!game_scene_base.is_screen_fading());
 	/// ```
 	//==============================================================================
@@ -1521,7 +1525,7 @@ impl GameSceneBase {
 	/// use std::rc::Rc;
 	/// use vanilla::{Engine, EngineConfiguration, GameSceneBase, NodeTree, ScreenFadeHold};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 	/// let mut game_scene_base = GameSceneBase::new();
 	/// game_scene_base.set_screen_fade_seconds(0.0);
@@ -1530,14 +1534,14 @@ impl GameSceneBase {
 	/// assert!(game_scene_base.fade_screen_with_hold(Box::new(move |_node_tree: &mut NodeTree, _engine: &Engine, screen_fade_hold: ScreenFadeHold| {
 	/// 	*held_hold_for_event.borrow_mut() = Some(screen_fade_hold);
 	/// })));
-	/// game_scene_base.tick(&mut engine, 0.016);
-	/// game_scene_base.tick(&mut engine, 0.016);
+	/// game_scene_base.tick(engine, 0.016);
+	/// game_scene_base.tick(engine, 0.016);
 	/// assert_eq!(game_scene_base.get_screen_fade_alpha(), 1.0);
 	/// if let Some(screen_fade_hold) = held_hold.borrow().as_ref() {
 	/// 	screen_fade_hold.release();
 	/// }
-	/// game_scene_base.tick(&mut engine, 0.016);
-	/// game_scene_base.tick(&mut engine, 0.016);
+	/// game_scene_base.tick(engine, 0.016);
+	/// game_scene_base.tick(engine, 0.016);
 	/// assert!(!game_scene_base.is_screen_fading());
 	/// ```
 	//==============================================================================
@@ -1582,7 +1586,7 @@ impl GameSceneBase {
 	/// 		self.game_scene_base.get_scene_base_mut()
 	/// 	}
 	///
-	/// 	fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	/// 	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	/// 		self.game_scene_base.fade_screen_async::<PuzzleScene, _, _>(|mut scene_context: SceneContext<PuzzleScene>| async move {
 	/// 			scene_context.with(|scene, _engine| {
 	/// 				scene.stage_number += 1;
@@ -1590,7 +1594,7 @@ impl GameSceneBase {
 	/// 		});
 	/// 	}
 	///
-	/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 	/// 		self.game_scene_base.tick(engine, time_delta);
 	/// 		if let Some(screen_fade_dark_starter) = self.game_scene_base.take_screen_fade_dark_starter() {
 	/// 			screen_fade_dark_starter.start(self, engine);
@@ -1779,19 +1783,19 @@ impl GameSceneBase {
 	/// ```rust
 	/// use vanilla::{Engine, EngineConfiguration, GameSceneBase, PlayInput, SafeAreaInsets, Vector2};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 	/// let mut game_scene_base = GameSceneBase::new();
 	/// game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(10.0, 0.0, 0.0, 20.0)));
-	/// game_scene_base.initialize(&mut engine);
-	/// game_scene_base.tick(&mut engine, 0.016);
+	/// game_scene_base.initialize(engine);
+	/// game_scene_base.tick(engine, 0.016);
 	/// game_scene_base.set_play_input_enabled(true);
 	/// engine.get_input_manager_mut().set_view_input_position(Vector2::create(120.0, 110.0));
 	/// engine.get_input_manager_mut().set_touch_pressed(true);
-	/// game_scene_base.tick(&mut engine, 0.016);
+	/// game_scene_base.tick(engine, 0.016);
 	/// engine.get_input_manager_mut().set_touch_pressed(false);
 	/// engine.get_input_manager_mut().set_touch_released(true);
-	/// game_scene_base.tick(&mut engine, 0.016);
+	/// game_scene_base.tick(engine, 0.016);
 	/// let play_inputs = game_scene_base.take_play_inputs();
 	/// assert_eq!(play_inputs.first(), Some(&PlayInput::Press(Vector2::create(100.0, 100.0))));
 	/// assert_eq!(play_inputs.last(), Some(&PlayInput::Release(Vector2::create(100.0, 100.0))));
@@ -1820,11 +1824,11 @@ impl GameSceneBase {
 	/// use std::rc::Rc;
 	/// use vanilla::{Engine, EngineConfiguration, GameSceneBase, PlayInput, SafeAreaInsets, Vector2};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 	/// let mut game_scene_base = GameSceneBase::new();
 	/// game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(0.0, 0.0, 0.0, 0.0)));
-	/// game_scene_base.initialize(&mut engine);
+	/// game_scene_base.initialize(engine);
 	/// let play_input_list: Rc<RefCell<Vec<PlayInput>>> = Rc::new(RefCell::new(Vec::new()));
 	/// let play_input_list_for_handler = play_input_list.clone();
 	/// game_scene_base.set_play_input_handler(Some(Box::new(move |play_input: PlayInput| {
@@ -1832,10 +1836,10 @@ impl GameSceneBase {
 	/// })));
 	/// engine.get_input_manager_mut().set_view_input_position(Vector2::create(50.0, 60.0));
 	/// engine.get_input_manager_mut().set_touch_pressed(true);
-	/// game_scene_base.tick(&mut engine, 0.016);
+	/// game_scene_base.tick(engine, 0.016);
 	/// engine.get_input_manager_mut().set_touch_pressed(false);
 	/// engine.get_input_manager_mut().set_touch_released(true);
-	/// game_scene_base.tick(&mut engine, 0.016);
+	/// game_scene_base.tick(engine, 0.016);
 	/// assert_eq!(*play_input_list.borrow(), vec![PlayInput::Press(Vector2::create(50.0, 60.0)), PlayInput::Release(Vector2::create(50.0, 60.0))]);
 	/// ```
 	//==============================================================================
@@ -1885,19 +1889,19 @@ impl GameSceneBase {
 	/// ```rust
 	/// use vanilla::{Engine, EngineConfiguration, GameSceneBase, SafeAreaInsets, ViewScaleMode};
 	///
-	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let engine = Engine::new(EngineConfiguration::new());
 	/// engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 	/// engine.get_view_manager_mut().set_safe_area_override(Some(SafeAreaInsets::create(40.0, 0.0, 30.0, 0.0)));
 	/// let mut game_scene_base = GameSceneBase::new();
-	/// game_scene_base.set_play_area_reference(720.0, false, Some(&mut engine));
+	/// game_scene_base.set_play_area_reference(720.0, false, Some(engine));
 	/// assert_eq!(engine.get_view_manager().get_view_scale_mode(), ViewScaleMode::StretchHeightExpandWidth);
 	/// assert_eq!(game_scene_base.get_play_area_fixed_length(), 720.0);
-	/// game_scene_base.initialize(&mut engine);
+	/// game_scene_base.initialize(engine);
 	/// game_scene_base.layout(&engine);
 	/// assert!((game_scene_base.get_safe_area_rect().size.y - 720.0).abs() < 0.01);
 	/// ```
 	//==============================================================================
-	pub fn set_play_area_reference(&mut self, fixed_length: f64, is_landscape: bool, engine: Option<&mut Engine>) {
+	pub fn set_play_area_reference(&mut self, fixed_length: f64, is_landscape: bool, engine: Option<&Engine>) {
 		self.play_area_fixed_length = fixed_length.max(0.0);
 		self.is_play_area_landscape = is_landscape;
 		if self.play_area_fixed_length <= 0.0 {
@@ -1911,7 +1915,7 @@ impl GameSceneBase {
 		};
 		match engine {
 			Some(engine) => {
-				self.set_view_scale_mode(view_scale_mode, Some(&mut *engine));
+				self.set_view_scale_mode(view_scale_mode, Some(engine));
 				self.apply_play_area_reference(engine);
 			}
 			None => {
@@ -1939,11 +1943,11 @@ impl GameSceneBase {
 	/// # 돌려줌
 	/// 기준 해상도를 바꿨으면 true. 게임 영역 기준을 쓰지 않거나, 캔버스 크기가 0 이거나, 셈할 수 없거나, 이미 같으면 false.
 	//==============================================================================
-	pub fn apply_play_area_reference(&mut self, engine: &mut Engine) -> bool {
+	pub fn apply_play_area_reference(&mut self, engine: &Engine) -> bool {
 		if self.play_area_fixed_length <= 0.0 {
 			return false;
 		}
-		let view_manager = engine.get_view_manager_mut();
+		let mut view_manager = engine.get_view_manager_mut();
 		let canvas_native_size = view_manager.get_canvas_native_size();
 		if canvas_native_size.x <= 0.0 || canvas_native_size.y <= 0.0 {
 			return false;
@@ -2066,24 +2070,24 @@ impl Default for GameSceneBase {
 /// 		&mut self.game_scene_base
 /// 	}
 ///
-/// 	fn load_assets(&mut self, engine: &mut Engine) {
+/// 	fn load_assets(&mut self, engine: &Engine) {
 /// 		self.logo_asset.load(engine, "examples/assets/atlas/icons.png");
 /// 		self.game_scene_base.get_scene_base_mut().track_asset(&self.logo_asset);
 /// 	}
 ///
-/// 	fn initialize(&mut self, _engine: &mut Engine) {
+/// 	fn initialize(&mut self, _engine: &Engine) {
 /// 		let safe_area_id = self.game_scene_base.get_safe_area_node_id().expect("safe area node");
 /// 		self.game_scene_base.get_scene_base_mut().get_node_tree_mut().create_child(safe_area_id, "logo");
 /// 	}
 ///
-/// 	fn layout(&mut self, _engine: &mut Engine) {
+/// 	fn layout(&mut self, _engine: &Engine) {
 /// 		self.layout_count += 1;
 /// 	}
 /// }
 ///
 /// vanilla::game_scene!(TitleScene);
 ///
-/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let engine = Engine::new(EngineConfiguration::new());
 /// engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 /// let mut title_scene = TitleScene {
 /// 	game_scene_base: GameSceneBase::new(),
@@ -2091,10 +2095,10 @@ impl Default for GameSceneBase {
 /// 	layout_count: 0,
 /// };
 /// title_scene.game_scene_base.set_loading_min_duration_ms(0.0);
-/// Scene::create(&mut title_scene, &mut engine);
+/// Scene::create(&mut title_scene, engine);
 /// assert!(title_scene.get_scene_base().are_tracked_assets_finished());
-/// Scene::initialize(&mut title_scene, &mut engine);
-/// Scene::tick(&mut title_scene, &mut engine, 0.016);
+/// Scene::initialize(&mut title_scene, engine);
+/// Scene::tick(&mut title_scene, engine, 0.016);
 /// assert_eq!(title_scene.layout_count, 1);
 /// ```
 ///
@@ -2155,7 +2159,7 @@ pub trait GameScene: 'static {
 	/// # 인자
 	/// - `_engine`: 애셋을 부탁할 엔진.
 	//==============================================================================
-	fn load_assets(&mut self, _engine: &mut Engine) {
+	fn load_assets(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -2188,7 +2192,7 @@ pub trait GameScene: 'static {
 	/// 		&mut self.game_scene_base
 	/// 	}
 	///
-	/// 	fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	/// 	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	/// 		self.fade_screen_async(|mut scene_context: SceneContext<StageScene>| async move {
 	/// 			scene_context.with(|scene, _engine| {
 	/// 				scene.stage_number += 1;
@@ -2216,7 +2220,7 @@ pub trait GameScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽. (뷰 좌표계가 걸려 있다)
 	//==============================================================================
-	fn draw_on_load(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	fn draw_on_load(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -2225,7 +2229,7 @@ pub trait GameScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -2234,7 +2238,7 @@ pub trait GameScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn destroy(&mut self, _engine: &mut Engine) {
+	fn destroy(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -2243,7 +2247,7 @@ pub trait GameScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn layout(&mut self, _engine: &mut Engine) {
+	fn layout(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -2253,7 +2257,7 @@ pub trait GameScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_time_delta`: 배율을 곱한 프레임 간격. (초)
 	//==============================================================================
-	fn tick(&mut self, _engine: &mut Engine, _time_delta: f64) {
+	fn tick(&mut self, _engine: &Engine, _time_delta: f64) {
 	}
 
 	//==============================================================================
@@ -2263,7 +2267,7 @@ pub trait GameScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn pre_draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	fn pre_draw(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -2273,7 +2277,7 @@ pub trait GameScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -2283,7 +2287,7 @@ pub trait GameScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn post_draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	fn post_draw(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -2292,7 +2296,7 @@ pub trait GameScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn finalize(&mut self, _engine: &mut Engine) {
+	fn finalize(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -2301,7 +2305,7 @@ pub trait GameScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn unload(&mut self, _engine: &mut Engine) {
+	fn unload(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -2311,7 +2315,7 @@ pub trait GameScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn on_page_process_restored(&mut self, _engine: &mut Engine) {
+	fn on_page_process_restored(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -2320,7 +2324,7 @@ pub trait GameScene: 'static {
 	/// # 인자
 	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn on_page_visibility_restored(&mut self, _engine: &mut Engine) {
+	fn on_page_visibility_restored(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
@@ -2331,7 +2335,7 @@ pub trait GameScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 누른 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
@@ -2341,7 +2345,7 @@ pub trait GameScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 지금 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_move(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_move(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
@@ -2351,7 +2355,7 @@ pub trait GameScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 뗀 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_release(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_release(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
@@ -2361,7 +2365,7 @@ pub trait GameScene: 'static {
 	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 취소된 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_cancel(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_cancel(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
@@ -2372,7 +2376,7 @@ pub trait GameScene: 'static {
 	/// - `_view_input_position`: 휠을 굴린 자리. (뷰 좌표)
 	/// - `_wheel_delta`: 휠 값. (가로, 세로)
 	//==============================================================================
-	fn touch_wheel(&mut self, _engine: &mut Engine, _view_input_position: Vector2, _wheel_delta: Vector2) {
+	fn touch_wheel(&mut self, _engine: &Engine, _view_input_position: Vector2, _wheel_delta: Vector2) {
 	}
 }
 
@@ -2391,67 +2395,67 @@ macro_rules! game_scene {
 				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).get_scene_base_mut()
 			}
 
-			fn create(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn create(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).create(engine);
 				$crate::game::gamescene::GameScene::load_assets(self, engine);
 			}
 
-			fn draw_on_load(&mut self, engine: &mut $crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
+			fn draw_on_load(&mut self, engine: &$crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
 				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).draw_on_load(engine, graphic);
 				$crate::game::gamescene::GameScene::draw_on_load(self, engine, graphic);
 			}
 
-			fn initialize(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn initialize(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).initialize(engine);
 				$crate::game::gamescene::GameScene::initialize(self, engine);
 			}
 
-			fn destroy(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn destroy(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::game::gamescene::GameScene::destroy(self, engine);
 			}
 
-			fn finalize(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn finalize(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::game::gamescene::GameScene::finalize(self, engine);
 			}
 
-			fn unload(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn unload(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::game::gamescene::GameScene::unload(self, engine);
 			}
 
-			fn on_page_process_restored(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn on_page_process_restored(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::game::gamescene::GameScene::on_page_process_restored(self, engine);
 			}
 
-			fn on_page_visibility_restored(&mut self, engine: &mut $crate::core::engine::Engine) {
+			fn on_page_visibility_restored(&mut self, engine: &$crate::core::engine::Engine) {
 				$crate::game::gamescene::GameScene::on_page_visibility_restored(self, engine);
 			}
 
-			fn touch_press(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
+			fn touch_press(&mut self, engine: &$crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
 				$crate::game::gamescene::GameScene::touch_press(self, engine, view_input_position);
 			}
 
-			fn touch_move(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
+			fn touch_move(&mut self, engine: &$crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
 				$crate::game::gamescene::GameScene::touch_move(self, engine, view_input_position);
 			}
 
-			fn touch_release(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
+			fn touch_release(&mut self, engine: &$crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
 				$crate::game::gamescene::GameScene::touch_release(self, engine, view_input_position);
 			}
 
-			fn touch_cancel(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
+			fn touch_cancel(&mut self, engine: &$crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
 				$crate::game::gamescene::GameScene::touch_cancel(self, engine, view_input_position);
 			}
 
-			fn touch_wheel(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2, wheel_delta: $crate::base::vector2::Vector2) {
+			fn touch_wheel(&mut self, engine: &$crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2, wheel_delta: $crate::base::vector2::Vector2) {
 				$crate::game::gamescene::GameScene::touch_wheel(self, engine, view_input_position, wheel_delta);
 			}
 
-			fn resize(&mut self, engine: &mut $crate::core::engine::Engine, canvas_native_size: $crate::base::vector2::Vector2) {
+			fn resize(&mut self, engine: &$crate::core::engine::Engine, canvas_native_size: $crate::base::vector2::Vector2) {
 				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).resize(engine, canvas_native_size);
 				$crate::game::gamescene::GameScene::layout(self, engine);
 			}
 
-			fn tick(&mut self, engine: &mut $crate::core::engine::Engine, time_delta: f64) {
+			fn tick(&mut self, engine: &$crate::core::engine::Engine, time_delta: f64) {
 				if $crate::game::gamescene::GameScene::get_game_scene_base_mut(self).tick(engine, time_delta) {
 					$crate::game::gamescene::GameScene::layout(self, engine);
 				}
@@ -2461,17 +2465,17 @@ macro_rules! game_scene {
 				$crate::game::gamescene::GameScene::tick(self, engine, time_delta);
 			}
 
-			fn pre_draw(&mut self, engine: &mut $crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
+			fn pre_draw(&mut self, engine: &$crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
 				$crate::game::gamescene::GameScene::get_game_scene_base(self).pre_draw(engine, graphic);
 				$crate::game::gamescene::GameScene::pre_draw(self, engine, graphic);
 			}
 
-			fn draw(&mut self, engine: &mut $crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
+			fn draw(&mut self, engine: &$crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
 				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).get_scene_base_mut().draw(graphic);
 				$crate::game::gamescene::GameScene::draw(self, engine, graphic);
 			}
 
-			fn post_draw(&mut self, engine: &mut $crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
+			fn post_draw(&mut self, engine: &$crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
 				$crate::game::gamescene::GameScene::post_draw(self, engine, graphic);
 				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).post_draw(engine, graphic);
 			}
@@ -2534,31 +2538,31 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn layout_follows_view_size_changes() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 		let mut game_scene_base = GameSceneBase::new();
 		game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(10.0, 0.0, 20.0, 5.0)));
-		game_scene_base.initialize(&mut engine);
+		game_scene_base.initialize(engine);
 		assert_eq!(engine.get_view_manager().get_view_scale_mode(), ViewScaleMode::None);
 		assert_eq!(engine.get_view_manager().get_view_size(), Vector2::create(800.0, 600.0));
 		let safe_area_node_id = game_scene_base.get_safe_area_node_id().expect("safe area node");
 		assert_eq!(game_scene_base.get_scene_base().get_node_tree()[safe_area_node_id].get_name(), "safeArea");
 
-		assert!(game_scene_base.tick(&mut engine, 0.016));
+		assert!(game_scene_base.tick(engine, 0.016));
 		assert_eq!(game_scene_base.get_safe_area_rect(), Rect::create(5.0, 10.0, 795.0, 570.0));
 		let safe_area_node = &game_scene_base.get_scene_base().get_node_tree()[safe_area_node_id];
 		assert_eq!(safe_area_node.get_local_position(), Vector2::create(5.0, 10.0));
 		assert_eq!(safe_area_node.get_content_size(), Vector2::create(795.0, 570.0));
-		assert!(!game_scene_base.tick(&mut engine, 0.016));
+		assert!(!game_scene_base.tick(engine, 0.016));
 
 		engine.get_view_manager_mut().calculate_view_rect(1024, 768, 1.0);
-		assert!(game_scene_base.tick(&mut engine, 0.016));
+		assert!(game_scene_base.tick(engine, 0.016));
 		assert_eq!(game_scene_base.get_safe_area_rect(), Rect::create(5.0, 10.0, 1019.0, 738.0));
-		assert!(!game_scene_base.tick(&mut engine, 0.016));
+		assert!(!game_scene_base.tick(engine, 0.016));
 
-		game_scene_base.set_view_scale_mode(ViewScaleMode::ReferenceResolution, Some(&mut engine));
+		game_scene_base.set_view_scale_mode(ViewScaleMode::ReferenceResolution, Some(engine));
 		assert_eq!(engine.get_view_manager().get_view_size(), Vector2::create(1280.0, 720.0));
-		assert!(game_scene_base.tick(&mut engine, 0.016));
+		assert!(game_scene_base.tick(engine, 0.016));
 		assert_eq!(game_scene_base.get_safe_area_rect(), Rect::create(5.0, 10.0, 1275.0, 690.0));
 	}
 
@@ -2576,7 +2580,7 @@ mod tests {
 	//==============================================================================
 	/// 한 프레임 진행. (시간을 seconds 만큼 흘리고 tick)
 	//==============================================================================
-	fn step_frame(engine: &mut Engine, game_scene_base: &mut GameSceneBase, current_seconds: &mut f64, seconds: f64) {
+	fn step_frame(engine: &Engine, game_scene_base: &mut GameSceneBase, current_seconds: &mut f64, seconds: f64) {
 		*current_seconds += seconds;
 		engine.get_time_manager_mut().update(*current_seconds);
 		game_scene_base.tick(engine, seconds);
@@ -2585,7 +2589,7 @@ mod tests {
 	//==============================================================================
 	/// 누름을 한 프레임 넣고 다음 프레임에 뗀다.
 	//==============================================================================
-	fn press_and_release(engine: &mut Engine, game_scene_base: &mut GameSceneBase, current_seconds: &mut f64, position: Vector2) {
+	fn press_and_release(engine: &Engine, game_scene_base: &mut GameSceneBase, current_seconds: &mut f64, position: Vector2) {
 		engine.get_input_manager_mut().set_view_input_position(position);
 		engine.get_input_manager_mut().set_touch_pressed(true);
 		step_frame(engine, game_scene_base, current_seconds, 0.016);
@@ -2600,11 +2604,11 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn screen_fade_holds_until_release_and_blocks_press() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 		let mut game_scene_base = GameSceneBase::new();
 		game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(0.0, 0.0, 0.0, 0.0)));
-		game_scene_base.initialize(&mut engine);
+		game_scene_base.initialize(engine);
 		game_scene_base.set_play_input_enabled(true);
 		game_scene_base.set_screen_fade_seconds(0.2);
 		let mut current_seconds = 1.0;
@@ -2618,23 +2622,23 @@ mod tests {
 			Some(returned_hold)
 		}))));
 		assert!(!game_scene_base.fade_screen(None));
-		step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.1);
+		step_frame(engine, &mut game_scene_base, &mut current_seconds, 0.1);
 		assert!((game_scene_base.get_screen_fade_alpha() - 0.5).abs() < 0.001);
 		assert_eq!(dark_count.get(), 0);
-		step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.1);
+		step_frame(engine, &mut game_scene_base, &mut current_seconds, 0.1);
 		assert_eq!(game_scene_base.get_screen_fade_alpha(), 1.0);
 		assert_eq!(dark_count.get(), 1);
-		step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.1);
+		step_frame(engine, &mut game_scene_base, &mut current_seconds, 0.1);
 		assert_eq!(game_scene_base.get_screen_fade_alpha(), 1.0);
-		press_and_release(&mut engine, &mut game_scene_base, &mut current_seconds, Vector2::create(100.0, 100.0));
+		press_and_release(engine, &mut game_scene_base, &mut current_seconds, Vector2::create(100.0, 100.0));
 		assert!(game_scene_base.take_play_inputs().is_empty());
 		screen_fade_hold.release();
 		for _ in 0..4 {
-			step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.1);
+			step_frame(engine, &mut game_scene_base, &mut current_seconds, 0.1);
 		}
 		assert_eq!(game_scene_base.get_screen_fade_alpha(), 0.0);
 		assert!(!game_scene_base.is_screen_fading());
-		press_and_release(&mut engine, &mut game_scene_base, &mut current_seconds, Vector2::create(100.0, 100.0));
+		press_and_release(engine, &mut game_scene_base, &mut current_seconds, Vector2::create(100.0, 100.0));
 		assert_eq!(game_scene_base.take_play_inputs().first(), Some(&PlayInput::Press(Vector2::create(100.0, 100.0))));
 	}
 
@@ -2643,13 +2647,13 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn play_input_skips_user_interface() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 		let mut game_scene_base = GameSceneBase::new();
 		game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(10.0, 0.0, 0.0, 20.0)));
-		game_scene_base.initialize(&mut engine);
+		game_scene_base.initialize(engine);
 		let mut current_seconds = 1.0;
-		step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.016);
+		step_frame(engine, &mut game_scene_base, &mut current_seconds, 0.016);
 		game_scene_base.set_play_input_enabled(true);
 		let root_id = game_scene_base.get_scene_base().get_node_tree().get_root_id();
 		let button_id = game_scene_base.get_scene_base_mut().get_node_tree_mut().create_child(root_id, "button");
@@ -2662,19 +2666,19 @@ mod tests {
 		}
 		assert!(game_scene_base.is_user_interface_at(Vector2::create(650.0, 450.0)));
 		assert!(!game_scene_base.is_user_interface_at(Vector2::create(120.0, 110.0)));
-		press_and_release(&mut engine, &mut game_scene_base, &mut current_seconds, Vector2::create(120.0, 110.0));
+		press_and_release(engine, &mut game_scene_base, &mut current_seconds, Vector2::create(120.0, 110.0));
 		let play_inputs = game_scene_base.take_play_inputs();
 		assert_eq!(play_inputs.first(), Some(&PlayInput::Press(Vector2::create(100.0, 100.0))));
 		assert_eq!(play_inputs.last(), Some(&PlayInput::Release(Vector2::create(100.0, 100.0))));
-		press_and_release(&mut engine, &mut game_scene_base, &mut current_seconds, Vector2::create(650.0, 450.0));
+		press_and_release(engine, &mut game_scene_base, &mut current_seconds, Vector2::create(650.0, 450.0));
 		assert!(game_scene_base.take_play_inputs().is_empty());
 		engine.get_input_manager_mut().add_wheel_delta(0.0, 120.0);
-		step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.016);
+		step_frame(engine, &mut game_scene_base, &mut current_seconds, 0.016);
 		assert!(game_scene_base.take_play_inputs().is_empty());
 		engine.get_input_manager_mut().clear_wheel_delta();
 		engine.get_input_manager_mut().set_view_input_position(Vector2::create(120.0, 110.0));
 		engine.get_input_manager_mut().add_wheel_delta(0.0, 120.0);
-		step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.016);
+		step_frame(engine, &mut game_scene_base, &mut current_seconds, 0.016);
 		assert_eq!(game_scene_base.take_play_inputs(), vec![PlayInput::Wheel(Vector2::create(100.0, 100.0), Vector2::create(0.0, 120.0))]);
 	}
 
@@ -2683,22 +2687,22 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn play_area_reference_keeps_fixed_length() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 		let mut game_scene_base = GameSceneBase::new();
 		engine.get_view_manager_mut().set_safe_area_override(Some(SafeAreaInsets::create(40.0, 0.0, 30.0, 0.0)));
-		game_scene_base.set_play_area_reference(720.0, false, Some(&mut engine));
+		game_scene_base.set_play_area_reference(720.0, false, Some(engine));
 		assert_eq!(engine.get_view_manager().get_view_scale_mode(), ViewScaleMode::StretchHeightExpandWidth);
-		game_scene_base.initialize(&mut engine);
+		game_scene_base.initialize(engine);
 		game_scene_base.layout(&engine);
 		assert!((game_scene_base.get_safe_area_rect().size.y - 720.0).abs() < 0.01);
 		assert!((engine.get_view_manager().get_reference_resolution_size().y - 720.0 * 600.0 / 530.0).abs() < 0.01);
 		engine.get_view_manager_mut().set_ignored_safe_area_sides(&[SafeAreaSide::Top]);
-		assert!(game_scene_base.apply_play_area_reference(&mut engine));
+		assert!(game_scene_base.apply_play_area_reference(engine));
 		game_scene_base.layout(&engine);
 		assert!((game_scene_base.get_safe_area_rect().size.y - 720.0).abs() < 0.01);
 		assert_eq!(game_scene_base.get_safe_area_rect().position.y, 0.0);
-		assert!(!game_scene_base.apply_play_area_reference(&mut engine));
+		assert!(!game_scene_base.apply_play_area_reference(engine));
 		assert!((GameSceneBase::calculate_play_area_reference_length(1920.0, true, Vector2::create(1000.0, 500.0), SafeAreaInsets::create(0.0, 25.0, 0.0, 25.0), 2.0) - 1920.0 * 1000.0 / 900.0).abs() < 0.01);
 	}
 
@@ -2780,14 +2784,14 @@ mod tests {
 		//==============================================================================
 		/// 레이아웃 수 세기.
 		//==============================================================================
-		fn layout(&mut self, _engine: &mut Engine) {
+		fn layout(&mut self, _engine: &Engine) {
 			self.layout_count += 1;
 		}
 
 		//==============================================================================
 		/// 갱신 수 세기.
 		//==============================================================================
-		fn tick(&mut self, _engine: &mut Engine, _time_delta: f64) {
+		fn tick(&mut self, _engine: &Engine, _time_delta: f64) {
 			self.tick_count += 1;
 		}
 	}
@@ -2800,7 +2804,7 @@ mod tests {
 	#[test]
 	fn game_scene_macro_calls_base_and_hooks() {
 		use crate::core::scene::Scene;
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 		engine.get_view_manager_mut().set_safe_area_override(Some(SafeAreaInsets::create(40.0, 0.0, 30.0, 0.0)));
 		let mut scene = LayoutCountScene {
@@ -2809,14 +2813,14 @@ mod tests {
 			tick_count: 0,
 		};
 		scene.game_scene_base.set_play_area_reference(720.0, false, None);
-		Scene::initialize(&mut scene, &mut engine);
+		Scene::initialize(&mut scene, engine);
 		assert!(scene.game_scene_base.get_dev_tools().is_some());
-		Scene::tick(&mut scene, &mut engine, 0.016);
+		Scene::tick(&mut scene, engine, 0.016);
 		assert_eq!(scene.layout_count, 1);
 		assert_eq!(scene.tick_count, 1);
-		Scene::tick(&mut scene, &mut engine, 0.016);
+		Scene::tick(&mut scene, engine, 0.016);
 		assert_eq!(scene.layout_count, 1);
-		Scene::resize(&mut scene, &mut engine, Vector2::create(800.0, 600.0));
+		Scene::resize(&mut scene, engine, Vector2::create(800.0, 600.0));
 		assert_eq!(scene.layout_count, 2);
 		assert!((scene.game_scene_base.get_safe_area_rect().size.y - 720.0).abs() < 0.01);
 	}
@@ -2826,18 +2830,18 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn play_input_handler_and_fade_with_hold() {
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 		let mut game_scene_base = GameSceneBase::new();
 		game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(0.0, 0.0, 0.0, 0.0)));
-		game_scene_base.initialize(&mut engine);
+		game_scene_base.initialize(engine);
 		let received_inputs: Rc<std::cell::RefCell<Vec<PlayInput>>> = Rc::new(std::cell::RefCell::new(Vec::new()));
 		let received_inputs_handler = received_inputs.clone();
 		game_scene_base.set_play_input_handler(Some(Box::new(move |play_input: PlayInput| {
 			received_inputs_handler.borrow_mut().push(play_input);
 		})));
 		let mut current_seconds = 1.0;
-		press_and_release(&mut engine, &mut game_scene_base, &mut current_seconds, Vector2::create(50.0, 60.0));
+		press_and_release(engine, &mut game_scene_base, &mut current_seconds, Vector2::create(50.0, 60.0));
 		assert_eq!(*received_inputs.borrow(), vec![PlayInput::Press(Vector2::create(50.0, 60.0)), PlayInput::Release(Vector2::create(50.0, 60.0))]);
 		assert!(game_scene_base.take_play_inputs().is_empty());
 
@@ -2848,7 +2852,7 @@ mod tests {
 			*held_hold_event.borrow_mut() = Some(screen_fade_hold);
 		})));
 		for _ in 0..3 {
-			step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.1);
+			step_frame(engine, &mut game_scene_base, &mut current_seconds, 0.1);
 		}
 		assert!(held_hold.borrow().is_some());
 		assert_eq!(game_scene_base.get_screen_fade_alpha(), 1.0);
@@ -2856,7 +2860,7 @@ mod tests {
 			screen_fade_hold.release();
 		}
 		for _ in 0..3 {
-			step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.1);
+			step_frame(engine, &mut game_scene_base, &mut current_seconds, 0.1);
 		}
 		assert!(!game_scene_base.is_screen_fading());
 	}
@@ -2868,7 +2872,7 @@ mod tests {
 	#[test]
 	fn fade_screen_async_starts_on_dark_tick_and_holds_until_future_finishes() {
 		use crate::core::scene::Scene;
-		let mut engine = Engine::new(EngineConfiguration::new());
+		let engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 		let mut scene = LayoutCountScene {
 			game_scene_base: GameSceneBase::new(),
@@ -2877,7 +2881,7 @@ mod tests {
 		};
 		scene.get_scene_base_mut().set_scene_id(SceneId(5));
 		scene.game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(0.0, 0.0, 0.0, 0.0)));
-		Scene::initialize(&mut scene, &mut engine);
+		Scene::initialize(&mut scene, engine);
 		scene.game_scene_base.set_screen_fade_seconds(0.1);
 		let (finish_promise, finish_resolver) = crate::core::task::Promise::create();
 		assert!(scene.fade_screen_async(move |mut scene_context: SceneContext<LayoutCountScene>| async move {
@@ -2893,7 +2897,7 @@ mod tests {
 		let mut scene_list: Vec<Box<dyn Scene>> = vec![Box::new(scene)];
 		let mut current_seconds = 1.0;
 		engine.get_time_manager_mut().update(current_seconds);
-		let mut step_scene_frame = |engine: &mut Engine, scene_list: &mut Vec<Box<dyn Scene>>| -> (f64, u32) {
+		let mut step_scene_frame = |engine: &Engine, scene_list: &mut Vec<Box<dyn Scene>>| -> (f64, u32) {
 			current_seconds += 0.06;
 			engine.get_time_manager_mut().update(current_seconds);
 			task::poll_tasks(engine, scene_list, &mut Vec::new());
@@ -2901,25 +2905,25 @@ mod tests {
 			let scene = scene_list[0].as_scene_any_mut().downcast_mut::<LayoutCountScene>().expect("시험용 씬");
 			(scene.game_scene_base.get_screen_fade_alpha(), scene.layout_count)
 		};
-		let (alpha, layout_count) = step_scene_frame(&mut engine, &mut scene_list);
+		let (alpha, layout_count) = step_scene_frame(engine, &mut scene_list);
 		assert!(alpha < 1.0);
 		assert!(layout_count < 1000);
-		let (alpha, layout_count) = step_scene_frame(&mut engine, &mut scene_list);
+		let (alpha, layout_count) = step_scene_frame(engine, &mut scene_list);
 		assert_eq!(alpha, 1.0);
 		assert!(layout_count >= 1000 && layout_count < 100000);
 		for _ in 0..3 {
-			let (alpha, layout_count) = step_scene_frame(&mut engine, &mut scene_list);
+			let (alpha, layout_count) = step_scene_frame(engine, &mut scene_list);
 			assert_eq!(alpha, 1.0);
 			assert!(layout_count < 100000);
 		}
 		finish_resolver.resolve(());
-		let (alpha, layout_count) = step_scene_frame(&mut engine, &mut scene_list);
+		let (alpha, layout_count) = step_scene_frame(engine, &mut scene_list);
 		assert!(layout_count >= 100000);
 		assert_eq!(alpha, 1.0);
-		let (alpha, _) = step_scene_frame(&mut engine, &mut scene_list);
+		let (alpha, _) = step_scene_frame(engine, &mut scene_list);
 		assert!(alpha < 1.0);
 		for _ in 0..3 {
-			step_scene_frame(&mut engine, &mut scene_list);
+			step_scene_frame(engine, &mut scene_list);
 		}
 		let scene = scene_list[0].as_scene_any_mut().downcast_mut::<LayoutCountScene>().expect("시험용 씬");
 		assert!(!scene.game_scene_base.is_screen_fading());
@@ -2934,12 +2938,12 @@ mod tests {
 		for _ in 0..2 {
 			current_seconds += 0.06;
 			engine.get_time_manager_mut().update(current_seconds);
-			scene.game_scene_base.tick(&mut engine, 0.06);
+			scene.game_scene_base.tick(engine, 0.06);
 		}
 		assert!(!started.get());
-		scene.game_scene_base.tick(&mut engine, 0.06);
+		scene.game_scene_base.tick(engine, 0.06);
 		let mut moved_scene_list: Vec<Box<dyn Scene>> = vec![scene_list.remove(0)];
-		task::poll_tasks(&mut engine, &mut moved_scene_list, &mut Vec::new());
+		task::poll_tasks(engine, &mut moved_scene_list, &mut Vec::new());
 		assert!(started.get());
 	}
 }

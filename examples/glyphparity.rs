@@ -69,14 +69,14 @@ impl Scene for MainScene {
 	//==============================================================================
 	// 생성. (원본처럼 렌더 배율 상한 1)
 	//==============================================================================
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		engine.get_view_manager_mut().set_max_render_pixel_ratio(1.0);
 	}
 
 	//==============================================================================
 	// 그리기.
 	//==============================================================================
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		graphic.set_text_baseline(TextBaseline::Alphabetic);
 		graphic.set_text_align(TextAlign::Left);
 		graphic.set_fill_color(Color::create_from_bytes(255, 255, 255, 255));

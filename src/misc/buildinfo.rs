@@ -36,7 +36,7 @@ use std::task::{Context, Poll};
 ///
 /// let mut engine_configuration = EngineConfiguration::new();
 /// engine_configuration.document_meta_list = vec![(String::from("build-version"), String::from("1.2.3"))];
-/// let mut engine = Engine::new(engine_configuration);
+/// let engine = Engine::new(engine_configuration);
 /// let version_text = Rc::new(RefCell::new(String::new()));
 /// let version_text_for_task = version_text.clone();
 /// let task_handle = engine.spawn_task(|mut engine_context| async move {
@@ -81,7 +81,7 @@ impl IntoFuture for BuildInfoLoadHandle {
 ///
 /// let mut engine_configuration = EngineConfiguration::new();
 /// engine_configuration.document_meta_list = vec![(String::from("build-version"), String::from("2026-11-26 def5678"))];
-/// let mut engine = Engine::new(engine_configuration);
+/// let engine = Engine::new(engine_configuration);
 /// let build_info = Rc::new(RefCell::new(BuildInfo::new()));
 /// build_info.borrow_mut().load(&engine);
 /// let build_info_for_task = build_info.clone();
