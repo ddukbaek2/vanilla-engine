@@ -58050,6 +58050,43 @@
 						},
 						{
 							"kind": "method",
+							"name": "copy_content_size_to",
+							"signature": "pub fn copy_content_size_to(&self, target: &mut Vector2)",
+							"params": [
+								{
+									"name": "target",
+									"type": "&mut Vector2",
+									"description": {
+										"ko": "내용 크기를 받을 벡터. (노드 좌표, 배율을 걸기 전)",
+										"en": "Vector that receives the content size. (node coordinates, before scale)"
+									}
+								}
+							],
+							"description": {
+								"ko": "내용 크기를 target 에 적는다. (원본 copyContentSizeTo, 새 값을 만들지 않고 받을 자리에 적는다)",
+								"en": "Writes the content size into target. (the original copyContentSizeTo, writes into the given place without making a new value)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/node/worldnode.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/worldnode",
+								"class": "WorldNode",
+								"name": "copyContentSizeTo"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "",
+										"en": ""
+									},
+									"code": "use vanilla::{Vector2, WorldNode};\n\nlet mut node = WorldNode::new(\"panel\");\nnode.set_content_size(Vector2::create(30.0, 40.0));\nlet mut content_size = Vector2::zero();\nnode.copy_content_size_to(&mut content_size);\nassert_eq!(content_size, Vector2::create(30.0, 40.0));",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
 							"name": "set_local_position_xy",
 							"signature": "pub fn set_local_position_xy(&mut self, x: f64, y: f64)",
 							"params": [
@@ -60731,7 +60768,13 @@
 								"en": "Use. (the original useProgram)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/shaderprogram.rs"
+							"source": "src/core/shaderprogram.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic/shaderprogram",
+								"class": "ShaderProgram",
+								"name": "useProgram"
+							}
 						},
 						{
 							"kind": "method",
@@ -88674,6 +88717,41 @@
 								"class": "ShadowAtlas",
 								"name": "getLights"
 							}
+						},
+						{
+							"kind": "method",
+							"name": "get_light_count",
+							"signature": "pub fn get_light_count(&self) -> usize",
+							"params": [],
+							"returns": {
+								"type": "usize",
+								"description": {
+									"ko": "마지막 update_lights 가 고른 빛 개수. (0 ~ SHADOW_ATLAS_MAXIMUM_LIGHTS)",
+									"en": "Number of lights the last update_lights picked. (0 ~ SHADOW_ATLAS_MAXIMUM_LIGHTS)"
+								}
+							},
+							"description": {
+								"ko": "그림자를 받는 빛 개수 반환. (원본 getLightCount, get_lights 의 길이)",
+								"en": "Returns the number of shadow-casting lights. (the original getLightCount, the length of get_lights)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "getLightCount"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "",
+										"en": ""
+									},
+									"code": "use vanilla::ShadowAtlas;\n\nfn has_shadow_lights(shadow_atlas: &ShadowAtlas) -> bool {\n\tshadow_atlas.get_light_count() > 0\n}",
+									"language": "rust"
+								}
+							]
 						},
 						{
 							"kind": "method",
