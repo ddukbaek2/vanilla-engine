@@ -2141,6 +2141,11 @@ impl EngineRunner {
 		if !capture_request.frame_numbers.contains(&frame_number) {
 			return;
 		}
+		// GL 상태 캐시 검사 모드면 찍는 프레임마다 그때까지 견준 수를 남긴다. (VANILLA_GL_STATE_CHECK=1)
+		if crate::core::glstatecache::is_check_enabled() {
+			let (mismatch_count, draw_count) = crate::core::glstatecache::get_check_count();
+			eprintln!("glstatecache 검사: 프레임 {} 까지 그리기 {} 번 견줌, 어긋남 {}", frame_number, draw_count, mismatch_count);
+		}
 		let graphic = match self.engine.get_graphic() {
 			Some(graphic) => {
 				graphic

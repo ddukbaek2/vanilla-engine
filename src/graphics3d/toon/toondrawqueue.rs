@@ -389,8 +389,6 @@ impl<'a> ToonDrawQueue<'a> {
 				continue;
 			}
 			callback(GlContext::from_context(gl), renderer);
-			// 콜백이 안의 glow::Context 를 꺼내 상태를 바꿨을 수 있다. (GlContext 의 상태 함수는 상태 캐시를 거친다, 안전망, 뒤의 apply_frame_state 가 다시 건다)
-			crate::core::glstatecache::reset(gl);
 			is_run = true;
 		}
 		if is_run {

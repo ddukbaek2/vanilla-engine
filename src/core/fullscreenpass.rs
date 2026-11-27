@@ -7,7 +7,6 @@
 //==============================================================================
 use crate::core::graphic::{GlUniformLocation, GlVertexArray};
 use crate::core::shaderprogram::ShaderProgram;
-use glow::HasContext;
 
 //==============================================================================
 // 전역 상수 목록.
@@ -115,7 +114,7 @@ impl FullscreenPass {
 	//==============================================================================
 	pub fn draw(&self, gl: &glow::Context) {
 		unsafe {
-			gl.draw_arrays(glow::TRIANGLES, 0, 3);
+			crate::core::glstatecache::draw_arrays(gl, glow::TRIANGLES, 0, 3);
 		}
 	}
 
