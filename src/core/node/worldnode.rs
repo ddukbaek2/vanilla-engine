@@ -963,6 +963,90 @@ impl WorldNode {
 	}
 
 	//==============================================================================
+	/// 내용 크기를 out 에 적는다. (원본 readContentSize, get_content_size 과 같은 값, 새 값을 만들지 않고 받을 자리에 적는다)
+	///
+	/// # 인자
+	/// - `out`: 적을 자리.
+	///
+	/// # 예제
+	/// ```rust
+	/// use vanilla::{Vector2, WorldNode};
+	///
+	/// let mut node = WorldNode::new("panel");
+	/// node.set_content_size(Vector2::create(30.0, 40.0));
+	/// let mut out = Vector2::zero();
+	/// node.read_content_size(&mut out);
+	/// assert_eq!(out, Vector2::create(30.0, 40.0));
+	/// ```
+	//==============================================================================
+	pub fn read_content_size(&self, out: &mut Vector2) {
+		*out = self.transform.get_content_size();
+	}
+
+	//==============================================================================
+	/// 피봇를 out 에 적는다. (원본 readPivot, get_pivot 과 같은 값, 새 값을 만들지 않고 받을 자리에 적는다)
+	///
+	/// # 인자
+	/// - `out`: 적을 자리.
+	///
+	/// # 예제
+	/// ```rust
+	/// use vanilla::{Vector2, WorldNode};
+	///
+	/// let mut node = WorldNode::new("panel");
+	/// node.set_pivot(Vector2::create(0.5, 1.0));
+	/// let mut out = Vector2::zero();
+	/// node.read_pivot(&mut out);
+	/// assert_eq!(out, Vector2::create(0.5, 1.0));
+	/// ```
+	//==============================================================================
+	pub fn read_pivot(&self, out: &mut Vector2) {
+		*out = self.transform.get_pivot();
+	}
+
+	//==============================================================================
+	/// 로컬 위치를 out 에 적는다. (원본 readLocalPosition, get_local_position 과 같은 값, 새 값을 만들지 않고 받을 자리에 적는다)
+	///
+	/// # 인자
+	/// - `out`: 적을 자리.
+	///
+	/// # 예제
+	/// ```rust
+	/// use vanilla::{Vector2, WorldNode};
+	///
+	/// let mut node = WorldNode::new("panel");
+	/// node.set_local_position(Vector2::create(3.0, 4.0));
+	/// let mut out = Vector2::zero();
+	/// node.read_local_position(&mut out);
+	/// assert_eq!(out, Vector2::create(3.0, 4.0));
+	/// ```
+	//==============================================================================
+	pub fn read_local_position(&self, out: &mut Vector2) {
+		*out = self.transform.get_local_position();
+	}
+
+	//==============================================================================
+	/// 로컬 배율를 out 에 적는다. (원본 readLocalScale, get_local_scale 과 같은 값, 새 값을 만들지 않고 받을 자리에 적는다)
+	///
+	/// # 인자
+	/// - `out`: 적을 자리.
+	///
+	/// # 예제
+	/// ```rust
+	/// use vanilla::{Vector2, WorldNode};
+	///
+	/// let mut node = WorldNode::new("panel");
+	/// node.set_local_scale(Vector2::create(2.0, 0.5));
+	/// let mut out = Vector2::zero();
+	/// node.read_local_scale(&mut out);
+	/// assert_eq!(out, Vector2::create(2.0, 0.5));
+	/// ```
+	//==============================================================================
+	pub fn read_local_scale(&self, out: &mut Vector2) {
+		*out = self.transform.get_local_scale();
+	}
+
+	//==============================================================================
 	/// 로컬 위치 설정. (x, y 를 바로 받는다, NodeTransform::set_local_position_xy)
 	///
 	/// # 인자
