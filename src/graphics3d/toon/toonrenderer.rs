@@ -61,7 +61,7 @@
 //! - 텍스처 유닛: 점광 그림자 아틀라스 0, 램프 1, 매트캡 2, 해 그림자 3, 바탕색 4, 빛남 5, 데칼 6, 천사 고리 7, 머티리얼 8 ~ 15, 모서리 어둠 16. 유닛 0 의 묶음은 begin_frame 이 적어 두고 end_frame 이 돌린다.
 //!   유닛마다 묶인 텍스처가 같으면 묶지 않고, 고른 유닛도 그리기마다 0 으로 되돌리지 않는다. (고른 유닛은 end_frame 이 돌린다, 단계 콜백과 on_before_draw 에는 유닛 0 을 고른 채 넘긴다)
 //! - 모서리 어둠: set_ambient_occlusion_texture(ToonPostProcess::draw_ambient_occlusion 의 결과, 직접 빛 몫) 를 건 동안 몸은 TOON_AMBIENT_OCCLUSION 을 정의한 몸 프로그램으로 그린다.
-//!   (원본은 원점과 직접 빛 몫을 프레임 블록 ToonFrame 의 칸으로 올린다. 러스트는 프레임 블록이 없어 같은 이름의 유니폼 ambientOcclusionOrigin, ambientOcclusionDirectLightingStrength 로 올린다)
+//!   (원점과 직접 빛 몫은 프레임 블록 ToonFrame 의 칸 ambientOcclusionOrigin, ambientOcclusionDirectLightingStrength 로 올린다, 원본과 같다)
 //! - 2 번 UV: 배열에 uv1_data 가 있으면 vertexUv 가 (UV, 2 번 UV) 넷이다. 셰이더 조각은 ToonSurface.uv1 로 읽는다. (없으면 (0, 1))
 //! - 빛 색 쓰기(set_light_color_usage), 그늘 쪽 림(set_shade_rim_light), 빛 세기 막기(set_light_intensity_limited)는 빛 묶음(ToonLightSet)에 둔다.
 //==============================================================================
@@ -140,6 +140,16 @@ const INSTANCE_MATRIX_LOCATION: u32 = 7;
 const INSTANCE_TINT_LOCATION: u32 = 11;
 const UV_LOCATION: u32 = 12;
 
+const FRAME_BLOCK_NAME: &str = "ToonFrame"; // 프레임 블록. (FRAME_BLOCK_CHUNK)
+const FRAME_BLOCK_BINDING: u32 = 2;
+const FRAME_BLOCK_FLOAT_COUNT: usize = 172;
+/// 프레임 블록 장(유니폼 버퍼 하나)마다 칸 수. (하나면 장을 통째 bind_buffer_base 로 묶어 멈춘 장면의 GL 호출이 값마다 버퍼를 짓던 꼴과 같다, 여럿이면 칸을 bind_buffer_range 로 고른다)
+const FRAME_RING_SLOT_COUNT: usize = 1;
+/// 장을 다시 쓰기 전에 아무 칸도 안 쓰고 지나야 할 begin_frame 수. (GPU 가 아직 읽는 장을 고치지 않는다, 그림자와 선의 판까지 화면 한 장에 begin_frame 이 둘셋이라 화면 세 장 남짓)
+const FRAME_RING_LATENCY: u64 = 8;
+/// UNIFORM_BUFFER_OFFSET_ALIGNMENT 의 쓸 수 있는 가장 큰 값. (칸 사이 걸음, 칸이 여럿일 때만 쓴다)
+const FRAME_RING_ALIGNMENT: usize = 256;
+
 /// 모형마다 다른 번호를 주는 셈. (인스턴스 버퍼가 모형마다 지은 버텍스 어레이를 가린다)
 static NEXT_MESH_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -172,6 +182,38 @@ pub enum ToonProgramKind {
 	Depth,
 }
 
+/// 프레임 블록. (프로그램마다 올리던 프레임 값을 std140 블록 하나로, 패스마다 한 번 올리고 바인딩 2 에 묶는다, 차례와 자리는 write_frame_block_values)
+/// - 몸, 바깥선, 깊이 프로그램의 정점과 조각 셰이더가 모두 같은 선언을 쓴다. (float 배열은 std140 에서 칸마다 vec4 자리)
+macro_rules! frame_block_chunk {
+	() => {
+		"layout(std140) uniform ToonFrame {
+	mat4 viewProjectionMatrix;
+	mat4 lightViewProjectionMatrix;
+	vec4 cameraPosition;
+	vec3 cameraForward;
+	float hdrOutput;
+	mat3 viewRotation;
+	vec3 outlineDistanceScale;
+	float shadowEnabled;
+	vec2 cameraRoll;
+	vec2 outlineFadeDistance;
+	float shadowStrength;
+	float shadowTexelSize;
+	vec2 ambientOcclusionOrigin;
+	vec4 localShadowAtlas;
+	vec4 localShadowPositions[4];
+	vec4 localShadowForwards[4];
+	vec4 localShadowUps[4];
+	float localShadowTiles[4];
+	float pointLightShadowSlots[8];
+	vec4 shadowBias;
+	float ambientOcclusionDirectLightingStrength;
+};
+"
+	};
+}
+const FRAME_BLOCK_CHUNK: &str = frame_block_chunk!();
+
 /// 세 정점 셰이더의 머리. (몸에만 있는 어트리뷰트도 모두 적는다, 바깥선 버텍스 어레이에 없는 것은 기본값으로 읽힘)
 const VERTEX_HEAD_CHUNK: &str = "#version 300 es
 in vec3 vertexPosition;
@@ -195,7 +237,6 @@ in vec4 instanceTint;
 uniform mat4 jointMatrices[96];
 uniform float skinned;
 uniform float instanced;
-uniform mat4 viewProjectionMatrix;
 uniform mat4 modelMatrix;
 mat4 readSkinMatrix() {
 	if (skinned < 0.5) {
@@ -266,9 +307,7 @@ const DEFAULT_LIGHT_CHUNK: &str = "void applyLight(ToonSurface surface, inout To
 ";
 
 /// 몸을 그리는 정점 셰이더의 몸통.
-const SOLID_VERTEX_BODY: &str = "uniform mat4 lightViewProjectionMatrix;
-uniform vec4 shadowBias;
-out vec3 worldPosition;
+const SOLID_VERTEX_BODY: &str = "out vec3 worldPosition;
 out vec3 localPosition;
 out vec3 worldNormal;
 out vec3 surfaceColor;
@@ -306,10 +345,10 @@ void main() {
 ";
 
 /// 몸을 그리는 조각 셰이더의 머리. (유니폼, 표면과 빛 구조, 공용 함수)
-const SOLID_FRAGMENT_HEAD: &str = "#version 300 es
+const SOLID_FRAGMENT_HEAD: &str = concat!("#version 300 es
 precision highp float;
 precision highp sampler2DShadow;
-in vec3 worldPosition;
+", frame_block_chunk!(), "in vec3 worldPosition;
 in vec3 localPosition;
 in vec3 worldNormal;
 in vec3 surfaceColor;
@@ -345,25 +384,13 @@ uniform vec3 pointLightColors[8];
 uniform vec3 pointLightShapes[8];
 uniform vec4 pointLightSpots[8];
 uniform vec2 pointLightCones[8];
-uniform float pointLightShadowSlots[8];
-uniform vec4 localShadowAtlas;
-uniform vec4 localShadowPositions[4];
-uniform vec4 localShadowForwards[4];
-uniform vec4 localShadowUps[4];
-uniform float localShadowTiles[4];
 uniform sampler2DShadow localShadowTexture;
 uniform vec4 lightColorUsage;
 uniform vec3 lightColorUsageExtra;
 uniform vec4 shadeRimLight;
 #ifdef TOON_AMBIENT_OCCLUSION
 uniform sampler2D ambientOcclusionTexture;
-uniform vec2 ambientOcclusionOrigin;
-uniform float ambientOcclusionDirectLightingStrength;
 #endif
-uniform vec4 cameraPosition;
-uniform vec3 cameraForward;
-uniform mat3 viewRotation;
-uniform vec2 cameraRoll;
 uniform vec4 tintColor;
 uniform float tintAmount;
 uniform float alpha;
@@ -373,7 +400,6 @@ uniform vec4 emissiveColor;
 uniform float softEdge;
 uniform float alphaCutoff;
 uniform float premultipliedOutput;
-uniform float hdrOutput;
 uniform vec3 textureEnabled;
 uniform sampler2D baseColorTexture;
 uniform sampler2D emissiveTexture;
@@ -389,9 +415,6 @@ uniform sampler2D matcapTexture;
 uniform vec4 angelRingSettings;
 uniform vec3 angelRingColor;
 uniform sampler2D angelRingTexture;
-uniform float shadowEnabled;
-uniform float shadowStrength;
-uniform float shadowTexelSize;
 uniform sampler2DShadow shadowTexture;
 out vec4 fragmentColor;
 const float RECIPROCAL_PI = 0.3183098862;
@@ -609,7 +632,7 @@ float readAmbientOcclusion() {
 	return 1.0;
 #endif
 }
-";
+");
 
 /// 몸을 그리는 조각 셰이더의 몸통. (표면 → 표면 조각 → 틴트 → 빛 → 빛 조각 → 합치기)
 const SOLID_FRAGMENT_BODY: &str = "ToonSurface readSurface() {
@@ -810,11 +833,7 @@ void main() {
 
 /// 바깥선 껍데기를 그리는 셰이더. (껍데기는 뒷면만 그려 몸 둘레에 테로 보인다)
 const OUTLINE_VERTEX_BODY: &str = "uniform float outlineWidthScale;
-uniform vec3 outlineDistanceScale;
-uniform vec2 outlineFadeDistance;
 uniform float outlineOffsetZ;
-uniform vec4 cameraPosition;
-uniform vec3 cameraForward;
 out float outlineTint;
 void main() {
 	ToonVertex vertex = readVertex();
@@ -836,13 +855,12 @@ void main() {
 }
 ";
 
-const OUTLINE_FRAGMENT_SHADER: &str = "#version 300 es
+const OUTLINE_FRAGMENT_SHADER: &str = concat!("#version 300 es
 precision highp float;
-in float outlineTint;
+", frame_block_chunk!(), "in float outlineTint;
 uniform vec4 outlineColor;
 uniform vec3 outlineLightColor;
 uniform float alpha;
-uniform float hdrOutput;
 uniform float premultipliedOutput;
 out vec4 fragmentColor;
 #ifdef VANILLA_COLOR_SPACE_LINEAR
@@ -863,7 +881,7 @@ void main() {
 	}
 	fragmentColor = vec4(color, outputAlpha);
 }
-";
+");
 
 /// 그림자 깊이를 그리는 셰이더.
 const DEPTH_VERTEX_BODY: &str = "void main() {
@@ -948,7 +966,7 @@ pub fn compose_toon_program_sources(material: Option<&ToonMaterial>, instance_la
 	let surface_chunk = pick(material.map(|material| material.get_surface_chunk()), DEFAULT_SURFACE_CHUNK);
 	let light_chunk = pick(material.map(|material| material.get_light_chunk()), DEFAULT_LIGHT_CHUNK);
 	let instance_chunk = instance_layout.map(|instance_layout| instance_layout.read_declaration_source()).unwrap_or_default();
-	let vertex_head = format!("{}{}{}{}{}", VERTEX_HEAD_CHUNK, VERTEX_COMMON_CHUNK, instance_chunk, VERTEX_STRUCT_CHUNK, vertex_chunk);
+	let vertex_head = format!("{}{}{}{}{}{}", VERTEX_HEAD_CHUNK, FRAME_BLOCK_CHUNK, VERTEX_COMMON_CHUNK, instance_chunk, VERTEX_STRUCT_CHUNK, vertex_chunk);
 	let mut attribute_locations: Vec<(String, u32)> = TOON_ATTRIBUTE_LOCATIONS.iter().map(|(name, location)| (String::from(*name), *location)).collect();
 	if let Some(instance_layout) = instance_layout {
 		for attribute in instance_layout.get_attributes() {
@@ -1561,12 +1579,58 @@ struct ToonLocalShadowInput {
 }
 
 //==============================================================================
-/// 프로그램 하나와 마지막으로 올린 프레임 값, 빛 묶음. (Cell 이라 빌린 채 고친다)
+/// 재질 블록 값의 해시. (원본 readMaterialBlockHash, FNV-1a, float 의 비트로)
+//==============================================================================
+fn read_block_hash(bits: &[u32]) -> u32 {
+	let mut hash: u32 = 2166136261;
+	for bit in bits {
+		hash = (hash ^ bit).wrapping_mul(16777619);
+	}
+	hash
+}
+
+//==============================================================================
+/// 프레임 블록 장 하나. (원본 createFrameRing 의 pages 칸, 유니폼 버퍼 하나)
+//==============================================================================
+struct FramePage {
+	buffer: GlBuffer,
+	/// 칸마다 쓴 값의 비트. (칸마다 FRAME_BLOCK_FLOAT_COUNT)
+	bits: Vec<u32>,
+	hashes: Vec<u32>,
+	count: usize,
+	use_frame: u64,
+	write_frame: u64,
+}
+
+//==============================================================================
+/// 프레임 블록 고리. (원본 createFrameRing 의 결과와 #frameBlock, #frameBlockOffset, #frameBlockSerial)
+//==============================================================================
+struct FrameRing {
+	values: [f32; FRAME_BLOCK_FLOAT_COUNT],
+	stride: usize,
+	pages: Vec<FramePage>,
+	write_page: Option<usize>,
+	bound_buffer: Option<GlBuffer>,
+	bound_offset: i64,
+	/// 지금 frame_serial 의 프레임 블록이 든 장의 번호와 그 안의 칸 자리. (바이트)
+	block_page: Option<usize>,
+	block_offset: usize,
+	/// block_page 를 고른 frame_serial. (같으면 다시 고르지 않는다)
+	block_serial: u64,
+}
+
+impl FrameRing {
+	fn new() -> FrameRing {
+		let stride = (FRAME_BLOCK_FLOAT_COUNT * 4).div_ceil(FRAME_RING_ALIGNMENT) * FRAME_RING_ALIGNMENT;
+		FrameRing { values: [0.0; FRAME_BLOCK_FLOAT_COUNT], stride, pages: Vec::new(), write_page: None, bound_buffer: None, bound_offset: -1, block_page: None, block_offset: 0, block_serial: 0 }
+	}
+}
+
+//==============================================================================
+/// 프로그램 하나와 마지막으로 올린 빛 묶음. (Cell 이라 빌린 채 고친다)
 //==============================================================================
 struct ToonProgramEntry {
 	program: ShaderProgram,
-	kind: ToonProgramKind,
-	frame_serial: Cell<u64>,
 	light_set_id: Cell<u32>,
 	light_version: Cell<u64>,
 }
@@ -1575,8 +1639,8 @@ impl ToonProgramEntry {
 	//==============================================================================
 	/// 프로그램 칸 짓기. (올린 프레임 번호와 빛 묶음은 비운 채로)
 	//==============================================================================
-	fn new(program: ShaderProgram, kind: ToonProgramKind) -> ToonProgramEntry {
-		ToonProgramEntry { program, kind, frame_serial: Cell::new(0), light_set_id: Cell::new(0), light_version: Cell::new(u64::MAX) }
+	fn new(program: ShaderProgram) -> ToonProgramEntry {
+		ToonProgramEntry { program, light_set_id: Cell::new(0), light_version: Cell::new(u64::MAX) }
 	}
 }
 
@@ -1637,6 +1701,10 @@ pub struct ToonRenderer {
 	is_shadow_pass: bool,
 	/// 프레임 값이 바뀔 때마다 오르는 번호. (프로그램마다 마지막으로 올린 번호와 견준다)
 	frame_serial: u64,
+	/// begin_frame 마다 오르는 번호. (프레임 블록 장을 다시 쓸 수 있는지 가른다)
+	frame_number: u64,
+	/// 프레임 블록(ToonFrame) 고리. (장의 칸마다 한 패스의 값, GPU 가 읽는 장은 고치지 않는다)
+	frame_ring: RefCell<FrameRing>,
 	saved_state: Option<SavedState>,
 	instance_data: Vec<f32>,
 	frame_statistics: ToonFrameStatistics,
@@ -2150,6 +2218,8 @@ impl ToonRenderer {
 			shadow_input: None,
 			is_shadow_pass: false,
 			frame_serial: 1,
+			frame_number: 0,
+			frame_ring: RefCell::new(FrameRing::new()),
 			saved_state: None,
 			instance_data: Vec::new(),
 			frame_statistics: ToonFrameStatistics::default(),
@@ -2204,13 +2274,27 @@ impl ToonRenderer {
 			for (name, unit) in [("shadowTexture", SHADOW_TEXTURE_UNIT), ("baseColorTexture", BASE_COLOR_TEXTURE_UNIT), ("emissiveTexture", EMISSIVE_TEXTURE_UNIT), ("decalTexture", DECAL_TEXTURE_UNIT), ("rampTexture", RAMP_TEXTURE_UNIT), ("matcapTexture", MATCAP_TEXTURE_UNIT), ("localShadowTexture", LOCAL_SHADOW_TEXTURE_UNIT), ("angelRingTexture", ANGEL_RING_TEXTURE_UNIT)] {
 				gl.uniform_1_i32(solid_program.get_uniform_location(gl, name).as_ref(), unit as i32);
 			}
+			for program in [&solid_program, &outline_program, &depth_program] {
+				ToonRenderer::bind_frame_block(gl, program);
+			}
 			crate::core::glstatecache::use_program(gl, previous_program);
 		}
 		Ok(ToonProgramSet {
-			solid: ToonProgramEntry::new(solid_program, ToonProgramKind::Solid),
-			outline: ToonProgramEntry::new(outline_program, ToonProgramKind::Outline),
-			depth: ToonProgramEntry::new(depth_program, ToonProgramKind::Depth),
+			solid: ToonProgramEntry::new(solid_program),
+			outline: ToonProgramEntry::new(outline_program),
+			depth: ToonProgramEntry::new(depth_program),
 		})
+	}
+
+	//==============================================================================
+	/// 프로그램의 프레임 블록을 바인딩 2 에 잇기. (원본 createProgramSet 의 bindBlock)
+	//==============================================================================
+	unsafe fn bind_frame_block(gl: &crate::GlContext, program: &ShaderProgram) {
+		unsafe {
+			if let Some(block_index) = gl.get_uniform_block_index(program.get_program(), FRAME_BLOCK_NAME) {
+				gl.uniform_block_binding(program.get_program(), block_index, FRAME_BLOCK_BINDING);
+			}
+		}
 	}
 
 	//==============================================================================
@@ -2226,9 +2310,10 @@ impl ToonRenderer {
 			for (name, unit) in [("shadowTexture", SHADOW_TEXTURE_UNIT), ("baseColorTexture", BASE_COLOR_TEXTURE_UNIT), ("emissiveTexture", EMISSIVE_TEXTURE_UNIT), ("decalTexture", DECAL_TEXTURE_UNIT), ("rampTexture", RAMP_TEXTURE_UNIT), ("matcapTexture", MATCAP_TEXTURE_UNIT), ("localShadowTexture", LOCAL_SHADOW_TEXTURE_UNIT), ("angelRingTexture", ANGEL_RING_TEXTURE_UNIT), ("ambientOcclusionTexture", AMBIENT_OCCLUSION_TEXTURE_UNIT)] {
 				gl.uniform_1_i32(solid_program.get_uniform_location(gl, name).as_ref(), unit as i32);
 			}
+			ToonRenderer::bind_frame_block(gl, &solid_program);
 			crate::core::glstatecache::use_program(gl, previous_program);
 		}
-		Ok(ToonProgramEntry::new(solid_program, ToonProgramKind::Solid))
+		Ok(ToonProgramEntry::new(solid_program))
 	}
 
 	//==============================================================================
@@ -2525,6 +2610,17 @@ impl ToonRenderer {
 			}
 		}
 		self.uniform_slot_table.borrow_mut().clear();
+		{
+			let mut frame_ring = self.frame_ring.borrow_mut();
+			for page in frame_ring.pages.drain(..) {
+				unsafe {
+					crate::core::glstatecache::delete_buffer(gl, page.buffer);
+				}
+			}
+			frame_ring.write_page = None;
+			frame_ring.bound_buffer = None;
+			frame_ring.block_page = None;
+		}
 		unsafe {
 			crate::core::glstatecache::delete_texture(gl, self.empty_shadow_texture);
 			crate::core::glstatecache::delete_texture(gl, self.white_texture);
@@ -2968,6 +3064,7 @@ impl ToonRenderer {
 		self.frame_statistics = ToonFrameStatistics::default();
 		self.is_shadow_pass = false;
 		self.frame_serial += 1;
+		self.frame_number += 1;
 		self.save_state(gl);
 		self.apply_screen_rect(gl);
 		// 모서리 어둠 텍스처의 화면 원점. (이번 프레임 뷰포트의 왼쪽 아래)
@@ -3316,87 +3413,187 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
-	/// 프로그램의 프레임 값 올리기. (보기와 투영, 카메라, 보기 돌림, HDR, 그림자, 껍데기 거리 배, 이번 프레임에 이미 올렸으면 건너뛴다)
+	/// 프로그램의 프레임 값 올리기. (보기와 투영, 카메라, HDR, 그림자, 바깥선 거리, 점광 그림자, 모서리 어둠 원점을 프레임 블록 ToonFrame 하나로, 패스마다 한 번 고르고 묶였으면 건너뛴다)
 	//==============================================================================
-	fn upload_frame_uniforms(&self, gl: &crate::GlContext, entry: &ToonProgramEntry) {
-		if entry.frame_serial.get() == self.frame_serial {
-			return;
+	fn upload_frame_uniforms(&self, gl: &crate::GlContext, _entry: &ToonProgramEntry) {
+		// 패스(frame_serial)마다 값을 한 번 써서 같은 값의 칸을 찾거나 고리의 새 칸에 쓴다. (패스마다 다른 칸, GPU 가 읽는 장은 고치지 않는다, 카메라와 빛이 그대로면 올림이 없다, 버퍼를 값마다 짓지 않는다)
+		let mut frame_ring = self.frame_ring.borrow_mut();
+		if frame_ring.block_serial != self.frame_serial || frame_ring.block_page.is_none() {
+			frame_ring.block_serial = self.frame_serial;
+			let mut values = [0.0f32; FRAME_BLOCK_FLOAT_COUNT];
+			values.copy_from_slice(&frame_ring.values);
+			self.write_frame_block_values(&mut values);
+			frame_ring.values = values;
+			self.select_frame_slot(gl, &mut frame_ring);
 		}
-		entry.frame_serial.set(self.frame_serial);
-		let program = &entry.program;
-		let hdr_output = if self.is_hdr_output { 1.0 } else { 0.0 };
-		unsafe {
-			gl.uniform_matrix_4_f32_slice(program.get_uniform_location(gl, "viewProjectionMatrix").as_ref(), false, &self.view_projection_matrix.elements);
-			match entry.kind {
-				ToonProgramKind::Outline => {
-					let camera_position = self.camera_position;
-					let outline_distance_scale = self.outline_distance_scale;
-					gl.uniform_4_f64(program.get_uniform_location(gl, "cameraPosition").as_ref(), camera_position[0], camera_position[1], camera_position[2], camera_position[3]);
-					gl.uniform_3_f64(program.get_uniform_location(gl, "outlineDistanceScale").as_ref(), outline_distance_scale[0], outline_distance_scale[1], outline_distance_scale[2]);
-					gl.uniform_2_f64(program.get_uniform_location(gl, "outlineFadeDistance").as_ref(), self.outline_fade_distance[0], self.outline_fade_distance[1]);
-					gl.uniform_3_f64(program.get_uniform_location(gl, "cameraForward").as_ref(), self.camera_forward[0], self.camera_forward[1], self.camera_forward[2]);
-					gl.uniform_1_f64(program.get_uniform_location(gl, "hdrOutput").as_ref(), hdr_output);
+		let page_index = frame_ring.block_page.unwrap_or(0);
+		let buffer = frame_ring.pages[page_index].buffer;
+		let offset = frame_ring.block_offset;
+		if frame_ring.bound_buffer != Some(buffer) || frame_ring.bound_offset != offset as i64 {
+			unsafe {
+				if FRAME_RING_SLOT_COUNT == 1 {
+					gl.bind_buffer_base(glow::UNIFORM_BUFFER, FRAME_BLOCK_BINDING, Some(buffer));
 				}
-				ToonProgramKind::Solid => {
-					let camera_position = self.camera_position;
-					let camera_forward = self.camera_forward;
-					gl.uniform_4_f64(program.get_uniform_location(gl, "cameraPosition").as_ref(), camera_position[0], camera_position[1], camera_position[2], camera_position[3]);
-					gl.uniform_3_f64(program.get_uniform_location(gl, "cameraForward").as_ref(), camera_forward[0], camera_forward[1], camera_forward[2]);
-					gl.uniform_matrix_3_f32_slice(program.get_uniform_location(gl, "viewRotation").as_ref(), false, &self.view_rotation);
-					gl.uniform_2_f64(program.get_uniform_location(gl, "cameraRoll").as_ref(), self.camera_roll.cos(), self.camera_roll.sin());
-					gl.uniform_1_f64(program.get_uniform_location(gl, "hdrOutput").as_ref(), hdr_output);
-					match self.shadow_input {
-						Some(shadow_input) => {
-							gl.uniform_1_f64(program.get_uniform_location(gl, "shadowEnabled").as_ref(), 1.0);
-							gl.uniform_1_f64(program.get_uniform_location(gl, "shadowStrength").as_ref(), shadow_input.strength);
-							gl.uniform_1_f64(program.get_uniform_location(gl, "shadowTexelSize").as_ref(), 1.0 / shadow_input.resolution.max(1) as f64);
-							gl.uniform_matrix_4_f32_slice(program.get_uniform_location(gl, "lightViewProjectionMatrix").as_ref(), false, &shadow_input.light_view_projection_matrix.elements);
-							let shadow_bias = shadow_input.bias;
-							gl.uniform_4_f64(program.get_uniform_location(gl, "shadowBias").as_ref(), shadow_bias[0], shadow_bias[1], shadow_bias[2], shadow_bias[3]);
-						}
-						None => {
-							gl.uniform_1_f64(program.get_uniform_location(gl, "shadowEnabled").as_ref(), 0.0);
-						}
-					}
-					self.upload_local_shadow_uniforms(gl, program);
-					// 모서리 어둠 텍스처의 화면 원점과 직접 빛 몫. (원본 프레임 블록의 ambientOcclusionOrigin, ambientOcclusionDirectLightingStrength 칸, 러스트는 모서리 어둠 몸 프로그램의 유니폼)
-					if let Some(ambient_occlusion_input) = self.ambient_occlusion_input.as_ref() {
-						gl.uniform_2_f64(program.get_uniform_location(gl, "ambientOcclusionOrigin").as_ref(), ambient_occlusion_input.origin[0], ambient_occlusion_input.origin[1]);
-						gl.uniform_1_f64(program.get_uniform_location(gl, "ambientOcclusionDirectLightingStrength").as_ref(), ambient_occlusion_input.direct_lighting_strength);
-					}
+				else {
+					gl.bind_buffer_range(glow::UNIFORM_BUFFER, FRAME_BLOCK_BINDING, Some(buffer), offset as i32, (FRAME_BLOCK_FLOAT_COUNT * 4) as i32);
 				}
-				ToonProgramKind::Depth => {}
 			}
+			frame_ring.bound_buffer = Some(buffer);
+			frame_ring.bound_offset = offset as i64;
 		}
 	}
 
 	//==============================================================================
-	/// 점광과 스포트라이트 그림자 올리기. (아틀라스의 빛마다 자리, 바탕, 거리, 첫 칸과 점광마다의 칸 번호 + 1)
+	/// 프레임 블록 칸 고르기. (값이 같은 칸이 있으면 그것, 없으면 이 프레임의 장 다음 칸에 buffer_sub_data, block_page 와 block_offset 에 둔다)
 	//==============================================================================
-	fn upload_local_shadow_uniforms(&self, gl: &crate::GlContext, program: &ShaderProgram) {
-		let mut slot_values = [0.0f32; TOON_MAXIMUM_POINT_LIGHTS];
-		let mut position_values = [0.0f32; SHADOW_ATLAS_MAXIMUM_LIGHTS * 4];
-		let mut forward_values = [0.0f32; SHADOW_ATLAS_MAXIMUM_LIGHTS * 4];
-		let mut up_values = [0.0f32; SHADOW_ATLAS_MAXIMUM_LIGHTS * 4];
-		let mut tile_values = [0.0f32; SHADOW_ATLAS_MAXIMUM_LIGHTS];
-		unsafe {
-			if let Some(local_shadow_input) = self.local_shadow_input.as_ref() {
-				for (slot, light) in local_shadow_input.light_list.iter().take(SHADOW_ATLAS_MAXIMUM_LIGHTS).enumerate() {
-					if light.light_index < TOON_MAXIMUM_POINT_LIGHTS {
-						slot_values[light.light_index] = ((slot + 1) as f64) as f32;
-					}
-					position_values[slot * 4..slot * 4 + 4].copy_from_slice(&[(light.position[0]) as f32, (light.position[1]) as f32, (light.position[2]) as f32, light.near as f32]);
-					forward_values[slot * 4..slot * 4 + 4].copy_from_slice(&[(light.forward[0]) as f32, (light.forward[1]) as f32, (light.forward[2]) as f32, light.far as f32]);
-					up_values[slot * 4..slot * 4 + 4].copy_from_slice(&[(light.up[0]) as f32, (light.up[1]) as f32, (light.up[2]) as f32, light.tangent as f32]);
-					tile_values[slot] = (light.first_tile as f64) as f32;
+	fn select_frame_slot(&self, gl: &crate::GlContext, frame_ring: &mut FrameRing) {
+		let bits: Vec<u32> = frame_ring.values.iter().map(|value| value.to_bits()).collect();
+		let hash = read_block_hash(&bits);
+		let frame_number = self.frame_number;
+		for page_index in 0..frame_ring.pages.len() {
+			let page = &mut frame_ring.pages[page_index];
+			for slot in 0..page.count {
+				if page.hashes[slot] == hash && page.bits[slot * FRAME_BLOCK_FLOAT_COUNT..(slot + 1) * FRAME_BLOCK_FLOAT_COUNT] == bits[..] {
+					page.use_frame = frame_number;
+					let offset = slot * frame_ring.stride;
+					frame_ring.block_page = Some(page_index);
+					frame_ring.block_offset = offset;
+					return;
 				}
-				gl.uniform_4_f64(program.get_uniform_location(gl, "localShadowAtlas").as_ref(), local_shadow_input.grid_size, local_shadow_input.tile_size, local_shadow_input.texel_size, local_shadow_input.strength);
 			}
-			gl.uniform_1_f32_slice(program.get_uniform_location(gl, "pointLightShadowSlots").as_ref(), &slot_values);
-			gl.uniform_4_f32_slice(program.get_uniform_location(gl, "localShadowPositions").as_ref(), &position_values);
-			gl.uniform_4_f32_slice(program.get_uniform_location(gl, "localShadowForwards").as_ref(), &forward_values);
-			gl.uniform_4_f32_slice(program.get_uniform_location(gl, "localShadowUps").as_ref(), &up_values);
-			gl.uniform_1_f32_slice(program.get_uniform_location(gl, "localShadowTiles").as_ref(), &tile_values);
+		}
+		let mut page_index = frame_ring.write_page;
+		let is_write_page_usable = match page_index {
+			Some(index) => frame_ring.pages[index].write_frame == frame_number && frame_ring.pages[index].count < FRAME_RING_SLOT_COUNT,
+			None => false,
+		};
+		if !is_write_page_usable {
+			// 이 프레임에 쓸 장: FRAME_RING_LATENCY 프레임 동안 쓰지 않은 장 가운데 가장 오래된 것을 비워 쓴다. (없으면 새로)
+			let mut chosen: Option<usize> = None;
+			for (candidate_index, candidate) in frame_ring.pages.iter().enumerate() {
+				if frame_number - candidate.use_frame >= FRAME_RING_LATENCY && chosen.is_none_or(|chosen| candidate.use_frame < frame_ring.pages[chosen].use_frame) {
+					chosen = Some(candidate_index);
+				}
+			}
+			let index = match chosen {
+				Some(index) => {
+					index
+				}
+				None => {
+					let buffer = unsafe { crate::core::glstatecache::create_buffer(gl) };
+					let Ok(buffer) = buffer else {
+						// 버퍼를 지을 수 없으면 앞의 값 그대로 둔다. (그릴 수는 있다)
+						return;
+					};
+					unsafe {
+						crate::core::glstatecache::bind_buffer(gl, glow::UNIFORM_BUFFER, Some(buffer));
+						gl.buffer_data_size(glow::UNIFORM_BUFFER, (frame_ring.stride * (FRAME_RING_SLOT_COUNT - 1) + FRAME_BLOCK_FLOAT_COUNT * 4) as i32, glow::STATIC_DRAW);
+						crate::core::glstatecache::bind_buffer(gl, glow::UNIFORM_BUFFER, None);
+					}
+					frame_ring.pages.push(FramePage { buffer, bits: vec![0; FRAME_RING_SLOT_COUNT * FRAME_BLOCK_FLOAT_COUNT], hashes: vec![0; FRAME_RING_SLOT_COUNT], count: 0, use_frame: frame_number, write_frame: frame_number });
+					frame_ring.pages.len() - 1
+				}
+			};
+			let page = &mut frame_ring.pages[index];
+			page.count = 0;
+			page.write_frame = frame_number;
+			frame_ring.write_page = Some(index);
+			page_index = Some(index);
+		}
+		let index = page_index.unwrap_or(0);
+		let stride = frame_ring.stride;
+		let page = &mut frame_ring.pages[index];
+		let slot = page.count;
+		page.bits[slot * FRAME_BLOCK_FLOAT_COUNT..(slot + 1) * FRAME_BLOCK_FLOAT_COUNT].copy_from_slice(&bits);
+		page.hashes[slot] = hash;
+		page.count = slot + 1;
+		page.use_frame = frame_number;
+		let buffer = page.buffer;
+		unsafe {
+			crate::core::glstatecache::bind_buffer(gl, glow::UNIFORM_BUFFER, Some(buffer));
+			gl.buffer_sub_data_u8_slice(glow::UNIFORM_BUFFER, (slot * stride) as i32, float_slice_to_bytes(&frame_ring.values));
+			crate::core::glstatecache::bind_buffer(gl, glow::UNIFORM_BUFFER, None);
+		}
+		frame_ring.block_page = Some(index);
+		frame_ring.block_offset = slot * stride;
+	}
+
+	//==============================================================================
+	/// 프레임 블록의 값 쓰기. (FRAME_BLOCK_CHUNK 의 std140 자리, 그림자나 점광 그림자가 없으면 그 행렬, 치우침과 아틀라스 칸은 앞의 값 그대로)
+	//==============================================================================
+	fn write_frame_block_values(&self, values: &mut [f32; FRAME_BLOCK_FLOAT_COUNT]) {
+		values[0..16].copy_from_slice(&self.view_projection_matrix.elements);
+		let shadow_input = self.shadow_input.as_ref();
+		if let Some(shadow_input) = shadow_input {
+			values[16..32].copy_from_slice(&shadow_input.light_view_projection_matrix.elements);
+		}
+		let camera_position = self.camera_position;
+		let camera_forward = self.camera_forward;
+		values[32] = camera_position[0] as f32;
+		values[33] = camera_position[1] as f32;
+		values[34] = camera_position[2] as f32;
+		values[35] = camera_position[3] as f32;
+		values[36] = camera_forward[0] as f32;
+		values[37] = camera_forward[1] as f32;
+		values[38] = camera_forward[2] as f32;
+		values[39] = if self.is_hdr_output { 1.0 } else { 0.0 };
+		let view_rotation = self.view_rotation;
+		for column in 0..3 {
+			values[40 + column * 4] = view_rotation[column * 3];
+			values[41 + column * 4] = view_rotation[column * 3 + 1];
+			values[42 + column * 4] = view_rotation[column * 3 + 2];
+		}
+		let outline_distance_scale = self.outline_distance_scale;
+		values[52] = outline_distance_scale[0] as f32;
+		values[53] = outline_distance_scale[1] as f32;
+		values[54] = outline_distance_scale[2] as f32;
+		values[55] = if shadow_input.is_some() { 1.0 } else { 0.0 };
+		values[56] = self.camera_roll.cos() as f32;
+		values[57] = self.camera_roll.sin() as f32;
+		values[58] = self.outline_fade_distance[0] as f32;
+		values[59] = self.outline_fade_distance[1] as f32;
+		if let Some(shadow_input) = shadow_input {
+			values[60] = shadow_input.strength as f32;
+			values[61] = (1.0 / shadow_input.resolution.max(1) as f64) as f32;
+			// 해 그림자 치우침. (x 깊이, y 노멀 월드 거리, z 기울기 깊이, w 기울기 상한, read_shadow_bias)
+			let shadow_bias = shadow_input.bias;
+			values[164] = shadow_bias[0] as f32;
+			values[165] = shadow_bias[1] as f32;
+			values[166] = shadow_bias[2] as f32;
+			values[167] = shadow_bias[3] as f32;
+		}
+		// 모서리 어둠 텍스처의 화면 원점. (이번 프레임 뷰포트의 왼쪽 아래, 걸지 않았으면 0)
+		let ambient_occlusion_input = self.ambient_occlusion_input.as_ref();
+		values[62] = ambient_occlusion_input.map(|input| input.origin[0] as f32).unwrap_or(0.0);
+		values[63] = ambient_occlusion_input.map(|input| input.origin[1] as f32).unwrap_or(0.0);
+		// 모서리 어둠이 직접 빛에 미치는 몫. (걸지 않았으면 0)
+		values[168] = ambient_occlusion_input.map(|input| input.direct_lighting_strength as f32).unwrap_or(0.0);
+		// 점광 그림자. (칸 넷의 자리, 앞, 위, 첫 칸과 점광마다의 칸 번호, 없으면 0)
+		values[68..164].fill(0.0);
+		if let Some(local_shadow_input) = self.local_shadow_input.as_ref() {
+			values[64] = local_shadow_input.grid_size as f32;
+			values[65] = local_shadow_input.tile_size as f32;
+			values[66] = local_shadow_input.texel_size as f32;
+			values[67] = local_shadow_input.strength as f32;
+			for (slot, light) in local_shadow_input.light_list.iter().take(SHADOW_ATLAS_MAXIMUM_LIGHTS).enumerate() {
+				if light.light_index < TOON_MAXIMUM_POINT_LIGHTS {
+					values[132 + light.light_index * 4] = (slot + 1) as f32;
+				}
+				let offset = slot * 4;
+				values[68 + offset] = light.position[0] as f32;
+				values[69 + offset] = light.position[1] as f32;
+				values[70 + offset] = light.position[2] as f32;
+				values[71 + offset] = light.near as f32;
+				values[84 + offset] = light.forward[0] as f32;
+				values[85 + offset] = light.forward[1] as f32;
+				values[86 + offset] = light.forward[2] as f32;
+				values[87 + offset] = light.far as f32;
+				values[100 + offset] = light.up[0] as f32;
+				values[101 + offset] = light.up[1] as f32;
+				values[102 + offset] = light.up[2] as f32;
+				values[103 + offset] = light.tangent as f32;
+				values[116 + offset] = light.first_tile as f32;
+			}
 		}
 	}
 
@@ -3578,6 +3775,7 @@ impl ToonRenderer {
 	//==============================================================================
 	fn forget_all_uniform_values(&self) {
 		self.uniform_serial.set(self.uniform_serial.get() + 1);
+		self.frame_ring.borrow_mut().bound_buffer = None;
 	}
 
 	//==============================================================================
@@ -4479,5 +4677,35 @@ mod tests {
 		let default_sources = compose_toon_program_sources(None, None, false, ColorSpace::Gamma);
 		assert!(default_sources.solid_fragment_shader.contains(DEFAULT_SURFACE_CHUNK));
 		assert_eq!(default_sources.attribute_locations.len(), TOON_ATTRIBUTE_LOCATIONS.len());
+	}
+	//==============================================================================
+	/// 프레임 값은 프레임 블록 ToonFrame(std140, 172 float)으로만 올린다. 세 프로그램의 정점 셰이더와 몸, 바깥선 조각 셰이더가 같은 선언을 쓰고, 선언은 원본과 글자까지 같다. (원본 jsubo 의 FRAME_BLOCK_CHUNK)
+	//==============================================================================
+	#[test]
+	fn frame_values_are_declared_in_frame_block_like_original() {
+		let sources = compose_toon_program_sources(None, None, false, ColorSpace::Gamma);
+		let block_head = "layout(std140) uniform ToonFrame {\n\tmat4 viewProjectionMatrix;\n\tmat4 lightViewProjectionMatrix;\n";
+		for source in [&sources.solid_vertex_shader, &sources.solid_fragment_shader, &sources.outline_vertex_shader, &sources.outline_fragment_shader, &sources.depth_vertex_shader] {
+			assert!(source.contains(block_head));
+		}
+		assert!(!sources.depth_fragment_shader.contains("ToonFrame"));
+		for name in ["viewProjectionMatrix", "cameraPosition", "cameraForward", "hdrOutput", "viewRotation", "outlineDistanceScale", "outlineFadeDistance", "shadowEnabled", "shadowStrength", "shadowTexelSize", "shadowBias", "lightViewProjectionMatrix", "cameraRoll", "localShadowAtlas", "pointLightShadowSlots"] {
+			for source in [&sources.solid_vertex_shader, &sources.solid_fragment_shader, &sources.outline_vertex_shader, &sources.outline_fragment_shader, &sources.depth_vertex_shader] {
+				assert!(!source.lines().any(|line| line.starts_with("uniform ") && line.contains(&format!(" {}", name)) && line.trim_end().ends_with(&format!("{};", name)) ), "{} 는 블록 밖 유니폼이면 안 됨", name);
+			}
+		}
+		let ambient_sources = compose_toon_program_sources(None, None, true, ColorSpace::Gamma);
+		assert!(!ambient_sources.solid_fragment_shader.contains("uniform vec2 ambientOcclusionOrigin;"));
+		let path = std::env::var("VANILLA_JS_PATH").unwrap_or_else(|_| format!("{}/../vanilla.js", env!("CARGO_MANIFEST_DIR")));
+		let Ok(original) = std::fs::read_to_string(format!("{}/src/graphics3d/toon/toonrenderer.js", path)) else {
+			println!("(원본 저장소가 없어 블록 선언 글자 견주기는 건너뜀)");
+			return;
+		};
+		let start = original.find("const FRAME_BLOCK_CHUNK = `").expect("원본 블록") + "const FRAME_BLOCK_CHUNK = `".len();
+		let chunk = &original[start..start + original[start..].find("`;").expect("원본 블록 끝")];
+		assert_eq!(chunk, FRAME_BLOCK_CHUNK);
+		assert!(FRAME_BLOCK_CHUNK.contains("float ambientOcclusionDirectLightingStrength;"));
+		assert_eq!(FRAME_BLOCK_FLOAT_COUNT, 172);
+		assert_eq!(FRAME_BLOCK_BINDING, 2);
 	}
 }
