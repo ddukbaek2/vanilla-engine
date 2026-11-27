@@ -37,7 +37,7 @@
 //! - GPU 인스턴싱: draw_mesh_instanced 로 같은 모형 여럿을 인스턴스마다 행렬과 틴트로 한 번에 그린다. (몸과 바깥선 모두, 그릴 때마다 걸러서 올림)
 //!   오래 두는 인스턴스는 create_instance_layout 과 create_instance_buffer 로 영구 버퍼를 짓고 draw_mesh_instance_buffer 로 그린다. (거르지 않음, 머티리얼 정점 조각이 사용자 어트리뷰트를 읽음)
 //! - 화면 밖 거르기: 모형의 경계 구를 보기와 투영의 절두체에 대어 밖이면 그리지 않는다. (인스턴스는 하나씩 걸러 남은 것만 올린다)
-//! - 그림자: 엔진 ShadowMap 에 begin_shadow_pass 와 draw_mesh 로 드리우고, set_shadow 로 받는다. (3x3 PCF)
+//! - 그림자: 엔진 ShadowMap 에 begin_shadow_pass 와 draw_mesh 로 드리우고, set_shadow 로 받는다. (3x3 PCF, 치우침은 ShadowMap::set_bias 의 텍셀 단위 값에 텍셀 크기와 기울기를 곱한다)
 //!   점광과 스포트라이트 그림자는 ShadowAtlas 에 begin_shadow_atlas_pass, 칸마다 set_shadow_atlas_tile 과 draw_mesh 로 드리우고, set_local_shadows 로 받는다. (점광은 큐브 여섯 칸, 스포트라이트는 원근 한 칸)
 //!   그 빛의 받는 몫에 그림자를 곱해 그늘 램프에 넣는다. (해와 같은 꼴) casts_shadow 가 true 인 점광만 칸을 받는다. (SHADOW_ATLAS_MAXIMUM_LIGHTS 까지)
 //!   그림자를 받지 않을 때도 두 그림자 유닛에 1x1 비교 깊이 텍스처를 묶는다. (sampler2DShadow 유닛에 깊이 텍스처가 없으면 맥 드라이버가 알리고, 색 텍스처가 묶여 있으면 WebGL 이 그리기를 거부한다)
@@ -85,6 +85,14 @@ pub const TOON_MAXIMUM_JOINTS: usize = 96;
 /// - 행렬은 아핀 3x4 로 읽는다. 아래 줄 네 칸(원소 3, 7, 11, 15)은 인스턴스 빛남(sRGB r, g, b 와 선형 세기)이다. (Godot MultiMesh, 유니티 BatchRendererGroup 의 3x4 행렬 꼴)
 ///   Matrix4 원소를 그대로 담으면 아래 줄이 0, 0, 0, 1 이라 빛남이 없다.
 pub const TOON_INSTANCE_FLOAT_COUNT: usize = 20;
+
+/// 해 그림자 치우침. (ShadowMap::set_bias 의 텍셀 단위 값에 곱하는 PCF 반지름, 기울기 비례 치우침의 텍셀 배수, 기울기 상한)
+/// - 3x3 PCF 는 가운데에서 1.5 텍셀까지 읽으므로 깊이와 노멀 치우침에 1.5 를 곱한다. (유니티 URP ShadowUtils 의 soft shadow kernel radius, Low 3x3 이 1.5)
+/// - 기울기 비례 치우침은 텍셀 하나 안에서 면의 깊이가 바뀌는 몫(텍셀 크기 x tan(빛과 노멀 사이 각))에 2.5 를 곱한다. (URP 가 HDRP 기본값과 같다고 적은 slope scale 2.5)
+/// - 기울기는 10(약 84 도)에서 자른다. (빛과 거의 나란한 면에서 치우침이 끝없이 커지지 않게, 언리얼의 MaxSlopeDepthBias 와 같은 자리)
+const SHADOW_FILTER_RADIUS: f64 = 1.5;
+const SHADOW_SLOPE_BIAS: f64 = 2.5;
+const SHADOW_MAXIMUM_SLOPE: f64 = 10.0;
 
 /// 텍스처 유닛. (점광 그림자 아틀라스 0, 램프, 매트캡, 해 그림자, 바탕색, 빛남, 데칼, 천사 고리, 머티리얼 텍스처는 8 부터 15 까지)
 /// - 유닛 0 은 엔진 2D 가 기억하는 유닛이라 begin_frame 이 묶음을 적어 두고 end_frame 이 돌린다.
@@ -250,6 +258,7 @@ const DEFAULT_LIGHT_CHUNK: &str = "void applyLight(ToonSurface surface, inout To
 
 /// 몸을 그리는 정점 셰이더의 몸통.
 const SOLID_VERTEX_BODY: &str = "uniform mat4 lightViewProjectionMatrix;
+uniform vec4 shadowBias;
 out vec3 worldPosition;
 out vec3 localPosition;
 out vec3 worldNormal;
@@ -277,7 +286,12 @@ void main() {
 	surfaceUv1 = vertex.uv1;
 	surfaceTint = vertex.tint;
 	surfaceEmissive = vertex.emissive;
-	lightSpacePosition = lightViewProjectionMatrix * vec4(position.xyz + worldNormal * 0.02, 1.0);
+	// 해 그림자 치우침. (노멀 쪽으로 밀어 읽고, 깊이와 기울기 비례 몫만큼 빛 쪽으로 당겨 견준다, shadowBias 는 x 깊이, y 노멀 월드 거리, z 기울기 깊이, w 기울기 상한)
+	vec3 shadowLightDirection = normalize(vec3(lightViewProjectionMatrix[0][2], lightViewProjectionMatrix[1][2], lightViewProjectionMatrix[2][2]));
+	float shadowCosine = clamp(abs(dot(worldNormal, shadowLightDirection)), 0.0001, 1.0);
+	float shadowSlope = min(sqrt(1.0 - shadowCosine * shadowCosine) / shadowCosine, shadowBias.w);
+	lightSpacePosition = lightViewProjectionMatrix * vec4(position.xyz + worldNormal * shadowBias.y, 1.0);
+	lightSpacePosition.z -= 2.0 * (shadowBias.x + shadowBias.z * shadowSlope) * lightSpacePosition.w;
 	gl_Position = viewProjectionMatrix * position;
 }
 ";
@@ -425,7 +439,7 @@ float readShadow() {
 	float lit = 0.0;
 	for (int offsetY = -1; offsetY <= 1; ++offsetY) {
 		for (int offsetX = -1; offsetX <= 1; ++offsetX) {
-			lit += texture(shadowTexture, vec3(projected.xy + vec2(float(offsetX), float(offsetY)) * shadowTexelSize, projected.z - 0.0015));
+			lit += texture(shadowTexture, vec3(projected.xy + vec2(float(offsetX), float(offsetY)) * shadowTexelSize, projected.z));
 		}
 	}
 	return mix(1.0, lit / 9.0, shadowStrength);
@@ -1338,6 +1352,8 @@ struct ToonShadowInput {
 	light_view_projection_matrix: Matrix4,
 	resolution: i32,
 	strength: f64,
+	/// 셰이더 shadowBias 의 값. (read_shadow_bias)
+	bias: [f64; 4],
 }
 
 //==============================================================================
@@ -1680,6 +1696,28 @@ pub fn read_camera_roll(view_rotation: &[f32; 9], is_mirrored: bool) -> f64 {
 	let roll = cosine.clamp(-1.0, 1.0).acos();
 	let direction = if right[1] < 0.0 { -1.0 } else { 1.0 };
 	(-(direction * roll)) as f64
+}
+
+//==============================================================================
+/// 해 그림자 치우침 셈하기. (ShadowMap 의 텍셀 단위 치우침을 셰이더가 쓰는 깊이와 월드 거리로, 원본 readShadowBias)
+/// - 텍셀 하나의 월드 크기는 2 / (빛 행렬 첫 줄의 길이 x 해상도), 월드 1 의 깊이(0 ~ 1)는 셋째 줄의 길이 / 2. (직교 빛 행렬, 보기 부분은 강체)
+///   유니티 URP 가 방향광의 텍셀 크기를 2 / 투영 m00 / 해상도로 셈하는 것과 같다.
+///
+/// # 인자
+/// - `light_view_projection_matrix`: 빛 보기 투영 행렬.
+/// - `resolution`: 그림자 판 한 변의 텍셀 수.
+/// - `depth_bias`: 깊이 치우침. (텍셀 단위)
+/// - `normal_bias`: 노멀 치우침. (텍셀 단위)
+///
+/// # 돌려줌
+/// [깊이 치우침 (0 ~ 1 깊이), 노멀 치우침 (월드 거리), 기울기 1 의 치우침 (0 ~ 1 깊이), 기울기 상한]
+//==============================================================================
+fn read_shadow_bias(light_view_projection_matrix: &Matrix4, resolution: i32, depth_bias: f64, normal_bias: f64) -> [f64; 4] {
+	let elements = light_view_projection_matrix.read_elements();
+	let width_scale = crate::base::trigonometry::hypot_list(&[elements[0], elements[4], elements[8]]);
+	let depth_scale = crate::base::trigonometry::hypot_list(&[elements[2], elements[6], elements[10]]) * 0.5;
+	let texel_world_size = 2.0 / (width_scale.max(1e-6) * resolution.max(1) as f64);
+	[depth_bias * SHADOW_FILTER_RADIUS * texel_world_size * depth_scale, normal_bias * SHADOW_FILTER_RADIUS * texel_world_size, SHADOW_SLOPE_BIAS * texel_world_size * depth_scale, SHADOW_MAXIMUM_SLOPE]
 }
 
 //==============================================================================
@@ -3040,6 +3078,8 @@ impl ToonRenderer {
 							gl.uniform_1_f64(program.get_uniform_location(gl, "shadowStrength").as_ref(), shadow_input.strength);
 							gl.uniform_1_f64(program.get_uniform_location(gl, "shadowTexelSize").as_ref(), 1.0 / shadow_input.resolution.max(1) as f64);
 							gl.uniform_matrix_4_f32_slice(program.get_uniform_location(gl, "lightViewProjectionMatrix").as_ref(), false, &shadow_input.light_view_projection_matrix.elements);
+							let shadow_bias = shadow_input.bias;
+							gl.uniform_4_f64(program.get_uniform_location(gl, "shadowBias").as_ref(), shadow_bias[0], shadow_bias[1], shadow_bias[2], shadow_bias[3]);
 						}
 						None => {
 							gl.uniform_1_f64(program.get_uniform_location(gl, "shadowEnabled").as_ref(), 0.0);
@@ -3830,7 +3870,9 @@ impl ToonRenderer {
 	pub fn set_shadow(&mut self, shadow_map: Option<&ShadowMap>, strength: f64) {
 		self.frame_serial += 1;
 		self.shadow_input = shadow_map.map(|shadow_map| {
-			ToonShadowInput { depth_texture: shadow_map.get_depth_texture(), light_view_projection_matrix: *shadow_map.get_light_view_projection_matrix(), resolution: shadow_map.get_resolution(), strength }
+			let light_view_projection_matrix = *shadow_map.get_light_view_projection_matrix();
+			let resolution = shadow_map.get_resolution();
+			ToonShadowInput { depth_texture: shadow_map.get_depth_texture(), light_view_projection_matrix, resolution, strength, bias: read_shadow_bias(&light_view_projection_matrix, resolution, shadow_map.get_depth_bias(), shadow_map.get_normal_bias()) }
 		});
 	}
 
@@ -3959,6 +4001,19 @@ mod tests {
 			assert_eq!(fake_gl::get_live_count(FakeGlObject::Buffer), 0);
 			assert_eq!(fake_gl::get_live_count(FakeGlObject::VertexArray), 0);
 		}
+	}
+
+	//==============================================================================
+	/// 해 그림자 치우침 셈이 원본 readShadowBias 와 비트까지 같다. (직교 빛 행렬, 돌린 빛 행렬, 값은 원본을 node 로 돌려 얻음)
+	//==============================================================================
+	#[test]
+	fn shadow_bias_matches_original() {
+		let orthographic_matrix = Matrix4::create_orthographic(-40.0, 40.0, -40.0, 40.0, 1.0, 100.0);
+		assert_eq!(read_shadow_bias(&orthographic_matrix, 512, 1.0, 1.0), [0.002367424204942037, 0.2343749965075404, 0.003945707008236728, 10.0]);
+		assert_eq!(read_shadow_bias(&orthographic_matrix, 2048, 0.5, 2.0), [0.00029592802561775465, 0.1171874982537702, 0.000986426752059182, 10.0]);
+		let mut light_matrix = Matrix4::create_orthographic(-8.0, 8.0, -8.0, 8.0, 1.0, 100.0);
+		light_matrix.multiply(&Matrix4::create_look_at(Vector3::create(5.0, 50.0, 15.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0)));
+		assert_eq!(read_shadow_bias(&light_matrix, 2048, 1.0, 1.0), [0.00011837121009714387, 0.011718749747447212, 0.00019728535016190642, 10.0]);
 	}
 
 	//==============================================================================

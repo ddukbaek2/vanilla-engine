@@ -9,6 +9,7 @@
 //!   툰 셰이더는 받는 자리를 노멀 쪽으로 그 거리의 칸 텍셀 (1 + 3 x (1 - dot(N, L))) 개만큼 밀어 견준다. (빛에 비스듬한 면일수록 크게, 그림자 여드름을 막는다)
 //! - 텍셀 스냅의 반올림은 원본 Math.round 와 같이 0.5 를 위로 올린다. (러스트 round 는 0 에서 먼 쪽이라 음수에서 다르다)
 //! - 원본 해상도 기본값 인자 2048 은 DEFAULT_SHADOWMAP_RESOLUTION 으로 둔다. (러스트에 기본값 인자가 없다)
+//! - 해 그림자 치우침은 set_bias(깊이, 노멀) 의 그림자 텍셀 단위 값이다. (기본 1, 1, 유니티 URP 의 Depth Bias, Normal Bias 와 같은 단위, 받는 쪽 ToonRenderer 가 텍셀 크기와 기울기를 곱해 건다)
 //==============================================================================
 use crate::base::matrix4::Matrix4;
 use crate::base::vector3::Vector3;
@@ -30,6 +31,10 @@ pub const DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION: i32 = 1024;
 
 /// 그림자 아틀라스가 받는 점광과 스포트라이트 수의 상한. (셰이더의 유니폼 배열 크기)
 pub const SHADOW_ATLAS_MAXIMUM_LIGHTS: usize = 4;
+
+/// 해 그림자 치우침의 기본값. (그림자 텍셀 단위, 유니티 URP 애셋의 Depth Bias 1, Normal Bias 1 과 같은 단위와 값)
+const DEFAULT_SHADOW_DEPTH_BIAS: f64 = 1.0;
+const DEFAULT_SHADOW_NORMAL_BIAS: f64 = 1.0;
 
 /// 점광 큐브 여섯 면의 앞쪽과 위쪽. (+x, -x, +y, -y, +z, -z 차례, 오른쪽은 앞쪽 x 위쪽, 셰이더의 면 고르기와 같다)
 const CUBE_FACE_FORWARDS: [[f64; 3]; 6] = [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0]];
@@ -133,6 +138,10 @@ pub struct ShadowMap {
 	depth_texture: GlTexture,
 	resolution: i32,
 	light_view_projection_matrix: Matrix4,
+	/// 깊이 치우침. (그림자 텍셀 단위)
+	depth_bias: f64,
+	/// 노멀 치우침. (그림자 텍셀 단위)
+	normal_bias: f64,
 }
 
 impl ShadowMap {
@@ -149,7 +158,7 @@ impl ShadowMap {
 	//==============================================================================
 	pub fn new(gl: &glow::Context, resolution: i32) -> Result<ShadowMap, String> {
 		let (framebuffer, depth_texture) = create_depth_target(gl, resolution)?;
-		Ok(ShadowMap { framebuffer, depth_texture, resolution, light_view_projection_matrix: Matrix4::create_identity() })
+		Ok(ShadowMap { framebuffer, depth_texture, resolution, light_view_projection_matrix: Matrix4::create_identity(), depth_bias: DEFAULT_SHADOW_DEPTH_BIAS, normal_bias: DEFAULT_SHADOW_NORMAL_BIAS })
 	}
 
 	//==============================================================================
@@ -252,6 +261,56 @@ impl ShadowMap {
 	//==============================================================================
 	pub fn get_light_view_projection_matrix(&self) -> &Matrix4 {
 		&self.light_view_projection_matrix
+	}
+
+	//==============================================================================
+	/// 그림자 치우침 정하기. (그림자 텍셀 단위, 기본 깊이 1, 노멀 1, 받는 쪽이 읽을 때 쓴다)
+	/// - 텍셀 하나의 월드 크기(빛 행렬의 가로 폭 / 해상도)를 곱해 월드 거리로 바꾸므로 extent 와 해상도가 바뀌어도 같은 몫으로 걸린다. (유니티 URP 의 Depth Bias, Normal Bias 와 같은 단위)
+	/// - 깊이 치우침은 빛 쪽으로 견줄 깊이를 당긴다. 노멀 치우침은 받는 점을 면의 노멀 쪽으로 밀어 읽는다. 둘 다 3x3 PCF 의 반지름 1.5 텍셀을 곱한다.
+	/// - ToonRenderer 는 여기에 기울기 비례 치우침(빛과 면이 스칠수록 커짐, 텍셀 2.5 x 기울기, 기울기는 10 까지)을 더한다.
+	/// - 줄이면 그림자가 붙고 제 그림자 여드름이 생기기 쉽다. 늘리면 여드름은 없어지고 그림자가 떠 보인다(피터 패닝).
+	///
+	/// # 인자
+	/// - `depth_bias`: 깊이 치우침. (텍셀 단위, 0 이상)
+	/// - `normal_bias`: 노멀 치우침. (텍셀 단위, 0 이상)
+	///
+	/// # 예제
+	/// 텍셀 단위로 그림자 치우침 정하기
+	/// ```rust,no_run
+	/// use vanilla::{ShadowMap, Vector3};
+	///
+	/// fn soften_shadow(gl: &glow::Context) {
+	/// 	let mut shadow_map = ShadowMap::new(gl, 1024).unwrap();
+	/// 	shadow_map.update_light_matrix(Vector3::create(0.0, 0.0, 0.0), Vector3::create(-0.3, -1.0, -0.2), 20.0, 1.0, 100.0);
+	/// 	shadow_map.set_bias(0.5, 1.5);
+	/// 	println!("{} {}", shadow_map.get_depth_bias(), shadow_map.get_normal_bias());
+	/// 	shadow_map.destroy(gl);
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn set_bias(&mut self, depth_bias: f64, normal_bias: f64) {
+		self.depth_bias = depth_bias.max(0.0);
+		self.normal_bias = normal_bias.max(0.0);
+	}
+
+	//==============================================================================
+	/// 깊이 치우침 반환.
+	///
+	/// # 돌려줌
+	/// 깊이 치우침. (그림자 텍셀 단위, 기본 1)
+	//==============================================================================
+	pub fn get_depth_bias(&self) -> f64 {
+		self.depth_bias
+	}
+
+	//==============================================================================
+	/// 노멀 치우침 반환.
+	///
+	/// # 돌려줌
+	/// 노멀 치우침. (그림자 텍셀 단위, 기본 1)
+	//==============================================================================
+	pub fn get_normal_bias(&self) -> f64 {
+		self.normal_bias
 	}
 
 	//==============================================================================
