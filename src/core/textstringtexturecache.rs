@@ -42,12 +42,12 @@
 //! - Graphic 없이 재기(measure_text_without_graphic): 원본은 어디서든 공용 2D 캔버스로 글을 잰다. 러스트 판은 글꼴을 등록할 때마다
 //!   글꼴 목록(Rc)을 스레드 하나의 전역에 알려 두고, 그 목록으로 잰다. UI 레이아웃이 그리기 전에 글 줄 수를 알아야 할 때 쓴다. (UIConfirmWindow)
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::base::color::Color;
 use crate::core::textshaping::{self, FontFaceDescriptors, LoadedFont, RegisteredFontFace, ResolvedFontFace, ShapedText, ShapingDirection};
 use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 use unicode_script::{Script, UnicodeScript};
 use unicode_segmentation::UnicodeSegmentation;
-use glow::HasContext;
 use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -271,7 +271,7 @@ pub enum TextDrawKind {
 /// use vanilla::core::textstringtexturecache::{TextDrawKind, TextStringTextureCache};
 /// use vanilla::{Rect, ShapingDirection};
 ///
-/// fn calculate_glyph_quads(text_string_texture_cache: &mut TextStringTextureCache, gl: &glow::Context, pen_x: f64, baseline_y: f64) -> Vec<Rect> {
+/// fn calculate_glyph_quads(text_string_texture_cache: &mut TextStringTextureCache, gl: &vanilla::GlContext, pen_x: f64, baseline_y: f64) -> Vec<Rect> {
 /// 	let Some(entry) = text_string_texture_cache.get_entry(gl, TextDrawKind::Fill, "Score", "24px default", 0.0, 2.0, ShapingDirection::LeftToRight) else {
 /// 		return Vec::new();
 /// 	};
@@ -1809,7 +1809,7 @@ impl TextStringTextureCache {
 	/// use vanilla::core::textstringtexturecache::{TextDrawKind, TextStringTextureCache};
 	/// use vanilla::ShapingDirection;
 	///
-	/// fn bake_outline(text_string_texture_cache: &mut TextStringTextureCache, gl: &glow::Context) {
+	/// fn bake_outline(text_string_texture_cache: &mut TextStringTextureCache, gl: &vanilla::GlContext) {
 	/// 	text_string_texture_cache.get_entry(gl, TextDrawKind::Stroke, "Hello", "bold 20px default", 3.0, 1.5, ShapingDirection::LeftToRight);
 	/// 	let first_statistics = text_string_texture_cache.read_atlas_statistics();
 	/// 	text_string_texture_cache.get_entry(gl, TextDrawKind::Stroke, "Hello", "bold 20px default", 3.0, 1.5, ShapingDirection::LeftToRight);
@@ -1817,7 +1817,7 @@ impl TextStringTextureCache {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn get_entry(&mut self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<TextEntry> {
+	pub fn get_entry(&mut self, gl: &GlContext, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<TextEntry> {
 		if text.is_empty() {
 			return None;
 		}
@@ -1851,7 +1851,7 @@ impl TextStringTextureCache {
 	//==============================================================================
 	/// 버리기로 한 아틀라스 장 텍스처 지우기. (주인 Graphic 은 그 장을 쓰는 묶음을 먼저 내보내고 부른다)
 	//==============================================================================
-	pub(crate) fn delete_pending_textures(&mut self, gl: &glow::Context) {
+	pub(crate) fn delete_pending_textures(&mut self, gl: &GlContext) {
 		for texture in self.pending_deleted_texture_list.drain(..) {
 			unsafe {
 				crate::core::glstatecache::delete_texture(gl, texture);
@@ -2312,7 +2312,7 @@ impl TextStringTextureCache {
 	/// - 문자열 사각형은 예전에 문자열을 통째로 구운 비트맵과 같게 셈하고, 글리프 칸은 그 사각형 안으로 잘라 예전과 같은 화소만 남긴다.
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
-	fn build_entry(&mut self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<(TextEntry, Vec<u64>)> {
+	fn build_entry(&mut self, gl: &GlContext, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<(TextEntry, Vec<u64>)> {
 		let font_description = parse_font_string(font_string);
 		let face_list = self.resolve_covering_face_list(text, &font_description);
 		let is_antialias = self.is_text_antialias_enabled;
@@ -2573,7 +2573,7 @@ impl TextStringTextureCache {
 	/// 문자열째 구운 비트맵을 칸 하나로 굽고 엔트리 짓기. (아주 큰 글꼴, 브라우저로 굽는 웹, 원본 isWholeText)
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
-	fn build_whole_text_entry(&mut self, gl: &glow::Context, whole_text_bitmap: WholeTextBitmap, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<(TextEntry, Vec<u64>)> {
+	fn build_whole_text_entry(&mut self, gl: &GlContext, whole_text_bitmap: WholeTextBitmap, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<(TextEntry, Vec<u64>)> {
 		let width = whole_text_bitmap.width;
 		let height = whole_text_bitmap.height;
 		if width <= 0 || height <= 0 {
@@ -2672,7 +2672,7 @@ impl TextStringTextureCache {
 	/// 새 글리프들을 아틀라스에 놓고 올리기. (원본 bakeGlyphs, 같은 줄에 이어 놓인 글리프들은 한 번에 올린다)
 	/// - 칸마다 위아래에 가장자리 줄을 한 줄씩 되풀이해 굽는다. (GLYPH_EDGE_ROW_COUNT, 글리프의 atlas_y 는 되풀이 줄 아래 첫 줄이다)
 	//==============================================================================
-	fn bake_glyphs(&mut self, gl: &glow::Context, pending_glyph_list: Vec<PendingGlyph>, is_antialias: bool) {
+	fn bake_glyphs(&mut self, gl: &GlContext, pending_glyph_list: Vec<PendingGlyph>, is_antialias: bool) {
 		let is_nearest = !is_antialias;
 		// 칸 자리 잡기와 이어진 칸 묶기. (장 번호, 줄 y, 왼쪽 x, 너비, 높이, 글리프 차례들)
 		let mut span_list: Vec<(u64, i32, i32, i32, i32, Vec<usize>)> = Vec::new();
@@ -2754,7 +2754,7 @@ impl TextStringTextureCache {
 	///   (TextMeshPro 여러 장 아틀라스처럼, 앞 장의 남은 틈을 채우면 한 문자열의 글리프가 여러 장에 흩어져 드로 콜이 나뉜다)
 	/// - 이번 엔트리가 쓰는 장(사용 번호가 지금 번호)은 비우지 않는다. 그것뿐이면 상한을 넘겨 새 장을 연다. 한 장보다 큰 칸은 제 크기의 장을 따로 연다.
 	//==============================================================================
-	fn allocate_glyph_cell(&mut self, gl: &glow::Context, width: i32, height: i32, is_nearest: bool) -> Option<(u64, i32, i32)> {
+	fn allocate_glyph_cell(&mut self, gl: &GlContext, width: i32, height: i32, is_nearest: bool) -> Option<(u64, i32, i32)> {
 		if width > ATLAS_PAGE_SIZE || height > ATLAS_PAGE_SIZE {
 			self.make_room_for_atlas_page();
 			let atlas_page_index = self.create_atlas_page(gl, width, height, is_nearest, true)?;
@@ -2789,7 +2789,7 @@ impl TextStringTextureCache {
 	//==============================================================================
 	/// 아틀라스 장 만들기. (원본 createAtlasPage, 빈 텍셀로 채운 텍스처, 만든 장의 차례)
 	//==============================================================================
-	fn create_atlas_page(&mut self, gl: &glow::Context, width: i32, height: i32, is_nearest: bool, is_dedicated: bool) -> Option<usize> {
+	fn create_atlas_page(&mut self, gl: &GlContext, width: i32, height: i32, is_nearest: bool, is_dedicated: bool) -> Option<usize> {
 		let texture_filter = if is_nearest {
 			glow::NEAREST
 		}
@@ -2864,7 +2864,7 @@ impl TextStringTextureCache {
 	/// use vanilla::core::textstringtexturecache::{TextDrawKind, TextStringTextureCache};
 	/// use vanilla::ShapingDirection;
 	///
-	/// fn bake_once(text_string_texture_cache: &mut TextStringTextureCache, gl: &glow::Context) {
+	/// fn bake_once(text_string_texture_cache: &mut TextStringTextureCache, gl: &vanilla::GlContext) {
 	/// 	let entry_count = text_string_texture_cache.read_atlas_statistics().entry_count;
 	/// 	text_string_texture_cache.get_entry(gl, TextDrawKind::Fill, "Score 100", "20px default", 0.0, 1.0, ShapingDirection::LeftToRight);
 	/// 	let text_atlas_statistics = text_string_texture_cache.read_atlas_statistics();

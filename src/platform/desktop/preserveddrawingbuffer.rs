@@ -8,9 +8,9 @@
 //! - 기본 프레임버퍼에 그대로 그리므로 화면 효과와 3D 패스가 기본 프레임버퍼로 되돌아가도 그대로 맞다. (늘이개와 같은 방법)
 //! - 렌더 크기가 바뀌면 원본처럼 비운다. (브라우저도 캔버스 width, height 를 바꾸면 드로잉 버퍼를 새로 만들어 비운다) 처음 프레임도 비운다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::core::fullscreenpass::FullscreenPass;
 use crate::core::graphic::{GlTexture, GlUniformLocation};
-use glow::HasContext;
 
 /// 떠 둔 그림을 그대로 되그리는 셰이더.
 const RESTORE_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
@@ -40,7 +40,7 @@ impl PreservedDrawingBuffer {
 	//==============================================================================
 	/// 생성. (셰이더와 텍스처, 같은 크기로 되그리므로 가장 가까운 픽셀로 거른다)
 	//==============================================================================
-	pub(crate) fn new(gl: &glow::Context) -> Result<PreservedDrawingBuffer, String> {
+	pub(crate) fn new(gl: &GlContext) -> Result<PreservedDrawingBuffer, String> {
 		let fullscreen_pass = FullscreenPass::new(gl, RESTORE_FRAGMENTSHADER_SOURCE)?;
 		let source_texture_location = fullscreen_pass.get_uniform_location(gl, "sourceTexture");
 		let saved_texture = unsafe {
@@ -65,7 +65,7 @@ impl PreservedDrawingBuffer {
 	//==============================================================================
 	/// 다 그린 프레임 떠 두기. (기본 프레임버퍼의 왼쪽 아래 렌더 영역, 늘이개가 창 크기로 늘이기 전에 부른다)
 	//==============================================================================
-	pub(crate) fn save(&mut self, gl: &glow::Context, render_width: i32, render_height: i32) {
+	pub(crate) fn save(&mut self, gl: &GlContext, render_width: i32, render_height: i32) {
 		if render_width <= 0 || render_height <= 0 {
 			return;
 		}
@@ -85,7 +85,7 @@ impl PreservedDrawingBuffer {
 	/// - 뷰포트는 렌더 영역으로 둔다. (Graphic 이 프레임 첫머리에 거는 것과 같다) 건드린 블렌드, 스텐실, 시저, 깊이는 되돌린다.
 	///   프로그램과 텍스처, 버텍스 어레이는 Graphic 이 프레임 첫머리에 다시 건다.
 	//==============================================================================
-	pub(crate) fn restore(&self, gl: &glow::Context, render_width: i32, render_height: i32) {
+	pub(crate) fn restore(&self, gl: &GlContext, render_width: i32, render_height: i32) {
 		if render_width <= 0 || render_height <= 0 {
 			return;
 		}

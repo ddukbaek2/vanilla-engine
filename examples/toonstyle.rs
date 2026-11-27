@@ -12,7 +12,7 @@
 // - 빛 세기 막기(유니티 툰 셰이더의 Limit Light Intensity)는 기본대로 켠다.
 // - 실행: cargo run --example toonstyle (화면 견주기는 VANILLA_CAPTURE_PATH 로 숨긴 창에서 찍는다)
 //==============================================================================
-use glow::HasContext;
+use vanilla::GlContext;
 use vanilla::{
 	create_box_geometry, create_faceted_chunk_geometry, create_octahedron_geometry, create_sphere_geometry, create_torus_geometry, Camera3D, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ShadowAtlas, ShadowMap, ToonDrawOptions, DEFAULT_SHADOW_ATLAS_RESOLUTION, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION, ToonDrawQueue, ToonGeometry, ToonMatcapBlend, ToonMesh, ToonPartOptions, ToonPointLight,
 	ToonRenderer, ToonScreenOutline, ToonShade, ToonTextureOptions, Vector2, Vector3,
@@ -27,7 +27,7 @@ const CHUNK_SCALES: [f64; 12] = [1.0, 0.85, 1.1, 0.95, 1.05, 0.9, 1.0, 1.12, 0.8
 //==============================================================================
 // 도형 하나로 지은 모형. (has_shell 이면 껍데기 바깥선도)
 //==============================================================================
-fn build_mesh(renderer: &ToonRenderer, gl: &glow::Context, geometry: &ToonGeometry, color_text: &str, has_shell: bool) -> Result<ToonMesh, String> {
+fn build_mesh(renderer: &ToonRenderer, gl: &GlContext, geometry: &ToonGeometry, color_text: &str, has_shell: bool) -> Result<ToonMesh, String> {
 	let mut geometry = geometry.clone();
 	if !geometry.uvs.is_empty() && geometry.uvs1.is_empty() {
 		geometry.uvs1 = geometry.uvs.clone();
@@ -132,7 +132,7 @@ impl StyleResources {
 	//==============================================================================
 	// 짓기. (선의 판 몫, 모형마다 바깥선 꼴을 바꿔 보일지, 껍데기 바깥선으로 그릴지)
 	//==============================================================================
-	fn new(gl: &glow::Context, line_scale: f64, is_toggled: bool, is_shell: bool) -> Result<StyleResources, String> {
+	fn new(gl: &GlContext, line_scale: f64, is_toggled: bool, is_shell: bool) -> Result<StyleResources, String> {
 		let mut renderer = ToonRenderer::new(gl)?;
 		renderer.set_sun_direction(SUN_DIRECTION);
 		renderer.set_shade(ToonShade { step: 0.5, feather: 0.02, color: [0.55, 0.52, 0.72], second_step: 0.2, second_feather: 0.02, second_color: [0.38, 0.35, 0.56], is_half_lambert: true });
@@ -171,7 +171,7 @@ impl StyleResources {
 	//==============================================================================
 	// 한 프레임 그리기. (그림자 → 그리기 줄, 그리기 줄이 선의 판과 화면 공간 바깥선을 스스로)
 	//==============================================================================
-	fn draw(&mut self, gl: &glow::Context, camera: &Camera3D) {
+	fn draw(&mut self, gl: &GlContext, camera: &Camera3D) {
 		let mut queue = ToonDrawQueue::new();
 		if !self.is_shell {
 			queue.set_screen_outline(Some(&mut self.outline));

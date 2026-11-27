@@ -17,7 +17,6 @@ use std::path::PathBuf;
 use vanilla::{
 	AmbientOcclusionEffect, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, GlContext, Graphic, Matrix4, Rect, RenderTarget, Scene, SceneBase, ShadowMap, SkinnedModel, SkinnedModelAsset, SkinnedModelLoadHandle, SkinnedModelRenderer, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector3,
 };
-use glow::HasContext;
 
 //==============================================================================
 // 전역 상수 목록.
@@ -459,7 +458,7 @@ fn measure_model_scale(skinned_model: &mut SkinnedModel, target_height: f64) -> 
 //==============================================================================
 // 자산 캐시 재기. (같은 모형 20 개를 캐시 없이(지을 때마다 캐시를 비움)와 캐시로 지어 걸린 밀리초와 서로 다른 자산의 GPU 바이트 합을 견준 한 줄)
 //==============================================================================
-fn measure_asset_cache(gl: &glow::Context, load_handle: &SkinnedModelLoadHandle, skinned_model_renderer: &SkinnedModelRenderer, label: &str) -> Result<String, String> {
+fn measure_asset_cache(gl: &GlContext, load_handle: &SkinnedModelLoadHandle, skinned_model_renderer: &SkinnedModelRenderer, label: &str) -> Result<String, String> {
 	const MODEL_COUNT: usize = 20;
 	let measure_load = |use_cache: bool| -> Result<(f64, usize, usize), String> {
 		SkinnedModelAsset::clear_cache();

@@ -8,6 +8,7 @@
 // - TOON_MODEL_PATH 에 GLB 경로를 주면 그 모형도 하나 더 놓는다. (데스크탑만)
 // - 실행: cargo run --example toonshowcase
 //==============================================================================
+use vanilla::GlContext;
 use std::f64::consts::PI;
 use std::path::PathBuf;
 use vanilla::{
@@ -101,7 +102,7 @@ impl ToonShowcaseScene {
 	//==============================================================================
 	// 렌더러와 모형 준비. (처음 그릴 때 한 번)
 	//==============================================================================
-	fn create_resources(&mut self, gl: &glow::Context) -> Result<(), String> {
+	fn create_resources(&mut self, gl: &GlContext) -> Result<(), String> {
 		let mut renderer = ToonRenderer::new(gl)?;
 		renderer.set_band_count(3);
 		for (arrays, position, spin) in ToonShowcaseScene::build_shapes() {

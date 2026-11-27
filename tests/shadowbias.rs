@@ -9,8 +9,7 @@
 //! - GL 컨텍스트를 짓지 못하면 실패한다. (말없이 건너뛰지 않는다)
 //! - 실행: cargo test --test shadowbias
 //==============================================================================
-use glow::HasContext;
-use vanilla::{create_box_geometry, Engine, EngineConfiguration, Matrix4, MeshBuilder, ShadowMap, ToonDrawOptions, ToonDrawQueue, ToonPartOptions, ToonRenderer, Vector3};
+use vanilla::{create_box_geometry, Engine, EngineConfiguration, GlContext, Matrix4, MeshBuilder, ShadowMap, ToonDrawOptions, ToonDrawQueue, ToonPartOptions, ToonRenderer, Vector3};
 
 /// 찍는 너비. (원본 캔버스와 같다)
 const WIDTH: usize = 400;
@@ -58,7 +57,7 @@ fn read_point(view_projection_matrix: &Matrix4, x: f64, y: f64, z: f64) -> [i32;
 //==============================================================================
 /// 한 장면 그리기.
 //==============================================================================
-fn capture(gl: &glow::Context, framebuffer: <glow::Context as HasContext>::Framebuffer, extent: f64, resolution: i32, wall_height: f64, receives_shadow: bool) -> Captured {
+fn capture(gl: &GlContext, framebuffer: glow::Framebuffer, extent: f64, resolution: i32, wall_height: f64, receives_shadow: bool) -> Captured {
 	let mut renderer = ToonRenderer::new(gl).expect("툰 렌더러");
 	let mut floor_builder = MeshBuilder::new();
 	floor_builder.add_part(&create_box_geometry(12.0, 0.2, 12.0), &Matrix4::create_translation(0.0, -0.1, 0.0), "#d0c0a0", ToonPartOptions::default());
@@ -127,7 +126,7 @@ fn capture(gl: &glow::Context, framebuffer: <glow::Context as HasContext>::Frame
 //==============================================================================
 /// 그림자 받기 켜고 끈 두 장의 차이.
 //==============================================================================
-fn measure(gl: &glow::Context, framebuffer: <glow::Context as HasContext>::Framebuffer, extent: f64, resolution: i32, wall_height: f64) -> Measured {
+fn measure(gl: &GlContext, framebuffer: glow::Framebuffer, extent: f64, resolution: i32, wall_height: f64) -> Measured {
 	let with_shadow = capture(gl, framebuffer, extent, resolution, wall_height, true);
 	let without_shadow = capture(gl, framebuffer, extent, resolution, wall_height, false);
 	let read_darkening = |shadowed: &[u8], unshadowed: &[u8]| -> f64 {

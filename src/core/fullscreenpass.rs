@@ -5,6 +5,7 @@
 //! - 셰이더는 원본과 같은 GLSL ES 3.00 이다. 데스크탑은 ShaderProgram 이 머리만 #version 330 core 로 바꿔 컴파일한다.
 //! - 원본과 다른 점: GL 컨텍스트를 들지 않고 함수마다 받는다. 만들기 실패는 예외 대신 Err 로 돌려준다. GL 자원은 destroy 로 지운다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::core::graphic::{GlUniformLocation, GlVertexArray};
 use crate::core::shaderprogram::ShaderProgram;
 
@@ -33,7 +34,6 @@ void main() {
 /// # 예제
 /// 화면 가장자리를 어둡게 덮기
 /// ```rust,no_run
-/// use glow::HasContext;
 /// use vanilla::{FullscreenPass, Graphic};
 ///
 /// const VIGNETTE_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
@@ -82,7 +82,7 @@ impl FullscreenPass {
 	/// # 돌려줌
 	/// 만든 패스. 셰이더 컴파일이나 링크, 버텍스 어레이 만들기에 실패하면 그 오류 글을 담은 Err.
 	//==============================================================================
-	pub fn new(gl: &glow::Context, fragment_shader_source: &str) -> Result<FullscreenPass, String> {
+	pub fn new(gl: &GlContext, fragment_shader_source: &str) -> Result<FullscreenPass, String> {
 		let shader_program = ShaderProgram::new(gl, FULLSCREEN_VERTEXSHADER_SOURCE.trim(), fragment_shader_source.trim())?;
 		let vertex_array = unsafe {
 			crate::core::glstatecache::create_vertex_array(gl)?
@@ -99,7 +99,7 @@ impl FullscreenPass {
 	/// # 인자
 	/// - `gl`: 패스를 만든 GL 컨텍스트.
 	//==============================================================================
-	pub fn use_program(&self, gl: &glow::Context) {
+	pub fn use_program(&self, gl: &GlContext) {
 		self.shader_program.use_program(gl);
 		unsafe {
 			crate::core::glstatecache::bind_vertex_array(gl, Some(self.vertex_array));
@@ -112,7 +112,7 @@ impl FullscreenPass {
 	/// # 인자
 	/// - `gl`: 패스를 만든 GL 컨텍스트. (정점 3 개로 삼각형 하나를 그린다)
 	//==============================================================================
-	pub fn draw(&self, gl: &glow::Context) {
+	pub fn draw(&self, gl: &GlContext) {
 		unsafe {
 			crate::core::glstatecache::draw_arrays(gl, glow::TRIANGLES, 0, 3);
 		}
@@ -128,7 +128,7 @@ impl FullscreenPass {
 	/// # 돌려줌
 	/// 유니폼 위치. 그 이름의 활성 유니폼이 없으면 None.
 	//==============================================================================
-	pub fn get_uniform_location(&self, gl: &glow::Context, uniform_name: &str) -> Option<GlUniformLocation> {
+	pub fn get_uniform_location(&self, gl: &GlContext, uniform_name: &str) -> Option<GlUniformLocation> {
 		self.shader_program.get_uniform_location(gl, uniform_name)
 	}
 
@@ -158,7 +158,7 @@ impl FullscreenPass {
 	/// # 인자
 	/// - `gl`: 패스를 만든 GL 컨텍스트.
 	//==============================================================================
-	pub fn destroy(&self, gl: &glow::Context) {
+	pub fn destroy(&self, gl: &GlContext) {
 		unsafe {
 			crate::core::glstatecache::delete_program(gl, self.shader_program.get_program());
 			crate::core::glstatecache::delete_vertex_array(gl, self.vertex_array);

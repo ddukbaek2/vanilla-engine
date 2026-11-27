@@ -88,7 +88,7 @@ struct ToonTransparentEntry {
 /// ```rust,no_run
 /// use vanilla::{create_box_geometry, create_faceted_chunk_geometry, Camera3D, Matrix4, MeshBuilder, ToonDrawOptions, ToonDrawQueue, ToonPartOptions, ToonRenderer, ToonScreenOutline, Vector3};
 ///
-/// fn draw_scene(gl: &glow::Context) -> Result<(), String> {
+/// fn draw_scene(gl: &vanilla::GlContext) -> Result<(), String> {
 /// 	let mut renderer = ToonRenderer::new(gl)?;
 /// 	let mut floor_builder = MeshBuilder::new();
 /// 	floor_builder.add_part(&create_box_geometry(8.0, 0.2, 8.0), &Matrix4::create_translation(0.0, -0.1, 0.0), "#708090", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
@@ -259,7 +259,7 @@ impl<'a> ToonDrawQueue<'a> {
 	/// - `renderer`: ToonRenderer.
 	/// - `shadow_map`: ShadowMap.
 	//==============================================================================
-	pub fn draw_shadows(&self, gl: &glow::Context, renderer: &mut ToonRenderer, shadow_map: &ShadowMap) {
+	pub fn draw_shadows(&self, gl: &GlContext, renderer: &mut ToonRenderer, shadow_map: &ShadowMap) {
 		renderer.begin_shadow_pass(gl, shadow_map);
 		for &item_index in self.read_opaque_index_list().iter() {
 			let item = &self.item_list[item_index];
@@ -279,7 +279,7 @@ impl<'a> ToonDrawQueue<'a> {
 	/// - `renderer`: ToonRenderer.
 	/// - `shadow_atlas`: ShadowAtlas. (update_lights 를 부른 것)
 	//==============================================================================
-	pub fn draw_local_shadows(&self, gl: &glow::Context, renderer: &mut ToonRenderer, shadow_atlas: &ShadowAtlas) {
+	pub fn draw_local_shadows(&self, gl: &GlContext, renderer: &mut ToonRenderer, shadow_atlas: &ShadowAtlas) {
 		renderer.begin_shadow_atlas_pass(gl, shadow_atlas);
 		for tile_index in 0..shadow_atlas.get_tile_count() {
 			renderer.set_shadow_atlas_tile(gl, shadow_atlas, tile_index);
@@ -302,7 +302,7 @@ impl<'a> ToonDrawQueue<'a> {
 	/// - `renderer`: ToonRenderer.
 	/// - `camera`: Camera3D.
 	//==============================================================================
-	pub fn draw(&self, gl: &glow::Context, renderer: &mut ToonRenderer, camera: &Camera3D) {
+	pub fn draw(&self, gl: &GlContext, renderer: &mut ToonRenderer, camera: &Camera3D) {
 		self.draw_line_ids(gl, renderer, &camera.get_view_matrix(), &camera.get_projection_matrix());
 		renderer.begin_frame_with_camera(gl, camera);
 		self.draw_stages(gl, renderer, &|position: [f64; 3]| camera.read_view_depth(position[0], position[1], position[2]));
@@ -318,7 +318,7 @@ impl<'a> ToonDrawQueue<'a> {
 	/// - `view_matrix`: 보기 행렬.
 	/// - `projection_matrix`: 투영 행렬.
 	//==============================================================================
-	pub fn draw_with_matrices(&self, gl: &glow::Context, renderer: &mut ToonRenderer, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
+	pub fn draw_with_matrices(&self, gl: &GlContext, renderer: &mut ToonRenderer, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
 		self.draw_line_ids(gl, renderer, view_matrix, projection_matrix);
 		renderer.begin_frame_with_matrices(gl, view_matrix, projection_matrix);
 		let elements = view_matrix.read_elements();
@@ -329,7 +329,7 @@ impl<'a> ToonDrawQueue<'a> {
 	//==============================================================================
 	/// 화면 공간 바깥선의 선의 판 그리기. (맡긴 것이 없으면 아무것도 하지 않음, 불투명한 것만, 화면 사각형이 있으면 그 사각형을 그리는 영역으로)
 	//==============================================================================
-	fn draw_line_ids(&self, gl: &glow::Context, renderer: &ToonRenderer, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
+	fn draw_line_ids(&self, gl: &GlContext, renderer: &ToonRenderer, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
 		let mut screen_outline_slot = self.screen_outline.borrow_mut();
 		let screen_outline = match screen_outline_slot.as_mut() {
 			Some(screen_outline) => {
@@ -382,13 +382,13 @@ impl<'a> ToonDrawQueue<'a> {
 	//==============================================================================
 	/// 한 단계의 콜백 부르기. (부른 뒤 프레임의 그리기 상태를 다시 건다)
 	//==============================================================================
-	fn run_passes(&self, gl: &glow::Context, renderer: &mut ToonRenderer, stage: ToonDrawStage) {
+	fn run_passes(&self, gl: &GlContext, renderer: &mut ToonRenderer, stage: ToonDrawStage) {
 		let mut is_run = false;
 		for (pass_stage, callback) in self.pass_list.borrow_mut().iter_mut() {
 			if *pass_stage != stage {
 				continue;
 			}
-			callback(GlContext::from_context(gl), renderer);
+			callback(gl, renderer);
 			is_run = true;
 		}
 		if is_run {
@@ -412,7 +412,7 @@ impl<'a> ToonDrawQueue<'a> {
 	//==============================================================================
 	/// 단계마다 그리기. (begin_frame 과 end_frame 사이, read_depth(자리) 는 카메라에서의 보기 깊이)
 	//==============================================================================
-	fn draw_stages(&self, gl: &glow::Context, renderer: &mut ToonRenderer, read_depth: &dyn Fn([f64; 3]) -> f64) {
+	fn draw_stages(&self, gl: &GlContext, renderer: &mut ToonRenderer, read_depth: &dyn Fn([f64; 3]) -> f64) {
 		self.run_passes(gl, renderer, ToonDrawStage::BeforeOpaque);
 
 		// 1. 불투명한 몸. (인스턴스 묶음은 바깥선까지 한 번에, 화면 밖이면 draw_mesh 가 걸러 센다)
@@ -501,7 +501,7 @@ impl<'a> ToonDrawQueue<'a> {
 	//==============================================================================
 	/// 하나 그리기. (모형 하나는 draw_mesh, 인스턴스 묶음은 draw_mesh_instanced)
 	//==============================================================================
-	fn draw_item(gl: &glow::Context, renderer: &mut ToonRenderer, item: &ToonDrawItem, options: ToonDrawOptions) {
+	fn draw_item(gl: &GlContext, renderer: &mut ToonRenderer, item: &ToonDrawItem, options: ToonDrawOptions) {
 		match item.instance_list {
 			Some(instance_list) => {
 				renderer.draw_mesh_instanced(gl, item.mesh, instance_list, options);

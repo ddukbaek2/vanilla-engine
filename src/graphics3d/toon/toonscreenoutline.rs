@@ -23,7 +23,7 @@
 //! ```rust,no_run
 //! use vanilla::{create_box_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonLineDrawOptions, ToonOutlineWidthUnit, ToonPartOptions, ToonRenderer, ToonScreenOutline, Vector3};
 //!
-//! fn draw_outlined_box(gl: &glow::Context) -> Result<(), String> {
+//! fn draw_outlined_box(gl: &vanilla::GlContext) -> Result<(), String> {
 //! 	let mut renderer = ToonRenderer::new(gl)?;
 //! 	let mut outline = ToonScreenOutline::new(gl)?;
 //! 	outline.set_width(2.0, ToonOutlineWidthUnit::Pixel);
@@ -47,7 +47,7 @@
 //! ```
 //! <!-- image: toon-style.webp -->
 //==============================================================================
-use glow::HasContext;
+use crate::core::glcontext::GlContext;
 use crate::core::gluniform::GlUniformF64;
 
 use crate::base::matrix4::Matrix4;
@@ -88,7 +88,7 @@ pub enum ToonOutlineWidthUnit {
 /// ```rust,no_run
 /// use vanilla::{create_box_geometry, create_octahedron_geometry, Matrix4, MeshBuilder, ToonLineDrawOptions, ToonPartOptions, ToonRenderer, ToonScreenOutline, Vector3};
 ///
-/// fn draw_floor_and_crystal(gl: &glow::Context, renderer: &ToonRenderer, outline: &mut ToonScreenOutline) -> Option<()> {
+/// fn draw_floor_and_crystal(gl: &vanilla::GlContext, renderer: &ToonRenderer, outline: &mut ToonScreenOutline) -> Option<()> {
 /// 	let part_options = ToonPartOptions { has_outline: false, ..ToonPartOptions::default() };
 /// 	let mut floor_builder = MeshBuilder::new();
 /// 	floor_builder.add_part(&create_box_geometry(6.0, 0.2, 6.0), &Matrix4::create_translation(0.0, -0.1, 0.0), "#506070", part_options);
@@ -218,7 +218,7 @@ struct SavedState {
 /// ```rust,no_run
 /// use vanilla::{ToonOutlineWidthUnit, ToonScreenOutline};
 ///
-/// fn create_silhouette_outline(gl: &glow::Context) -> Result<ToonScreenOutline, String> {
+/// fn create_silhouette_outline(gl: &vanilla::GlContext) -> Result<ToonScreenOutline, String> {
 /// 	let mut outline = ToonScreenOutline::new(gl)?;
 /// 	outline.set_color([0.1, 0.08, 0.12, 1.0]);
 /// 	outline.set_width(3.0, ToonOutlineWidthUnit::Pixel);
@@ -358,7 +358,7 @@ impl ToonScreenOutline {
 	/// # 돌려줌
 	/// 새 화면 공간 바깥선. 셰이더를 짓지 못하거나 버텍스 어레이를 못 만들면 Err(오류 글).
 	//==============================================================================
-	pub fn new(gl: &glow::Context) -> Result<ToonScreenOutline, String> {
+	pub fn new(gl: &GlContext) -> Result<ToonScreenOutline, String> {
 		let line_program = ShaderProgram::create_with_attribute_locations(gl, LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER, &TOON_ATTRIBUTE_LOCATIONS)?;
 		let seed_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, SEED_FRAGMENT_SHADER)?;
 		let seed_gather_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, SEED_GATHER_FRAGMENT_SHADER)?;
@@ -422,7 +422,7 @@ impl ToonScreenOutline {
 	/// ```rust,no_run
 	/// use vanilla::{create_octahedron_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonInstance, ToonLineDrawOptions, ToonPartOptions, ToonRenderer, ToonScreenOutline, Vector3};
 	///
-	/// fn draw_picked_rock(gl: &glow::Context) -> Result<(), String> {
+	/// fn draw_picked_rock(gl: &vanilla::GlContext) -> Result<(), String> {
 	/// 	let mut renderer = ToonRenderer::new(gl)?;
 	/// 	let mut outline = ToonScreenOutline::new(gl)?;
 	/// 	let mut builder = MeshBuilder::new();
@@ -641,7 +641,7 @@ impl ToonScreenOutline {
 	/// # 돌려줌
 	/// 선의 판을 짓지 못했으면 false. (그때 draw_mesh 는 아무것도 하지 않는다)
 	//==============================================================================
-	pub fn begin_line_ids(&mut self, gl: &glow::Context, view_matrix: &Matrix4, projection_matrix: &Matrix4) -> bool {
+	pub fn begin_line_ids(&mut self, gl: &GlContext, view_matrix: &Matrix4, projection_matrix: &Matrix4) -> bool {
 		let mut viewport = [0i32; 4];
 		unsafe {
 			crate::core::glstatecache::get_parameter_i32_slice(gl, glow::VIEWPORT, &mut viewport);
@@ -700,7 +700,7 @@ impl ToonScreenOutline {
 	/// - `line_id`: 1 ~ TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID. (0 은 빈 곳이라 쓰지 않는다, 같은 번호끼리 맞닿은 곳은 긋지 않는다)
 	/// - `options`: 그리기 꼴. (본 행렬, 거르기, 몸 번호 버퍼의 일부, 감기 뒤집기, 바깥 선과 꺾임 선을 낼지)
 	//==============================================================================
-	pub fn draw_mesh(&mut self, gl: &glow::Context, mesh: &ToonMesh, model_matrix: &Matrix4, line_id: u32, options: ToonLineDrawOptions) {
+	pub fn draw_mesh(&mut self, gl: &GlContext, mesh: &ToonMesh, model_matrix: &Matrix4, line_id: u32, options: ToonLineDrawOptions) {
 		if !self.is_drawing_line_ids {
 			return;
 		}
@@ -722,7 +722,7 @@ impl ToonScreenOutline {
 	/// - `line_id`: 공통 번호.
 	/// - `options`: draw_mesh 와 같다. (꼴은 모든 인스턴스에 같다, is_mirrored 가 None 이면 뒤집지 않는다)
 	//==============================================================================
-	pub fn draw_mesh_instanced(&mut self, gl: &glow::Context, mesh: &ToonMesh, instance_list: &[ToonInstance], line_id: u32, options: ToonLineDrawOptions) {
+	pub fn draw_mesh_instanced(&mut self, gl: &GlContext, mesh: &ToonMesh, instance_list: &[ToonInstance], line_id: u32, options: ToonLineDrawOptions) {
 		if !self.is_drawing_line_ids {
 			return;
 		}
@@ -754,7 +754,7 @@ impl ToonScreenOutline {
 	/// 번호 그리기 본체. (instance_count 가 0 이면 보통 그리기)
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
-	fn draw_with_count(&self, gl: &glow::Context, mesh: &ToonMesh, model_matrix: &Matrix4, instance_count: i32, line_id: u32, is_instance_line_id: bool, is_mirrored: bool, options: ToonLineDrawOptions) {
+	fn draw_with_count(&self, gl: &GlContext, mesh: &ToonMesh, model_matrix: &Matrix4, instance_count: i32, line_id: u32, is_instance_line_id: bool, is_mirrored: bool, options: ToonLineDrawOptions) {
 		let line_program = &self.line_program;
 		let is_skinned = mesh.is_skinned() && options.joint_matrices.is_some();
 		let (body_vertex_array, body_index_count) = mesh.get_body();
@@ -799,7 +799,7 @@ impl ToonScreenOutline {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
-	pub fn end_line_ids(&mut self, gl: &glow::Context) {
+	pub fn end_line_ids(&mut self, gl: &GlContext) {
 		if !self.is_drawing_line_ids {
 			return;
 		}
@@ -889,7 +889,7 @@ impl ToonScreenOutline {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
-	pub fn draw_outline(&mut self, gl: &glow::Context) {
+	pub fn draw_outline(&mut self, gl: &GlContext) {
 		let (frame, seed_texture, line_texture, depth_texture, point_scale) = match (self.frame, self.line_target.as_ref()) {
 			(Some(frame), Some(line_target)) => {
 				(frame, line_target.jump_flood_textures[line_target.jump_flood_index], line_target.line_texture, line_target.depth_texture, [line_target.width as f64 / line_target.jump_flood_width as f64, line_target.height as f64 / line_target.jump_flood_height as f64])
@@ -952,7 +952,7 @@ impl ToonScreenOutline {
 	/// # 돌려줌
 	/// 텍스처가 있으면 true.
 	//==============================================================================
-	fn upload_line_color_table(&mut self, gl: &glow::Context) -> bool {
+	fn upload_line_color_table(&mut self, gl: &GlContext) -> bool {
 		let texture = match self.line_color_texture {
 			Some(texture) => {
 				texture
@@ -1036,7 +1036,7 @@ impl ToonScreenOutline {
 	//==============================================================================
 	/// 선의 판 읽기. (크기가 바뀌면 다시 지음, 짓지 못하면 None)
 	//==============================================================================
-	fn read_line_target(&mut self, gl: &glow::Context, width: i32, height: i32, jump_flood_width: i32, jump_flood_height: i32) -> Option<&ToonLineTarget> {
+	fn read_line_target(&mut self, gl: &GlContext, width: i32, height: i32, jump_flood_width: i32, jump_flood_height: i32) -> Option<&ToonLineTarget> {
 		let is_same_size = matches!(self.line_target.as_ref(), Some(line_target) if line_target.width == width && line_target.height == height && line_target.jump_flood_width == jump_flood_width && line_target.jump_flood_height == jump_flood_height);
 		if !is_same_size {
 			self.delete_line_target(gl);
@@ -1048,7 +1048,7 @@ impl ToonScreenOutline {
 	//==============================================================================
 	/// 선의 판 짓기. (그리는 영역 해상도의 노멀과 번호 RGBA8, 깊이 24, 씨앗 RGBA16UI, 넓히기 판 RGBA16UI 둘, 앞의 프레임버퍼와 텍스처는 돌린다)
 	//==============================================================================
-	fn create_line_target(gl: &glow::Context, width: i32, height: i32, jump_flood_width: i32, jump_flood_height: i32) -> Option<ToonLineTarget> {
+	fn create_line_target(gl: &GlContext, width: i32, height: i32, jump_flood_width: i32, jump_flood_height: i32) -> Option<ToonLineTarget> {
 		unsafe {
 			let previous_framebuffer = crate::graphics3d::read_framebuffer_binding(gl);
 			let previous_texture = crate::graphics3d::read_texture_binding(gl);
@@ -1106,7 +1106,7 @@ impl ToonScreenOutline {
 	//==============================================================================
 	/// 선의 판 지우기.
 	//==============================================================================
-	fn delete_line_target(&mut self, gl: &glow::Context) {
+	fn delete_line_target(&mut self, gl: &GlContext) {
 		if let Some(line_target) = self.line_target.take() {
 			ToonScreenOutline::delete_target_objects(gl, &line_target);
 		}
@@ -1115,7 +1115,7 @@ impl ToonScreenOutline {
 	//==============================================================================
 	/// 선의 판의 GL 객체 지우기.
 	//==============================================================================
-	fn delete_target_objects(gl: &glow::Context, line_target: &ToonLineTarget) {
+	fn delete_target_objects(gl: &GlContext, line_target: &ToonLineTarget) {
 		unsafe {
 			crate::core::glstatecache::delete_framebuffer(gl, line_target.framebuffer);
 			crate::core::glstatecache::delete_framebuffer(gl, line_target.seed_framebuffer);
@@ -1134,7 +1134,7 @@ impl ToonScreenOutline {
 	//==============================================================================
 	/// 그리기 상태 적어 두기.
 	//==============================================================================
-	fn save_state(&mut self, gl: &glow::Context) {
+	fn save_state(&mut self, gl: &GlContext) {
 		unsafe {
 			let mut viewport = [0i32; 4];
 			crate::core::glstatecache::get_parameter_i32_slice(gl, glow::VIEWPORT, &mut viewport);
@@ -1164,7 +1164,7 @@ impl ToonScreenOutline {
 	//==============================================================================
 	/// 적어 둔 상태로 돌리기.
 	//==============================================================================
-	fn restore_state(&mut self, gl: &glow::Context) {
+	fn restore_state(&mut self, gl: &GlContext) {
 		let saved_state = match self.saved_state.take() {
 			Some(saved_state) => {
 				saved_state
@@ -1201,7 +1201,7 @@ impl ToonScreenOutline {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
-	pub fn destroy(&mut self, gl: &glow::Context) {
+	pub fn destroy(&mut self, gl: &GlContext) {
 		self.delete_line_target(gl);
 		unsafe {
 			if let Some(line_color_texture) = self.line_color_texture.take() {

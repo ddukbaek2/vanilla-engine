@@ -5,10 +5,10 @@
 //! - 주고받는 판은 기본 RGBA8 이라 1 을 넘는 밝은 값이 잘린다. set_use_float_color(true) 면 RGBA16F 로 지어 HDR 값을 그대로 흐린다.
 //! - GL 을 쓰는 함수는 gl 을 받고, 생성과 크기 변경은 GL 객체를 못 만들면 오류(Result)를 돌려준다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::core::graphic::GlTexture;
 use crate::graphics3d::fullscreenpass::FullscreenPass;
 use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
-use glow::HasContext;
 use crate::core::gluniform::GlUniformF64;
 
 //==============================================================================
@@ -52,16 +52,15 @@ void main() {
 /// # 예제
 /// 씬 렌더 타겟에서 블룸을 만들고 결과를 합성 패스의 1 번 유닛에 묶기
 /// ```rust,no_run
-/// use glow::HasContext;
 /// use vanilla::{BloomEffect, RenderTarget};
 ///
-/// fn create_bloom(gl: &glow::Context) -> Result<BloomEffect, String> {
+/// fn create_bloom(gl: &vanilla::GlContext) -> Result<BloomEffect, String> {
 /// 	let mut bloom_effect = BloomEffect::new(gl)?;
 /// 	bloom_effect.set_threshold(0.7, 0.95);
 /// 	Ok(bloom_effect)
 /// }
 ///
-/// fn render_bloom(gl: &glow::Context, bloom_effect: &mut BloomEffect, scene_render_target: &RenderTarget) -> Result<(), String> {
+/// fn render_bloom(gl: &vanilla::GlContext, bloom_effect: &mut BloomEffect, scene_render_target: &RenderTarget) -> Result<(), String> {
 /// 	bloom_effect.resize(gl, scene_render_target.get_width(), scene_render_target.get_height())?;
 /// 	bloom_effect.render(gl, scene_render_target.get_color_texture(0));
 /// 	unsafe {
@@ -93,7 +92,7 @@ impl BloomEffect {
 	/// # 돌려줌
 	/// 새 블룸 이펙트. (임계 0.5 ~ 0.95, 반복 2, RGBA8 판) 셰이더 컴파일이나 GL 객체 만들기에 실패하면 Err(오류 글).
 	//==============================================================================
-	pub fn new(gl: &glow::Context) -> Result<BloomEffect, String> {
+	pub fn new(gl: &GlContext) -> Result<BloomEffect, String> {
 		let bright_pass = FullscreenPass::new(gl, BRIGHTPASS_FRAGMENTSHADER_SOURCE)?;
 		let blur_pass = match FullscreenPass::new(gl, BLUR_FRAGMENTSHADER_SOURCE) {
 			Ok(blur_pass) => {
@@ -136,7 +135,7 @@ impl BloomEffect {
 	/// # 돌려줌
 	/// 판을 맞췄으면 Ok. 다시 짓다 GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
-	pub fn resize(&mut self, gl: &glow::Context, scene_width: i32, scene_height: i32) -> Result<(), String> {
+	pub fn resize(&mut self, gl: &GlContext, scene_width: i32, scene_height: i32) -> Result<(), String> {
 		let half_width = (scene_width >> 1).max(1);
 		let half_height = (scene_height >> 1).max(1);
 		self.ping_render_target.resize(gl, half_width, half_height)?;
@@ -152,7 +151,7 @@ impl BloomEffect {
 	/// - `gl`: GL 컨텍스트.
 	/// - `scene_color_texture`: 밝은 영역을 뽑을 씬 컬러 텍스처. (보통 씬 RenderTarget 의 get_color_texture(0))
 	//==============================================================================
-	pub fn render(&self, gl: &glow::Context, scene_color_texture: Option<GlTexture>) {
+	pub fn render(&self, gl: &GlContext, scene_color_texture: Option<GlTexture>) {
 		unsafe {
 			crate::core::glstatecache::disable(gl, glow::DEPTH_TEST);
 			crate::core::glstatecache::disable(gl, glow::BLEND);
@@ -250,7 +249,7 @@ impl BloomEffect {
 	/// ```rust,no_run
 	/// use vanilla::BloomEffect;
 	///
-	/// fn create_hdr_bloom(gl: &glow::Context) -> Result<BloomEffect, String> {
+	/// fn create_hdr_bloom(gl: &vanilla::GlContext) -> Result<BloomEffect, String> {
 	/// 	let mut bloom_effect = BloomEffect::new(gl)?;
 	/// 	bloom_effect.set_use_float_color(gl, true)?;
 	/// 	bloom_effect.set_threshold(1.0, 1.5);
@@ -259,7 +258,7 @@ impl BloomEffect {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn set_use_float_color(&mut self, gl: &glow::Context, use_float_color: bool) -> Result<(), String> {
+	pub fn set_use_float_color(&mut self, gl: &GlContext, use_float_color: bool) -> Result<(), String> {
 		if self.get_use_float_color() == use_float_color {
 			return Ok(());
 		}
@@ -300,7 +299,7 @@ impl BloomEffect {
 	/// # 인자
 	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
-	pub fn destroy(&mut self, gl: &glow::Context) {
+	pub fn destroy(&mut self, gl: &GlContext) {
 		self.ping_render_target.destroy(gl);
 		self.pong_render_target.destroy(gl);
 		self.bright_pass.destroy(gl);
@@ -354,7 +353,7 @@ impl BloomEffect {
 /// # 돌려줌
 /// (핑, 퐁). 둘째를 못 지으면 먼저 지은 첫째를 지우고 Err.
 //==============================================================================
-fn create_render_target_pair(gl: &glow::Context, width: i32, height: i32, options: Option<RenderTargetOptions>) -> Result<(RenderTarget, RenderTarget), String> {
+fn create_render_target_pair(gl: &GlContext, width: i32, height: i32, options: Option<RenderTargetOptions>) -> Result<(RenderTarget, RenderTarget), String> {
 	let mut ping_render_target = RenderTarget::new(gl, width, height, false, options)?;
 	match RenderTarget::new(gl, width, height, false, options) {
 		Ok(pong_render_target) => {
@@ -386,26 +385,26 @@ mod tests {
 	fn failure_deletes_partially_created_objects() {
 		let gl = fake_gl::create_context();
 		fake_gl::fail_after(FakeGlObject::Shader, 2);
-		assert!(BloomEffect::new(&gl).is_err());
+		assert!(BloomEffect::new(GlContext::from_context(&gl)).is_err());
 		assert_eq!(read_live_counts(), [0, 0, 0, 0]);
 
 		let gl = fake_gl::create_context();
 		fake_gl::fail_after(FakeGlObject::Framebuffer, 1);
-		assert!(BloomEffect::new(&gl).is_err());
+		assert!(BloomEffect::new(GlContext::from_context(&gl)).is_err());
 		assert_eq!(read_live_counts(), [0, 0, 0, 0]);
 
 		let gl = fake_gl::create_context();
-		let mut bloom_effect = BloomEffect::new(&gl).expect("bloom effect");
+		let mut bloom_effect = BloomEffect::new(GlContext::from_context(&gl)).expect("bloom effect");
 		assert_eq!(read_live_counts(), [2, 2, 2, 2]);
 		fake_gl::fail_after(FakeGlObject::Framebuffer, 1);
-		assert!(bloom_effect.set_use_float_color(&gl, true).is_err());
+		assert!(bloom_effect.set_use_float_color(GlContext::from_context(&gl), true).is_err());
 		assert_eq!(read_live_counts(), [2, 2, 2, 2]);
 		assert!(!bloom_effect.get_use_float_color());
 		fake_gl::fail_after(FakeGlObject::Framebuffer, 2);
-		bloom_effect.set_use_float_color(&gl, true).expect("float color");
+		bloom_effect.set_use_float_color(GlContext::from_context(&gl), true).expect("float color");
 		assert!(bloom_effect.get_use_float_color());
 		assert_eq!(read_live_counts(), [2, 2, 2, 2]);
-		bloom_effect.destroy(&gl);
+		bloom_effect.destroy(GlContext::from_context(&gl));
 		assert_eq!(read_live_counts(), [0, 0, 0, 0]);
 	}
 }

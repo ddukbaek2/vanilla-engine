@@ -8,10 +8,10 @@
 //! - GL 을 쓰는 함수는 gl 을 받고, 생성과 크기 변경은 GL 객체를 못 만들면 오류(Result)를 돌려준다.
 //==============================================================================
 // 옮긴 원문: Separable SSS(Jorge Jimenez, Diego Gutierrez) 의 커널에서 옮김, BSD-2-Clause 꼴(표기 조건 있음), THIRD_PARTY_LICENSES.md
+use crate::core::glcontext::GlContext;
 use crate::core::graphic::GlTexture;
 use crate::graphics3d::fullscreenpass::FullscreenPass;
 use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
-use glow::HasContext;
 use crate::core::gluniform::GlUniformF64;
 
 //==============================================================================
@@ -84,13 +84,13 @@ void main() {
 /// ```rust,no_run
 /// use vanilla::{Camera3D, RenderTarget, SubsurfaceScatteringEffect};
 ///
-/// fn create_scattering(gl: &glow::Context) -> Result<SubsurfaceScatteringEffect, String> {
+/// fn create_scattering(gl: &vanilla::GlContext) -> Result<SubsurfaceScatteringEffect, String> {
 /// 	let mut subsurface_scattering_effect = SubsurfaceScatteringEffect::new(gl)?;
 /// 	subsurface_scattering_effect.set_scatter_width(0.015);
 /// 	Ok(subsurface_scattering_effect)
 /// }
 ///
-/// fn render_scattering(gl: &glow::Context, subsurface_scattering_effect: &mut SubsurfaceScatteringEffect, scene_render_target: &RenderTarget, camera: &Camera3D) -> Result<(), String> {
+/// fn render_scattering(gl: &vanilla::GlContext, subsurface_scattering_effect: &mut SubsurfaceScatteringEffect, scene_render_target: &RenderTarget, camera: &Camera3D) -> Result<(), String> {
 /// 	subsurface_scattering_effect.resize(gl, scene_render_target.get_width(), scene_render_target.get_height())?;
 /// 	subsurface_scattering_effect.render(gl, scene_render_target.get_color_texture(0), scene_render_target.get_depth_texture(), camera.get_field_of_view(), camera.get_aspect_ratio(), camera.get_near_distance(), camera.get_far_distance());
 /// 	let scattered_irradiance_texture = subsurface_scattering_effect.get_result_texture();
@@ -119,7 +119,7 @@ impl SubsurfaceScatteringEffect {
 	/// # 돌려줌
 	/// 새 이펙트. (산란 폭 0.2, 폴오프 (1, 0.37, 0.3), 강도 (0.48, 0.41, 0.28), 커널까지 셈한 것) 셰이더 컴파일이나 판 만들기에 실패하면 Err(오류 글).
 	//==============================================================================
-	pub fn new(gl: &glow::Context) -> Result<SubsurfaceScatteringEffect, String> {
+	pub fn new(gl: &GlContext) -> Result<SubsurfaceScatteringEffect, String> {
 		let float_color_options = RenderTargetOptions {
 			use_float_color: true,
 			..RenderTargetOptions::default()
@@ -270,7 +270,7 @@ impl SubsurfaceScatteringEffect {
 	/// # 돌려줌
 	/// 판을 맞췄으면 Ok. 다시 짓다 GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
-	pub fn resize(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
+	pub fn resize(&mut self, gl: &GlContext, width: i32, height: i32) -> Result<(), String> {
 		self.ping_render_target.resize(gl, width, height)?;
 		self.pong_render_target.resize(gl, width, height)?;
 		Ok(())
@@ -290,7 +290,7 @@ impl SubsurfaceScatteringEffect {
 	/// - `near_distance`: 투영의 가까운 거리. (깊이를 선형으로 풀 때)
 	/// - `far_distance`: 투영의 먼 거리.
 	//==============================================================================
-	pub fn render(&self, gl: &glow::Context, irradiance_texture: Option<GlTexture>, depth_texture: Option<GlTexture>, field_of_view_radian: f64, aspect_ratio: f64, near_distance: f64, far_distance: f64) {
+	pub fn render(&self, gl: &GlContext, irradiance_texture: Option<GlTexture>, depth_texture: Option<GlTexture>, field_of_view_radian: f64, aspect_ratio: f64, near_distance: f64, far_distance: f64) {
 		unsafe {
 			crate::core::glstatecache::disable(gl, glow::DEPTH_TEST);
 			crate::core::glstatecache::disable(gl, glow::BLEND);
@@ -408,7 +408,7 @@ impl SubsurfaceScatteringEffect {
 	/// # 인자
 	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
-	pub fn destroy(&mut self, gl: &glow::Context) {
+	pub fn destroy(&mut self, gl: &GlContext) {
 		self.ping_render_target.destroy(gl);
 		self.pong_render_target.destroy(gl);
 		self.scatter_pass.destroy(gl);

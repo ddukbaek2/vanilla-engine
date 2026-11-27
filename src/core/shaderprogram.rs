@@ -4,7 +4,7 @@
 //!   (precision 한정자는 GLSL 1.30 부터 의미 없이 받아 주므로 본문은 그대로 둔다)
 //! - 유니폼 / 어트리뷰트 위치는 처음 물을 때 읽어 담아 둔다.
 //==============================================================================
-use glow::HasContext;
+use crate::core::glcontext::GlContext;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -16,7 +16,6 @@ use std::collections::HashMap;
 /// # 예제
 /// 단색 프로그램을 만들고 유니폼 올리기
 /// ```rust,no_run
-/// use glow::HasContext;
 /// use vanilla::{Graphic, ShaderProgram};
 ///
 /// const VERTEX_SHADER_SOURCE: &str = "#version 300 es
@@ -66,7 +65,7 @@ impl ShaderProgram {
 	/// # 돌려줌
 	/// 링크한 프로그램. 셰이더 컴파일이나 프로그램 링크에 실패하면 정보 로그를 담은 Err, GL 객체를 만들지 못하면 그 오류 글을 담은 Err.
 	//==============================================================================
-	pub fn new(gl: &glow::Context, vertex_shader_source: &str, fragment_shader_source: &str) -> Result<ShaderProgram, String> {
+	pub fn new(gl: &GlContext, vertex_shader_source: &str, fragment_shader_source: &str) -> Result<ShaderProgram, String> {
 		ShaderProgram::create_with_attribute_locations(gl, vertex_shader_source, fragment_shader_source, &[])
 	}
 
@@ -82,7 +81,7 @@ impl ShaderProgram {
 	/// # 돌려줌
 	/// 링크한 프로그램. 셰이더 컴파일이나 프로그램 링크에 실패하면 정보 로그를 담은 Err, GL 객체를 만들지 못하면 그 오류 글을 담은 Err.
 	//==============================================================================
-	pub fn create_with_attribute_locations(gl: &glow::Context, vertex_shader_source: &str, fragment_shader_source: &str, attribute_location_list: &[(&str, u32)]) -> Result<ShaderProgram, String> {
+	pub fn create_with_attribute_locations(gl: &GlContext, vertex_shader_source: &str, fragment_shader_source: &str, attribute_location_list: &[(&str, u32)]) -> Result<ShaderProgram, String> {
 		let desktop_vertex_shader_source = convert_to_desktop_source(vertex_shader_source);
 		let desktop_fragment_shader_source = convert_to_desktop_source(fragment_shader_source);
 		unsafe {
@@ -136,7 +135,7 @@ impl ShaderProgram {
 	/// # 인자
 	/// - `gl`: 프로그램을 만든 GL 컨텍스트.
 	//==============================================================================
-	pub fn use_program(&self, gl: &glow::Context) {
+	pub fn use_program(&self, gl: &GlContext) {
 		if crate::core::glstatecache::is_program_in_use(gl, Some(self.program)) {
 			return;
 		}
@@ -157,7 +156,7 @@ impl ShaderProgram {
 	/// # 돌려줌
 	/// 유니폼 위치. 그 이름의 활성 유니폼이 없으면 None. (처음 물을 때 읽고, 없다는 것까지 담아 둔다)
 	#[allow(clippy::clone_on_copy)]
-	pub fn get_uniform_location(&self, gl: &glow::Context, name: &str) -> Option<crate::core::graphic::GlUniformLocation> {
+	pub fn get_uniform_location(&self, gl: &GlContext, name: &str) -> Option<crate::core::graphic::GlUniformLocation> {
 		let mut uniform_location_table = self.uniform_location_table.borrow_mut();
 		if let Some(location) = uniform_location_table.get(name) {
 			// 웹의 위치 객체는 Copy 가 아니라 복제한다. (데스크탑은 정수 하나라 복사와 같다)
@@ -180,7 +179,7 @@ impl ShaderProgram {
 	/// # 돌려줌
 	/// 어트리뷰트 위치. 그 이름의 활성 어트리뷰트가 없으면 None. (처음 물을 때 읽고 담아 둔다)
 	//==============================================================================
-	pub fn get_attribute_location(&self, gl: &glow::Context, name: &str) -> Option<u32> {
+	pub fn get_attribute_location(&self, gl: &GlContext, name: &str) -> Option<u32> {
 		let mut attribute_location_table = self.attribute_location_table.borrow_mut();
 		if let Some(location) = attribute_location_table.get(name) {
 			return *location;
@@ -222,7 +221,7 @@ pub(crate) fn convert_to_desktop_source(source: &str) -> String {
 //==============================================================================
 /// 셰이더 하나 컴파일.
 //==============================================================================
-unsafe fn compile_shader(gl: &glow::Context, shader_type: u32, source: &str) -> Result<crate::core::graphic::GlShader, String> {
+unsafe fn compile_shader(gl: &GlContext, shader_type: u32, source: &str) -> Result<crate::core::graphic::GlShader, String> {
 	let shader = gl.create_shader(shader_type)?;
 	gl.shader_source(shader, source);
 	gl.compile_shader(shader);
@@ -246,14 +245,14 @@ mod tests {
 	fn failure_deletes_created_shaders() {
 		let gl = fake_gl::create_context();
 		fake_gl::fail_after(FakeGlObject::Shader, 1);
-		assert!(ShaderProgram::new(&gl, "", "").is_err());
+		assert!(ShaderProgram::new(GlContext::from_context(&gl), "", "").is_err());
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Shader), 0);
 		let gl = fake_gl::create_context();
 		fake_gl::fail_after(FakeGlObject::Program, 0);
-		assert!(ShaderProgram::new(&gl, "", "").is_err());
+		assert!(ShaderProgram::new(GlContext::from_context(&gl), "", "").is_err());
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Shader), 0);
 		let gl = fake_gl::create_context();
-		let shader_program = ShaderProgram::new(&gl, "", "").expect("shader program");
+		let shader_program = ShaderProgram::new(GlContext::from_context(&gl), "", "").expect("shader program");
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Shader), 0);
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Program), 1);
 		unsafe {

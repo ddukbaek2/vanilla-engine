@@ -63,7 +63,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use glow::HasContext;
 use crate::core::gluniform::GlUniformF64;
 
 use crate::base::rect::Rect;
@@ -867,7 +866,7 @@ pub fn compose_toon_program_sources(material: Option<&ToonMaterial>, instance_la
 /// ```rust,no_run
 /// use vanilla::{create_box_geometry, create_sphere_geometry, Matrix4, MeshBuilder, ToonPartOptions, ToonRenderer};
 ///
-/// fn upload_mesh(gl: &glow::Context, renderer: &ToonRenderer) {
+/// fn upload_mesh(gl: &vanilla::GlContext, renderer: &ToonRenderer) {
 /// 	let mut builder = MeshBuilder::new();
 /// 	builder.add_part(&create_box_geometry(1.0, 1.0, 1.0), &Matrix4::create_identity(), "#d06060", ToonPartOptions::default());
 /// 	builder.add_part(&create_sphere_geometry(0.4, 16, 12, std::f64::consts::PI), &Matrix4::create_translation(0.0, 0.9, 0.0), "#f0c8a0", ToonPartOptions::default());
@@ -976,7 +975,7 @@ impl ToonMesh {
 /// ```rust,no_run
 /// use vanilla::{Matrix4, ToonBufferUsage, ToonDrawOptions, ToonMesh, ToonRenderer};
 ///
-/// fn draw_trees(gl: &glow::Context, renderer: &mut ToonRenderer, mesh: &ToonMesh, view_projection_matrix: &Matrix4) -> Result<(), String> {
+/// fn draw_trees(gl: &vanilla::GlContext, renderer: &mut ToonRenderer, mesh: &ToonMesh, view_projection_matrix: &Matrix4) -> Result<(), String> {
 /// 	let instance_layout = renderer.create_instance_layout(&[("instanceMatrix", 16), ("instanceTint", 4)])?;
 /// 	let mut data: Vec<f32> = Vec::new();
 /// 	for index in 0..9 {
@@ -1042,7 +1041,7 @@ impl ToonInstanceBuffer {
 /// use vanilla::core::graphic::GlTexture;
 /// use vanilla::{ToonRenderer, ToonTextureOptions};
 ///
-/// fn create_matcap_texture(gl: &glow::Context, renderer: &ToonRenderer) -> Result<GlTexture, String> {
+/// fn create_matcap_texture(gl: &vanilla::GlContext, renderer: &ToonRenderer) -> Result<GlTexture, String> {
 /// 	let pixels = [60, 60, 70, 255, 255, 255, 255, 255, 60, 60, 70, 255, 160, 160, 180, 255];
 /// 	renderer.create_texture(gl, 2, 2, &pixels, ToonTextureOptions { is_mipmapped: false, is_repeated: false, ..ToonTextureOptions::default() })
 /// }
@@ -1305,7 +1304,7 @@ impl std::fmt::Debug for ToonDrawOptions<'_> {
 /// ```rust,no_run
 /// use vanilla::{Matrix4, ToonDrawOptions, ToonInstance, ToonMesh, ToonRenderer};
 ///
-/// fn draw_rocks(gl: &glow::Context, renderer: &mut ToonRenderer, mesh: &ToonMesh, view_projection_matrix: &Matrix4) {
+/// fn draw_rocks(gl: &vanilla::GlContext, renderer: &mut ToonRenderer, mesh: &ToonMesh, view_projection_matrix: &Matrix4) {
 /// 	let instance_list: Vec<ToonInstance> = (0..20).map(|index| {
 /// 		let shade = 0.6 + (index % 5) as f64 * 0.1;
 /// 		ToonInstance {
@@ -1478,7 +1477,7 @@ struct ToonProgramSet {
 /// ```rust,no_run
 /// use vanilla::{create_capsule_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonPartOptions, ToonRenderer, Vector3};
 ///
-/// fn draw_once(gl: &glow::Context) -> Result<(), String> {
+/// fn draw_once(gl: &vanilla::GlContext) -> Result<(), String> {
 /// 	let mut renderer = ToonRenderer::new(gl)?;
 /// 	renderer.set_light([-0.4, -1.0, -0.3], [1.0, 0.96, 0.9], [0.45, 0.5, 0.6], [0.25, 0.22, 0.2]);
 /// 	renderer.set_outline_color([0.1, 0.06, 0.08, 1.0]);
@@ -1874,7 +1873,7 @@ fn read_bounding_sphere(positions: &[f32], stride: usize) -> ([f64; 3], f64) {
 //==============================================================================
 /// RGBA 텍스처 올리기. (create_texture 와 흰 텍스처가 함께 쓴다)
 //==============================================================================
-fn upload_texture(gl: &glow::Context, width: u32, height: u32, pixels: &[u8], options: ToonTextureOptions) -> Result<GlTexture, String> {
+fn upload_texture(gl: &crate::GlContext, width: u32, height: u32, pixels: &[u8], options: ToonTextureOptions) -> Result<GlTexture, String> {
 	let byte_count = width as usize * height as usize * 4;
 	if width == 0 || height == 0 || pixels.len() < byte_count {
 		return Err(format!("텍스처 바이트가 모자란다: {} x {} 에 {} 바이트", width, height, pixels.len()));
@@ -1936,7 +1935,7 @@ impl ToonRenderer {
 	/// # 돌려줌
 	/// 새 렌더러. 기본 프로그램이나 텍스처를 짓지 못하면 Err(오류 글).
 	//==============================================================================
-	pub fn new(gl: &glow::Context) -> Result<ToonRenderer, String> {
+	pub fn new(gl: &crate::GlContext) -> Result<ToonRenderer, String> {
 		let default_program_set = ToonRenderer::create_program_set(gl, None, None)?;
 		let empty_shadow_texture = ToonRenderer::create_empty_shadow_texture(gl)?;
 		let white_texture = upload_texture(gl, 1, 1, &[255, 255, 255, 255], ToonTextureOptions { is_mipmapped: false, ..ToonTextureOptions::default() })?;
@@ -1975,7 +1974,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 세 프로그램 짓기. (짓지 못하면 Err, 몸 프로그램의 텍스처 유닛을 정해 둔다)
 	//==============================================================================
-	fn create_program_set(gl: &glow::Context, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>) -> Result<ToonProgramSet, String> {
+	fn create_program_set(gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>) -> Result<ToonProgramSet, String> {
 		let sources = compose_toon_program_sources(material, instance_layout);
 		let attribute_locations: Vec<(&str, u32)> = sources.attribute_locations.iter().map(|(name, location)| (name.as_str(), *location)).collect();
 		let solid_program = ShaderProgram::create_with_attribute_locations(gl, &sources.solid_vertex_shader, &sources.solid_fragment_shader, &attribute_locations)?;
@@ -2020,7 +2019,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 머티리얼과 인스턴스 꼴의 프로그램이 있게 하기. (없으면 짓고, 짓지 못한 것은 알리고 None 을 기억해 다시 짓지 않는다, 있으면 true)
 	//==============================================================================
-	fn ensure_program_set(&mut self, gl: &glow::Context, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>) -> bool {
+	fn ensure_program_set(&mut self, gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>) -> bool {
 		let key = (material.map(|material| material.get_id()).unwrap_or(0), instance_layout.map(|instance_layout| instance_layout.get_id()).unwrap_or(0));
 		if let Some(program_set) = self.program_set_table.get(&key) {
 			return program_set.is_some();
@@ -2064,7 +2063,7 @@ impl ToonRenderer {
 	/// # 돌려줌
 	/// 짓지 못하면 false.
 	//==============================================================================
-	pub fn prepare_material(&mut self, gl: &glow::Context, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>) -> bool {
+	pub fn prepare_material(&mut self, gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>) -> bool {
 		self.ensure_program_set(gl, material, instance_layout)
 	}
 
@@ -2075,7 +2074,7 @@ impl ToonRenderer {
 	/// - `gl`: 프로그램을 지은 GL 컨텍스트.
 	/// - `material`: 프로그램을 지울 머티리얼.
 	//==============================================================================
-	pub fn delete_material(&mut self, gl: &glow::Context, material: &ToonMaterial) {
+	pub fn delete_material(&mut self, gl: &crate::GlContext, material: &ToonMaterial) {
 		let material_id = material.get_id();
 		let key_list: Vec<(u32, u32)> = self.program_set_table.keys().filter(|key| key.0 == material_id).copied().collect();
 		for key in key_list {
@@ -2093,7 +2092,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 세 프로그램 지우기.
 	//==============================================================================
-	fn delete_program_set(gl: &glow::Context, program_set: &ToonProgramSet) {
+	fn delete_program_set(gl: &crate::GlContext, program_set: &ToonProgramSet) {
 		unsafe {
 			crate::core::glstatecache::delete_program(gl, program_set.solid.program.get_program());
 			crate::core::glstatecache::delete_program(gl, program_set.outline.program.get_program());
@@ -2156,7 +2155,7 @@ impl ToonRenderer {
 	/// # 돌려줌
 	/// 인스턴스 버퍼. 버퍼를 짓지 못하면 Err(GL 의 오류 글).
 	//==============================================================================
-	pub fn create_instance_buffer(&self, gl: &glow::Context, instance_layout: &ToonInstanceLayout, data: &[f32], usage: ToonBufferUsage) -> Result<ToonInstanceBuffer, String> {
+	pub fn create_instance_buffer(&self, gl: &crate::GlContext, instance_layout: &ToonInstanceLayout, data: &[f32], usage: ToonBufferUsage) -> Result<ToonInstanceBuffer, String> {
 		let gl_usage = match usage {
 			ToonBufferUsage::Static => {
 				glow::STATIC_DRAW
@@ -2181,7 +2180,7 @@ impl ToonRenderer {
 	/// - `instance_buffer`: create_instance_buffer 의 결과.
 	/// - `data`: 새 수. (인스턴스 수가 바뀌어도 된다)
 	//==============================================================================
-	pub fn update_instance_buffer(&self, gl: &glow::Context, instance_buffer: &ToonInstanceBuffer, data: &[f32]) {
+	pub fn update_instance_buffer(&self, gl: &crate::GlContext, instance_buffer: &ToonInstanceBuffer, data: &[f32]) {
 		unsafe {
 			crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(instance_buffer.buffer));
 			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(data), instance_buffer.usage);
@@ -2196,7 +2195,7 @@ impl ToonRenderer {
 	/// - `gl`: 버퍼를 지은 GL 컨텍스트.
 	/// - `instance_buffer`: create_instance_buffer 의 결과.
 	//==============================================================================
-	pub fn delete_instance_buffer(&self, gl: &glow::Context, instance_buffer: ToonInstanceBuffer) {
+	pub fn delete_instance_buffer(&self, gl: &crate::GlContext, instance_buffer: ToonInstanceBuffer) {
 		unsafe {
 			for (_, body_vertex_array, outline_vertex_array) in instance_buffer.vertex_array_list.borrow().iter() {
 				crate::core::glstatecache::delete_vertex_array(gl, *body_vertex_array);
@@ -2221,7 +2220,7 @@ impl ToonRenderer {
 	/// # 돌려줌
 	/// 지은 RGBA 텍스처. 너비나 높이가 0 이거나 바이트가 모자라거나 텍스처를 짓지 못하면 Err(오류 글).
 	//==============================================================================
-	pub fn create_texture(&self, gl: &glow::Context, width: u32, height: u32, pixels: &[u8], options: ToonTextureOptions) -> Result<GlTexture, String> {
+	pub fn create_texture(&self, gl: &crate::GlContext, width: u32, height: u32, pixels: &[u8], options: ToonTextureOptions) -> Result<GlTexture, String> {
 		upload_texture(gl, width, height, pixels, options)
 	}
 
@@ -2232,7 +2231,7 @@ impl ToonRenderer {
 	/// - `gl`: 텍스처를 지은 GL 컨텍스트.
 	/// - `texture`: 지울 텍스처.
 	//==============================================================================
-	pub fn delete_texture(&self, gl: &glow::Context, texture: GlTexture) {
+	pub fn delete_texture(&self, gl: &crate::GlContext, texture: GlTexture) {
 		unsafe {
 			crate::core::glstatecache::delete_texture(gl, texture);
 		}
@@ -2241,7 +2240,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 빈 그림자 텍스처 짓기. (1x1 깊이 1, 비교 샘플링)
 	//==============================================================================
-	fn create_empty_shadow_texture(gl: &glow::Context) -> Result<GlTexture, String> {
+	fn create_empty_shadow_texture(gl: &crate::GlContext) -> Result<GlTexture, String> {
 		unsafe {
 			let texture = crate::core::glstatecache::create_texture(gl)?;
 			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + SHADOW_TEXTURE_UNIT);
@@ -2268,7 +2267,7 @@ impl ToonRenderer {
 	/// # 인자
 	/// - `gl`: 렌더러를 지은 GL 컨텍스트.
 	//==============================================================================
-	pub fn destroy(&self, gl: &glow::Context) {
+	pub fn destroy(&self, gl: &crate::GlContext) {
 		for program_set in self.program_set_table.values().flatten() {
 			ToonRenderer::delete_program_set(gl, program_set);
 		}
@@ -2282,7 +2281,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 꼭짓점 버퍼 만들기.
 	//==============================================================================
-	unsafe fn create_array_buffer(gl: &glow::Context, data: &[f32], usage: u32) -> Option<GlBuffer> {
+	unsafe fn create_array_buffer(gl: &crate::GlContext, data: &[f32], usage: u32) -> Option<GlBuffer> {
 		let buffer = crate::core::glstatecache::create_buffer(gl).ok()?;
 		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(buffer));
 		gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(data), usage);
@@ -2292,7 +2291,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 번호 버퍼 만들기. (지금 묶인 버텍스 어레이에 붙는다)
 	//==============================================================================
-	unsafe fn create_index_buffer(gl: &glow::Context, data: &[u32]) -> Option<GlBuffer> {
+	unsafe fn create_index_buffer(gl: &crate::GlContext, data: &[u32]) -> Option<GlBuffer> {
 		let buffer = crate::core::glstatecache::create_buffer(gl).ok()?;
 		crate::core::glstatecache::bind_buffer(gl, glow::ELEMENT_ARRAY_BUFFER, Some(buffer));
 		gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, index_slice_to_bytes(data), glow::STATIC_DRAW);
@@ -2310,14 +2309,14 @@ impl ToonRenderer {
 	/// # 돌려줌
 	/// GPU 에 올린 모형. (몸의 꼭짓점 번호가 비거나 GL 버퍼를 짓지 못하면 None)
 	//==============================================================================
-	pub fn create_mesh(&self, gl: &glow::Context, arrays: &ToonMeshArrays) -> Option<ToonMesh> {
+	pub fn create_mesh(&self, gl: &crate::GlContext, arrays: &ToonMeshArrays) -> Option<ToonMesh> {
 		ToonRenderer::create_mesh_objects(gl, arrays)
 	}
 
 	//==============================================================================
 	/// 모형의 GL 객체 짓기. (create_mesh 의 몸, 짓다 실패하면 그때까지 지은 버퍼와 버텍스 어레이를 지운다)
 	//==============================================================================
-	fn create_mesh_objects(gl: &glow::Context, arrays: &ToonMeshArrays) -> Option<ToonMesh> {
+	fn create_mesh_objects(gl: &crate::GlContext, arrays: &ToonMeshArrays) -> Option<ToonMesh> {
 		if arrays.index_data.is_empty() {
 			return None;
 		}
@@ -2343,7 +2342,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 모형의 버퍼와 버텍스 어레이 짓기. (지은 것을 차례로 created_* 에 적는다, 하나라도 짓지 못하면 None)
 	//==============================================================================
-	unsafe fn build_mesh_objects(gl: &glow::Context, arrays: &ToonMeshArrays, created_buffer_list: &mut Vec<GlBuffer>, created_vertex_array_list: &mut Vec<GlVertexArray>) -> Option<ToonMesh> {
+	unsafe fn build_mesh_objects(gl: &crate::GlContext, arrays: &ToonMeshArrays, created_buffer_list: &mut Vec<GlBuffer>, created_vertex_array_list: &mut Vec<GlVertexArray>) -> Option<ToonMesh> {
 		let is_skinned = !arrays.skin_data.is_empty();
 		let vertex_count = arrays.vertex_data.len() / VERTEX_FLOAT_COUNT;
 		let has_uv = vertex_count > 0 && arrays.uv_data.len() >= vertex_count * 2;
@@ -2444,7 +2443,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 몸의 꼭짓점, 뼈대, UV 어트리뷰트와 번호 버퍼를 지금 묶인 버텍스 어레이에 붙이기.
 	//==============================================================================
-	unsafe fn attach_body_attributes(gl: &glow::Context, mesh: &ToonMesh) {
+	unsafe fn attach_body_attributes(gl: &crate::GlContext, mesh: &ToonMesh) {
 		let stride = (VERTEX_FLOAT_COUNT * 4) as i32;
 		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(mesh.vertex_buffer));
 		for (location, size, offset) in [(0u32, 3i32, 0i32), (1, 3, 12), (2, 3, 24), (3, 2, 36), (4, 4, 44)] {
@@ -2465,7 +2464,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 바깥선 껍데기의 바탕 자리와 미는 쪽(노멀 자리), 뼈대 어트리뷰트와 번호 버퍼를 지금 묶인 버텍스 어레이에 붙이기.
 	//==============================================================================
-	unsafe fn attach_outline_attributes(gl: &glow::Context, mesh: &ToonMesh) {
+	unsafe fn attach_outline_attributes(gl: &crate::GlContext, mesh: &ToonMesh) {
 		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, mesh.outline_buffer);
 		gl.enable_vertex_attrib_array(0);
 		gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 24, 0);
@@ -2480,7 +2479,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 뼈대 번호와 무게의 버퍼를 지금 묶인 버텍스 어레이에 어트리뷰트로 붙이기.
 	//==============================================================================
-	unsafe fn attach_skin_attributes(gl: &glow::Context, skin_buffer: GlBuffer) {
+	unsafe fn attach_skin_attributes(gl: &crate::GlContext, skin_buffer: GlBuffer) {
 		let stride = (SKIN_FLOAT_COUNT * 4) as i32;
 		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(skin_buffer));
 		gl.enable_vertex_attrib_array(5);
@@ -2492,7 +2491,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 인스턴스 버퍼를 지금 묶인 버텍스 어레이의 인스턴스 어트리뷰트로. (행렬 네 줄, 틴트, 인스턴스마다 하나씩)
 	//==============================================================================
-	unsafe fn attach_instance_attributes(gl: &glow::Context, instance_buffer: GlBuffer) {
+	unsafe fn attach_instance_attributes(gl: &crate::GlContext, instance_buffer: GlBuffer) {
 		let stride = (TOON_INSTANCE_FLOAT_COUNT * 4) as i32;
 		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(instance_buffer));
 		for column_index in 0..5u32 {
@@ -2506,7 +2505,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 인스턴스 꼴의 버퍼를 지금 묶인 버텍스 어레이의 인스턴스 어트리뷰트로.
 	//==============================================================================
-	unsafe fn attach_layout_attributes(gl: &glow::Context, instance_layout: &ToonInstanceLayout, buffer: GlBuffer) {
+	unsafe fn attach_layout_attributes(gl: &crate::GlContext, instance_layout: &ToonInstanceLayout, buffer: GlBuffer) {
 		let stride = (instance_layout.get_float_count() * 4) as i32;
 		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(buffer));
 		let attach = |location: u32, size: i32, float_offset: usize| {
@@ -2532,7 +2531,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 모형과 인스턴스 버퍼를 함께 묶은 버텍스 어레이. (처음 그릴 때 짓고 인스턴스 버퍼에 담아 둔다, (몸, 바깥선))
 	//==============================================================================
-	fn read_instance_vertex_arrays(&self, gl: &glow::Context, mesh: &ToonMesh, instance_buffer: &ToonInstanceBuffer) -> Option<(GlVertexArray, Option<GlVertexArray>)> {
+	fn read_instance_vertex_arrays(&self, gl: &crate::GlContext, mesh: &ToonMesh, instance_buffer: &ToonInstanceBuffer) -> Option<(GlVertexArray, Option<GlVertexArray>)> {
 		if let Some((_, body_vertex_array, outline_vertex_array)) = instance_buffer.vertex_array_list.borrow().iter().find(|entry| entry.0 == mesh.mesh_id) {
 			return Some((*body_vertex_array, *outline_vertex_array));
 		}
@@ -2572,7 +2571,7 @@ impl ToonRenderer {
 	/// - `gl`: 모형을 올린 GL 컨텍스트.
 	/// - `mesh`: create_mesh 의 결과.
 	//==============================================================================
-	pub fn delete_mesh(&self, gl: &glow::Context, mesh: ToonMesh) {
+	pub fn delete_mesh(&self, gl: &crate::GlContext, mesh: ToonMesh) {
 		unsafe {
 			crate::core::glstatecache::delete_vertex_array(gl, mesh.body_vertex_array);
 			if let Some(outline_vertex_array) = mesh.outline_vertex_array {
@@ -2588,7 +2587,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 그리기 전의 상태 적어 두기.
 	//==============================================================================
-	fn save_state(&mut self, gl: &glow::Context) {
+	fn save_state(&mut self, gl: &crate::GlContext) {
 		unsafe {
 			let mut viewport = [0i32; 4];
 			crate::core::glstatecache::get_parameter_i32_slice(gl, glow::VIEWPORT, &mut viewport);
@@ -2614,7 +2613,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 유닛 0 에 묶인 텍스처 읽기. (지금 고른 유닛은 그대로 둔다)
 	//==============================================================================
-	fn read_first_unit_texture(gl: &glow::Context) -> Option<GlTexture> {
+	fn read_first_unit_texture(gl: &crate::GlContext) -> Option<GlTexture> {
 		unsafe {
 			let active_texture = crate::core::glstatecache::get_parameter_i32(gl, glow::ACTIVE_TEXTURE);
 			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
@@ -2627,7 +2626,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 적어 둔 상태로 돌리기.
 	//==============================================================================
-	fn restore_state(&mut self, gl: &glow::Context, is_framebuffer_restored: bool) {
+	fn restore_state(&mut self, gl: &crate::GlContext, is_framebuffer_restored: bool) {
 		self.forget_all_uniform_values();
 		unsafe {
 			crate::core::glstatecache::cull_face(gl, glow::BACK);
@@ -2669,7 +2668,7 @@ impl ToonRenderer {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
-	pub fn apply_frame_state(&self, gl: &glow::Context) {
+	pub fn apply_frame_state(&self, gl: &crate::GlContext) {
 		// 단계 콜백, 화면 공간 바깥선처럼 렌더러 밖의 코드가 유니폼을 바꿨을 수 있다.
 		self.forget_all_uniform_values();
 		unsafe {
@@ -2691,7 +2690,7 @@ impl ToonRenderer {
 	/// - `gl`: GL 컨텍스트.
 	/// - `view_projection_matrix`: 보기와 투영 행렬. (투영 x 보기)
 	//==============================================================================
-	pub fn begin_frame(&mut self, gl: &glow::Context, view_projection_matrix: &Matrix4) {
+	pub fn begin_frame(&mut self, gl: &crate::GlContext, view_projection_matrix: &Matrix4) {
 		self.view_projection_matrix = *view_projection_matrix;
 		self.frustum_planes = extract_frustum_planes(view_projection_matrix);
 		let frame_camera = read_frame_camera(view_projection_matrix);
@@ -2714,7 +2713,7 @@ impl ToonRenderer {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
-	pub fn end_frame(&mut self, gl: &glow::Context) {
+	pub fn end_frame(&mut self, gl: &crate::GlContext) {
 		self.release_screen_rect(gl);
 		self.restore_state(gl, false);
 	}
@@ -2726,7 +2725,7 @@ impl ToonRenderer {
 	/// - `gl`: GL 컨텍스트.
 	/// - `camera`: Camera3D. (보기와 투영을 읽는다)
 	//==============================================================================
-	pub fn begin_frame_with_camera(&mut self, gl: &glow::Context, camera: &Camera3D) {
+	pub fn begin_frame_with_camera(&mut self, gl: &crate::GlContext, camera: &Camera3D) {
 		let view_projection_matrix = camera.get_view_projection_matrix();
 		self.begin_frame(gl, &view_projection_matrix);
 	}
@@ -2739,7 +2738,7 @@ impl ToonRenderer {
 	/// - `view_matrix`: 보기 행렬.
 	/// - `projection_matrix`: 투영 행렬.
 	//==============================================================================
-	pub fn begin_frame_with_matrices(&mut self, gl: &glow::Context, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
+	pub fn begin_frame_with_matrices(&mut self, gl: &crate::GlContext, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
 		let mut view_projection_matrix = *projection_matrix;
 		view_projection_matrix.multiply(view_matrix);
 		self.begin_frame(gl, &view_projection_matrix);
@@ -2788,7 +2787,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 화면 사각형 걸기. (begin_frame 이 상태를 적은 뒤, 클립 x, y 에 사각형의 비를 곱하고 자리를 더한 뒤 가위를 켠다)
 	//==============================================================================
-	fn apply_screen_rect(&mut self, gl: &glow::Context) {
+	fn apply_screen_rect(&mut self, gl: &crate::GlContext) {
 		let (screen_rect, viewport) = match (self.screen_rect, self.saved_state.as_ref()) {
 			(Some(screen_rect), Some(saved_state)) => {
 				(screen_rect, saved_state.viewport)
@@ -2823,7 +2822,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 화면 사각형의 가위 풀기. (apply_screen_rect 가 켰을 때만)
 	//==============================================================================
-	fn release_screen_rect(&mut self, gl: &glow::Context) {
+	fn release_screen_rect(&mut self, gl: &crate::GlContext) {
 		if !self.is_scissor_applied {
 			return;
 		}
@@ -2840,7 +2839,7 @@ impl ToonRenderer {
 	/// - `gl`: GL 컨텍스트.
 	/// - `shadow_map`: ShadowMap. (깊이를 그릴 곳, update_light_matrix 로 빛 행렬을 정해 둔다)
 	//==============================================================================
-	pub fn begin_shadow_pass(&mut self, gl: &glow::Context, shadow_map: &ShadowMap) {
+	pub fn begin_shadow_pass(&mut self, gl: &crate::GlContext, shadow_map: &ShadowMap) {
 		self.forget_all_uniform_values();
 		self.save_state(gl);
 		self.view_projection_matrix = *shadow_map.get_light_view_projection_matrix();
@@ -2864,7 +2863,7 @@ impl ToonRenderer {
 	/// - `gl`: GL 컨텍스트.
 	/// - `shadow_atlas`: ShadowAtlas.
 	//==============================================================================
-	pub fn begin_shadow_atlas_pass(&mut self, gl: &glow::Context, shadow_atlas: &ShadowAtlas) {
+	pub fn begin_shadow_atlas_pass(&mut self, gl: &crate::GlContext, shadow_atlas: &ShadowAtlas) {
 		self.forget_all_uniform_values();
 		self.save_state(gl);
 		self.is_shadow_pass = true;
@@ -2887,7 +2886,7 @@ impl ToonRenderer {
 	/// - `shadow_atlas`: ShadowAtlas.
 	/// - `tile_index`: 칸 번호.
 	//==============================================================================
-	pub fn set_shadow_atlas_tile(&mut self, gl: &glow::Context, shadow_atlas: &ShadowAtlas, tile_index: usize) {
+	pub fn set_shadow_atlas_tile(&mut self, gl: &crate::GlContext, shadow_atlas: &ShadowAtlas, tile_index: usize) {
 		self.view_projection_matrix = shadow_atlas.get_tile(tile_index).view_projection_matrix;
 		self.frustum_planes = extract_frustum_planes(&self.view_projection_matrix);
 		self.frame_serial += 1;
@@ -2900,7 +2899,7 @@ impl ToonRenderer {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
-	pub fn end_shadow_pass(&mut self, gl: &glow::Context) {
+	pub fn end_shadow_pass(&mut self, gl: &crate::GlContext) {
 		self.is_shadow_pass = false;
 		self.frame_serial += 1;
 		self.restore_state(gl, true);
@@ -2932,7 +2931,7 @@ impl ToonRenderer {
 	/// - `model_matrix`: 모형 행렬.
 	/// - `options`: 그리기 꼴. (ToonDrawOptions, 머리말)
 	//==============================================================================
-	pub fn draw_mesh(&mut self, gl: &glow::Context, mesh: &ToonMesh, model_matrix: &Matrix4, options: ToonDrawOptions) {
+	pub fn draw_mesh(&mut self, gl: &crate::GlContext, mesh: &ToonMesh, model_matrix: &Matrix4, options: ToonDrawOptions) {
 		if options.is_culled && !self.is_visible(mesh, model_matrix) {
 			self.frame_statistics.culled_object_count += 1;
 			return;
@@ -2957,7 +2956,7 @@ impl ToonRenderer {
 	/// ```rust,no_run
 	/// use vanilla::{create_octahedron_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonInstance, ToonPartOptions, ToonRenderer, Vector3};
 	///
-	/// fn draw_glowing_rock(gl: &glow::Context) -> Result<(), String> {
+	/// fn draw_glowing_rock(gl: &vanilla::GlContext) -> Result<(), String> {
 	/// 	let mut renderer = ToonRenderer::new(gl)?;
 	/// 	let mut builder = MeshBuilder::new();
 	/// 	builder.add_part(&create_octahedron_geometry(0.3), &Matrix4::create_identity(), "#909098", ToonPartOptions { has_outline: true, ..ToonPartOptions::default() });
@@ -2973,7 +2972,7 @@ impl ToonRenderer {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn draw_mesh_instanced(&mut self, gl: &glow::Context, mesh: &ToonMesh, instance_list: &[ToonInstance], options: ToonDrawOptions) {
+	pub fn draw_mesh_instanced(&mut self, gl: &crate::GlContext, mesh: &ToonMesh, instance_list: &[ToonInstance], options: ToonDrawOptions) {
 		let mut instance_data = std::mem::take(&mut self.instance_data);
 		instance_data.clear();
 		let mut instance_count = 0;
@@ -3017,7 +3016,7 @@ impl ToonRenderer {
 	/// - `instance_count`: 그릴 인스턴스 수. (버퍼에 든 수를 넘으면 자른다)
 	/// - `options`: draw_mesh 와 같다. (material 의 정점 조각이 사용자 어트리뷰트를 읽는다)
 	//==============================================================================
-	pub fn draw_mesh_instance_buffer(&mut self, gl: &glow::Context, mesh: &ToonMesh, instance_buffer: &ToonInstanceBuffer, instance_count: usize, options: ToonDrawOptions) {
+	pub fn draw_mesh_instance_buffer(&mut self, gl: &crate::GlContext, mesh: &ToonMesh, instance_buffer: &ToonInstanceBuffer, instance_count: usize, options: ToonDrawOptions) {
 		let count = instance_count.min(instance_buffer.get_instance_count());
 		if count == 0 {
 			return;
@@ -3035,7 +3034,7 @@ impl ToonRenderer {
 	/// - `model_matrix`: 모형 행렬.
 	/// - `options`: draw_mesh 와 같다.
 	//==============================================================================
-	pub fn draw_mesh_outline(&mut self, gl: &glow::Context, mesh: &ToonMesh, model_matrix: &Matrix4, options: ToonDrawOptions) {
+	pub fn draw_mesh_outline(&mut self, gl: &crate::GlContext, mesh: &ToonMesh, model_matrix: &Matrix4, options: ToonDrawOptions) {
 		if mesh.outline_vertex_array.is_none() || !options.has_outline || self.is_shadow_pass {
 			return;
 		}
@@ -3045,7 +3044,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 프로그램의 프레임 값 올리기. (보기와 투영, 카메라, 보기 돌림, HDR, 그림자, 껍데기 거리 배, 이번 프레임에 이미 올렸으면 건너뛴다)
 	//==============================================================================
-	fn upload_frame_uniforms(&self, gl: &glow::Context, entry: &ToonProgramEntry) {
+	fn upload_frame_uniforms(&self, gl: &crate::GlContext, entry: &ToonProgramEntry) {
 		if entry.frame_serial.get() == self.frame_serial {
 			return;
 		}
@@ -3095,7 +3094,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 점광과 스포트라이트 그림자 올리기. (아틀라스의 빛마다 자리, 바탕, 거리, 첫 칸과 점광마다의 칸 번호 + 1)
 	//==============================================================================
-	fn upload_local_shadow_uniforms(&self, gl: &glow::Context, program: &ShaderProgram) {
+	fn upload_local_shadow_uniforms(&self, gl: &crate::GlContext, program: &ShaderProgram) {
 		let mut slot_values = [0.0f32; TOON_MAXIMUM_POINT_LIGHTS];
 		let mut position_values = [0.0f32; SHADOW_ATLAS_MAXIMUM_LIGHTS * 4];
 		let mut forward_values = [0.0f32; SHADOW_ATLAS_MAXIMUM_LIGHTS * 4];
@@ -3125,7 +3124,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 몸 프로그램의 빛 묶음 올리기. (같은 묶음, 같은 판이면 건너뛴다)
 	//==============================================================================
-	fn upload_light_uniforms(gl: &glow::Context, entry: &ToonProgramEntry, light_set: &ToonLightSet) {
+	fn upload_light_uniforms(gl: &crate::GlContext, entry: &ToonProgramEntry, light_set: &ToonLightSet) {
 		if entry.light_set_id.get() == light_set.get_id() && entry.light_version.get() == light_set.get_version() {
 			return;
 		}
@@ -3202,7 +3201,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 그리기마다의 공용 유니폼 올리기. (모형 행렬, 뼈대, 인스턴싱 0 아님, 1 인스턴스 행렬과 틴트, 2 인스턴스 틴트만)
 	//==============================================================================
-	fn upload_draw_uniforms(&self, gl: &glow::Context, program: &ShaderProgram, model_matrix: &Matrix4, is_skinned: bool, instanced_mode: f64, joint_matrices: Option<&[f32]>) {
+	fn upload_draw_uniforms(&self, gl: &crate::GlContext, program: &ShaderProgram, model_matrix: &Matrix4, is_skinned: bool, instanced_mode: f64, joint_matrices: Option<&[f32]>) {
 		self.write_uniform_matrix4(gl, program, "modelMatrix", &model_matrix.elements);
 		self.write_uniform_floats(gl, program, "instanced", 1, [instanced_mode, 0.0, 0.0, 0.0]);
 		self.write_uniform_floats(gl, program, "skinned", 1, [if is_skinned { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0]);
@@ -3215,14 +3214,14 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 텍스처 유닛에 묶기. (없으면 흰 텍스처)
 	//==============================================================================
-	fn bind_texture_unit(&self, gl: &glow::Context, unit: u32, texture: Option<GlTexture>) {
+	fn bind_texture_unit(&self, gl: &crate::GlContext, unit: u32, texture: Option<GlTexture>) {
 		ToonRenderer::bind_texture_2d(gl, unit, texture.unwrap_or(self.white_texture));
 	}
 
 	//==============================================================================
 	/// 텍스처 유닛에 2D 텍스처 묶기. (원본 bindTexture2D, 상태 캐시가 이미 묶였다고 기억하면 건너뛰고, 유닛도 다를 때만 고른다)
 	//==============================================================================
-	fn bind_texture_2d(gl: &glow::Context, unit: u32, texture: GlTexture) {
+	fn bind_texture_2d(gl: &crate::GlContext, unit: u32, texture: GlTexture) {
 		let texture_unit = glow::TEXTURE0 + unit;
 		if crate::core::glstatecache::is_texture_bound(gl, texture_unit, glow::TEXTURE_2D, Some(texture)) {
 			return;
@@ -3238,7 +3237,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 텍스처 유닛 고르기. (원본 applyActiveTexture, 상태 캐시가 이미 같은 유닛이라고 기억하면 건너뛴다)
 	//==============================================================================
-	fn apply_active_texture(gl: &glow::Context, texture_unit: u32) {
+	fn apply_active_texture(gl: &crate::GlContext, texture_unit: u32) {
 		if !crate::core::glstatecache::is_active_texture(gl, texture_unit) {
 			unsafe {
 				crate::core::glstatecache::active_texture(gl, texture_unit);
@@ -3249,7 +3248,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 앞면 감김 방향 걸기. (원본 applyFrontFace, 상태 캐시가 같은 값이라고 기억하면 건너뛴다)
 	//==============================================================================
-	fn apply_front_face(gl: &glow::Context, mode: u32) {
+	fn apply_front_face(gl: &crate::GlContext, mode: u32) {
 		if !crate::core::glstatecache::is_front_face(gl, mode) {
 			unsafe {
 				crate::core::glstatecache::front_face(gl, mode);
@@ -3260,7 +3259,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 가릴 면 걸기. (원본 applyCullFace, 상태 캐시가 같은 값이라고 기억하면 건너뛴다)
 	//==============================================================================
-	fn apply_cull_face(gl: &glow::Context, mode: u32) {
+	fn apply_cull_face(gl: &crate::GlContext, mode: u32) {
 		if !crate::core::glstatecache::is_cull_face(gl, mode) {
 			unsafe {
 				crate::core::glstatecache::cull_face(gl, mode);
@@ -3271,7 +3270,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 버텍스 어레이 묶기. (원본 applyVertexArray, 상태 캐시가 같은 것이라고 기억하면 건너뛴다)
 	//==============================================================================
-	fn apply_vertex_array(gl: &glow::Context, vertex_array: GlVertexArray) {
+	fn apply_vertex_array(gl: &crate::GlContext, vertex_array: GlVertexArray) {
 		if !crate::core::glstatecache::is_vertex_array_bound(gl, Some(vertex_array)) {
 			unsafe {
 				crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
@@ -3286,7 +3285,7 @@ impl ToonRenderer {
 	///   프레임과 그림자 판의 시작, apply_frame_state(단계 콜백과 화면 공간 바깥선 뒤), 상태 되돌리기, 그 프로그램의 on_before_draw 를 부른 뒤.
 	/// - 값은 주어진 수 그대로 견준다. (0 과 -0 도 가른다, NaN 은 늘 다시 올린다) 셰이더에서 빠진 유니폼(위치 None)은 올리지 않는다.
 	//==============================================================================
-	fn with_uniform_slot<R>(&self, gl: &glow::Context, program: &ShaderProgram, uniform_name: &str, callback: impl FnOnce(&mut ToonUniformSlot, u64) -> R) -> R {
+	fn with_uniform_slot<R>(&self, gl: &crate::GlContext, program: &ShaderProgram, uniform_name: &str, callback: impl FnOnce(&mut ToonUniformSlot, u64) -> R) -> R {
 		let mut uniform_slot_table = self.uniform_slot_table.borrow_mut();
 		let slot_table = uniform_slot_table.entry(program.get_program()).or_default();
 		if !slot_table.contains_key(uniform_name) {
@@ -3316,7 +3315,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// float 유니폼 하나 올리기. (원본 writeUniformFloats, uniform1f ~ uniform4f, 같은 값이면 건너뛴다)
 	//==============================================================================
-	fn write_uniform_floats(&self, gl: &glow::Context, program: &ShaderProgram, uniform_name: &str, component_count: usize, values: [f64; 4]) {
+	fn write_uniform_floats(&self, gl: &crate::GlContext, program: &ShaderProgram, uniform_name: &str, component_count: usize, values: [f64; 4]) {
 		self.with_uniform_slot(gl, program, uniform_name, |slot, uniform_serial| {
 			let Some(location) = slot.location.as_ref() else {
 				return;
@@ -3341,7 +3340,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// int 유니폼 하나 올리기. (원본 writeUniform1i, 같은 값이면 건너뛴다)
 	//==============================================================================
-	fn write_uniform_1i(&self, gl: &glow::Context, program: &ShaderProgram, uniform_name: &str, value: i32) {
+	fn write_uniform_1i(&self, gl: &crate::GlContext, program: &ShaderProgram, uniform_name: &str, value: i32) {
 		self.with_uniform_slot(gl, program, uniform_name, |slot, uniform_serial| {
 			let Some(location) = slot.location.as_ref() else {
 				return;
@@ -3361,7 +3360,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// mat4 유니폼이나 그 배열 올리기. (원본 writeUniformMatrix4, uniformMatrix4fv, 전치 없음, 같은 값이면 건너뛴다)
 	//==============================================================================
-	fn write_uniform_matrix4(&self, gl: &glow::Context, program: &ShaderProgram, uniform_name: &str, elements: &[f32]) {
+	fn write_uniform_matrix4(&self, gl: &crate::GlContext, program: &ShaderProgram, uniform_name: &str, elements: &[f32]) {
 		self.with_uniform_slot(gl, program, uniform_name, |slot, uniform_serial| {
 			let Some(location) = slot.location.as_ref() else {
 				return;
@@ -3381,7 +3380,7 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 그리기 본체. (instance_count 가 0 이면 보통, 아니면 인스턴스로, instance_buffer 가 있으면 그 꼴로)
 	//==============================================================================
-	fn draw_with_count(&mut self, gl: &glow::Context, mesh: &ToonMesh, model_matrix: &Matrix4, instance_count: i32, options: ToonDrawOptions, instance_buffer: Option<&ToonInstanceBuffer>) {
+	fn draw_with_count(&mut self, gl: &crate::GlContext, mesh: &ToonMesh, model_matrix: &Matrix4, instance_count: i32, options: ToonDrawOptions, instance_buffer: Option<&ToonInstanceBuffer>) {
 		let instance_layout = instance_buffer.map(|instance_buffer| &instance_buffer.layout);
 		if !self.ensure_program_set(gl, options.material, instance_layout) {
 			return;
@@ -3427,7 +3426,7 @@ impl ToonRenderer {
 		let is_mirrored_draw = options.is_mirrored.unwrap_or_else(|| read_matrix_determinant(model_matrix) < 0.0);
 		let is_mirrored = is_mirrored_draw != self.is_frame_mirrored;
 		let mut draw_call_count = 0u32;
-		let mut draw_elements = |gl: &glow::Context, start: usize, count: usize| {
+		let mut draw_elements = |gl: &crate::GlContext, start: usize, count: usize| {
 			if count == 0 {
 				return;
 			}
@@ -3450,7 +3449,7 @@ impl ToonRenderer {
 			self.upload_frame_uniforms(gl, depth_entry);
 			self.upload_draw_uniforms(gl, &depth_entry.program, model_matrix, is_skinned, instanced_mode, options.joint_matrices);
 			if let Some(on_before_draw) = options.on_before_draw {
-				on_before_draw(&depth_entry.program, GlContext::from_context(gl), ToonProgramKind::Depth);
+				on_before_draw(&depth_entry.program, gl, ToonProgramKind::Depth);
 				self.forget_uniform_values(&depth_entry.program);
 			}
 			ToonRenderer::apply_vertex_array(gl, body_vertex_array);
@@ -3499,7 +3498,7 @@ impl ToonRenderer {
 			self.write_uniform_floats(gl, outline_program, "alpha", 1, [options.alpha, 0.0, 0.0, 0.0]);
 			self.write_uniform_floats(gl, outline_program, "premultipliedOutput", 1, [premultiplied_output, 0.0, 0.0, 0.0]);
 			if let Some(on_before_draw) = options.on_before_draw {
-				on_before_draw(outline_program, GlContext::from_context(gl), ToonProgramKind::Outline);
+				on_before_draw(outline_program, gl, ToonProgramKind::Outline);
 				self.forget_uniform_values(outline_program);
 			}
 			ToonRenderer::apply_cull_face(gl, glow::FRONT);
@@ -3567,7 +3566,7 @@ impl ToonRenderer {
 		}
 		ToonRenderer::apply_active_texture(gl, glow::TEXTURE0);
 		if let Some(on_before_draw) = options.on_before_draw {
-			on_before_draw(solid_program, GlContext::from_context(gl), ToonProgramKind::Solid);
+			on_before_draw(solid_program, gl, ToonProgramKind::Solid);
 			self.forget_uniform_values(solid_program);
 		}
 		ToonRenderer::apply_cull_face(gl, glow::BACK);
@@ -3982,7 +3981,7 @@ mod tests {
 		};
 		// 다 지으면 버퍼 일곱(인스턴스, 몸, 뼈대, UV, 몸 번호, 바깥선, 바깥선 뼈대, 바깥선 번호 가운데 인스턴스 뺀 것은 buffer_list)과 버텍스 어레이 둘.
 		let gl = fake_gl::create_context();
-		let mesh = ToonRenderer::create_mesh_objects(&gl, &arrays).expect("mesh");
+		let mesh = ToonRenderer::create_mesh_objects(crate::GlContext::from_context(&gl), &arrays).expect("mesh");
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Buffer), 8);
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::VertexArray), 2);
 		assert_eq!(mesh.buffer_list.len(), 7);
@@ -3990,14 +3989,14 @@ mod tests {
 		for success_count in 0..8 {
 			let gl = fake_gl::create_context();
 			fake_gl::fail_after(FakeGlObject::Buffer, success_count);
-			assert!(ToonRenderer::create_mesh_objects(&gl, &arrays).is_none());
+			assert!(ToonRenderer::create_mesh_objects(crate::GlContext::from_context(&gl), &arrays).is_none());
 			assert_eq!(fake_gl::get_live_count(FakeGlObject::Buffer), 0);
 			assert_eq!(fake_gl::get_live_count(FakeGlObject::VertexArray), 0);
 		}
 		for success_count in 0..2 {
 			let gl = fake_gl::create_context();
 			fake_gl::fail_after(FakeGlObject::VertexArray, success_count);
-			assert!(ToonRenderer::create_mesh_objects(&gl, &arrays).is_none());
+			assert!(ToonRenderer::create_mesh_objects(crate::GlContext::from_context(&gl), &arrays).is_none());
 			assert_eq!(fake_gl::get_live_count(FakeGlObject::Buffer), 0);
 			assert_eq!(fake_gl::get_live_count(FakeGlObject::VertexArray), 0);
 		}

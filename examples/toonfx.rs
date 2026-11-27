@@ -9,7 +9,7 @@
 //   테를 두른 빛살 파티클(rim 1)과 빛 점(rim 1, 하나 걸러), 번짐 색 리본(glow)은 가장자리를 테 색으로 덮는다.
 // - 실행: cargo run --example toonfx
 //==============================================================================
-use glow::HasContext;
+use vanilla::GlContext;
 use std::f64::consts::PI;
 use vanilla::{
 	create_box_geometry, create_cylinder_geometry, create_octahedron_geometry, create_part_matrix, create_rounded_box_geometry, create_sphere_geometry, create_torus_geometry, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ToonDrawOptions, ToonGeometry, ToonInstance, ToonLineDrawOptions, ToonMesh, ToonOutlineWidthUnit, ToonPartOptions, ToonRenderer, ToonScreenOutline, ToonBeamOptions, ToonDecalOptions, ToonFireballOptions, ToonGlintOptions, ToonLightningOptions, ToonParticleOptions, ToonPlumeOptions, ToonRibbonOptions, ToonShockwaveOptions, ToonFlashOptions, ToonVfx, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange, ToonVfxShape, ToonVfxSlot, Vector2, Vector3, TOON_VFX_DEFAULT_PARTICLE_CAPACITY,
@@ -56,7 +56,7 @@ impl ToonFxScene {
 	//==============================================================================
 	// 도형 하나로 모형 짓기. (껍데기 바깥선 없이)
 	//==============================================================================
-	fn build_mesh(renderer: &ToonRenderer, gl: &glow::Context, geometry: &ToonGeometry, matrix: &Matrix4, color: &str) -> Option<ToonMesh> {
+	fn build_mesh(renderer: &ToonRenderer, gl: &GlContext, geometry: &ToonGeometry, matrix: &Matrix4, color: &str) -> Option<ToonMesh> {
 		let mut builder = MeshBuilder::new();
 		builder.add_part(geometry, matrix, color, ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
 		renderer.create_mesh(gl, &builder.read_arrays())
@@ -65,7 +65,7 @@ impl ToonFxScene {
 	//==============================================================================
 	// 렌더러, 바깥선, 모형 준비. (처음 그릴 때 한 번)
 	//==============================================================================
-	fn create_resources(&mut self, gl: &glow::Context) -> Result<(), String> {
+	fn create_resources(&mut self, gl: &GlContext) -> Result<(), String> {
 		let mut renderer = ToonRenderer::new(gl)?;
 		renderer.set_band_count(3);
 		renderer.set_light([-0.5, -1.0, -0.35], [0.85, 0.8, 0.75], [0.55, 0.6, 0.7], [0.25, 0.22, 0.2]);

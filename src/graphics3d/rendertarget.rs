@@ -12,9 +12,9 @@
 //!   만들 때 켜 둔다.
 //! - GL 객체를 못 만들면 원본은 그대로 진행하지만, 러스트 판은 오류(Result)로 돌려준다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::core::graphic::GlTexture;
 use crate::graphics3d::{read_framebuffer_binding, GlFramebuffer, GlRenderbuffer};
-use glow::HasContext;
 
 //==============================================================================
 /// 렌더 타겟 옵션. (원본 options 객체, 기본값은 컬러 1장 / RGBA8 / 깊이 렌더버퍼 16 비트 / 멀티샘플 없음)
@@ -69,15 +69,14 @@ impl Default for RenderTargetOptions {
 /// # 예제
 /// 씬을 HDR 렌더 타겟에 그리고 컬러 텍스처를 다음 패스에서 읽기
 /// ```rust,no_run
-/// use glow::HasContext;
 /// use vanilla::{RenderTarget, RenderTargetOptions};
 ///
-/// fn create_scene_target(gl: &glow::Context) -> Result<RenderTarget, String> {
+/// fn create_scene_target(gl: &vanilla::GlContext) -> Result<RenderTarget, String> {
 /// 	let options = RenderTargetOptions { use_float_color: true, ..RenderTargetOptions::default() };
 /// 	RenderTarget::new(gl, 2, 2, true, Some(options))
 /// }
 ///
-/// fn render_scene(gl: &glow::Context, scene_render_target: &mut RenderTarget, width: i32, height: i32) -> Result<(), String> {
+/// fn render_scene(gl: &vanilla::GlContext, scene_render_target: &mut RenderTarget, width: i32, height: i32) -> Result<(), String> {
 /// 	scene_render_target.resize(gl, width, height)?;
 /// 	scene_render_target.bind(gl);
 /// 	unsafe {
@@ -118,7 +117,7 @@ pub struct RenderTarget {
 /// 포맷마다 받는 표본 수로 줄이기. (웹, 포맷마다 받는 표본 수 가운데 sample_count 밑의 가장 큰 수, 플랫폼 층이 SAMPLES 목록을 읽는다)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
-fn clamp_sample_count_to_formats(_gl: &glow::Context, sample_count: i32, internal_format_list: &[u32]) -> i32 {
+fn clamp_sample_count_to_formats(_gl: &GlContext, sample_count: i32, internal_format_list: &[u32]) -> i32 {
 	let mut clamped_sample_count = sample_count;
 	for internal_format in internal_format_list {
 		let supported_sample_count_list = crate::platform::read_renderbuffer_sample_counts(*internal_format);
@@ -131,7 +130,7 @@ fn clamp_sample_count_to_formats(_gl: &glow::Context, sample_count: i32, interna
 /// 포맷마다 받는 표본 수로 줄이기. (데스크탑 GL 3.3 은 물을 함수가 없어 그대로, 머리말)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
-fn clamp_sample_count_to_formats(_gl: &glow::Context, sample_count: i32, _internal_format_list: &[u32]) -> i32 {
+fn clamp_sample_count_to_formats(_gl: &GlContext, sample_count: i32, _internal_format_list: &[u32]) -> i32 {
 	sample_count
 }
 
@@ -152,12 +151,12 @@ impl RenderTarget {
 	/// ```rust,no_run
 	/// use vanilla::RenderTarget;
 	///
-	/// fn read_msaa_sample_count(gl: &glow::Context) -> i32 {
+	/// fn read_msaa_sample_count(gl: &vanilla::GlContext) -> i32 {
 	/// 	RenderTarget::read_supported_sample_count(gl, 4, &[glow::RGBA8, glow::DEPTH_COMPONENT16])
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn read_supported_sample_count(gl: &glow::Context, requested_sample_count: i32, internal_format_list: &[u32]) -> i32 {
+	pub fn read_supported_sample_count(gl: &GlContext, requested_sample_count: i32, internal_format_list: &[u32]) -> i32 {
 		if requested_sample_count < 2 {
 			return 0;
 		}
@@ -190,7 +189,7 @@ impl RenderTarget {
 	/// ```rust,no_run
 	/// use vanilla::{RenderTarget, RenderTargetOptions};
 	///
-	/// fn render_antialiased(gl: &glow::Context) -> Result<(), String> {
+	/// fn render_antialiased(gl: &vanilla::GlContext) -> Result<(), String> {
 	/// 	let options = RenderTargetOptions { sample_count: 4, depth_bits: 24, ..RenderTargetOptions::default() };
 	/// 	let render_target = RenderTarget::new(gl, 1280, 720, true, Some(options))?;
 	/// 	render_target.bind(gl);
@@ -201,7 +200,7 @@ impl RenderTarget {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn new(gl: &glow::Context, width: i32, height: i32, use_depth: bool, options: Option<RenderTargetOptions>) -> Result<RenderTarget, String> {
+	pub fn new(gl: &GlContext, width: i32, height: i32, use_depth: bool, options: Option<RenderTargetOptions>) -> Result<RenderTarget, String> {
 		let resolved_options = options.unwrap_or_default();
 		let color_attachment_count = if resolved_options.color_attachment_count > 0 {
 			resolved_options.color_attachment_count
@@ -248,7 +247,7 @@ impl RenderTarget {
 	/// # 돌려줌
 	/// 다시 지었거나 같은 크기면 Ok. GL 객체를 못 만들면 Err(GL 의 오류 글, 그때까지 지은 것은 지우고 크기는 0 이다).
 	//==============================================================================
-	pub fn resize(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
+	pub fn resize(&mut self, gl: &GlContext, width: i32, height: i32) -> Result<(), String> {
 		if width == self.width && height == self.height {
 			return Ok(());
 		}
@@ -272,7 +271,7 @@ impl RenderTarget {
 	/// # 돌려줌
 	/// 다 지었으면 Ok. GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
-	fn create_resources(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
+	fn create_resources(&mut self, gl: &GlContext, width: i32, height: i32) -> Result<(), String> {
 		let internal_format = if self.use_float_color {
 			glow::RGBA16F
 		}
@@ -399,7 +398,7 @@ impl RenderTarget {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
-	pub fn resolve(&self, gl: &glow::Context) {
+	pub fn resolve(&self, gl: &GlContext) {
 		let Some(multisample_framebuffer) = self.multisample_framebuffer else {
 			return;
 		};
@@ -446,7 +445,7 @@ impl RenderTarget {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
-	pub fn bind(&self, gl: &glow::Context) {
+	pub fn bind(&self, gl: &GlContext) {
 		unsafe {
 			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, self.get_framebuffer());
 			crate::core::glstatecache::viewport(gl, 0, 0, self.width, self.height);
@@ -460,7 +459,7 @@ impl RenderTarget {
 	/// # 인자
 	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
-	pub fn destroy(&mut self, gl: &glow::Context) {
+	pub fn destroy(&mut self, gl: &GlContext) {
 		unsafe {
 			if let Some(framebuffer) = self.framebuffer.take() {
 				crate::core::glstatecache::delete_framebuffer(gl, framebuffer);
@@ -483,7 +482,7 @@ impl RenderTarget {
 	//==============================================================================
 	/// 멀티샘플 프레임버퍼와 렌더버퍼 지우기.
 	//==============================================================================
-	fn destroy_multisample(&mut self, gl: &glow::Context) {
+	fn destroy_multisample(&mut self, gl: &GlContext) {
 		unsafe {
 			if let Some(multisample_framebuffer) = self.multisample_framebuffer.take() {
 				crate::core::glstatecache::delete_framebuffer(gl, multisample_framebuffer);
@@ -640,20 +639,20 @@ mod tests {
 			color_attachment_count: 2,
 			..Default::default()
 		};
-		assert!(RenderTarget::new(&gl, 64, 32, true, Some(options)).is_err());
+		assert!(RenderTarget::new(GlContext::from_context(&gl), 64, 32, true, Some(options)).is_err());
 		assert_eq!(read_live_counts(), [0, 0, 0]);
 
 		let gl = fake_gl::create_context();
-		let mut render_target = RenderTarget::new(&gl, 64, 32, true, None).expect("render target");
+		let mut render_target = RenderTarget::new(GlContext::from_context(&gl), 64, 32, true, None).expect("render target");
 		assert_eq!(read_live_counts(), [1, 1, 1]);
 		fake_gl::fail_after(FakeGlObject::Renderbuffer, 0);
-		assert!(render_target.resize(&gl, 128, 64).is_err());
+		assert!(render_target.resize(GlContext::from_context(&gl), 128, 64).is_err());
 		assert_eq!(read_live_counts(), [0, 0, 0]);
 		assert_eq!(render_target.get_width(), 0);
 		fake_gl::fail_after(FakeGlObject::Renderbuffer, u32::MAX);
-		render_target.resize(&gl, 128, 64).expect("resize");
+		render_target.resize(GlContext::from_context(&gl), 128, 64).expect("resize");
 		assert_eq!(read_live_counts(), [1, 1, 1]);
-		render_target.destroy(&gl);
+		render_target.destroy(GlContext::from_context(&gl));
 		assert_eq!(read_live_counts(), [0, 0, 0]);
 	}
 }

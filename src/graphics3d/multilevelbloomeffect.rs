@@ -7,10 +7,10 @@
 //! - 사용: resize(gl, 씬 너비, 높이) → render(gl, 씬 텍스처) → get_result_texture() 를 합성 패스에서 세기를 곱해 더한다.
 //! - 부수 효과: 깊이 시험과 섞기를 끄고, TEXTURE0 을 활성으로, 프레임버퍼 바인드가 바뀐다. 섞기 함수는 앞의 것으로 돌린다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::core::graphic::GlTexture;
 use crate::graphics3d::fullscreenpass::FullscreenPass;
 use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
-use glow::HasContext;
 use crate::core::gluniform::GlUniformF64;
 
 /// 밝은 몫 뽑기. (반 크기로 줄이며 원본 네 점을 고르게, 밝기는 세 채널 가운데 가장 큰 값, 문턱 둘레는 부드러운 무릎)
@@ -74,16 +74,15 @@ void main() {
 /// # 예제
 /// 머리말의 쓰임: resize, render, get_result_texture 를 합성 패스에 묶기
 /// ```rust,no_run
-/// use glow::HasContext;
 /// use vanilla::{MultiLevelBloomEffect, RenderTarget};
 ///
-/// fn create_bloom(gl: &glow::Context) -> Result<MultiLevelBloomEffect, String> {
+/// fn create_bloom(gl: &vanilla::GlContext) -> Result<MultiLevelBloomEffect, String> {
 /// 	let mut multi_level_bloom_effect = MultiLevelBloomEffect::new(gl, 5, true)?;
 /// 	multi_level_bloom_effect.set_threshold(1.0, 0.25);
 /// 	Ok(multi_level_bloom_effect)
 /// }
 ///
-/// fn render_bloom(gl: &glow::Context, multi_level_bloom_effect: &mut MultiLevelBloomEffect, scene_render_target: &RenderTarget) -> Result<(), String> {
+/// fn render_bloom(gl: &vanilla::GlContext, multi_level_bloom_effect: &mut MultiLevelBloomEffect, scene_render_target: &RenderTarget) -> Result<(), String> {
 /// 	multi_level_bloom_effect.resize(gl, scene_render_target.get_width(), scene_render_target.get_height())?;
 /// 	multi_level_bloom_effect.render(gl, scene_render_target.get_color_texture(0));
 /// 	unsafe {
@@ -124,7 +123,7 @@ impl MultiLevelBloomEffect {
 	/// # 돌려줌
 	/// 새 다단 블룸. (문턱 1, 무릎 0.25) 셰이더 컴파일이나 판 만들기에 실패하면 Err(오류 글).
 	//==============================================================================
-	pub fn new(gl: &glow::Context, level_count: usize, use_float_color: bool) -> Result<MultiLevelBloomEffect, String> {
+	pub fn new(gl: &GlContext, level_count: usize, use_float_color: bool) -> Result<MultiLevelBloomEffect, String> {
 		let mut multi_level_bloom_effect = MultiLevelBloomEffect {
 			extract_pass: FullscreenPass::new(gl, EXTRACT_FRAGMENTSHADER_SOURCE)?,
 			downsample_pass: FullscreenPass::new(gl, DOWNSAMPLE_FRAGMENTSHADER_SOURCE)?,
@@ -144,7 +143,7 @@ impl MultiLevelBloomEffect {
 	//==============================================================================
 	/// 단마다의 판 다시 짓기. (씬 크기와 단 수로)
 	//==============================================================================
-	fn create_levels(&mut self, gl: &glow::Context) -> Result<(), String> {
+	fn create_levels(&mut self, gl: &GlContext) -> Result<(), String> {
 		self.destroy_levels(gl);
 		let options = RenderTargetOptions { use_float_color: self.use_float_color, ..RenderTargetOptions::default() };
 		let mut level_width = self.scene_width;
@@ -161,7 +160,7 @@ impl MultiLevelBloomEffect {
 	//==============================================================================
 	/// 단마다의 판 지우기.
 	//==============================================================================
-	fn destroy_levels(&mut self, gl: &glow::Context) {
+	fn destroy_levels(&mut self, gl: &GlContext) {
 		for level_render_target in self.level_render_target_list.iter_mut() {
 			level_render_target.destroy(gl);
 		}
@@ -179,7 +178,7 @@ impl MultiLevelBloomEffect {
 	/// # 돌려줌
 	/// 판을 맞췄으면 Ok. 다시 짓다 판을 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
-	pub fn resize(&mut self, gl: &glow::Context, scene_width: i32, scene_height: i32) -> Result<(), String> {
+	pub fn resize(&mut self, gl: &GlContext, scene_width: i32, scene_height: i32) -> Result<(), String> {
 		let safe_width = scene_width.max(1);
 		let safe_height = scene_height.max(1);
 		if safe_width == self.scene_width && safe_height == self.scene_height {
@@ -200,7 +199,7 @@ impl MultiLevelBloomEffect {
 	/// # 돌려줌
 	/// 판을 맞췄으면 Ok. 다시 짓다 판을 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
-	pub fn set_level_count(&mut self, gl: &glow::Context, level_count: usize) -> Result<(), String> {
+	pub fn set_level_count(&mut self, gl: &GlContext, level_count: usize) -> Result<(), String> {
 		let safe_level_count = level_count.max(1);
 		if safe_level_count == self.level_count {
 			return Ok(());
@@ -249,7 +248,7 @@ impl MultiLevelBloomEffect {
 	/// - `gl`: GL 컨텍스트.
 	/// - `scene_color_texture`: 씬 컬러 텍스처. (크기는 resize 로 준 씬 크기와 같아야 뽑기의 텍셀 간격이 맞는다)
 	//==============================================================================
-	pub fn render(&self, gl: &glow::Context, scene_color_texture: Option<GlTexture>) {
+	pub fn render(&self, gl: &GlContext, scene_color_texture: Option<GlTexture>) {
 		let level_render_target_list = &self.level_render_target_list;
 		let level_count = level_render_target_list.len();
 		if level_count == 0 {
@@ -334,7 +333,7 @@ impl MultiLevelBloomEffect {
 	/// # 인자
 	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
-	pub fn destroy(&mut self, gl: &glow::Context) {
+	pub fn destroy(&mut self, gl: &GlContext) {
 		self.destroy_levels(gl);
 		self.extract_pass.destroy(gl);
 		self.downsample_pass.destroy(gl);

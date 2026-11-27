@@ -24,6 +24,7 @@
 //==============================================================================
 // 포함 모듈 목록.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::core::shaderprogram::ShaderProgram;
 use crate::graphics3d::material::Material;
 use crate::graphics3d::skinnedmodel::{AnimationClip, Drawable, Skin, SkinnedModelNode};
@@ -74,7 +75,7 @@ pub struct SkinnedModelAssetContent {
 /// ```rust,no_run
 /// use vanilla::{SkinnedModel, SkinnedModelAsset};
 ///
-/// fn spawn_herd(gl: &glow::Context, source_model: &SkinnedModel) -> Result<Vec<SkinnedModel>, String> {
+/// fn spawn_herd(gl: &vanilla::GlContext, source_model: &SkinnedModel) -> Result<Vec<SkinnedModel>, String> {
 /// 	let mut model_list = Vec::new();
 /// 	for _ in 0..10 {
 /// 		model_list.push(source_model.create_instance()?);
@@ -214,7 +215,7 @@ impl SkinnedModelAsset {
 	/// ```rust,no_run
 	/// use vanilla::{SkinnedModel, SkinnedModelAsset, SkinnedModelRenderer};
 	///
-	/// fn load_named_model(gl: &glow::Context, bytes: &[u8], skinned_model_renderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
+	/// fn load_named_model(gl: &vanilla::GlContext, bytes: &[u8], skinned_model_renderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
 	/// 	if let Some(found_asset) = SkinnedModelAsset::find("fox", &skinned_model_renderer.get_shader_program()) {
 	/// 		return SkinnedModel::create_from_asset(&found_asset);
 	/// 	}
@@ -297,7 +298,7 @@ impl SkinnedModelAsset {
 	/// # 돌려줌
 	/// 이번에 자원을 지웠으면 true.
 	//==============================================================================
-	pub fn release(&self, gl: &glow::Context) -> bool {
+	pub fn release(&self, gl: &GlContext) -> bool {
 		if self.is_destroyed.get() {
 			return false;
 		}
@@ -336,7 +337,7 @@ impl SkinnedModelAsset {
 	//==============================================================================
 	/// GPU 자원 지우기. (원형 드로어블의 버텍스 어레이, 버퍼, 모프 텍스처와 머티리얼 원형의 텍스처)
 	//==============================================================================
-	fn destroy_resources(&self, gl: &glow::Context) {
+	fn destroy_resources(&self, gl: &GlContext) {
 		for drawable in self.drawable_list.borrow_mut().drain(..) {
 			unsafe {
 				crate::core::glstatecache::delete_vertex_array(gl, drawable.vertex_array);

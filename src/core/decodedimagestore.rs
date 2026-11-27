@@ -5,6 +5,7 @@
 //!   Graphic 은 제 것만 미리 올린다. 주인을 모르면(그래픽을 내어 준 동안 읽었거나 load_from_bytes) Graphic 이 하나뿐일 때만 미리 올린다. (원본과 같음)
 //! - 원본은 브라우저가 일꾼 스레드에서 푼 ImageBitmap 을 맡는다. 러스트는 애셋 손잡이가 이미 푼 그림을 들고 있어 그림만 가리킨다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::core::image::Image;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -25,8 +26,8 @@ thread_local! {
 //==============================================================================
 /// 주인 번호 읽기. (GL 컨텍스트의 자리, 같은 컨텍스트면 같다)
 //==============================================================================
-pub(crate) fn read_owner(gl: &glow::Context) -> usize {
-	gl as *const glow::Context as usize
+pub(crate) fn read_owner(gl: &GlContext) -> usize {
+	gl.get_glow_context_unchecked() as *const glow::Context as usize
 }
 
 //==============================================================================

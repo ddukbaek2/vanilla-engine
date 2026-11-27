@@ -4,6 +4,7 @@
 //!   러스트 판도 엔진 셈은 f64 로 하고, 이 함수들이 GPU 로 넘기는 자리에서만 f32 로 바꾼다. (언리얼 5 의 큰 세계 좌표처럼 CPU 는 double, 셰이더는 float)
 //! - 이름의 f64 는 받는 수의 꼴이다. GPU 에 가는 값은 glow 의 f32 함수 그대로다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use glow::HasContext;
 
 //==============================================================================
@@ -66,5 +67,42 @@ impl GlUniformF64 for glow::Context {
 		unsafe {
 			self.vertex_attrib_4_f32(index, x as f32, y as f32, z as f32, w as f32);
 		}
+	}
+}
+
+impl GlUniformF64 for GlContext {
+	//==============================================================================
+	/// float 유니폼 하나. (안의 glow::Context 의 같은 함수, 유니폼은 상태 캐시와 상관없다)
+	//==============================================================================
+	unsafe fn uniform_1_f64(&self, location: Option<&glow::UniformLocation>, x: f64) {
+		unsafe { self.get_glow_context_unchecked().uniform_1_f64(location, x) }
+	}
+
+	//==============================================================================
+	/// vec2 유니폼. (안의 glow::Context 의 같은 함수)
+	//==============================================================================
+	unsafe fn uniform_2_f64(&self, location: Option<&glow::UniformLocation>, x: f64, y: f64) {
+		unsafe { self.get_glow_context_unchecked().uniform_2_f64(location, x, y) }
+	}
+
+	//==============================================================================
+	/// vec3 유니폼. (안의 glow::Context 의 같은 함수)
+	//==============================================================================
+	unsafe fn uniform_3_f64(&self, location: Option<&glow::UniformLocation>, x: f64, y: f64, z: f64) {
+		unsafe { self.get_glow_context_unchecked().uniform_3_f64(location, x, y, z) }
+	}
+
+	//==============================================================================
+	/// vec4 유니폼. (안의 glow::Context 의 같은 함수)
+	//==============================================================================
+	unsafe fn uniform_4_f64(&self, location: Option<&glow::UniformLocation>, x: f64, y: f64, z: f64, w: f64) {
+		unsafe { self.get_glow_context_unchecked().uniform_4_f64(location, x, y, z, w) }
+	}
+
+	//==============================================================================
+	/// 배열을 끄지 않은 정점 속성의 고정 값. (안의 glow::Context 의 같은 함수)
+	//==============================================================================
+	unsafe fn vertex_attrib_4_f64(&self, index: u32, x: f64, y: f64, z: f64, w: f64) {
+		unsafe { self.get_glow_context_unchecked().vertex_attrib_4_f64(index, x, y, z, w) }
 	}
 }
