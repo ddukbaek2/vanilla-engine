@@ -120,7 +120,8 @@ impl Scene for NodeScene {
 		badge_paint.set_round_size(32.0);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		engine.get_view_manager().apply_view_rect(graphic);
 	}
 }
@@ -141,11 +142,11 @@ fn main() {
 
 - `class NodeScene extends Scene` 은 `SceneBase` 를 품은 구조체와 `impl Scene` 입니다. 반드시 쓰는 것은 공통 상태를 내주는 `get_scene_base`, `get_scene_base_mut` 둘입니다.
 - 훅은 `&Engine` 을 인자로 받습니다. 원본 `this.getEngine()` 자리입니다.
-- 원본 `super.initialize(engine)` 같은 상위 호출은 없습니다. 트레이트의 기본 구현이 비어 있기 때문입니다. 다만 `tick` 과 `draw` 는 기본 구현이 노드 트리를 갱신하고 그리므로, 덮어쓸 때는 원본 `super.tick`, `super.draw` 자리에 `self.scene_base.tick(engine, time_delta)`, `self.scene_base.draw(graphic)` 을 부릅니다.
+- 원본 `super.initialize(engine)` 같은 상위 호출은 없습니다. 트레이트의 기본 구현이 비어 있기 때문입니다. 다만 `tick` 과 `draw` 는 기본 구현이 노드 트리를 갱신하고 그리므로, 덮어쓸 때는 원본 `super.tick`, `super.draw` 자리에 `self.scene_base.tick(time_delta)`, `self.scene_base.draw(graphic)` 을 부릅니다.
 - `new WorldNode()` 와 `root.addChild(panel)` 은 `node_tree.create_child(root_id, "Panel")` 한 줄입니다. 부모 없이 만들려면 `create_node(이름)` 뒤에 `add_child(부모, 자식)` 입니다.
 - `addComponent(Paint)` 는 클래스를 받지만 `add_component(Paint::new())` 는 값을 받고, 붙인 컴포넌트의 `&mut` 를 돌려줍니다.
 - `engine.run` 은 창이나 GL 을 만들지 못하면 `Err(까닭)` 을 돌려줍니다.
-- 원본의 씬 `load` 단계는 `create` 에서 애셋을 맡기는 꼴입니다. (`async load` 는 "async/await" 장)
+- 원본의 씬 `load(engine)` 는 러스트 판도 `load(engine)` 입니다. 애셋은 거기서 요청해 씬에 맡깁니다. (`async load` 는 "async/await" 장)
 
 ## 클래스 상속 대신 트레이트와 공통 상태 구조체
 
@@ -292,7 +293,8 @@ assert!(node_tree.get_node(label_id).is_some());
 
 | 자리 | 엔진을 받는 길 |
 | --- | --- |
-| 씬의 훅 (`create`, `initialize`, `tick`, `pre_draw` 같은 것) | 인자 `engine: &Engine` |
+| 씬의 훅 가운데 원본이 엔진을 받는 것 (`load`, `initialize`, `finalize`, `unload`) | 인자 `engine: &Engine` (원본 `load(engine)` 처럼) |
+| 씬의 다른 훅 (`create`, `tick`, `pre_draw`, `draw`, `touch_press`, `resize` 같은 것) | `Engine::get_engine()` (원본처럼 인자는 `time_delta`, `graphic`, `view_input_position` 같은 것만) |
 | 컴포넌트의 `tick`, 터치, 휠 | `context.get_engine()` (`&Engine`) |
 | 콜백 (`UIButtonEvent` 같은 것) | 콜백이 받는 `ComponentContext` |
 | async 작업 | `engine_context.with(\|engine\| ...)`, `scene_context.with(\|scene, engine\| ...)` |
@@ -303,7 +305,7 @@ assert!(node_tree.get_node(label_id).is_some());
 원본 `engine.getGraphic()` 은 `engine.get_graphic()`(변경은 `get_graphic_mut()`)입니다. 엔진을 받는 위 자리 어디서나 GL 자원을 짓습니다. 다른 것은 둘입니다.
 
 - 씬의 그리기 훅(`pre_draw`, `draw`, `post_draw`, `draw_on_load`, `draw_gizmos`)은 `graphic: &mut Graphic` 을 인자로 받습니다. 엔진이 든 그래픽을 잠깐 꺼내 넘긴 것이라 그 안에서는 `engine.get_graphic()` 이 `None` 이고 인자의 `graphic` 을 씁니다. 그리기 밖에서 엔진과 그래픽을 함께 `&mut` 로 쓰려면 `engine.with_graphic(|engine, graphic| ...)` 입니다.
-- 엔진을 받지 않는 컴포넌트의 `attach` 는 그래픽에도 닿지 않습니다. GL 자원은 컴포넌트를 짓는 자리(씬의 `create`)나 컴포넌트의 `tick` 에서 짓습니다.
+- 엔진을 받지 않는 컴포넌트의 `attach` 는 그래픽에도 닿지 않습니다. GL 자원은 컴포넌트를 짓는 자리(씬의 `load`)나 컴포넌트의 `tick` 에서 짓습니다.
 
 ## 콜백과 Rc<RefCell>
 

@@ -1903,8 +1903,8 @@ pub type TimelineImageResolver<'a> = &'a dyn Fn(&str) -> Option<Rc<Image>>;
 /// 		self.timeline.play();
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-/// 		self.scene_base.tick(engine, time_delta);
+/// 	fn tick(&mut self, time_delta: f64) {
+/// 		self.scene_base.tick(time_delta);
 /// 		self.timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
 /// 	}
 /// }
@@ -2044,7 +2044,7 @@ impl Timeline {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&mut self, engine: &Engine) {
+	/// 	fn load(&mut self, engine: &Engine) {
 	/// 		let timeline_future = Timeline::load_from_url(engine, "data:application/json,{\"duration\":2,\"loop\":true}");
 	/// 		let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 	/// 			match timeline_future.await {
@@ -2736,8 +2736,8 @@ impl Timeline {
 	/// 		self.timeline.play();
 	/// 	}
 	///
-	/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-	/// 		self.scene_base.tick(engine, time_delta);
+	/// 	fn tick(&mut self, time_delta: f64) {
+	/// 		self.scene_base.tick(time_delta);
 	/// 		self.timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
 	/// 	}
 	/// }

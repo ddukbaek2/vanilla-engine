@@ -291,7 +291,7 @@ impl Scene for ToonStyleScene {
 	//==============================================================================
 	// 생성. (원본 생성자처럼 렌더러, 그림자, 모형을 엔진의 그래픽으로 짓는다)
 	//==============================================================================
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.scene_base.set_scene_background_color("#202633");
 		if let Some(graphic) = engine.get_graphic() {
 			match StyleResources::new(graphic.get_gl(), self.line_scale, self.is_toggled, self.is_shell) {
@@ -308,8 +308,9 @@ impl Scene for ToonStyleScene {
 	//==============================================================================
 	// 3D 출력. (2D 묶음 내보내기 → 깊이 비우기 → 툰 그리기 줄 → 2D 상태 복구)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
+		self.scene_base.draw_scene_background(graphic);
 		graphic.flush_batch();
 		let gl = graphic.get_gl();
 		let canvas_pixel_size = engine.get_view_manager().get_canvas_pixel_size();

@@ -232,7 +232,8 @@ impl GameScene for MainScene {
 	//==============================================================================
 	// 애셋 읽기 자리. (세이프 에어리어를 흉내 내고 게임 영역 기준과 놀이 입력 처리기를 정한다)
 	//==============================================================================
-	fn load_assets(&mut self, engine: &Engine) {
+	fn load_assets(&mut self) {
+		let engine = Engine::get_engine().unwrap();
 		engine.get_view_manager_mut().set_safe_area_override(Some(SafeAreaInsets::create(40.0, 0.0, 30.0, 0.0)));
 		self.game_scene_base.set_scene_background_color(Color::create_from_hex("#4a1f1f"));
 		self.game_scene_base.set_play_area_reference(720.0, false, Some(engine));
@@ -290,14 +291,15 @@ impl GameScene for MainScene {
 	//==============================================================================
 	// 레이아웃. (바탕이 세이프 에어리어를 다시 계산한 뒤)
 	//==============================================================================
-	fn layout(&mut self, engine: &Engine) {
+	fn layout(&mut self) {
+		let engine = Engine::get_engine().unwrap();
 		self.layout_content(engine);
 	}
 
 	//==============================================================================
 	// 갱신. (둘러보기, 놀이 입력으로 표시 옮기기, 페이드 손잡이 놓기)
 	//==============================================================================
-	fn tick(&mut self, _engine: &Engine, time_delta: f64) {
+	fn tick(&mut self, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 		self.update_tour();
 		if self.fade_requested.replace(false) {

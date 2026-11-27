@@ -4,7 +4,7 @@
 
 ## Graphic 으로 바로 그리기
 
-`Graphic` 은 OpenGL 3.3(데스크탑)과 WebGL2(웹) 위에 Canvas2D 와 같은 꼴(왼쪽 위 원점, 픽셀 단위, 상태 스택)을 만든 렌더러입니다. 씬의 그리기 함수가 `&mut Graphic` 으로 받습니다. 변환, 전역 알파, 블렌드 모드는 매 프레임 처음에 되돌아가므로 뷰 좌표로 그리려면 `pre_draw` 에서 `scene_base.draw_scene_background(engine, graphic)` 를 부릅니다. (배경을 칠하고 뷰 좌표계를 겁니다, "엔진과 씬 생명 주기" 장)
+`Graphic` 은 OpenGL 3.3(데스크탑)과 WebGL2(웹) 위에 Canvas2D 와 같은 꼴(왼쪽 위 원점, 픽셀 단위, 상태 스택)을 만든 렌더러입니다. 씬의 그리기 함수가 `&mut Graphic` 으로 받습니다. 변환, 전역 알파, 블렌드 모드는 매 프레임 처음에 되돌아가므로 뷰 좌표로 그리려면 `pre_draw` 에서 `scene_base.draw_scene_background(graphic)` 를 부릅니다. (배경을 칠하고 뷰 좌표계를 겁니다, "엔진과 씬 생명 주기" 장)
 
 | 갈래 | 함수 |
 | --- | --- |
@@ -33,11 +33,11 @@ impl Scene for ShapeScene {
 		&mut self.scene_base
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		graphic.set_fill_color("#2a3550");
 		graphic.draw_round_rect(Rect::create(40.0, 40.0, 360.0, 220.0), 24.0);
@@ -120,7 +120,7 @@ impl Scene for SpriteScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
@@ -163,8 +163,8 @@ impl Scene for SpriteScene {
 		tiled_sprite.set_sprite_draw_mode(SpriteDrawMode::Tiled);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -184,7 +184,7 @@ fn main() {
 }
 ```
 
-`examples/assets/atlas/icons.png` 는 저장소에 든 128 x 128 아이콘 시트입니다. 그림은 `create` 에서 받기를 청하고 `track_asset` 으로 맡기면, 다 받은 뒤에 불리는 `initialize` 에서 `get_image()` 로 꺼냅니다. ("애셋" 장)
+`examples/assets/atlas/icons.png` 는 저장소에 든 128 x 128 아이콘 시트입니다. 그림은 `load` 에서 받기를 청하고 `track_asset` 으로 맡기면, 다 받은 뒤에 불리는 `initialize` 에서 `get_image()` 로 꺼냅니다. ("애셋" 장)
 
 - `Sprite::create_with_image(image)` 와 `set_image(Some(image))` 는 `Rc<Image>` 를 받습니다. 그림은 노드의 내용 크기로 늘여 그립니다. `set_image(None)` 이면 색 사각형을 칠합니다.
 - `set_image_rect(rect)` 는 그림 안의 한 조각만 그립니다. (픽셀, 그림 왼쪽 위 기준) `Rect::zero()` 면 그림 전체입니다. `set_frame(Some(&frame))` 은 `Frame`(그림과 영역)을 한 번에 겁니다. (`SpriteAtlas` 는 "애셋" 장)
@@ -274,8 +274,8 @@ impl Scene for TextScene {
 		button_text.set_fit_width(180.0, 0.55);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -405,11 +405,11 @@ impl Scene for BlendScene {
 		&mut self.scene_base
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		let blend_modes = [BlendMode::Normal, BlendMode::Lighter, BlendMode::Multiply, BlendMode::Screen, BlendMode::Difference];
 		for (index, blend_mode) in blend_modes.iter().enumerate() {
@@ -505,8 +505,8 @@ impl Scene for DecorationScene {
 		shadow_text.set_shadow("#000000", 0.8, 4.0, 6.0);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 		graphic.set_fill_color("#5a6b7a");
 		graphic.draw_rect(Rect::create(700.0, 0.0, 580.0, 720.0));
 	}
@@ -603,8 +603,9 @@ impl Scene for CameraScene {
 		self.camera.set_zoom(1.5);
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
+		self.scene_base.tick(time_delta);
 		self.elapsed_seconds += time_delta;
 		let view_size = engine.get_view_manager().get_view_size();
 		self.camera.set_view_size(view_size);
@@ -614,11 +615,11 @@ impl Scene for CameraScene {
 		self.camera.tick(time_delta);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.camera.begin(graphic);
 		for row in 0..16 {
 			for column in 0..24 {
@@ -655,11 +656,11 @@ fn main() {
 }
 ```
 
-위 예제는 카메라를 끝낸 뒤 `self.scene_base.draw(graphic)` 로 노드 트리를 그리므로 노드는 카메라와 상관없이 화면에 고정됩니다. (HUD) 노드 트리까지 카메라로 비추려면 `self.scene_base.draw(graphic)` 를 `begin` 과 `end` 사이에서 부릅니다. 씬의 `tick` 을 덮어쓰면 위처럼 `self.scene_base.tick(engine, time_delta)` 를 불러야 노드, 터치, 트윈이 갱신됩니다.
+위 예제는 카메라를 끝낸 뒤 `self.scene_base.draw(graphic)` 로 노드 트리를 그리므로 노드는 카메라와 상관없이 화면에 고정됩니다. (HUD) 노드 트리까지 카메라로 비추려면 `self.scene_base.draw(graphic)` 를 `begin` 과 `end` 사이에서 부릅니다. 씬의 `tick` 을 덮어쓰면 위처럼 `self.scene_base.tick(time_delta)` 를 불러야 노드, 터치, 트윈이 갱신됩니다.
 
 ## 그리기 설정
 
-원본처럼 `engine.get_graphic_mut()` 으로 `Graphic` 을 얻어 씬의 `create`, `initialize`, `tick` 에서 정합니다. 씬의 그리기 함수(`pre_draw`, `draw`, `post_draw`, `draw_on_load`) 안에서는 인자로 받은 `graphic` 에 정합니다. (그 안에서는 엔진이 그래픽을 인자로 내어 주어 `engine.get_graphic_mut()` 이 `None` 입니다) 아래 설정은 매 프레임 되돌아가지 않으므로 한 번 정하면 됩니다.
+원본처럼 `engine.get_graphic_mut()` 으로 `Graphic` 을 얻어 씬의 `load`, `initialize`, `tick` 에서 정합니다. 씬의 그리기 함수(`pre_draw`, `draw`, `post_draw`, `draw_on_load`) 안에서는 인자로 받은 `graphic` 에 정합니다. (그 안에서는 엔진이 그래픽을 인자로 내어 주어 `engine.get_graphic_mut()` 이 `None` 입니다) 아래 설정은 매 프레임 되돌아가지 않으므로 한 번 정하면 됩니다.
 
 - `set_image_smoothing_enabled(false)`: 그림을 가장 가까운 픽셀로 늘입니다. 도트 그림 게임이 씁니다. (처음 켬)
 - `set_image_mipmap_enabled(true)`: 큰 그림을 크게 줄여 그릴 때 자글거림을 줄입니다. (처음 끔)
@@ -667,7 +668,7 @@ fn main() {
 
 ## 주의할 점
 
-- 그림은 다 받은 뒤에 그립니다. 씬의 `create` 에서 받기를 청하고 `track_asset` 으로 맡긴 뒤, `initialize` 에서 `get_image()` 로 꺼내 노드를 짓습니다. 웹은 받기가 비동기라 `create` 바로 뒤에는 그림이 아직 없습니다.
+- 그림은 다 받은 뒤에 그립니다. 씬의 `load` 에서 받기를 청하고 `track_asset` 으로 맡긴 뒤, `initialize` 에서 `get_image()` 로 꺼내 노드를 짓습니다. 웹은 받기가 비동기라 `load` 바로 뒤에는 그림이 아직 없습니다.
 - `Sprite` 는 `Rc<Image>` 만 받습니다. 원본의 `HTMLImageElement` 나 캔버스 자리는 없습니다. 픽셀로 그림을 지을 때는 `Image::create_from_pixels(width, height, pixels)` 를 씁니다.
 - 색을 글로 줄 때는 `"#..."` 이나 `"rgb..."` 로 시작해야 합니다. 모르는 꼴의 글은 흰색이 됩니다. (`Paint`, `Text`, `Graphic` 모두 `impl Into<Color>` 를 받고 같은 규칙입니다)
 - 그리기 모드와 블렌드 모드는 원본처럼 글이 아니라 `SpriteDrawMode`, `BlendMode` 열거로 줍니다. JSON 처럼 글로 온 이름은 `BlendMode::from_name` 으로 바꿉니다.

@@ -598,7 +598,7 @@ impl Material {
 	/// 받기 손잡이. (데스크탑은 그 자리에서 읽어 이미 끝나 있고, 웹은 fetch 가 끝나야 끝난다, get_image_description 이나 await 로 서술을 받는다)
 	///
 	/// # 예제
-	/// 씬의 create 에서 부탁하고 다 받은 뒤 initialize 에서 서술 꺼내기
+	/// 씬의 load 에서 부탁하고 다 받은 뒤 initialize 에서 서술 꺼내기
 	/// ```rust,no_run
 	/// use vanilla::{Engine, ImageDescriptionLoadHandle, ImageDescriptionOptions, Material, Scene, SceneBase};
 	///
@@ -616,7 +616,7 @@ impl Material {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&mut self, engine: &Engine) {
+	/// 	fn load(&mut self, engine: &Engine) {
 	/// 		let options = ImageDescriptionOptions { is_color_data: true, ..ImageDescriptionOptions::default() };
 	/// 		let load_handle = Material::load_image_description(engine, "examples/assets/atlas/icons.png", Some(options));
 	/// 		self.scene_base.track_load_handle(load_handle.get_load_handle());

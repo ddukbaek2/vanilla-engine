@@ -265,17 +265,18 @@ impl Scene for Physics2DScene {
 	//==============================================================================
 	// 갱신. (멈추지 않았으면 프레임마다 한 걸음)
 	//==============================================================================
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
+	fn tick(&mut self, time_delta: f64) {
 		if self.prestep_count == 0 {
 			self.step_world();
 		}
-		self.scene_base.tick(engine, time_delta);
+		self.scene_base.tick(time_delta);
 	}
 
 	//==============================================================================
 	// 이전 출력. (배경)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		let view_manager = engine.get_view_manager();
 		let canvas_native_size = view_manager.get_canvas_native_size();
 		view_manager.apply_canvas_native_rect(graphic);
@@ -287,7 +288,7 @@ impl Scene for Physics2DScene {
 	//==============================================================================
 	// 출력. (센서 칸, 물리 모양, 광선, 노드)
 	//==============================================================================
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		if self.sensor_visitor_count > 0 {
 			graphic.set_fill_color(SENSOR_ACTIVE_COLOR);
 			graphic.draw_rect(Rect::create(SENSOR_CENTER.x - SENSOR_HALF_SIZE.x, SENSOR_CENTER.y - SENSOR_HALF_SIZE.y, SENSOR_HALF_SIZE.x * 2.0, SENSOR_HALF_SIZE.y * 2.0));

@@ -7,7 +7,7 @@
 //! - 셰이더는 GLSL ES 3.00 이다. 데스크탑(GL 3.3 코어)은 ShaderProgram 이 머리만 #version 330 core 로 바꾸고, 웹(WebGL2)은 그대로 쓴다.
 //! - 엔진은 고치지 않는다. 원본처럼 씬이 pre_draw 첫머리에서 begin, post_draw 끝에서 end, tick 에서 tick 을 부른다:
 //!   ```text
-//!     // 씬 create 에서
+//!     // 씬 load 에서
 //!     self.screen_effect = ScreenEffect::new();
 //!     self.screen_effect.set_enabled(ScreenEffectType::Vignette, true);
 //!     // pre_draw 처음 / post_draw 끝에서
@@ -1204,21 +1204,21 @@ fn find_effect_body(pass_name: &str) -> Option<&'static str> {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn create(&mut self, _engine: &Engine) {
+/// 	fn load(&mut self, _engine: &Engine) {
 /// 		self.screen_effect.set_enabled(ScreenEffectType::Vignette, true);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-/// 		self.scene_base.tick(engine, time_delta);
+/// 	fn tick(&mut self, time_delta: f64) {
+/// 		self.scene_base.tick(time_delta);
 /// 		self.screen_effect.tick(time_delta);
 /// 	}
 ///
-/// 	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+/// 	fn pre_draw(&mut self, graphic: &mut Graphic) {
 /// 		self.screen_effect.begin(graphic);
-/// 		self.scene_base.draw_scene_background(engine, graphic);
+/// 		self.scene_base.draw_scene_background(graphic);
 /// 	}
 ///
-/// 	fn post_draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+/// 	fn post_draw(&mut self, graphic: &mut Graphic) {
 /// 		self.screen_effect.end(graphic);
 /// 	}
 /// }

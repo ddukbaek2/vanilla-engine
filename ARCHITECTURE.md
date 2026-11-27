@@ -315,7 +315,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 
 | 차이 | 까닭 |
 | --- | --- |
-| 전역 엔진 Engine::get_engine()(원본 Engine.getEngine, Scene.getEngine 은 SceneBase::get_engine, UIView.getEngine 은 UIView::get_engine)은 원본처럼 Engine::new 직후부터 어디서나(씬 함수, 컴포넌트 tick 과 draw, attach, 위젯 콜백, 페이지 이벤트 리스너, async 작업) 꺼낸다. 씬 훅은 원본과 달리 engine 인자(&Engine)도 받는다(같은 엔진). 인스펙터 게터 목록에 원본 UIView.getEngine 은 빼고(원본은 setEngine 으로 준 값, 러스트는 전역 엔진을 꺼내는 함수), 반사 속성 목록에도 Engine 이 없다 | 엔진 공개 함수는 모두 &self, 고치는 칸은 안쪽 가변성이라 &Engine 을 여럿이 같이 쥐어도 된다. 매니저는 Ref, RefMut 으로 빌려 주고 같은 칸을 겹쳐 고치면 이름을 적은 패닉(RefCell 꼴) |
+| 전역 엔진 Engine::get_engine()(원본 Engine.getEngine, Scene.getEngine 은 SceneBase::get_engine, UIView.getEngine 은 UIView::get_engine)은 원본처럼 Engine::new 직후부터 어디서나(씬 함수, 컴포넌트 tick 과 draw, attach, 위젯 콜백, 페이지 이벤트 리스너, async 작업) 꺼낸다. 씬 훅의 이름과 인자는 원본과 같다(create(), load(engine), initialize(engine), tick(time_delta), draw(graphic) 처럼. 원본이 엔진을 받는 load, initialize, finalize, unload 만 engine 인자를 받고, 나머지 훅에서는 Engine::get_engine()). 인스펙터 게터 목록에 원본 UIView.getEngine 은 빼고(원본은 setEngine 으로 준 값, 러스트는 전역 엔진을 꺼내는 함수), 반사 속성 목록에도 Engine 이 없다 | 엔진 공개 함수는 모두 &self, 고치는 칸은 안쪽 가변성이라 &Engine 을 여럿이 같이 쥐어도 된다. 매니저는 Ref, RefMut 으로 빌려 주고 같은 칸을 겹쳐 고치면 이름을 적은 패닉(RefCell 꼴) |
 | 노드는 NodeTree 안에 있고 NodeId 핸들로 가리킨다 | 부모와 자식을 Rc<RefCell> 로 서로 가리키면 순환 참조와 실행 중 빌림 검사가 생긴다. 지운 노드의 핸들은 None 이 된다 |
 | 노드 종류는 WorldNode 하나다 (원본 Node, ComponentNode, TransformNode, WorldNode 를 합침, 원본에서 노드인 위젯과 UINode 는 컴포넌트) | 러스트에 클래스 상속이 없어 노드 꼴을 하나로 두고 기능을 컴포넌트로 붙였다 |
 | 상속 대신 트레이트와 품기 (Scene + SceneBase, Component + ComponentBase, ShaderSprite 는 Sprite 를 품고 Deref) | 러스트에 클래스 상속이 없어 공통 상태는 구조체로, 덮어쓰기는 트레이트 함수로 둔다. 원본 상위 클래스를 품은 컴포넌트는 Component::get_base_component 로 그것을 알려, get_component::<Sprite>() 가 ShaderSprite 도 찾는다(원본 instanceof 와 같음) |

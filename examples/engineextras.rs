@@ -375,7 +375,7 @@ impl Scene for EngineExtrasScene {
 	//==============================================================================
 	// 생성.
 	//==============================================================================
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.scene_base.set_scene_background_color(BACKGROUND_COLOR);
 		let root_id = self.scene_base.get_root_id();
 		self.scene_base.get_root_mut().set_content_size(Vector2::create(VIEW_WIDTH, VIEW_HEIGHT));
@@ -391,7 +391,8 @@ impl Scene for EngineExtrasScene {
 	//==============================================================================
 	// 주기적 갱신.
 	//==============================================================================
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
 		self.elapsed_seconds += time_delta;
 		let ring_ratio = (self.elapsed_seconds * 0.25).fract();
 		for (ring_index, ring_id) in self.ring_ids.clone().into_iter().enumerate() {
@@ -408,8 +409,8 @@ impl Scene for EngineExtrasScene {
 	//==============================================================================
 	// 이전 출력.
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 

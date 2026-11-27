@@ -61,6 +61,23 @@ pub(crate) fn install_global_engine(engine: Engine) -> &'static Engine {
 }
 
 //==============================================================================
+/// 꺼내기. (엔진이 부르는 씬 바탕 함수처럼 엔진이 늘 있는 자리, 못 꺼내면 함수 이름과 까닭을 적은 패닉)
+///
+/// # 인자
+/// - `function_name`: 패닉 글에 적을 함수 이름.
+//==============================================================================
+pub(crate) fn expect_global_engine(function_name: &str) -> &'static Engine {
+	match get_global_engine() {
+		Ok(engine) => {
+			engine
+		}
+		Err(engine_access_error) => {
+			panic!("{function_name}: {engine_access_error}");
+		}
+	}
+}
+
+//==============================================================================
 /// 꺼내기. (Engine::get_engine)
 //==============================================================================
 pub(crate) fn get_global_engine() -> Result<&'static Engine, EngineAccessError> {
@@ -205,7 +222,7 @@ mod tests {
 			&mut self.scene_base
 		}
 
-		fn create(&mut self, engine: &Engine) {
+		fn load(&mut self, engine: &Engine) {
 			// 씬 함수의 engine 인자와 전역 엔진은 같은 엔진이다. 둘을 같이 써도 된다.
 			self.read_list.borrow_mut().push(("create", read_global_engine_address()));
 			assert_eq!(self.scene_base.get_engine().map(get_engine_address), Ok(get_engine_address(engine)));
@@ -221,7 +238,8 @@ mod tests {
 			});
 		}
 
-		fn tick(&mut self, engine: &Engine, _time_delta: f64) {
+		fn tick(&mut self, _time_delta: f64) {
+			let engine = Engine::get_engine().unwrap();
 			self.read_list.borrow_mut().push(("tick", read_global_engine_address()));
 			assert!(std::ptr::eq(Engine::get_engine().unwrap(), engine));
 		}
@@ -245,7 +263,7 @@ mod tests {
 			read_list: Rc::clone(&read_list),
 			promise: None,
 		};
-		scene.tick(engine, 0.016);
+		scene.tick(0.016);
 		promise_resolver.resolve(());
 		task::poll_tasks(engine, &mut [], &mut []);
 		let expected: Vec<(&'static str, Result<usize, EngineAccessError>)> = ["create", "task", "tick", "task after await", "task with"].iter().map(|name| (*name, Ok(engine_address))).collect();

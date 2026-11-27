@@ -109,26 +109,28 @@ impl Scene for MainScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &Engine) {
+	fn load(&mut self, _engine: &Engine) {
 		self.dev_tools.set_root_nodes(vec![self.scene_base.get_root_id()]);
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
 		let is_capturing_input = self.dev_tools.is_visible() && self.dev_tools.is_pointer_inside_panel(engine);
 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 		if !is_capturing_input {
-			self.scene_base.tick_touch(engine);
+			self.scene_base.tick_touch(time_delta);
 		}
 		self.scene_base.tick_tweens(time_delta);
 		let unscaled_time_delta = engine.get_time_manager().get_unscale_delta_time();
 		self.dev_tools.tick(engine, self.scene_base.get_node_tree_mut(), unscaled_time_delta);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn post_draw(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		self.dev_tools.draw(engine, self.scene_base.get_node_tree(), graphic);
 	}
 }
@@ -191,7 +193,7 @@ assert!(engine.get_engine_configuration().use_statistics);
 
 기즈모는 개발 중에만 보는 표시(영역, 기준점, 시야 범위 같은 것)입니다. 씬, 노드, 컴포넌트가 저마다 `set_gizmo_visible(is_gizmo_visible)` 와 `is_gizmo_visible()`, 덮어쓸 수 있는 `draw_gizmos` 를 가집니다. 처음에는 모두 꺼져 있습니다.
 
-- 씬: `scene_base.set_gizmo_visible(true)` 면 엔진이 그 씬의 `pre_draw`, `draw`, `post_draw` 뒤에 `Scene::draw_gizmos(engine, graphic)` 를 부릅니다. 기본 구현은 아무것도 그리지 않으므로 덮어써서 그립니다.
+- 씬: `scene_base.set_gizmo_visible(true)` 면 엔진이 그 씬의 `pre_draw`, `draw`, `post_draw` 뒤에 `Scene::draw_gizmos(graphic)` 를 부릅니다. 기본 구현은 아무것도 그리지 않으므로 덮어써서 그립니다.
 - 노드: `set_gizmo_visible(true)` 면 그 노드를 그릴 때 노드의 좌표계에서 노드의 기즈모를 그립니다. 내용 영역 테두리를 초록색 1 픽셀 선으로, 피벗 자리에 빨간 점(반지름 3)을 그리고, 기즈모가 켜진 컴포넌트의 `draw_gizmos` 를 부릅니다. (원본은 초록 점, 반지름 4 입니다)
 - 컴포넌트: `Component::draw_gizmos(transform, graphic)` 는 노드의 기즈모를 그릴 때만 그 안에서 불립니다. 컴포넌트의 기즈모를 보려면 컴포넌트와 노드를 둘 다 켭니다. `transform` 은 그 노드의 `NodeTransform` 입니다.
 - `graphic.set_force_gizmos_visible(true)` 는 노드마다의 설정과 상관없이 모든 노드의 기즈모를 그리게 합니다. 개발자 도구 패널의 Show All Gizmos 가 이것을 씁니다.
@@ -259,11 +261,12 @@ impl Scene for GizmoScene {
 		self.scene_base.set_gizmo_visible(true);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw_gizmos(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn draw_gizmos(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		let view_manager = engine.get_view_manager();
 		view_manager.apply_view_rect(graphic);
 		let view_size = view_manager.get_view_size();
@@ -325,16 +328,17 @@ impl Scene for ProfileScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.elapsed_seconds += time_delta;
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn post_draw(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		if self.elapsed_seconds < 0.5 {
 			return;
 		}
@@ -395,8 +399,8 @@ impl Scene for CaptureScene {
 		}));
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -431,6 +435,8 @@ index.html?capture=120,240&captureName=shot_{frame}.png&captureExit=1
 | `VANILLA_CAPTURE_SHOW_WINDOW=1` | 없음 | 저장하는 동안 창을 보입니다. 데스크탑은 저장 모드에서 창을 숨기고 돕니다 |
 
 헤드리스로 화면을 비교하는 검증에 씁니다. 창을 숨긴 저장 모드는 화면에 아무것도 띄우지 않고 돌아 끝납니다.
+
+찍기 모드는 결정적입니다. 시간은 실제 시각 대신 프레임마다 1/60 초씩 가고, 씬을 불러온 뒤 로딩 화면을 0.3 초 더 보이는 기다림과 `GameScene`, `UIScene` 의 최소 노출 시간도 이 엔진 시계로 셉니다. 애셋 받기처럼 실제 시간이 드는 불러오기 동안은 프레임 번호와 시계가 서고, 다 받은 뒤부터 셉니다. 그래서 같은 예제를 두 번 찍으면 같은 프레임 번호의 그림이 바이트까지 같습니다. (두 엔진이 같고, 받는 동안의 로딩 화면 프레임만 받는 빠르기를 따릅니다)
 
 ## 처지는 기기 가리기
 

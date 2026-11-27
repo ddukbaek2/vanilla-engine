@@ -327,7 +327,7 @@ impl Scene for InputGalleryScene {
 	//==============================================================================
 	// 생성. (필드와 리치텍스트 라벨을 놓는다)
 	//==============================================================================
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		// 입력 동작. (키를 묶고 반복을 걸고, 흉내 낸 바깥 입력원을 끼운다)
 		let mut input_manager = engine.get_input_manager_mut();
 		input_manager.set_prevented_keys(&["Tab", "Space"]);
@@ -401,7 +401,8 @@ impl Scene for InputGalleryScene {
 	//==============================================================================
 	// 주기적 갱신. (흉내 낸 입력 → 패드 진동 시험 → 노드 갱신과 터치)
 	//==============================================================================
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
 		self.frame_count += 1;
 		let connected_gamepad_count = engine.get_input_manager().get_gamepad_manager().get_connected_gamepad_count();
 		if self.frame_count >= EXIT_FRAME_COUNT && connected_gamepad_count == 0 {
@@ -413,14 +414,14 @@ impl Scene for InputGalleryScene {
 		self.simulate_action_input(engine);
 		self.update_action_status(engine);
 		self.update_gamepad_vibration(engine);
-		self.scene_base.tick(engine, time_delta);
+		self.scene_base.tick(time_delta);
 	}
 
 	//==============================================================================
 	// 이전 출력. (배경 칠하고 뷰 좌표계 걸기)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 

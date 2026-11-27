@@ -4,7 +4,7 @@ There are two ways to draw. If you attach drawing components (`Paint`, `Sprite`,
 
 ## Drawing directly with Graphic
 
-`Graphic` is a renderer that builds a Canvas2D style model (top left origin, pixel units, state stack) on top of OpenGL 3.3 (desktop) and WebGL2 (web). The scene's drawing functions receive it as `&mut Graphic`. The transform, global alpha and blend mode are reset at the start of every frame, so to draw in view coordinates call `scene_base.draw_scene_background(engine, graphic)` in `pre_draw`. (It fills the background and applies the view coordinate system; see the "Engine and Scene Lifecycle" chapter)
+`Graphic` is a renderer that builds a Canvas2D style model (top left origin, pixel units, state stack) on top of OpenGL 3.3 (desktop) and WebGL2 (web). The scene's drawing functions receive it as `&mut Graphic`. The transform, global alpha and blend mode are reset at the start of every frame, so to draw in view coordinates call `scene_base.draw_scene_background(graphic)` in `pre_draw`. (It fills the background and applies the view coordinate system; see the "Engine and Scene Lifecycle" chapter)
 
 | Group | Functions |
 | --- | --- |
@@ -33,11 +33,11 @@ impl Scene for ShapeScene {
 		&mut self.scene_base
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		graphic.set_fill_color("#2a3550");
 		graphic.draw_round_rect(Rect::create(40.0, 40.0, 360.0, 220.0), 24.0);
@@ -120,7 +120,7 @@ impl Scene for SpriteScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
@@ -163,8 +163,8 @@ impl Scene for SpriteScene {
 		tiled_sprite.set_sprite_draw_mode(SpriteDrawMode::Tiled);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -184,7 +184,7 @@ fn main() {
 }
 ```
 
-`examples/assets/atlas/icons.png` is a 128 x 128 icon sheet included in the repository. Request the image in `create` and hand it over with `track_asset`; then take it out with `get_image()` in `initialize`, which is called after loading finishes. (the "Assets" chapter)
+`examples/assets/atlas/icons.png` is a 128 x 128 icon sheet included in the repository. Request the image in `load` and hand it over with `track_asset`; then take it out with `get_image()` in `initialize`, which is called after loading finishes. (the "Assets" chapter)
 
 - `Sprite::create_with_image(image)` and `set_image(Some(image))` take an `Rc<Image>`. The image is stretched to the node's content size. With `set_image(None)` it fills a color rectangle.
 - `set_image_rect(rect)` draws only one piece of the image. (in pixels, from the image's top left) `Rect::zero()` means the whole image. `set_frame(Some(&frame))` applies a `Frame` (an image and a region) at once. (`SpriteAtlas` is in the "Assets" chapter)
@@ -274,8 +274,8 @@ impl Scene for TextScene {
 		button_text.set_fit_width(180.0, 0.55);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -405,11 +405,11 @@ impl Scene for BlendScene {
 		&mut self.scene_base
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		let blend_modes = [BlendMode::Normal, BlendMode::Lighter, BlendMode::Multiply, BlendMode::Screen, BlendMode::Difference];
 		for (index, blend_mode) in blend_modes.iter().enumerate() {
@@ -505,8 +505,8 @@ impl Scene for DecorationScene {
 		shadow_text.set_shadow("#000000", 0.8, 4.0, 6.0);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 		graphic.set_fill_color("#5a6b7a");
 		graphic.draw_rect(Rect::create(700.0, 0.0, 580.0, 720.0));
 	}
@@ -603,8 +603,9 @@ impl Scene for CameraScene {
 		self.camera.set_zoom(1.5);
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
+		self.scene_base.tick(time_delta);
 		self.elapsed_seconds += time_delta;
 		let view_size = engine.get_view_manager().get_view_size();
 		self.camera.set_view_size(view_size);
@@ -614,11 +615,11 @@ impl Scene for CameraScene {
 		self.camera.tick(time_delta);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.camera.begin(graphic);
 		for row in 0..16 {
 			for column in 0..24 {
@@ -655,11 +656,11 @@ fn main() {
 }
 ```
 
-The example above draws the node tree with `self.scene_base.draw(graphic)` after ending the camera, so nodes stay fixed on screen regardless of the camera. (HUD) To show the node tree through the camera too, call `self.scene_base.draw(graphic)` between `begin` and `end`. If you override the scene's `tick`, call `self.scene_base.tick(engine, time_delta)` as above so nodes, touches and tweens are updated.
+The example above draws the node tree with `self.scene_base.draw(graphic)` after ending the camera, so nodes stay fixed on screen regardless of the camera. (HUD) To show the node tree through the camera too, call `self.scene_base.draw(graphic)` between `begin` and `end`. If you override the scene's `tick`, call `self.scene_base.tick(time_delta)` as above so nodes, touches and tweens are updated.
 
 ## Drawing settings
 
-Like the original, get `Graphic` from `engine.get_graphic_mut()` and set these in the scene's `create`, `initialize` or `tick`. Inside the scene's drawing functions (`pre_draw`, `draw`, `post_draw`, `draw_on_load`), set them on the `graphic` argument. (There the engine has lent the graphic as the argument, so `engine.get_graphic_mut()` is `None`) The settings below are not reset every frame, so setting them once is enough.
+Like the original, get `Graphic` from `engine.get_graphic_mut()` and set these in the scene's `load`, `initialize` or `tick`. Inside the scene's drawing functions (`pre_draw`, `draw`, `post_draw`, `draw_on_load`), set them on the `graphic` argument. (There the engine has lent the graphic as the argument, so `engine.get_graphic_mut()` is `None`) The settings below are not reset every frame, so setting them once is enough.
 
 - `set_image_smoothing_enabled(false)`: stretches images with the nearest pixel. Pixel art games use this. (on by default)
 - `set_image_mipmap_enabled(true)`: reduces shimmering when large images are drawn much smaller. (off by default)
@@ -667,7 +668,7 @@ Like the original, get `Graphic` from `engine.get_graphic_mut()` and set these i
 
 ## Things to watch out for
 
-- Images are drawn after they have loaded. Request loading in the scene's `create`, hand it over with `track_asset`, then take the image out with `get_image()` in `initialize` and build the nodes. On the web loading is asynchronous, so the image is not there yet right after `create`.
+- Images are drawn after they have loaded. Request loading in the scene's `load`, hand it over with `track_asset`, then take the image out with `get_image()` in `initialize` and build the nodes. On the web loading is asynchronous, so the image is not there yet right after `create`.
 - `Sprite` accepts only `Rc<Image>`. There is no equivalent of the original's `HTMLImageElement` or canvas. To build an image from pixels, use `Image::create_from_pixels(width, height, pixels)`.
 - Color strings must start with `"#..."` or `"rgb..."`. Strings in any other form become white. (`Paint`, `Text` and `Graphic` all take `impl Into<Color>` and follow the same rule)
 - Draw modes and blend modes are given as the `SpriteDrawMode` and `BlendMode` enums, not as strings as in the original. Convert names that arrive as strings, such as from JSON, with `BlendMode::from_name`.

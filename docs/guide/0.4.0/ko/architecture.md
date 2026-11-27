@@ -88,7 +88,7 @@ EngineRunner
 ```
 
 - 플랫폼이 엔진 실행자(`EngineRunner`)를 들고 프레임마다 부릅니다. `Engine::run` 이 이 실행자를 만들어 플랫폼에 넘깁니다. 게임 코드가 실행자를 직접 다룰 일은 없습니다.
-- `Graphic` 은 `Engine` 이 듭니다. 플랫폼이 GL 컨텍스트를 만든 뒤 넘겨주고, 원본 `getGraphic()` 처럼 `engine.get_graphic()`, `engine.get_graphic_mut()` 로 씬의 `create`, `initialize`, `tick` 이나 컴포넌트의 `tick`(`context.get_engine()`)에서 꺼냅니다. 씬의 그리기 훅(`draw_on_load`, `pre_draw`, `draw`, `post_draw`, `draw_gizmos`)은 `&mut Graphic` 을 인자로 받습니다. 엔진이 그래픽을 잠깐 꺼내 넘기는 것이라 그 안에서는 `engine.get_graphic()` 이 `None` 이고 인자의 `graphic` 을 씁니다. (`&Engine` 과 `&mut Graphic` 을 함께 넘기는 러스트 빌림 꼴, 그리기 밖에서 둘을 함께 쓰려면 `engine.with_graphic(|engine, graphic| ...)`)
+- `Graphic` 은 `Engine` 이 듭니다. 플랫폼이 GL 컨텍스트를 만든 뒤 넘겨주고, 원본 `getGraphic()` 처럼 `engine.get_graphic()`, `engine.get_graphic_mut()` 로 씬의 `load`, `initialize`, `tick` 이나 컴포넌트의 `tick`(`context.get_engine()`)에서 꺼냅니다. 씬의 그리기 훅(`draw_on_load`, `pre_draw`, `draw`, `post_draw`, `draw_gizmos`)은 `&mut Graphic` 을 인자로 받습니다. 엔진이 그래픽을 잠깐 꺼내 넘기는 것이라 그 안에서는 `engine.get_graphic()` 이 `None` 이고 인자의 `graphic` 을 씁니다. (`&Engine` 과 `&mut Graphic` 을 함께 넘기는 러스트 빌림 꼴, 그리기 밖에서 둘을 함께 쓰려면 `engine.with_graphic(|engine, graphic| ...)`)
 - 씬은 엔진이 `Box<dyn Scene>` 으로 소유합니다. 다른 씬을 가리킬 때는 씬 값 대신 `Engine::load_scene` 이 돌려준 `SceneId` 를 씁니다. 원본의 `SceneManager` 는 엔진에 합쳤습니다.
 - 내리는 중인 씬(unload 에서 맡긴 작업을 기다리는 씬)은 원본처럼 목록에 남아 `tick` 과 `draw` 를 받습니다. 목록에서 뺀 뒤에도 그 씬의 async 작업이 남았으면 작업이 끝날 때까지 씬 값을 살려 두고, 다 끝나면 `destroy` 를 부르고 버립니다.
 - 애셋은 원본처럼 중앙 매니저 없이 씬이 멤버로 듭니다. 같은 그림을 여러 번 그려도 GPU 텍스처는 `Graphic` 의 캐시가 하나만 만듭니다. 여럿을 함께 받을 때는 `AssetLoader` 가 동시 수만큼 요청하고 진행률을 셉니다.
@@ -114,11 +114,11 @@ EngineRunner
 5. 씬마다: 불러오는 중이면 `draw_on_load` 만 부르고, 아니면 `tick`, 씬의 터치 훅, `pre_draw`, `draw`, `post_draw`, (기즈모를 켰으면) `draw_gizmos` 차례로 부릅니다.
 6. 정보창(`use_statistics` 를 켰을 때)과 마우스 커서를 처리하고, 한 프레임짜리 입력 표시를 지웁니다.
 7. 남은 묶음을 그리고, 검증용 화면 저장을 하고, 프레임 번호를 하나 올립니다. (첫 프레임이 1)
-8. 씬 목록을 바꿉니다. 내릴 씬은 `finalize`, `unload` 를 부르고, 새로 올린 씬은 `create` 를 부릅니다.
+8. 씬 목록을 바꿉니다. 내릴 씬은 `finalize`, `unload` 를 부르고, 새로 올린 씬은 `create` 와 `load` 를 부릅니다.
 
 그 뒤에 플랫폼이 화면을 넘깁니다. (데스크탑은 버퍼 바꾸기, 웹은 콜백이 끝나면 브라우저가) 데스크탑에서 엔진의 질문 창(`Engine::alert` 같은 것)이 떠 있는 동안은 원본에서 자바스크립트가 멈추듯 씬의 `tick` 과 async 작업을 건너뜁니다.
 
-씬 불러오기는 원본의 create, 비동기 load, initialize 를 `create`, (맡긴 애셋과 작업을 기다림), `initialize` 로 옮겼습니다. 원본 `async load` 의 몸은 `create` 에서 `Engine::spawn_scene_task` 로 맡긴 작업이고, `SceneBase::track_task` 로 씬에 맡기면 엔진이 그 작업이 끝나기를 기다립니다. 맡긴 것이 다 끝난 뒤에도 원본처럼 0.3 초 더 로딩 화면을 보이고 `initialize` 를 부릅니다. 자세한 차례는 "엔진과 씬 생명 주기" 장에서 봅니다.
+씬 불러오기는 원본의 create, 비동기 load, initialize 를 같은 이름의 `create`, `load`(맡긴 애셋과 작업을 기다림), `initialize` 로 옮겼습니다. 원본 `async load` 의 await 는 `load` 에서 `Engine::spawn_scene_task` 로 맡긴 작업이고, `SceneBase::track_task` 로 씬에 맡기면 엔진이 그 작업이 끝나기를 기다립니다. 맡긴 것이 다 끝난 뒤에도 원본처럼 0.3 초 더 로딩 화면을 보이고 `initialize` 를 부릅니다. 자세한 차례는 "엔진과 씬 생명 주기" 장에서 봅니다.
 
 ## 그리기
 

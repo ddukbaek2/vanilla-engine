@@ -408,14 +408,15 @@ pub struct TouchPoint {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn create(&mut self, engine: &Engine) {
+/// 	fn load(&mut self, engine: &Engine) {
 /// 		let mut input_manager = engine.get_input_manager_mut();
 /// 		input_manager.set_prevented_keys(&[KeyCode::TAB, KeyCode::SPACE]);
 /// 		input_manager.set_touch_from_left_button_only(true);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-/// 		self.scene_base.tick(engine, time_delta);
+/// 	fn tick(&mut self, time_delta: f64) {
+/// 		let engine = Engine::get_engine().unwrap();
+/// 		self.scene_base.tick(time_delta);
 /// 		let input_manager = engine.get_input_manager();
 /// 		if input_manager.is_key_just_pressed(KeyCode::SPACE) {
 /// 			println!("jump");

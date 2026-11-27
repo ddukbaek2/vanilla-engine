@@ -186,7 +186,8 @@ impl GameScene for AsyncAwaitScene {
 	//==============================================================================
 	// 불러오기. (원본 async loadAssets: 아틀라스를 await 로 받고 0.5초 쉰다. 맡긴 작업이 끝나야 initialize 가 불린다)
 	//==============================================================================
-	fn load_assets(&mut self, engine: &Engine) {
+	fn load_assets(&mut self) {
+		let engine = Engine::get_engine().unwrap();
 		let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 			scene_context.with(|scene, engine| scene.sprite_atlas.load(engine, "atlas/icons.json")).await;
 			wait::seconds(0.5).await;

@@ -33,11 +33,11 @@ impl Scene for MainScene {
 		&mut self.scene_base
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		graphic.set_fill_color(Colors::WHITE);
 		graphic.draw_rect(Rect::create(100.0, 100.0, 200.0, 120.0));
 	}
@@ -67,7 +67,7 @@ cargo run
 
 Inside the engine repository the same code is in `examples/quickstart.rs`. (`cargo run --example quickstart`, only the window title differs)
 
-- A scene implements the `Scene` trait. The only required functions are `get_scene_base` and `get_scene_base_mut`, which hand out the shared scene state (`SceneBase`); override only the other hooks you need (`create`, `initialize`, `tick`, `pre_draw`, `draw` and so on).
+- A scene implements the `Scene` trait. The only required functions are `get_scene_base` and `get_scene_base_mut`, which hand out the shared scene state (`SceneBase`); override only the other hooks you need (`load`, `initialize`, `tick`, `pre_draw`, `draw` and so on). Hook names and arguments are the same as the original (`load(engine)`, `tick(time_delta)`, `draw(graphic)`; in hooks that do not receive the engine, use `Engine::get_engine()`).
 - `SceneBase::draw_scene_background`, called in `pre_draw`, fills the whole window with the scene background color (black at first) and switches the following drawing to view coordinates. So `Rect::create(100.0, 100.0, 200.0, 120.0)` in `draw` is a position inside the 1280 x 720 reference resolution.
 - The default `draw` draws the scene's node tree. This example has no nodes, so the overridden `draw` only draws the rectangle. A scene that uses nodes also calls `self.scene_base.draw(graphic)` in its overridden `draw`.
 - `reference_resolution_size` is the reference resolution the game draws in. Whatever the window size, the view scale mode (`ViewScaleMode::StretchShort` at first) stretches and shrinks this size to fit the window.

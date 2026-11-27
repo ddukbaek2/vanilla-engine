@@ -1086,7 +1086,7 @@ pub enum ImageSmoothingQuality {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+/// 	fn draw(&mut self, graphic: &mut Graphic) {
 /// 		graphic.push_state();
 /// 		graphic.translate(640.0, 360.0);
 /// 		graphic.rotate(0.25);

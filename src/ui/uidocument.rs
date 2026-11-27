@@ -1501,7 +1501,7 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 문서의 그림 읽기 요청. (imagePath 마다 ImageAsset 을 요청해 창고에 든다. 이미 요청한 경로는 건너뛴다)
-	/// - 새로 요청한 애셋의 읽기 손잡이를 돌려준다. 씬이 create 에서 부르면 track_load_handle 로 맡겨 initialize 를 기다리게 할 수 있다.
+	/// - 새로 요청한 애셋의 읽기 손잡이를 돌려준다. 씬이 load 에서 부르면 track_load_handle 로 맡겨 initialize 를 기다리게 할 수 있다.
 	/// - 데스크탑은 그 자리에서 읽히고, 웹은 나중에 읽힌다. 읽히기 전에 지은 노드의 그림은 bind_pending_images 가 붙인다.
 	/// # 인자
 	/// - `engine`: 애셋을 읽을 엔진. (데스크탑은 EngineConfiguration 의 asset_directory_paths 에서 찾는다)

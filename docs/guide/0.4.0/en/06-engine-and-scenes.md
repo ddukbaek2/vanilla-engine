@@ -106,12 +106,12 @@ What the engine holds is reached through `get_time_manager`, `get_view_manager`,
 
 A scene implements the `Scene` trait and embeds a `SceneBase`, which holds the shared scene state (node tree, tweens, handed-over assets, background color), as a field. The only required functions are `get_scene_base` and `get_scene_base_mut`; override only the other hooks you need. They are called in this order.
 
-1. Create the scene value. `SceneBase::new()` creates the root node, named "root", along with it. (The original creates the root in `create`)
-2. When passed to `Engine::load_scene` or `Engine::run`, the scene gets a scene handle (`SceneId`), and `create(engine)` is called at the end of that frame. Right after, the engine fits the root to the view size. (Position 0, top-left pivot, content size equal to the view size)
-3. When all assets and tasks handed over in `create` (`track_asset`, `track_load_handle`, `track_audio_asset`, `track_task`) have finished and 0.3 more seconds have passed, `initialize(engine)` is called, followed once by `resize(engine, canvas_native_size)`. With nothing handed over, that is 0.3 seconds after `create`.
-4. Until `initialize`, the engine calls only `draw_on_load(engine, graphic)` every frame. (The loading screen)
-5. After that, every frame calls `tick(engine, time_delta)`, the scene's touch hooks (`touch_press`, `touch_move`, `touch_release`, `touch_cancel`, `touch_wheel`), `pre_draw`, `draw` and `post_draw` in order. With `SceneBase::set_gizmo_visible(true)`, `draw_gizmos` is called after them.
-6. When the window size changes, `resize(engine, canvas_native_size)` is called.
+1. Create the scene value. `SceneBase::new()` creates the root node, named "root", along with it. (The original creates the root in `load`)
+2. When passed to `Engine::load_scene` or `Engine::run`, the scene gets a scene handle (`SceneId`), and `create()` is called at the end of that frame; the engine then fits the root to the view size (position 0, top-left pivot, content size equal to the view size) and calls `load(engine)`. (The same names and arguments as the original create and async load)
+3. When all assets and tasks handed over in `load` (`track_asset`, `track_load_handle`, `track_audio_asset`, `track_task`) have finished and 0.3 more seconds have passed, `initialize(engine)` is called, followed once by `resize(canvas_native_size)`. With nothing handed over, that is 0.3 seconds after `create`.
+4. Until `initialize`, the engine calls only `draw_on_load(graphic)` every frame. (The loading screen)
+5. After that, every frame calls `tick(time_delta)`, the scene's touch hooks (`touch_press`, `touch_move`, `touch_release`, `touch_cancel`, `touch_wheel`), `pre_draw`, `draw` and `post_draw` in order. With `SceneBase::set_gizmo_visible(true)`, `draw_gizmos` is called after them.
+6. When the window size changes, `resize(canvas_native_size)` is called.
 7. When unloading, `finalize(engine)` and then `unload(engine)` are called at the end of that frame. When the tasks handed over with `track_task` in `unload` finish, the scene leaves the list, and after all of the scene's async tasks finish, `destroy(engine)` is called and the scene value is dropped.
 
 The default `tick` calls `SceneBase::tick`, which updates the node tree, dispatches touches (to the topmost pressable node under the press) and updates tweens, in order. The default `draw` calls `SceneBase::draw`, which draws the node tree. Where the original calls `super.tick()` and `super.draw()`, you call these two directly.
@@ -133,32 +133,32 @@ impl Scene for LifecycleScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &Engine) {
+	fn load(&mut self, _engine: &Engine) {
 		let root_name = self.scene_base.get_root().get_name().to_string();
 		println!("create {}", root_name);
 	}
 
-	fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn draw_on_load(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
 	fn initialize(&mut self, _engine: &Engine) {
 		println!("initialize");
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.tick_count += 1;
 		if self.tick_count == 1 {
 			println!("first tick {}", time_delta);
 		}
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 	}
 
-	fn resize(&mut self, _engine: &Engine, canvas_native_size: Vector2) {
+	fn resize(&mut self, canvas_native_size: Vector2) {
 		println!("resize {} {}", canvas_native_size.x, canvas_native_size.y);
 	}
 
@@ -170,7 +170,7 @@ impl Scene for LifecycleScene {
 		println!("unload");
 	}
 
-	fn destroy(&mut self, _engine: &Engine) {
+	fn destroy(&mut self) {
 		println!("destroy");
 	}
 }
@@ -204,7 +204,7 @@ assert_eq!(scene_base.get_root().get_name(), "root");
 
 ### Waiting for Assets and Tasks (Where the Original Has async load)
 
-The original awaits assets inside `async load(engine)`. In the Rust port, `create` hands a loading task to `Engine::spawn_scene_task` and gives it to the scene with `SceneBase::track_task`. The task runs up to the first await right where it is handed over, and inside the task the scene and engine are touched only inside `SceneContext::with`. The engine calls `initialize` only after the handed-over task finishes.
+The original awaits assets inside `async load(engine)`. In the Rust port, `load(engine)` hands a loading task to `Engine::spawn_scene_task` and gives it to the scene with `SceneBase::track_task`. The task runs up to the first await right where it is handed over, and inside the task the scene and engine are touched only inside `SceneContext::with`. The engine calls `initialize` only after the handed-over task finishes.
 
 ```rust,no_run
 use vanilla::{Engine, Graphic, Scene, SceneBase, SceneContext};
@@ -223,7 +223,7 @@ impl Scene for StageScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		let load_task = engine.spawn_scene_task(self, |mut scene_context: SceneContext<StageScene>| async move {
 			let load_handle = scene_context.with(|_scene, engine| engine.request_asset_bytes("examples/assets/scenedocument.scene.json"));
 			if let Ok(bytes) = load_handle.await {
@@ -235,8 +235,8 @@ impl Scene for StageScene {
 		self.scene_base.track_task(&load_task);
 	}
 
-	fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn draw_on_load(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
 	fn initialize(&mut self, _engine: &Engine) {
@@ -317,11 +317,11 @@ impl Scene for MainScene {
 		&mut self.scene_base
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		graphic.set_fill_color("#3399ff");
 		graphic.draw_rect(Rect::create(100.0, 100.0, 300.0, 200.0));
@@ -343,8 +343,9 @@ impl Scene for SplashScene {
 		&mut self.scene_base
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
+		self.scene_base.tick(time_delta);
 		self.elapsed_seconds += time_delta;
 		if self.is_leaving || self.elapsed_seconds < 0.5 {
 			return;
@@ -367,11 +368,11 @@ impl Scene for SplashScene {
 		});
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		graphic.set_fill_color("#ffffff");
 		graphic.draw_rect(Rect::create(540.0, 320.0, 200.0, 80.0));
@@ -392,12 +393,12 @@ fn main() {
 ```
 
 - Unloading a scene loaded in the same frame (before `create`) removes it without calling `create` or `destroy`. That scene's `load_scene_async` `Promise` does not resolve.
-- A scene unloaded during loading after `create` still receives `initialize` when loading finishes and is then dropped, as in the original. (Its `load_scene_async` `Promise` resolves at that point)
+- A scene unloaded during loading after `load` still receives `initialize` when loading finishes and is then dropped, as in the original. (Its `load_scene_async` `Promise` resolves at that point)
 - The `unload_scene_async` `Promise` resolves even for an unknown handle.
 
 ## Time (TimeManager)
 
-The `time_delta` in `tick(engine, time_delta)` is the seconds since the last frame multiplied by the time scale. One frame interval is clamped between 0 and an upper limit (0.25 seconds at first), so the first frame after the window was hidden or stalled for a long time does not jump far. In a scene, read it with `engine.get_time_manager()` and change the scale and limit with `engine.get_time_manager_mut()`.
+The `time_delta` in `tick(time_delta)` is the seconds since the last frame multiplied by the time scale. One frame interval is clamped between 0 and an upper limit (0.25 seconds at first), so the first frame after the window was hidden or stalled for a long time does not jump far. In a scene, read it with `engine.get_time_manager()` and change the scale and limit with `engine.get_time_manager_mut()`.
 
 | Function | Contents |
 | --- | --- |
@@ -453,8 +454,9 @@ impl Scene for TimeScene {
 		time_manager.set_maximum_time_delta(0.1);
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
+		self.scene_base.tick(time_delta);
 		let time_manager = engine.get_time_manager();
 		let frame_per_second = time_manager.get_frame_per_second();
 		let time = time_manager.get_time();
@@ -519,7 +521,7 @@ Before each scene's `pre_draw` (before `draw_on_load` while loading), the engine
 
 - `view_manager.apply_canvas_native_rect(graphic)`: the whole canvas in logical pixels. Used to fill the background to the canvas edges.
 - `view_manager.apply_view_rect(graphic)`: view coordinates. (0, 0) is the top left of the view and the bottom right is `get_view_size()`. Touch coordinates a scene receives are in these coordinates too.
-- `scene_base.draw_scene_background(engine, graphic)`: calls the two above in sequence. It fills the whole canvas with the scene background color and sets view coordinates. (Where the original has `GameScene.preDraw`)
+- `scene_base.draw_scene_background(graphic)`: calls the two above in sequence. It fills the whole canvas with the scene background color and sets view coordinates. (Where the original has `GameScene.preDraw`)
 
 ```rust,no_run
 use vanilla::{Color, Engine, EngineConfiguration, Graphic, Rect, Scene, SceneBase, Vector2, ViewScaleMode};
@@ -537,15 +539,16 @@ impl Scene for LetterboxScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &Engine) {
+	fn load(&mut self, _engine: &Engine) {
 		self.scene_base.set_scene_background_color("#202028");
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		self.scene_base.draw(graphic);
 		let view_size = engine.get_view_manager().get_view_size();
 		graphic.set_fill_color(Color::create(0.15, 0.3, 0.5, 1.0));
@@ -656,8 +659,8 @@ impl Scene for PausingScene {
 		println!("hidden at start {}", engine.is_page_hidden());
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		if self.is_paused.get() {
 			return;
 		}
@@ -670,7 +673,7 @@ impl Scene for PausingScene {
 		}
 	}
 
-	fn on_page_visibility_restored(&mut self, _engine: &Engine) {
+	fn on_page_visibility_restored(&mut self) {
 		println!("page visible again");
 	}
 }
@@ -708,7 +711,7 @@ impl GameScene for TitleScene {
 		&mut self.game_scene_base
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		graphic.set_fill_color("#ffffff");
 		graphic.draw_rect(Rect::create(540.0, 320.0, 200.0, 80.0));
 	}
@@ -734,10 +737,10 @@ fn main() {
 
 ## Cautions
 
-- The root node is created by `SceneBase::new()`. (The original creates it in `create()`) Fitting the root to the view size is done by the engine right after `create`.
-- Even after the handed-over assets and tasks finish, `initialize` and `tick` start only 0.3 seconds later. Desktop reads assets on the spot, so with no handed-over tasks it is 0.3 seconds after `create`.
+- The root node is created by `SceneBase::new()`. (The original creates it in `create()`) Fitting the root to the view size is done by the engine between `create` and `load`. (The first part of the original Scene.load)
+- Even after the handed-over assets and tasks finish, `initialize` and `tick` start only 0.3 seconds later. Desktop reads assets on the spot, so with no handed-over tasks it is 0.3 seconds after `load`.
 - On the web assets arrive later, so create nodes that use assets in `initialize`.
-- Overriding `tick` or `draw` drops what the default did (updating and drawing the node tree, dispatching touches, tweens). Call `self.scene_base.tick(engine, time_delta)` and `self.scene_base.draw(graphic)` yourself when needed.
+- Overriding `tick` or `draw` drops what the default did (updating and drawing the node tree, dispatching touches, tweens). Call `self.scene_base.tick(time_delta)` and `self.scene_base.draw(graphic)` yourself when needed.
 - The view scale mode of `GameSceneBase` and `UISceneBase` is `ViewScaleMode::None` at first and is applied to the view manager in `initialize`. Even if `EngineConfiguration::view_scale_mode` is set, these scenes switch to their own mode, so set it with `set_view_scale_mode` to draw in the reference resolution.
 - Modes other than `ViewScaleMode::None` divide by the reference resolution. With a reference resolution of 0, the view cannot be calculated.
 - Loading the next scene without unloading the current one makes the two scenes run and draw together.

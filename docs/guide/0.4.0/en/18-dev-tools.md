@@ -109,26 +109,28 @@ impl Scene for MainScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &Engine) {
+	fn load(&mut self, _engine: &Engine) {
 		self.dev_tools.set_root_nodes(vec![self.scene_base.get_root_id()]);
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
 		let is_capturing_input = self.dev_tools.is_visible() && self.dev_tools.is_pointer_inside_panel(engine);
 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 		if !is_capturing_input {
-			self.scene_base.tick_touch(engine);
+			self.scene_base.tick_touch(time_delta);
 		}
 		self.scene_base.tick_tweens(time_delta);
 		let unscaled_time_delta = engine.get_time_manager().get_unscale_delta_time();
 		self.dev_tools.tick(engine, self.scene_base.get_node_tree_mut(), unscaled_time_delta);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn post_draw(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		self.dev_tools.draw(engine, self.scene_base.get_node_tree(), graphic);
 	}
 }
@@ -191,7 +193,7 @@ The Rust overlay is shorter than the original. On a translucent black strip it w
 
 Gizmos are markers you only look at during development (areas, anchor points, sight ranges, and so on). Scenes, nodes, and components each have `set_gizmo_visible(is_gizmo_visible)`, `is_gizmo_visible()`, and an overridable `draw_gizmos`. All are off at first.
 
-- Scene: when `scene_base.set_gizmo_visible(true)` is set, the engine calls `Scene::draw_gizmos(engine, graphic)` after that scene's `pre_draw`, `draw`, and `post_draw`. The default implementation draws nothing, so override it to draw.
+- Scene: when `scene_base.set_gizmo_visible(true)` is set, the engine calls `Scene::draw_gizmos(graphic)` after that scene's `pre_draw`, `draw`, and `post_draw`. The default implementation draws nothing, so override it to draw.
 - Node: when `set_gizmo_visible(true)` is set, the node's gizmo is drawn in the node's coordinate system when the node is drawn. It draws the content area border as a 1 pixel green line and a red dot (radius 3) at the pivot, and calls `draw_gizmos` on components whose gizmo is on. (The original uses a green dot with radius 4.)
 - Component: `Component::draw_gizmos(transform, graphic)` is called only from inside the node's gizmo drawing. To see a component's gizmo, turn on both the component and the node. `transform` is that node's `NodeTransform`.
 - `graphic.set_force_gizmos_visible(true)` draws every node's gizmo regardless of each node's setting. Show All Gizmos in the developer tools panel uses this.
@@ -259,11 +261,12 @@ impl Scene for GizmoScene {
 		self.scene_base.set_gizmo_visible(true);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw_gizmos(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn draw_gizmos(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		let view_manager = engine.get_view_manager();
 		view_manager.apply_view_rect(graphic);
 		let view_size = view_manager.get_view_size();
@@ -325,16 +328,17 @@ impl Scene for ProfileScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.elapsed_seconds += time_delta;
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn post_draw(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		if self.elapsed_seconds < 0.5 {
 			return;
 		}
@@ -395,8 +399,8 @@ impl Scene for CaptureScene {
 		}));
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -431,6 +435,8 @@ index.html?capture=120,240&captureName=shot_{frame}.png&captureExit=1
 | `VANILLA_CAPTURE_SHOW_WINDOW=1` | None | Shows the window while capturing. The desktop hides the window in capture mode |
 
 Use it for headless screen comparison checks. Capture mode with a hidden window runs to the end without showing anything on screen.
+
+Capture mode is deterministic. Time advances by 1/60 second per frame instead of real time, and both the wait that keeps the loading screen up for 0.3 more seconds after a scene loads and the minimum display time of `GameScene` and `UIScene` are counted on this engine clock. While loading takes real time, such as downloading assets, the frame number and the clock stand still, and counting starts once everything has arrived. So capturing the same example twice gives byte-identical images for the same frame number. (Both engines behave the same; only the loading screen frames during the download follow the download speed)
 
 ## Spotting slow devices
 

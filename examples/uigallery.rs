@@ -439,7 +439,7 @@ impl Scene for UIGalleryScene {
 	//==============================================================================
 	// 생성. (위젯을 모두 놓는다)
 	//==============================================================================
-	fn create(&mut self, _engine: &Engine) {
+	fn load(&mut self, _engine: &Engine) {
 		self.scene_base.set_scene_background_color(BACKGROUND_COLOR);
 		let root_id = self.scene_base.get_root_id();
 		self.scene_base.get_root_mut().set_content_size(Vector2::create(VIEW_WIDTH, VIEW_HEIGHT));
@@ -458,7 +458,8 @@ impl Scene for UIGalleryScene {
 	//==============================================================================
 	// 주기적 갱신. (흉내 낸 입력 → 노드 갱신 → TouchRecognizer)
 	//==============================================================================
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
 		self.frame_count += 1;
 		self.elapsed_seconds += time_delta;
 		if self.frame_count >= EXIT_FRAME_COUNT {
@@ -474,8 +475,8 @@ impl Scene for UIGalleryScene {
 	//==============================================================================
 	// 이전 출력. (배경 칠하고 뷰 좌표계 걸기)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 

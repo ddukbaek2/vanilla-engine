@@ -46,7 +46,8 @@ impl Scene for MainScene {
 		&mut self.scene_base
 	}
 
-	fn touch_press(&mut self, engine: &Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, _view_input_position: Vector2) {
+		let engine = Engine::get_engine().unwrap();
 		let audio_manager = engine.get_audio_manager();
 		println!("{} {}", audio_manager.has_user_gesture(), audio_manager.get_context_time());
 	}
@@ -68,7 +69,7 @@ fn main() {
 
 ## AudioPlayer 로 소리 하나 틀기
 
-`AudioPlayer` 는 `AudioAsset` 하나를 틉니다. `set_audio_asset` 으로 애셋을 싣고 `play(is_loop)` 로 틉니다. 아래 예제는 `create` 에서 소리를 받아 씬에 맡기고, 처음 누를 때 플레이어를 만들어 누를 때마다 틉니다.
+`AudioPlayer` 는 `AudioAsset` 하나를 틉니다. `set_audio_asset` 으로 애셋을 싣고 `play(is_loop)` 로 틉니다. 아래 예제는 `load` 에서 소리를 받아 씬에 맡기고, 처음 누를 때 플레이어를 만들어 누를 때마다 틉니다.
 
 저장소에는 예제용 소리 파일이 따로 없어서 이 장의 예제는 해석기 시험 파일(`tests/assets/audio` 아래, 모두 0.5 초 안쪽의 짧은 소리)을 씁니다. 게임에서는 애셋 폴더에 둔 파일 경로를 줍니다.
 
@@ -91,7 +92,7 @@ impl Scene for SoundScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		match engine.load_audio_asset("tests/assets/audio/vorbis_stereo.ogg") {
 			Ok(audio_asset) => {
 				self.scene_base.track_audio_asset(&audio_asset);
@@ -103,7 +104,8 @@ impl Scene for SoundScene {
 		}
 	}
 
-	fn touch_press(&mut self, engine: &Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, _view_input_position: Vector2) {
+		let engine = Engine::get_engine().unwrap();
 		if self.audio_player.is_none() {
 			if let Some(audio_asset) = &self.audio_asset {
 				let mut audio_player = engine.get_audio_manager().create_audio_player();
@@ -166,14 +168,15 @@ impl Scene for BusScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		if let Ok(audio_asset) = engine.load_audio_asset("tests/assets/audio/wav_s16_stereo.wav") {
 			self.scene_base.track_audio_asset(&audio_asset);
 			self.audio_asset = Some(audio_asset);
 		}
 	}
 
-	fn touch_press(&mut self, engine: &Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, _view_input_position: Vector2) {
+		let engine = Engine::get_engine().unwrap();
 		if self.effect_bus.is_none() {
 			let effect_bus = engine.get_audio_manager().create_audio_bus();
 			effect_bus.set_volume(0.5);
@@ -244,7 +247,7 @@ assert_eq!(click_row.play_seconds, 0.0);
 assert_eq!(click_row.maximum_voices, Some(4));
 ```
 
-아래 예제는 `create` 에서 소리 표로 `SoundSystem` 을 만들어 함께 쓰는 자리에 두고, 소리를 다 받기를 작업으로 기다린 뒤 `initialize` 에서 배경음악을 틉니다. 누르면 누른 자리의 좌우로 효과음을 냅니다.
+아래 예제는 `load` 에서 소리 표로 `SoundSystem` 을 만들어 함께 쓰는 자리에 두고, 소리를 다 받기를 작업으로 기다린 뒤 `initialize` 에서 배경음악을 틉니다. 누르면 누른 자리의 좌우로 효과음을 냅니다.
 
 ```rust,no_run
 use std::cell::RefCell;
@@ -273,7 +276,7 @@ impl Scene for MusicScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		let mut sound_system = SoundSystem::new(engine, create_sound_table());
 		sound_system.set_music_volume(0.8);
 		sound_system.set_sound_effect_volume(1.0);
@@ -291,14 +294,15 @@ impl Scene for MusicScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		if let Some(sound_system) = read_sound_system() {
 			sound_system.borrow_mut().update();
 		}
 	}
 
-	fn touch_press(&mut self, engine: &Engine, view_input_position: Vector2) {
+	fn touch_press(&mut self, view_input_position: Vector2) {
+		let engine = Engine::get_engine().unwrap();
 		let view_size = engine.get_view_manager().get_view_size();
 		let pan = (view_input_position.x / view_size.x) * 2.0 - 1.0;
 		if let Some(sound_system) = read_sound_system() {
@@ -414,14 +418,15 @@ impl Scene for PoolScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		if let Ok(audio_asset) = engine.load_audio_asset("tests/assets/audio/wav_s16_stereo.wav") {
 			self.scene_base.track_audio_asset(&audio_asset);
 			self.audio_asset = Some(audio_asset);
 		}
 	}
 
-	fn touch_press(&mut self, engine: &Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, _view_input_position: Vector2) {
+		let engine = Engine::get_engine().unwrap();
 		if self.sound_effect_pool.is_none() {
 			let mut sound_effect_pool = SoundEffectPool::new(&engine.get_audio_manager(), 6);
 			sound_effect_pool.set_volume(0.8);
@@ -501,11 +506,11 @@ impl Scene for BeepScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.beep_player = Some(BeepPlayer::new(&engine.get_audio_manager(), 0.3));
 	}
 
-	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, _view_input_position: Vector2) {
 		if let Some(beep_player) = &self.beep_player {
 			beep_player.play_preset("confirm");
 			beep_player.play_sequence(&[
@@ -530,7 +535,7 @@ fn main() {
 }
 ```
 
-`BeepPlayer` 는 부를 때 AudioContext 깨우기를 해 보고(데스크탑은 이때 소리 장치를 엽니다), 돌고 있을 때만 소리를 냅니다. 음소거 중이면 깨우지도 않고 돌아갑니다. 소리를 버스를 거치지 않고 출력에 바로 내므로 `SoundSystem` 의 크기와 음소거를 따르지 않습니다. 만들기만 해서는 AudioContext 가 생기지 않으므로 `create` 에서 만들어도 됩니다.
+`BeepPlayer` 는 부를 때 AudioContext 깨우기를 해 보고(데스크탑은 이때 소리 장치를 엽니다), 돌고 있을 때만 소리를 냅니다. 음소거 중이면 깨우지도 않고 돌아갑니다. 소리를 버스를 거치지 않고 출력에 바로 내므로 `SoundSystem` 의 크기와 음소거를 따르지 않습니다. 만들기만 해서는 AudioContext 가 생기지 않으므로 `load` 에서 만들어도 됩니다.
 
 ## 주의할 점
 

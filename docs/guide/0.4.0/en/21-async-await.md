@@ -133,7 +133,7 @@ class StageScene extends Scene {
 }
 ```
 
-In the Rust edition, spawn the loading task in `create` and hand it to the scene with `scene_base.track_task`. Until the handed tasks finish, the engine only calls `draw_on_load`; after they finish, it waits 0.3 seconds more, like the original, and calls `initialize`.
+In the Rust edition, spawn the loading task in `load` and hand it to the scene with `scene_base.track_task`. Until the handed tasks finish, the engine only calls `draw_on_load`; after they finish, it waits 0.3 seconds more, like the original, and calls `initialize`.
 
 ```rust,no_run
 use std::path::PathBuf;
@@ -153,7 +153,7 @@ impl Scene for StageScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 			let load_result = scene_context.with(|scene, engine| scene.stage_asset.load(engine, "scenedocument.scene.json")).await;
 			if let Err(reason) = load_result {

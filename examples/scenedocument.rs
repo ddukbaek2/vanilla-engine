@@ -91,7 +91,7 @@ impl Scene for SceneDocumentScene {
 	//==============================================================================
 	// 생성. (씬 파일을 요청해 맡긴다)
 	//==============================================================================
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.scene_asset.load(engine, SCENE_FILE_PATH);
 		self.scene_base.track_asset(&self.scene_asset);
 	}
@@ -155,19 +155,19 @@ impl Scene for SceneDocumentScene {
 	//==============================================================================
 	// 갱신. (나중에 읽힌 그림을 붙인다)
 	//==============================================================================
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
+	fn tick(&mut self, time_delta: f64) {
 		if self.pending_image_count > 0 {
 			self.pending_image_count = self.document.bind_pending_images(self.scene_base.get_node_tree_mut());
 			self.refresh_status_label();
 		}
-		self.scene_base.tick(engine, time_delta);
+		self.scene_base.tick(time_delta);
 	}
 
 	//==============================================================================
 	// 이전 출력. (배경을 칠하고 기준 해상도 좌표계를 건다)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 

@@ -159,8 +159,9 @@ impl Scene for MenuScene {
 		self.refresh_texts();
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
+		self.scene_base.tick(time_delta);
 		if engine.get_input_manager().is_touch_pressed() {
 			let next_language = if Localization::get_language() == "en" {
 				"fr"
@@ -174,8 +175,8 @@ impl Scene for MenuScene {
 		}
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -318,7 +319,7 @@ assert_eq!(languagepack::read_languages().len(), 2);
 
 `read_languages()` returns the languages in the list (for building a language menu), `read_language()` the current language's line (`None` until loaded), `find_language(code)` the line found by code (case-insensitive), and `read_all_texts()` all of the current language's text joined together. Every returned line is a copy.
 
-A scene that loads from files hands the load to a scene task in `create` and makes the scene wait for it with `track_task`. The engine calls `initialize` after the tracked task finishes, so text is already available in `initialize`.
+A scene that loads from files hands the load to a scene task in `load` and makes the scene wait for it with `track_task`. The engine calls `initialize` after the tracked task finishes, so text is already available in `initialize`.
 
 ```rust,no_run
 use std::path::PathBuf;
@@ -337,7 +338,7 @@ impl Scene for TitleScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 			scene_context.with(|_scene, engine| languagepack::apply_language_setting(engine, "")).await;
 		});
@@ -354,8 +355,8 @@ impl Scene for TitleScene {
 		title_node.add_component(Text::create_with_text(&languagepack::translate("game.title"), 48.0));
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -426,7 +427,7 @@ assert_eq!(uifont::build_ui_font_string(700, 24.0), "700 24px \"GameUI\", sans-s
 assert!(uifont::read_ui_font_face().is_none());
 ```
 
-When used with `languagepack`, load the font in the loaded handler. Registered as async, the handle of `apply_language_setting` waits until the font's initial characters are ready. The scene hands `apply_language_setting` over in `create` as in the example in "Language files with languagepack" above, calls `uifont::update(engine)` in `tick`, and gives text nodes' `Text` the name from `read_ui_font_face()`.
+When used with `languagepack`, load the font in the loaded handler. Registered as async, the handle of `apply_language_setting` waits until the font's initial characters are ready. The scene hands `apply_language_setting` over in `load` as in the example in "Language files with languagepack" above, calls `uifont::update(engine)` in `tick`, and gives text nodes' `Text` the name from `read_ui_font_face()`.
 
 ```rust,no_run
 use vanilla::{languagepack, uifont, Engine, EngineConfiguration, LanguageEntry, UiFontOptions};
@@ -485,16 +486,16 @@ impl Scene for ScoreScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.score += (time_delta * 1000.0) as u64;
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		let score_text = format!("SCORE {}", self.score);
 		let text_width = self.dynamic_font.measure_text(&score_text);

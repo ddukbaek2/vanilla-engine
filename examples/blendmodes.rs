@@ -353,14 +353,15 @@ impl Scene for BlendModeScene {
 	//==============================================================================
 	// 이전 출력. (배경을 칠하고 기준 해상도 좌표계를 건다)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
 	//==============================================================================
 	// 출력. (칸마다 바탕을 깔고 그 칸의 블렌드 모드로 지금 장면을 그린다)
 	//==============================================================================
-	fn draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		let page_index = (engine.get_frame_number() / PAGE_FRAME_COUNT) % PAGE_COUNT;
 		if page_index >= 6 {
 			self.draw_render_target_page(graphic, page_index == 7);
