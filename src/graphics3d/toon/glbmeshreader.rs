@@ -536,6 +536,7 @@ fn check_required_extensions(json: &Value) -> Result<(), String> {
 //==============================================================================
 /// 접근자 하나를 수 목록으로 읽기. (촘촘한 것과 byteStride 로 띄운 것, 정수는 담긴 값 그대로)
 /// - 바이너리 덩어리(buffers[0]) 밖의 버퍼를 가리키면 Err. (EXT_meshopt_compression 의 fallback 버퍼도 여기 든다)
+/// - bufferView 가 없거나 읽을 바이트가 바이너리 덩어리 밖에 걸치면 Err. (0 으로 채우거나 짧게 읽지 않는다)
 //==============================================================================
 fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Result<Vec<f64>, String> {
 	let accessor = &chunks.json["accessors"][accessor_index];
@@ -569,7 +570,15 @@ fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Result<Vec<f64>, 
 		}
 	};
 	let count = accessor["count"].as_u64().unwrap_or(0) as usize;
-	let buffer_view = &chunks.json["bufferViews"][accessor["bufferView"].as_u64().unwrap_or(0) as usize];
+	let buffer_view_index = match accessor["bufferView"].as_u64() {
+		Some(buffer_view_index) => {
+			buffer_view_index as usize
+		}
+		None => {
+			return Err(format!("GLB 접근자 {} 에 bufferView 가 없습니다. (bufferView 없는 접근자는 읽지 못한다)", accessor_index));
+		}
+	};
+	let buffer_view = &chunks.json["bufferViews"][buffer_view_index];
 	let buffer_index = buffer_view["buffer"].as_u64().unwrap_or(0);
 	if buffer_index != 0 {
 		return Err(format!("GLB 의 바깥 버퍼(buffers[{}])는 읽지 못합니다. (바이너리 덩어리 buffers[0] 만 읽는다, EXT_meshopt_compression 의 fallback 버퍼도 여기 든다)", buffer_index));
@@ -578,19 +587,17 @@ fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Result<Vec<f64>, 
 	let tight_byte_size = component_count * component_size;
 	let byte_stride = buffer_view["byteStride"].as_u64().unwrap_or(0) as usize;
 	let stride = if byte_stride == 0 { tight_byte_size } else { byte_stride };
+	if count > 0 {
+		let end_offset = element_offset + (count - 1) * stride + tight_byte_size;
+		if end_offset > chunks.binary.len() {
+			return Err(format!("GLB 접근자 {} 가 바이너리 덩어리 밖을 읽습니다. (바이트 {} ~ {}, 바이너리 덩어리 {} 바이트)", accessor_index, element_offset, end_offset, chunks.binary.len()));
+		}
+	}
 	let mut values = Vec::with_capacity(count * component_count);
 	for element_index in 0..count {
 		for component_index in 0..component_count {
 			let offset = element_offset + element_index * stride + component_index * component_size;
-			let bytes = match chunks.binary.get(offset..offset + component_size) {
-				Some(bytes) => {
-					bytes
-				}
-				None => {
-					values.push(0.0);
-					continue;
-				}
-			};
+			let bytes = &chunks.binary[offset..offset + component_size];
 			let value = match component_type {
 				5120 => {
 					bytes[0] as i8 as f64

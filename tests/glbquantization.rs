@@ -264,3 +264,24 @@ fn toon_reader_builds_flat_normals_when_normals_are_missing() {
 	let outline_options = ToonOutlineOptions { width: 0.02, added_parts: vec![String::from("hull")], ..ToonOutlineOptions::default() };
 	assert!(!read_glb_arrays(&bytes, Some(&outline_options)).unwrap().outline_vertex_data.is_empty(), "노멀이 없어도 몸으로 바깥선 껍데기를 짓는다");
 }
+
+//==============================================================================
+/// 툰 읽기: 바이너리 덩어리 밖을 읽는 접근자와 bufferView 가 없는 접근자는 0 으로 채우지 않고 Err. (원본 readAccessor 에 넣을 범위 검사와 같은 글, HANDOFF)
+//==============================================================================
+#[test]
+fn toon_reader_rejects_accessor_outside_binary_chunk() {
+	let (json, binary_buffer) = SkinnedModel::read_glb_chunks(&read_asset("float.glb")).unwrap();
+	let position_accessor = json["meshes"][0]["primitives"][0]["attributes"]["POSITION"].as_u64().unwrap() as usize;
+	let mut far_json = json.clone();
+	far_json["accessors"][position_accessor]["byteOffset"] = Value::from(100000);
+	let far_bytes = create_glb(&far_json, &binary_buffer);
+	let expected_message = format!("GLB 접근자 {} 가 바이너리 덩어리 밖을 읽습니다. (바이트 100000 ~ 100048, 바이너리 덩어리 {} 바이트)", position_accessor, binary_buffer.len());
+	assert_eq!(read_glb_arrays(&far_bytes, None).err().as_deref(), Some(expected_message.as_str()), "버퍼 밖 바이트는 Err");
+	let mut tail_json = json.clone();
+	tail_json["accessors"][position_accessor]["byteOffset"] = Value::from(binary_buffer.len() - 8);
+	assert!(read_glb_arrays(&create_glb(&tail_json, &binary_buffer), None).is_err(), "끝이 덩어리를 넘는 접근자도 Err");
+	let mut missing_json = json.clone();
+	missing_json["accessors"][position_accessor].as_object_mut().unwrap().remove("bufferView");
+	let expected_missing_message = format!("GLB 접근자 {} 에 bufferView 가 없습니다. (bufferView 없는 접근자는 읽지 못한다)", position_accessor);
+	assert_eq!(read_glb_arrays(&create_glb(&missing_json, &binary_buffer), None).err().as_deref(), Some(expected_missing_message.as_str()), "bufferView 없는 접근자는 Err");
+}
