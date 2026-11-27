@@ -33,7 +33,7 @@
 //!     엔진은 맡긴 애셋이 모두(문 포함) 끝나야 initialize 를 부르므로 결과는 원본과 같다. (애셋 다 읽힘 + (최소 시간 또는 터치))
 //! - 두 엔진이 같게 하는 것:
 //!   - 로딩 시간은 엔진 시계(get_realtime_since_startup)로 잰다. 엔진 시계가 아직 돌지 않았으면(첫 프레임 전, 0) 첫 로딩 화면 프레임의 시각부터 잰다.
-//!   - 로딩 화면 누름은 엔진 입력(is_touch_pressed)으로 draw_on_load 가 프레임마다 본다.
+//!   - 로딩 화면 누름은 엔진 입력(is_touch_pressed)으로 엔진이 로딩 중 프레임마다 본다.
 //!   - TouchRecognizer 는 원본처럼 initialize 에서 만든다. (그 전에는 get_touch_recognizer 가 None, 원본 undefined)
 //!     터치는 원본 touchPress 같은 함수 대신 tick 이 넘긴다. (SceneBase 의 터치 레이캐스터와 첫 터치 콜백은 쓰지 않는다)
 //! - 그 밖에 원본과 다른 점:
