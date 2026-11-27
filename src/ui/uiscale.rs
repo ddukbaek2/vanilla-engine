@@ -6,7 +6,7 @@
 //!   - 낮은 화면은 키운 UI 층의 높이가 minimum_layer_height 보다 낮아지게는 키우지 않는다. (0 이면 보지 않음)
 //!   - 세로 화면(가로가 세로의 portrait_ratio 배 이하)은 상한 없이 한 단위가 minimum_css_scale CSS 픽셀이 되게 키운다.
 //! - 원본과 다른 것:
-//!   - 전역 엔진이 없어 한 단위의 CSS 픽셀(ViewManager::get_css_pixel_scale)을 인자로 받는다. (원본은 options.cssPixelScale 이 없으면 엔진에서 읽는다)
+//!   - 한 단위의 CSS 픽셀(ViewManager::get_css_pixel_scale)을 인자로 받는다. (원본은 options.cssPixelScale 이 없으면 엔진에서 읽는다)
 //!   - options 객체는 UIScaleOptions 구조체다.
 //! - 사용: let ui_scale = UIScale::read(view_width, view_height, view_manager.get_css_pixel_scale(), &UIScaleOptions::default());
 //==============================================================================

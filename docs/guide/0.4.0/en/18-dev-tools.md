@@ -90,7 +90,7 @@ Where users must not see it, as in release builds, turn it off with `engine_conf
 
 ### Attaching it to a Scene directly
 
-A scene that implements `Scene` directly does not get a panel automatically. Unlike the original, the panel is a value the scene holds (`DevTools`), so the scene creates it and calls it from `tick` and `post_draw`. With no global engine as in the original, `tick`, `draw`, and `is_pointer_inside_panel` take the engine, and nodes are referred to by `NodeId`.
+A scene that implements `Scene` directly does not get a panel automatically. Unlike the original, the panel is a value the scene holds (`DevTools`), so the scene creates it and calls it from `tick` and `post_draw`. There is only one engine, so there is no original `setEngine`; `tick`, `draw`, and `is_pointer_inside_panel` take the engine, and nodes are referred to by `NodeId`.
 
 ```rust,no_run
 use vanilla::{DevTools, Engine, EngineConfiguration, Graphic, Scene, SceneBase};

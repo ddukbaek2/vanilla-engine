@@ -1,6 +1,6 @@
 # 원본 vanilla.js 에서 옮겨 오기
 
-바닐라엔진은 vanilla.js 를 러스트로 옮긴 엔진입니다. 두 엔진은 기능 차이를 두지 않고, 공개 API 는 원본의 쓰임새를 따릅니다. 다른 것은 이름 꼴과, 러스트의 소유와 빌림 규칙에 맞춰 바꾼 몇 가지 꼴뿐입니다. 이 장에서는 vanilla.js 로 쓴 게임 코드를 바닐라엔진으로 옮길 때 무엇을 어떻게 바꾸는지 봅니다. 이름 바꾸기, 클래스 상속 대신 트레이트와 공통 상태 구조체, 노드 참조 대신 `NodeId`, 전역 엔진 대신 인자로 받는 엔진, 콜백과 `Rc<RefCell>`, `null` 대신 `Option`, 예외 대신 `Result`, 선택 인자 객체 대신 옵션 구조체, 두 엔진이 같이 쓰는 파일 차례입니다. 이 장은 러스트 판에만 있습니다.
+바닐라엔진은 vanilla.js 를 러스트로 옮긴 엔진입니다. 두 엔진은 기능 차이를 두지 않고, 공개 API 는 원본의 쓰임새를 따릅니다. 다른 것은 이름 꼴과, 러스트의 소유와 빌림 규칙에 맞춰 바꾼 몇 가지 꼴뿐입니다. 이 장에서는 vanilla.js 로 쓴 게임 코드를 바닐라엔진으로 옮길 때 무엇을 어떻게 바꾸는지 봅니다. 이름 바꾸기, 클래스 상속 대신 트레이트와 공통 상태 구조체, 노드 참조 대신 `NodeId`, 전역 엔진과 인자로 받는 엔진, 콜백과 `Rc<RefCell>`, `null` 대신 `Option`, 예외 대신 `Result`, 선택 인자 객체 대신 옵션 구조체, 두 엔진이 같이 쓰는 파일 차례입니다. 이 장은 러스트 판에만 있습니다.
 
 ## 이름 바꾸기
 
@@ -286,9 +286,9 @@ assert!(node_tree.get_node(label_id).is_some());
 - 원본 `getParent`, `getChildren`, `getSiblings` 는 핸들을 돌려주는 `get_parent_id`, `get_child_ids`, `get_sibling_ids` 입니다. 찾기(`find_child_by_name`, `find_descendant_by_name` 같은 것)도 핸들을 돌려줍니다.
 - 씬 코드가 컴포넌트를 쥔 동안에는 같은 트리의 다른 노드를 함께 빌릴 수 없습니다. 둘을 함께 만질 때는 `node_tree.with_component_mut::<T, _>(node_id, |component, tree| ...)` 를 쓰고, 자주 쓰는 것은 트리를 받는 `*_in_tree` 함수(`UIWindow::close_in_tree`, `ParticleSystem::emit_in_tree` 같은 것)로 따로 있습니다.
 
-## 전역 엔진 대신 인자로 받는 엔진
+## 전역 엔진과 인자로 받는 엔진
 
-원본은 `Engine.getEngine()`, `this.getEngine()` 으로 어디서든 엔진을 꺼냅니다. 바닐라엔진에는 전역 엔진이 없습니다. 엔진을 쓰는 곳은 인자로 드러납니다.
+원본은 `Engine.getEngine()`, `this.getEngine()` 으로 어디서든 엔진을 꺼냅니다. 바닐라엔진도 `Engine::get_engine()`(원본 `Engine.getEngine()`), `SceneBase::get_engine()`(원본 `Scene.getEngine()`), `UIView::get_engine()` 으로 전역 엔진을 꺼냅니다. 꺼낸 것은 `&Engine` 이라서 엔진이 `&Engine` 으로 빌려 준 동안(컴포넌트의 `tick`, 터치, 휠과 그 안에서 부른 함수, 콜백, 페이지 이벤트 리스너)에만 꺼내고, 엔진이 `&mut` 로 빌려 준 동안(씬의 훅과 그 안의 컴포넌트 `draw`, `with_graphic`, async 작업)은 `Err(EngineAccessError::MutablyBorrowed)` 입니다. 그 자리는 아래 길로 받습니다. 둘 다 같은 엔진입니다. 꺼낸 `EngineRef` 는 그 자리 안에서만 쓰고 필드나 `await` 너머로 들고 가지 않습니다.
 
 | 자리 | 엔진을 받는 길 |
 | --- | --- |
@@ -297,7 +297,7 @@ assert!(node_tree.get_node(label_id).is_some());
 | 콜백 (`UIButtonEvent` 같은 것) | 콜백이 받는 `ComponentContext` |
 | async 작업 | `engine_context.with(\|engine\| ...)`, `scene_context.with(\|scene, engine\| ...)` |
 
-그래서 인스펙터의 게터 목록에 원본 `Component.getEngine` 이 없고, 반사 속성 목록에 `Engine` 이 없습니다.
+인스펙터의 게터 목록에서 원본 `UIView.getEngine` 은 뺍니다(원본은 `setEngine` 으로 준 값, 러스트는 전역 엔진을 꺼내는 함수). 반사 속성 목록에도 `Engine` 이 없습니다.
 
 원본 `engine.getGraphic()` 은 `engine.get_graphic()`(변경은 `get_graphic_mut()`)입니다. 엔진을 받는 위 자리 어디서나 GL 자원을 짓습니다. 다른 것은 둘입니다.
 

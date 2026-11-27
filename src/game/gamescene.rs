@@ -38,7 +38,7 @@
 //! - 그 밖에 원본과 다른 점:
 //!   - 세이프 에어리어: 웹은 원본처럼 CSS env(safe-area-inset-*) 를 읽는다. 데스크탑은 크롬 데스크탑처럼 0 이고,
 //!     set_safe_area_insets 로 정해 줄 수 있다. (정하면 웹에서도 그 값을 쓴다)
-//!   - set_view_scale_mode 는 엔진을 같이 받는다. (전역 엔진이 없다) 엔진을 주면 원본처럼 바로 뷰 영역을 다시 계산한다.
+//!   - set_view_scale_mode 는 엔진을 같이 받는다. (뷰 매니저를 &mut 로 고쳐서 전역 엔진(&Engine)으로는 안 된다) 엔진을 주면 원본처럼 바로 뷰 영역을 다시 계산한다.
 //!   - 개발자 도구(DevTools)는 EngineConfiguration::use_dev_tools 가 켜져 있으면 initialize 에서 만든다. (원본과 같음) tick 이 F2 와 터치를 넘기고 post_draw 가 그린다.
 //! - 로딩 화면 바꾸기: set_loading_colors 로 색만, set_loading_drawer 로 바탕 위 그림 전체를 바꾼다. (원본 setLoadingColors, setLoadingDrawer)
 //!   건 함수는 `Rc<RefCell>` 에 담는다. get_loading_drawer 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.

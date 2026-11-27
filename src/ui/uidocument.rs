@@ -4232,7 +4232,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// DevTools 인스펙터의 게터 목록은 원본 getComponentProperties 와 같다. (원본 getEngine 은 전역 엔진이 없어 러스트에 없다)
+	/// DevTools 인스펙터의 게터 목록은 원본 getComponentProperties 와 같다. (원본 getEngine 은 뺀다. 원본은 setEngine 으로 준 값이고 러스트 판 UIView::get_engine 은 전역 엔진을 꺼내는 함수라 반사하지 않는다)
 	//==============================================================================
 	#[test]
 	fn inspector_getters_match_original() {
@@ -4251,7 +4251,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 편집할 수 있는 속성 목록과 반사 저장은 원본 getReflectedProperties, saveByReflection 과 같다. (원본 Engine 은 전역 엔진이 없어 러스트에 없다)
+	/// 편집할 수 있는 속성 목록과 반사 저장은 원본 getReflectedProperties, saveByReflection 과 같다. (원본 Engine 은 뺀다. 러스트 판은 엔진을 반사 속성으로 두지 않는다)
 	//==============================================================================
 	#[test]
 	fn reflected_properties_match_original() {

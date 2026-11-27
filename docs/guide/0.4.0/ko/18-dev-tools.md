@@ -90,7 +90,7 @@ fn main() {
 
 ### Scene 에 직접 붙이기
 
-`Scene` 을 바로 구현한 씬에는 패널이 저절로 생기지 않습니다. 원본과 달리 패널은 씬이 품는 값(`DevTools`)이라서, 씬이 직접 만들고 `tick` 과 `post_draw` 에서 부릅니다. 원본의 전역 엔진이 없어 `tick`, `draw`, `is_pointer_inside_panel` 이 엔진을 받고, 노드는 `NodeId` 로 가리킵니다.
+`Scene` 을 바로 구현한 씬에는 패널이 저절로 생기지 않습니다. 원본과 달리 패널은 씬이 품는 값(`DevTools`)이라서, 씬이 직접 만들고 `tick` 과 `post_draw` 에서 부릅니다. 엔진은 하나라 원본 `setEngine` 이 없고 `tick`, `draw`, `is_pointer_inside_panel` 이 엔진을 받으며, 노드는 `NodeId` 로 가리킵니다.
 
 ```rust,no_run
 use vanilla::{DevTools, Engine, EngineConfiguration, Graphic, Scene, SceneBase};

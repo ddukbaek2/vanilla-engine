@@ -20,7 +20,7 @@
 //!   원본 SceneManager.loadScene 처럼 맡긴 애셋이 다 끝난 뒤에도 로딩 화면(draw_on_load)을 최소 0.3초 더 보이고 initialize 를 부른다.
 //! - 씬의 터치 훅(touch_press, touch_move, touch_release, touch_cancel, touch_wheel)은 원본 Scene.tickTouch 차례로 엔진이 tick 뒤에 부른다.
 //!   SceneBase.tick 은 씬 꼴과 상관없이 가장 앞의 누를 수 있는 노드에도 넘긴다. (원본 Scene.tickTouch 가 씬의 TouchRaycaster 로 넘기는 것과 같다)
-//! - 페이지 복원 훅과 터치 훅은 원본과 달리 엔진을 받는다. (전역 엔진이 없다)
+//! - 페이지 복원 훅과 터치 훅은 원본과 달리 엔진을 받는다. (씬 함수는 엔진이 &mut 로 빌려 준 자리라 전역 엔진을 꺼낼 수 없다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;

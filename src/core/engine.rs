@@ -3,7 +3,7 @@
 //! - 원본은 캔버스를 잡고 request_animation_frame 으로 프레임을 돈다.
 //!   러스트 판은 창, GL 컨텍스트, 입력 이벤트, 화면 넘기기를 플랫폼 층(crate::platform)이 맡고,
 //!   여기 EngineRunner 는 플랫폼을 모른 채 씬과 프레임 흐름만 돈다. (데스크탑: platform/desktop.rs, 웹: platform/web.rs)
-//! - 씬에는 &mut Engine 을 넘긴다. 씬은 여기서 매니저(시간, 뷰, 입력)를 꺼내 쓴다. (원본 Engine.getEngine() 자리)
+//! - 씬에는 &mut Engine 을 넘긴다. 씬은 여기서 매니저(시간, 뷰, 입력)를 꺼내 쓴다. 엔진을 받지 않는 자리는 원본 Engine.getEngine() 처럼 Engine::get_engine() 으로 전역 엔진을 꺼낸다. (core/globalengine.rs)
 //! - Graphic 은 플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘겨받아 엔진이 든다. 원본 getGraphic 처럼 씬의 어느 훅에서나 get_graphic, get_graphic_mut 로 꺼낸다.
 //!   씬의 draw 계열은 지금처럼 graphic 인자를 받는다. 그 인자는 엔진이 든 그래픽을 Option::take 로 잠깐 꺼내 넘긴 것이다. (&mut Engine 과 &mut Graphic 을 함께 넘기려면
 //!   그래픽이 엔진 밖에 있어야 해서, 그동안 engine.get_graphic() 은 None 이고 인자의 graphic 이 곧 그 그래픽이다. with_graphic 도 같다. RefCell 도 unsafe 도 쓰지 않는다)
@@ -426,7 +426,7 @@ impl Engine {
 	/// use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineAccessError, EngineConfiguration, NodeTree};
 	///
 	/// fn read_frame_number() -> u64 {
-	/// 	let engine = Engine::get_engine().expect("엔진");
+	/// 	let engine = Engine::get_engine().unwrap();
 	/// 	engine.get_frame_number()
 	/// }
 	///

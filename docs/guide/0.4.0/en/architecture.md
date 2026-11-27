@@ -27,7 +27,7 @@ What the engine is made of, what holds what, and in what order a frame runs. Thi
 ## Design Principles (What Differs from the Original)
 
 1. **Nodes are referenced by handles.** In the original, a parent holds its child objects in an array and the child points back to the parent. In the Rust port, the scene's `NodeTree` puts every node in one storage (a slotmap) and links parents and children with `NodeId`. A `NodeId` is a slot index plus a generation, so even if a new node reuses a destroyed node's slot, the old handle returns `None`. `Rc<RefCell>` is not used.
-2. **There is no global engine.** Instead of the original `Engine.getEngine()`, scene hooks and the component context (`ComponentContext`) receive the engine as an argument. Async tasks borrow the engine only inside the context's `with`.
+2. **The global engine is taken within the borrowing rules.** Like the original `Engine.getEngine()`, it is taken with `Engine::get_engine()`. It can be taken anywhere while the engine is lent as `&Engine` (component `tick`, touch and wheel and all code inside them, page event listeners), and while it is lent as `&mut` (scene hooks, `with_graphic`, the task context's `with`) it is `Err(MutablyBorrowed)`. Those places use the scene hook's `engine` argument and the component context (`ComponentContext`). It is the same engine.
 3. **Traits and shared state structs instead of inheritance.** The forms are `Scene` + `SceneBase`, `Component` + `ComponentBase`, `Asset` + `AssetBase`. The original's four node classes (Node, ComponentNode, TransformNode, WorldNode) are merged into a single `WorldNode`, and widgets that were nodes in the original (input field, scroll bar, window and so on) and `UINode` are components in the Rust port.
 4. **The platform layer is separate.** Windows, GL, input, the loop, asset bytes and sound live only under `platform`.
 5. **Performance features are engine defaults.** Batching and off-screen culling are on from the start.
@@ -166,7 +166,7 @@ The two engines keep no feature differences. The remaining differences are only 
 
 | Difference | Reason |
 | --- | --- |
-| There is no global engine. It is passed through scene functions and `ComponentContext` | So the places that use the engine show up as arguments |
+| The global engine `Engine::get_engine()` is taken only while the engine is lent as `&Engine`. Scene functions also receive it as an argument and components through `ComponentContext` | Scene functions receive `&mut Engine`. Giving out `&Engine` again while an engine borrowed as `&mut` exists would break Rust's borrowing rules |
 | Nodes live in `NodeTree` and are referenced by `NodeId` | Pointing parents and children at each other with `Rc<RefCell>` brings reference cycles and run-time borrow checks |
 | There is one node type, `WorldNode` | Rust has no class inheritance, so the node is one form and features are attached as components |
 | Traits and embedding instead of inheritance (`Scene` + `SceneBase`, `Component` + `ComponentBase`) | Shared state goes in structs, overrides in trait functions |

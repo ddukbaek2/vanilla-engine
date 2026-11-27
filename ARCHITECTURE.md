@@ -64,7 +64,7 @@ tests/               데스크탑 플랫폼 시험 desktopplatform.rs (#[ignore]
 ## 2. 설계 원칙 (원본과 다른 것)
 
 1. **노드는 핸들로 가리킨다.** 원본은 부모가 children[] 으로 자식 객체를 들고 자식이 parent 로 거꾸로 가리킨다. 러스트 판은 씬의 NodeTree 가 노드를 slotmap 저장소 하나에 담고, 부모와 자식을 NodeId 로 잇는다. NodeId 는 칸 번호와 세대 번호라서 지운 노드의 핸들은 get_node 가 None 을 돌려준다. (원본은 늘 false 이던 isDestroyed 를 0.4.0 에서 뺐다) Rc<RefCell> 은 쓰지 않는다.
-2. **전역 엔진이 없다.** 원본의 Engine.getEngine() 대신 씬 함수와 컴포넌트 문맥으로 Engine 을 넘긴다. async 작업도 폴링하는 동안 컨텍스트의 with 로 받는다.
+2. **전역 엔진은 빌림 규칙 안에서 꺼낸다.** 엔진은 주 스레드에 하나이고 처음 한 번 만들고 지우지 않는다. 원본 Engine.getEngine() 처럼 Engine::get_engine() 으로 어디서나 꺼낸다(core/globalengine.rs, 언리얼 GEngine, 고도 Engine 싱글톤 꼴). 꺼낸 것은 &Engine(EngineRef)이라, 엔진이 &Engine 으로 빌려 준 동안(컴포넌트 tick, 터치, 휠과 그 안의 모든 코드, 페이지 이벤트 리스너) 꺼내고, 엔진이 &mut 로 빌려 준 동안(씬 함수와 그 안의 컴포넌트 draw, with_graphic, 작업 문맥의 with)은 Err(MutablyBorrowed) 다. 그 자리는 지금처럼 씬 함수의 engine 인자와 컴포넌트 문맥(ComponentContext::get_engine)을 쓴다(두 길이 같은 엔진). 다른 스레드는 Err(OtherThread). 꺼낸 것을 빌려 준 자리 밖에 남기면 엔진이 프로세스를 멈춘다(빌림 규칙을 깨지 않으려고).
 3. **상속 대신 트레이트와 공통 상태 구조체.** Scene 트레이트 + SceneBase, Component 트레이트 + ComponentBase, Asset 트레이트 + AssetBase. 원본의 Node, ComponentNode, TransformNode, WorldNode 상속 넷은 WorldNode 하나로 합쳤다.
 4. **플랫폼 층을 뗐다.** 창, GL, 입력, 루프, 애셋 바이트, 오디오는 platform 아래에만 있다. 안드로이드, iOS 는 여기에 모듈을 더하면 된다.
 5. **성능 기능은 엔진 기본.** 묶어 그리기와 화면 밖 거르기를 기본으로 켠다. (원본도 같이 기본 켬으로 바꿨다)
@@ -315,7 +315,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 
 | 차이 | 까닭 |
 | --- | --- |
-| 전역 엔진이 없다 (Engine.getEngine, Scene.getEngine 대신 씬 함수와 ComponentContext 로 넘긴다. 그래서 인스펙터 게터 목록에 원본 Component.getEngine 이, 반사 속성 목록에 Engine 이 없다. 엔진을 받지 않는 컴포넌트 훅(attach, detach, attach_to_tree)은 그래픽에도 닿지 않아, GL 자원은 컴포넌트를 짓는 자리나 tick 의 context.get_engine().get_graphic() 으로 짓는다. 원본 엔진 컴포넌트에도 attach 에서 그래픽을 쓰는 것은 없다) | 전역 가변 상태는 빌림 검사를 비켜 가서, 엔진을 쓰는 곳이 인자로 드러나게 했다 |
+| 전역 엔진 Engine::get_engine()(원본 Engine.getEngine, Scene.getEngine 은 SceneBase::get_engine, UIView.getEngine 은 UIView::get_engine)은 엔진이 &Engine 으로 빌려 준 동안(컴포넌트 tick, 터치, 휠과 그 안의 attach, detach, 위젯 콜백, 페이지 이벤트 리스너)만 꺼내고, &mut 로 빌려 준 동안(씬 함수와 그 안의 컴포넌트 draw, with_graphic, 작업 문맥의 with)은 Err(MutablyBorrowed) 다. 그래서 씬 create 에서 붙인 컴포넌트의 attach 와 컴포넌트 draw 는 아직 전역 엔진에 닿지 않아, GL 자원은 컴포넌트를 짓는 자리나 tick 의 context.get_engine().get_graphic() 으로 짓는다. 원본 엔진 컴포넌트에도 attach 에서 그래픽을 쓰는 것은 없다. 인스펙터 게터 목록에 원본 UIView.getEngine 은 빼고(원본은 setEngine 으로 준 값, 러스트는 전역 엔진을 꺼내는 함수), 반사 속성 목록에도 Engine 이 없다 | 씬 함수는 &mut Engine 을 받는다. &mut 로 빌린 엔진이 있는 동안 &Engine 을 또 주면 러스트 빌림 규칙이 깨져서, 빌려 준 자리를 스레드 지역 칸에 쌓아 &Engine 일 때만 준다(RefCell 꼴, 꺼낸 것이 남은 채 &mut 를 빌려 주려 하면 패닉) |
 | 노드는 NodeTree 안에 있고 NodeId 핸들로 가리킨다 | 부모와 자식을 Rc<RefCell> 로 서로 가리키면 순환 참조와 실행 중 빌림 검사가 생긴다. 지운 노드의 핸들은 None 이 된다 |
 | 노드 종류는 WorldNode 하나다 (원본 Node, ComponentNode, TransformNode, WorldNode 를 합침, 원본에서 노드인 위젯과 UINode 는 컴포넌트) | 러스트에 클래스 상속이 없어 노드 꼴을 하나로 두고 기능을 컴포넌트로 붙였다 |
 | 상속 대신 트레이트와 품기 (Scene + SceneBase, Component + ComponentBase, ShaderSprite 는 Sprite 를 품고 Deref) | 러스트에 클래스 상속이 없어 공통 상태는 구조체로, 덮어쓰기는 트레이트 함수로 둔다. 원본 상위 클래스를 품은 컴포넌트는 Component::get_base_component 로 그것을 알려, get_component::<Sprite>() 가 ShaderSprite 도 찾는다(원본 instanceof 와 같음) |
@@ -328,7 +328,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 콜백은 Box<dyn FnMut> 로 받고, 콜백 게터와 갈아 끼운 저장소는 Rc<RefCell> 로 돌려준다 | 엔진과 부르는 쪽이 같은 함수를 나눠 쥐고 부르는 동안 다시 부르는 것을 막는다 |
 | 예외 대신 Result 와 Option, 셰이더를 짓지 못하면 한 번 알리고 건너뛴다 | 러스트는 예외를 던지지 않는다. 한 효과가 실패해도 프레임이 멈추지 않게 했다 (ShaderSprite, ScreenEffect 의 짓기 실패는 원본도 0.4.0 부터 같이 한 번 알리고 건너뛴다) |
 | 이름은 러스트 규칙(snake_case, UpperCamelCase, SCREAMING_SNAKE_CASE)이다 | Rust API Guidelines C-CASE 를 따른다 |
-| async 작업은 컨텍스트의 with(\|씬, 엔진\| ...) 안에서만 씬과 엔진을 만진다 (원본은 await 다음 줄에서 this 와 엔진을 바로 쓴다) | 전역 엔진이 없고 노드를 NodeId 로 가리키는 것과 같은 러스트 빌림 꼴이다. 러스트 퓨처는 &mut 를 await 너머로 쥘 수 없어, 폴링하는 동안만 빌려 주어 이중 빌림이 생기지 않게 했다 |
+| async 작업은 컨텍스트의 with(\|씬, 엔진\| ...) 안에서만 씬과 엔진을 만진다 (원본은 await 다음 줄에서 this 와 엔진을 바로 쓴다) | 노드를 NodeId 로 가리키는 것과 같은 러스트 빌림 꼴이다. (작업 폴링은 엔진을 &mut 로 쥐어 with 바깥도 전역 엔진을 꺼낼 수 없다) 러스트 퓨처는 &mut 를 await 너머로 쥘 수 없어, 폴링하는 동안만 빌려 주어 이중 빌림이 생기지 않게 했다 |
 | 원본 reject 는 Promise<Result<T, E>> 의 reject(까닭)이고, 실패할 수 있는 손잡이의 await 는 Result 로 끝난다 | 예외 대신 Result 를 쓰는 것과 같다 |
 
 **초안(experimental)의 꼴** (0.4.0 뒤 기능의 초안, 문서에는 넣지 않는다. 기능과 동작은 두 엔진이 같고 아래는 언어 꼴만 다르다)

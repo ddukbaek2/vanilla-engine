@@ -293,7 +293,7 @@ vanilla::game_scene!(StoryScene);
 
 ## 원본과 다른 점과 주의할 점
 
-- `await` 다음 줄에서 `this` 를 바로 쓰지 않고 `with` 안에서 만집니다. 전역 엔진이 없고 노드를 `NodeId` 로 가리키는 것과 같은 까닭입니다.
+- `await` 다음 줄에서 `this` 를 바로 쓰지 않고 `with` 안에서 만집니다. 노드를 `NodeId` 로 가리키는 것과 같은 까닭입니다. 작업은 엔진이 `&mut` 로 쥔 채 폴링해서 `with` 바깥에서도 `Engine::get_engine()` 은 `Err(MutablyBorrowed)` 입니다.
 - 원본 `reject` 와 `try`/`catch` 자리는 `Result` 입니다. 실패할 수 있는 손잡이의 `await` 는 `Result` 로 끝나니 `match` 나 `if let` 으로 가립니다.
 - 씬을 내려도 그 씬의 작업은 원본의 Promise 사슬처럼 이어 돕니다. 엔진은 작업이 다 끝날 때까지 씬 값을 살려 두고(목록에서는 빠져 `tick`, `draw` 를 받지 않습니다) `with` 는 그 씬을 계속 줍니다. 다 끝나면 `destroy` 를 부르고 버립니다. 끝나지 않는 `loop` 작업은 씬을 내린 뒤에도 돌므로 끝낼 조건을 둡니다.
 - 불러오는 도중에 내린 씬은 원본 `loadScene` 처럼 불러오기가 끝나면 `initialize` 까지 받습니다.

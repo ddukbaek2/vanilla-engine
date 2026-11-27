@@ -293,7 +293,7 @@ vanilla::game_scene!(StoryScene);
 
 ## Differences from the Original and Cautions
 
-- Instead of using `this` right on the line after `await`, touch it inside `with`. The reason is the same as for having no global engine and pointing at nodes with `NodeId`.
+- Instead of using `this` right on the line after `await`, touch it inside `with`. The reason is the same as for pointing at nodes with `NodeId`. Tasks are polled while the engine is held as `&mut`, so `Engine::get_engine()` is `Err(MutablyBorrowed)` outside `with` too.
 - The original `reject` and `try`/`catch` become `Result`. Awaiting a handle that can fail ends in a `Result`, so tell the cases apart with `match` or `if let`.
 - When a scene is unloaded, its tasks keep running, like the original Promise chains. The engine keeps the scene value alive until all of them finish (it leaves the list and receives no `tick` or `draw`), and `with` keeps giving that scene. When they all finish, `destroy` is called and the scene is dropped. A `loop` task that never ends keeps running after its scene is unloaded, so give it an exit condition.
 - A scene unloaded while loading still receives `initialize` when loading finishes, like the original `loadScene`.

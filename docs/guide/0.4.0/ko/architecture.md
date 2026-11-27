@@ -27,7 +27,7 @@
 ## 설계 원칙 (원본과 다른 것)
 
 1. **노드는 핸들로 가리킵니다.** 원본은 부모가 자식 객체를 배열로 들고 자식이 부모를 거꾸로 가리킵니다. 러스트 판은 씬의 `NodeTree` 가 모든 노드를 저장소 하나(slotmap)에 담고, 부모와 자식을 `NodeId` 로 잇습니다. `NodeId` 는 칸 번호와 세대 번호라서, 지운 노드의 칸을 새 노드가 다시 써도 예전 핸들은 `None` 을 돌려줍니다. `Rc<RefCell>` 은 쓰지 않습니다.
-2. **전역 엔진이 없습니다.** 원본의 `Engine.getEngine()` 대신 씬 훅과 컴포넌트 문맥(`ComponentContext`)이 엔진을 인자로 받습니다. async 작업은 컨텍스트의 `with` 안에서만 엔진을 빌립니다.
+2. **전역 엔진은 빌림 규칙 안에서 꺼냅니다.** 원본 `Engine.getEngine()` 처럼 `Engine::get_engine()` 으로 꺼냅니다. 엔진이 `&Engine` 으로 빌려 준 동안(컴포넌트 `tick`, 터치, 휠과 그 안의 모든 코드, 페이지 이벤트 리스너) 어디서나 꺼내고, `&mut` 로 빌려 준 동안(씬 훅, `with_graphic`, 작업 문맥의 `with`)은 `Err(MutablyBorrowed)` 입니다. 그 자리는 씬 훅의 `engine` 인자와 컴포넌트 문맥(`ComponentContext`)을 씁니다. 같은 엔진입니다.
 3. **상속 대신 트레이트와 공통 상태 구조체.** `Scene` + `SceneBase`, `Component` + `ComponentBase`, `Asset` + `AssetBase` 꼴입니다. 원본의 노드 상속 넷(Node, ComponentNode, TransformNode, WorldNode)은 `WorldNode` 하나로 합쳤고, 원본에서 노드였던 위젯(입력 필드, 스크롤 바, 창 같은 것)과 `UINode` 는 러스트 판에서 컴포넌트입니다.
 4. **플랫폼 층을 뗐습니다.** 창, GL, 입력, 루프, 애셋 바이트, 소리는 `platform` 아래에만 있습니다.
 5. **성능 기능은 엔진 기본입니다.** 묶어 그리기와 화면 밖 거르기를 처음부터 켭니다.
@@ -166,7 +166,7 @@ EngineRunner
 
 | 차이 | 까닭 |
 | --- | --- |
-| 전역 엔진이 없습니다. 씬 함수와 `ComponentContext` 로 넘깁니다 | 엔진을 쓰는 곳이 인자로 드러나게 했습니다 |
+| 전역 엔진 `Engine::get_engine()` 은 엔진이 `&Engine` 으로 빌려 준 동안만 꺼냅니다. 씬 함수는 인자로, 컴포넌트는 `ComponentContext` 로도 받습니다 | 씬 함수는 `&mut Engine` 을 받습니다. `&mut` 로 빌린 엔진이 있는 동안 `&Engine` 을 또 주면 러스트 빌림 규칙이 깨집니다 |
 | 노드는 `NodeTree` 안에 있고 `NodeId` 로 가리킵니다 | 부모와 자식을 `Rc<RefCell>` 로 서로 가리키면 순환 참조와 실행 중 빌림 검사가 생깁니다 |
 | 노드 종류는 `WorldNode` 하나입니다 | 러스트에 클래스 상속이 없어 노드 꼴을 하나로 두고 기능을 컴포넌트로 붙였습니다 |
 | 상속 대신 트레이트와 품기입니다 (`Scene` + `SceneBase`, `Component` + `ComponentBase`) | 공통 상태는 구조체로, 덮어쓰기는 트레이트 함수로 둡니다 |

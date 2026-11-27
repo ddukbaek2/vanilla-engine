@@ -1,6 +1,6 @@
 # Porting from vanilla.js
 
-Vanilla Engine is vanilla.js ported to Rust. The two engines keep no feature gap, and the public API follows the original's usage. What differs is the naming style and a few patterns changed to fit Rust's ownership and borrowing rules. This chapter shows what to change, and how, when porting game code written for vanilla.js to Vanilla Engine: renaming, traits and shared state structs instead of class inheritance, `NodeId` instead of node references, the engine passed as an argument instead of a global engine, callbacks and `Rc<RefCell>`, `Option` instead of `null`, `Result` instead of exceptions, option structs instead of option objects, and the files both engines share. This chapter exists only in the Rust edition.
+Vanilla Engine is vanilla.js ported to Rust. The two engines keep no feature gap, and the public API follows the original's usage. What differs is the naming style and a few patterns changed to fit Rust's ownership and borrowing rules. This chapter shows what to change, and how, when porting game code written for vanilla.js to Vanilla Engine: renaming, traits and shared state structs instead of class inheritance, `NodeId` instead of node references, the global engine and the engine passed as an argument, callbacks and `Rc<RefCell>`, `Option` instead of `null`, `Result` instead of exceptions, option structs instead of option objects, and the files both engines share. This chapter exists only in the Rust edition.
 
 ## Renaming
 
@@ -286,9 +286,9 @@ assert!(node_tree.get_node(label_id).is_some());
 - The original `getParent`, `getChildren`, and `getSiblings` are `get_parent_id`, `get_child_ids`, and `get_sibling_ids`, which return handles. Searches (`find_child_by_name`, `find_descendant_by_name`, and so on) also return handles.
 - While scene code holds a component, it cannot borrow other nodes of the same tree at the same time. To touch both, use `node_tree.with_component_mut::<T, _>(node_id, |component, tree| ...)`; common cases have separate `*_in_tree` functions that take the tree (such as `UIWindow::close_in_tree` and `ParticleSystem::emit_in_tree`).
 
-## The Engine as an Argument Instead of a Global Engine
+## The Global Engine and the Engine as an Argument
 
-The original gets the engine from anywhere with `Engine.getEngine()` or `this.getEngine()`. Vanilla Engine has no global engine. Every place that uses the engine shows it as an argument.
+The original gets the engine from anywhere with `Engine.getEngine()` or `this.getEngine()`. Vanilla Engine also takes the global engine with `Engine::get_engine()` (the original `Engine.getEngine()`), `SceneBase::get_engine()` (the original `Scene.getEngine()`) and `UIView::get_engine()`. What it gives is `&Engine`, so it is taken only while the engine is lent as `&Engine` (a component's `tick`, touch and wheel and the functions called inside them, callbacks, page event listeners), and while the engine is lent as `&mut` (scene hooks and the component `draw` inside them, `with_graphic`, async tasks) it is `Err(EngineAccessError::MutablyBorrowed)`. Those places receive it through the ways below. Both are the same engine. Use a taken `EngineRef` only inside that place, and do not carry it in a field or across an `await`.
 
 | Place | How it receives the engine |
 | --- | --- |
@@ -297,7 +297,7 @@ The original gets the engine from anywhere with `Engine.getEngine()` or `this.ge
 | Callbacks (such as `UIButtonEvent`) | The `ComponentContext` the callback receives |
 | async tasks | `engine_context.with(\|engine\| ...)`, `scene_context.with(\|scene, engine\| ...)` |
 
-This is why the original `Component.getEngine` is missing from the inspector's getter list, and `Engine` is missing from the reflected property list.
+The original `UIView.getEngine` is left out of the inspector's getter list (in the original it is the value given with `setEngine`, in Rust a function that takes the global engine). `Engine` is not in the reflected property list either.
 
 The original `engine.getGraphic()` is `engine.get_graphic()` (`get_graphic_mut()` to change it). You build GL resources in any of the places above that receive the engine. Two things differ.
 

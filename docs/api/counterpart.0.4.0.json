@@ -8171,6 +8171,18 @@
 			"vanilla-engine": {
 				"module": "core/engine",
 				"class": "Engine",
+				"name": "get_engine"
+			},
+			"vanilla.js": {
+				"module": "core/engine",
+				"class": "Engine",
+				"name": "getEngine"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/engine",
+				"class": "Engine",
 				"name": "alert"
 			},
 			"vanilla.js": {
@@ -14189,6 +14201,18 @@
 				"module": "core/touchraycaster",
 				"class": "TouchRaycaster",
 				"name": "hasEverTouched"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/scene",
+				"class": "SceneBase",
+				"name": "get_engine"
+			},
+			"vanilla.js": {
+				"module": "core/scene",
+				"class": "Scene",
+				"name": "getEngine"
 			}
 		},
 		{
@@ -36891,6 +36915,18 @@
 				"module": "ui/uiview",
 				"class": "UIView",
 				"name": "getBackgroundColor"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiview",
+				"class": "UIView",
+				"name": "get_engine"
+			},
+			"vanilla.js": {
+				"module": "ui/uiview",
+				"class": "UIView",
+				"name": "getEngine"
 			}
 		},
 		{

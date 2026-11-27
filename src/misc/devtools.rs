@@ -9,7 +9,7 @@
 //!     tick 에서 dev_tools.tick(engine, node_tree, unscaled_time_delta), post_draw 에서 dev_tools.draw(engine, node_tree, graphic).
 //!     is_visible() && is_pointer_inside_panel(engine) 이면 씬은 그 입력을 노드에 넘기지 않는다. (원본 GameScene.isDevToolsCapturingInput)
 //! - 원본과 다른 점:
-//!   - 전역 엔진이 없어 원본 setEngine 이 없다. tick, draw, is_pointer_inside_panel 이 엔진을 받는다.
+//!   - 원본 setEngine 이 없다. (엔진은 하나라 따로 줄 엔진이 없다) tick, draw, is_pointer_inside_panel 이 엔진을 받는다.
 //!   - 노드 대신 NodeId 로 가리킨다. 루트 목록은 set_root_nodes(`Vec<NodeId>`) 이고, 펼친 노드는 NodeId 집합, 접은 컴포넌트는 (NodeId, 컴포넌트 차례) 집합이다.
 //!     지운 노드는 트리와 인스펙터에서 빠지고, 고른 노드가 지워지면 고르지 않은 것으로 돌아간다.
 //!   - 원본이 tick 과 눌림에서 부르는 setForceGizmosVisible 은 눌림 처리와 set_visible 이 &Engine 만 받아 Graphic 을 바꿀 수 없어, 바랄 값을 적어 두었다가
@@ -21,7 +21,7 @@
 //!     트리를 받는 게터(원본은 이웃 컴포넌트를 바로 쥐는 것)는 그리기에서 트리를 넘겨 부르고, &mut self 게터가 있는 컴포넌트는 tick 이 트리를 쥐고 읽어 둔 값을 보인다.
 //!     이름은 원본 formatMethodName(getTextColor → textColor, is 로 시작하면 그대로), 값은 원본 formatPropertyValue 꼴이다.
 //!     (수는 toFixed(2), Vector2 는 (x, y), Rect 는 (x, y, 너비, 높이) toFixed(1), Color 는 rgba, null, 노드는 `[WorldNode]`, 배열은 `[Array]`, 그 밖은 [종류 이름])
-//!     목록과 차례는 원본과 같다. (원본 클래스에 없는 러스트 판의 다시 정의는 빼고, 원본과 이름이 다른 게터는 원본 이름으로 보인다) 원본 getEngine 은 전역 엔진이 없어 없다.
+//!     목록과 차례는 원본과 같다. (원본 클래스에 없는 러스트 판의 다시 정의는 빼고, 원본과 이름이 다른 게터는 원본 이름으로 보인다) 원본 getEngine 은 뺀다. (원본은 setEngine 으로 준 값이고, 러스트 판 UIView::get_engine 은 전역 엔진을 꺼내는 함수다)
 //!   - 원본처럼 모든 컴포넌트가 반사된다. Reflect 가 Component 의 상위 트레이트라 `#[reflect]` 를 빠뜨린 게임 컴포넌트는 컴파일되지 않는다.
 //!     노드 종류 이름(노드를 가리키는 값)은 UIDocument 에 등록한 이름이다. 게임이 자기 종류를 등록한 문서는 set_ui_document 로 건다. (또는 get_ui_document_mut 로 등록한다)
 //!   - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기는 두 엔진 모두 엔진 질문 창 Engine::prompt, Engine::confirm 이다. (원본 engine.prompt, engine.confirm) (core/modaldialog.rs)
