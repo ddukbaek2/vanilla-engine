@@ -20,6 +20,7 @@
 //! - 기본 프레임버퍼에 그릴 때는 알파를 쓰지 않는다(apply_color_mask). 원본과 웹은 캔버스가 alpha: false 라 화면 알파가 늘 1 인데, 데스크탑 기본 프레임버퍼는 알파가 있어
 //!   알파를 낮추는 모드 뒤에 DST_ALPHA 를 쓰는 모드와 셰이더 섞기가 웹과 달랐다. 렌더 타겟에는 알파도 쓴다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::base::color::Color;
 use crate::base::math;
 use crate::base::rect::Rect;
@@ -1261,7 +1262,7 @@ impl Drop for ExternalPassGuard<'_> {
 	/// 2D 상태 되돌리기.
 	//==============================================================================
 	fn drop(&mut self) {
-		// pass 는 glow 로 상태를 바로 바꿀 수 있어(상태 캐시를 거치지 않음) 기억을 잊고 되돌린다. (되돌리기가 다시 건 값은 다시 기억한다)
+		// pass 가 받은 GlContext 는 상태 캐시를 거치지만, 안의 glow::Context 를 꺼내 바꿨을 수 있어 잊고 되돌린다. (되돌리기가 다시 건 값은 다시 기억한다)
 		crate::core::glstatecache::reset(&self.graphic.gl);
 		self.graphic.restore_render_state();
 		if self.shader_clip_count > 0 {
@@ -1633,6 +1634,7 @@ impl Graphic {
 	/// 2D 그리기 사이에 GL 패스 끼우기. (원본 runExternalPass)
 	/// - 앞의 2D 묶음을 내보내고, 기억한 프로그램과 텍스처를 잊고, is_depth_cleared 면 깊이를 비운 뒤 pass 를 부르고, 끝나면 restore_render_state 를 부른다.
 	/// - pass 는 GL 컨텍스트를 받아 프로그램, 버텍스 어레이, 뷰포트, 섞기, 깊이, 면 가리기를 바꿔도 된다. (클립 중이면 스텐실 테스트는 restore_render_state 가 다시 켠다)
+	/// - 받은 컨텍스트(GlContext)의 상태 함수는 GL 상태 캐시를 거치므로, pass 안에서 상태를 바꾼 뒤 엔진 그리기를 이어 불러도 엔진이 바뀐 상태를 안다.
 	/// - pass 가 돌려준 값을 그대로 돌려준다. pass 가 패닉해도 풀리는 동안 가드가 restore_render_state 를 부른다. (원본은 던져도 되돌린다)
 	///
 	/// # 인자
@@ -1659,7 +1661,7 @@ impl Graphic {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn run_external_pass<R>(&mut self, is_depth_cleared: bool, pass: impl FnOnce(&glow::Context) -> R) -> R {
+	pub fn run_external_pass<R>(&mut self, is_depth_cleared: bool, pass: impl FnOnce(&GlContext) -> R) -> R {
 		self.flush_batch();
 		if is_depth_cleared {
 			self.clear_depth_buffer();
@@ -1669,7 +1671,7 @@ impl Graphic {
 		let shader_clip_count = self.write_shader_clips_to_stencil(true);
 		self.forget_bound_render_state();
 		let guard = ExternalPassGuard { graphic: self, shader_clip_count };
-		pass(&guard.graphic.gl)
+		pass(GlContext::from_context(&guard.graphic.gl))
 	}
 
 	//==============================================================================
@@ -5168,16 +5170,18 @@ impl Graphic {
 	}
 
 	//==============================================================================
-	/// GL 컨텍스트 반환.
-	/// - 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, 기억한 프로그램과 텍스처, GL 상태 캐시를 잊는다. (다음 그리기에서 다시 건다)
+	/// GL 컨텍스트 반환. (원본 getWebGL2RenderingContext)
+	/// - 받은 컨텍스트(GlContext)의 상태 함수는 GL 상태 캐시를 거치므로, 받은 뒤 바꾼 상태를 엔진이 안다.
+	/// - 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, Graphic 이 2D 그리기에 묶어 둔 프로그램과 텍스처의 기억은 잊는다. (다음 그리기에서 상태 캐시에 물어 다시 건다)
+	/// - GL 상태 캐시도 잊는다. 안의 glow::Context 를 꺼내(`&glow::Context` 꼴의 함수에 넘기면 저절로 바뀐다) 바꾼 상태를 다음 받을 때 바로잡는 안전망이다.
 	///
 	/// # 돌려줌
-	/// Graphic 이 든 GL 컨텍스트.
+	/// Graphic 이 든 GL 컨텍스트. 엔진 함수의 `&glow::Context` 인자로도 그대로 넘긴다.
 	//==============================================================================
-	pub fn get_gl(&self) -> &glow::Context {
+	pub fn get_gl(&self) -> &GlContext {
 		self.forget_bound_render_state();
 		crate::core::glstatecache::reset(&self.gl);
-		&self.gl
+		GlContext::from_context(&self.gl)
 	}
 
 	//==============================================================================
@@ -5226,9 +5230,11 @@ impl Graphic {
 	}
 
 	//==============================================================================
-	/// GL 상태 캐시 잊기. (원본 resetGLStateCache, 상태 캐시를 거치지 않고 glow 로 GL 상태를 바꾼 뒤 부른다, 다음에 읽을 때 GL 에 한 번씩 묻는다)
-	/// - get_gl 은 받은 쪽이 상태를 바꿀 수 있어 스스로 잊는다. run_external_pass 는 pass 가 끝나면 스스로 잊는다.
-	/// - 툰 렌더러의 on_before_draw 와 그리기 줄의 단계 콜백이 끝나면 렌더러가 스스로 잊는다.
+	/// GL 상태 캐시 잊기. (원본 resetGLStateCache, 상태 캐시를 거치지 않고 GL 상태를 바꾼 뒤 부른다, 다음에 읽을 때 GL 에 한 번씩 묻는다)
+	/// - get_gl, run_external_pass, 툰 렌더러의 콜백이 주는 GlContext 는 상태 함수가 상태 캐시를 거치므로, 같은 콜백 안에서 엔진 그리기를 이어 불러도 부를 것 없다.
+	/// - GlContext 에서 안의 glow::Context 를 꺼내(`let raw: &glow::Context = gl;`, `&glow::Context` 꼴의 함수에 넘기기) 상태 함수를 바로 불렀거나,
+	///   다른 라이브러리가 같은 GL 컨텍스트의 상태를 바꾼 뒤 같은 콜백 안에서 엔진 그리기를 이어 부를 때 부른다.
+	/// - get_gl 과 run_external_pass 의 끝, 툰 렌더러의 on_before_draw 와 그리기 줄의 단계 콜백 뒤에는 엔진이 스스로 잊는다. (안전망)
 	//==============================================================================
 	pub fn reset_gl_state_cache(&self) {
 		crate::core::glstatecache::reset(&self.gl);

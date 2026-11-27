@@ -14,7 +14,7 @@ use std::f64::consts::PI;
 
 use glow::HasContext;
 use vanilla::{
-	create_box_geometry, create_capsule_geometry, create_octahedron_geometry, create_reflection_matrix, create_sphere_geometry, create_torus_geometry, Camera3D, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ShaderProgram, ToonBlendMode, ToonBufferUsage, ToonDrawOptions,
+	create_box_geometry, create_capsule_geometry, create_octahedron_geometry, create_reflection_matrix, create_sphere_geometry, create_torus_geometry, Camera3D, Engine, EngineConfiguration, GlContext, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ShaderProgram, ToonBlendMode, ToonBufferUsage, ToonDrawOptions,
 	ToonDrawQueue, ToonDrawStage, ToonInstanceBuffer, ToonLightSet, ToonMaterial, ToonMaterialChunks, ToonMesh, ToonPartOptions, ToonPointLight, ToonProgramKind, ToonRenderer, ToonTextureOptions, Vector2, Vector3,
 };
 
@@ -227,7 +227,7 @@ impl ToonMaterialScene {
 		torus_matrix.rotate_x(0.55);
 		torus_matrix.rotate_y(time * 0.4);
 		let sphere_matrix = Matrix4::create_translation(2.6, 0.55, -0.2);
-		let segment_draw = move |program: &ShaderProgram, gl: &glow::Context, kind: ToonProgramKind| {
+		let segment_draw = move |program: &ShaderProgram, gl: &GlContext, kind: ToonProgramKind| {
 			if kind == ToonProgramKind::Solid {
 				unsafe {
 					gl.uniform_1_f32(program.get_uniform_location(gl, "segmentMask").as_ref(), (DIGIT_SEGMENT_MASKS[digit] as f64) as f32);

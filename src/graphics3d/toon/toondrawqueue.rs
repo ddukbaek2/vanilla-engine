@@ -22,6 +22,7 @@
 //! - 원본은 담은 것을 객체 참조로 든다. 러스트 판은 모형과 인스턴스 목록, 단계 콜백을 빌려 담으므로 줄이 그 수명 'a 를 갖는다. (프레임마다 새로 짓거나 clear 뒤 다시 담는다)
 //!   단계 콜백은 FnMut 이라 RefCell 에 담아 draw(&self) 에서 부른다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -56,7 +57,7 @@ pub enum ToonDrawStage {
 //==============================================================================
 /// 단계 콜백. (gl, 렌더러)
 //==============================================================================
-pub type ToonPassCallback<'a> = Box<dyn FnMut(&glow::Context, &mut ToonRenderer) + 'a>;
+pub type ToonPassCallback<'a> = Box<dyn FnMut(&GlContext, &mut ToonRenderer) + 'a>;
 
 //==============================================================================
 /// 담은 것 하나.
@@ -206,7 +207,7 @@ impl<'a> ToonDrawQueue<'a> {
 	/// - `stage`: ToonDrawStage.
 	/// - `callback`: (gl, renderer) 를 받는다. 부른 뒤 렌더러가 프레임의 그리기 상태를 다시 건다.
 	//==============================================================================
-	pub fn add_pass(&mut self, stage: ToonDrawStage, callback: impl FnMut(&glow::Context, &mut ToonRenderer) + 'a) {
+	pub fn add_pass(&mut self, stage: ToonDrawStage, callback: impl FnMut(&GlContext, &mut ToonRenderer) + 'a) {
 		self.pass_list.borrow_mut().push((stage, Box::new(callback)));
 	}
 
@@ -387,8 +388,8 @@ impl<'a> ToonDrawQueue<'a> {
 			if *pass_stage != stage {
 				continue;
 			}
-			callback(gl, renderer);
-			// 콜백은 glow 로 상태를 바로 바꿀 수 있다. (상태 캐시를 거치지 않음, 뒤의 apply_frame_state 가 다시 건다)
+			callback(GlContext::from_context(gl), renderer);
+			// 콜백이 안의 glow::Context 를 꺼내 상태를 바꿨을 수 있다. (GlContext 의 상태 함수는 상태 캐시를 거친다, 안전망, 뒤의 apply_frame_state 가 다시 건다)
 			crate::core::glstatecache::reset(gl);
 			is_run = true;
 		}

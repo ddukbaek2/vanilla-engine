@@ -15,7 +15,7 @@
 
 use std::path::PathBuf;
 use vanilla::{
-	AmbientOcclusionEffect, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, Graphic, Matrix4, Rect, RenderTarget, Scene, SceneBase, ShadowMap, SkinnedModel, SkinnedModelAsset, SkinnedModelLoadHandle, SkinnedModelRenderer, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector3,
+	AmbientOcclusionEffect, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, GlContext, Graphic, Matrix4, Rect, RenderTarget, Scene, SceneBase, ShadowMap, SkinnedModel, SkinnedModelAsset, SkinnedModelLoadHandle, SkinnedModelRenderer, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector3,
 };
 use glow::HasContext;
 
@@ -132,7 +132,7 @@ impl ModelViewerScene {
 	//==============================================================================
 	// GL 리소스와 모델 만들기. (받은 모델 → 렌더러, 모델, 그림자, 렌더 타겟, 이펙트)
 	//==============================================================================
-	fn create_resources(&self, engine: &Engine, gl: &glow::Context) -> Result<ViewerResources, String> {
+	fn create_resources(&self, engine: &Engine, gl: &GlContext) -> Result<ViewerResources, String> {
 		let mut skinned_model_renderer = SkinnedModelRenderer::new(gl, None, None)?;
 		let sun_direction = Vector3::create(0.5, 0.8, 0.35).normalize();
 		skinned_model_renderer.set_sun_direction(sun_direction.x, sun_direction.y, sun_direction.z);
@@ -210,7 +210,7 @@ impl ModelViewerScene {
 	//==============================================================================
 	// 3D 그리기. (그림자 → 씬 → 블룸 → 합성, 2D 상태는 호출자가 되돌린다)
 	//==============================================================================
-	fn render_scene(resources: &mut ViewerResources, gl: &glow::Context, drawing_buffer_width: i32, drawing_buffer_height: i32, elapsed_time: f64) -> Result<(), String> {
+	fn render_scene(resources: &mut ViewerResources, gl: &GlContext, drawing_buffer_width: i32, drawing_buffer_height: i32, elapsed_time: f64) -> Result<(), String> {
 		resources.scene_render_target.resize(gl, drawing_buffer_width, drawing_buffer_height)?;
 		resources.bloom_effect.resize(gl, drawing_buffer_width, drawing_buffer_height)?;
 

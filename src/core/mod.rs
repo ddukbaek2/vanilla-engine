@@ -19,6 +19,7 @@ pub mod frame;
 pub mod fullscreenpass;
 pub mod gamepadmanager;
 pub mod graphic;
+pub mod glcontext;
 pub(crate) mod glstatecache;
 // GPU 경계의 수 바꾸기. (f64 를 유니폼의 f32 로)
 pub(crate) mod gluniform;

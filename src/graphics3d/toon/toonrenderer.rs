@@ -58,6 +58,7 @@
 //! - 2 번 UV: 배열에 uv1_data 가 있으면 vertexUv 가 (UV, 2 번 UV) 넷이다. 셰이더 조각은 ToonSurface.uv1 로 읽는다. (없으면 (0, 1))
 //! - 빛 색 쓰기(set_light_color_usage), 그늘 쪽 림(set_shade_rim_light), 빛 세기 막기(set_light_intensity_limited)는 빛 묶음(ToonLightSet)에 둔다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1041,7 +1042,7 @@ impl Default for ToonTextureOptions {
 //==============================================================================
 /// 그리기 전에 부르는 콜백. (프로그램, GL, 프로그램 종류, 머티리얼의 유니폼을 쓸 때)
 //==============================================================================
-pub type ToonBeforeDrawCallback<'a> = &'a dyn Fn(&ShaderProgram, &glow::Context, ToonProgramKind);
+pub type ToonBeforeDrawCallback<'a> = &'a dyn Fn(&ShaderProgram, &GlContext, ToonProgramKind);
 
 //==============================================================================
 /// 모형 하나를 그릴 때의 꼴.
@@ -3362,9 +3363,9 @@ impl ToonRenderer {
 			self.upload_frame_uniforms(gl, depth_entry);
 			self.upload_draw_uniforms(gl, &depth_entry.program, model_matrix, is_skinned, instanced_mode, options.joint_matrices);
 			if let Some(on_before_draw) = options.on_before_draw {
-				on_before_draw(&depth_entry.program, gl, ToonProgramKind::Depth);
+				on_before_draw(&depth_entry.program, GlContext::from_context(gl), ToonProgramKind::Depth);
 				self.forget_uniform_values(&depth_entry.program);
-				// 콜백은 glow 로 상태를 바로 바꿀 수 있다. (상태 캐시를 거치지 않음)
+				// 콜백이 안의 glow::Context 를 꺼내 상태를 바꿨을 수 있다. (GlContext 의 상태 함수는 상태 캐시를 거친다, 안전망)
 				crate::core::glstatecache::reset(gl);
 			}
 			ToonRenderer::apply_vertex_array(gl, body_vertex_array);
@@ -3413,9 +3414,9 @@ impl ToonRenderer {
 			self.write_uniform_floats(gl, outline_program, "alpha", 1, [options.alpha, 0.0, 0.0, 0.0]);
 			self.write_uniform_floats(gl, outline_program, "premultipliedOutput", 1, [premultiplied_output, 0.0, 0.0, 0.0]);
 			if let Some(on_before_draw) = options.on_before_draw {
-				on_before_draw(outline_program, gl, ToonProgramKind::Outline);
+				on_before_draw(outline_program, GlContext::from_context(gl), ToonProgramKind::Outline);
 				self.forget_uniform_values(outline_program);
-				// 콜백은 glow 로 상태를 바로 바꿀 수 있다. (상태 캐시를 거치지 않음)
+				// 콜백이 안의 glow::Context 를 꺼내 상태를 바꿨을 수 있다. (GlContext 의 상태 함수는 상태 캐시를 거친다, 안전망)
 				crate::core::glstatecache::reset(gl);
 			}
 			ToonRenderer::apply_cull_face(gl, glow::FRONT);
@@ -3483,9 +3484,9 @@ impl ToonRenderer {
 		}
 		ToonRenderer::apply_active_texture(gl, glow::TEXTURE0);
 		if let Some(on_before_draw) = options.on_before_draw {
-			on_before_draw(solid_program, gl, ToonProgramKind::Solid);
+			on_before_draw(solid_program, GlContext::from_context(gl), ToonProgramKind::Solid);
 			self.forget_uniform_values(solid_program);
-			// 콜백은 glow 로 상태를 바로 바꿀 수 있다. (상태 캐시를 거치지 않음)
+			// 콜백이 안의 glow::Context 를 꺼내 상태를 바꿨을 수 있다. (GlContext 의 상태 함수는 상태 캐시를 거친다, 안전망)
 			crate::core::glstatecache::reset(gl);
 		}
 		ToonRenderer::apply_cull_face(gl, glow::BACK);

@@ -21,6 +21,7 @@
 //!   - 공유 렌더러는 `Rc<RefCell<ToonRenderer>>` 다. 원본은 객체 참조를 나눠 든다. 그리는 동안 렌더러를 빌려 그리기 함수에 넘긴다.
 //!   - 원본 화면 사각형 객체의 outputFramebuffer, outputViewport 는 다섯째 인자 ToonViewOutput 의 output_framebuffer, output_viewport 다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use std::cell::{RefCell, RefMut};
 use std::rc::{Rc, Weak};
 
@@ -46,7 +47,7 @@ const RENDER_SCALE_SAMPLE_COUNT: i32 = 4;
 //==============================================================================
 /// 그리기 함수. (렌더러, 카메라, 화면 사각형, GL, 출력)
 //==============================================================================
-pub type ToonViewDrawCallback = Box<dyn FnMut(&mut ToonRenderer, &Camera3D, Rect, &glow::Context, ToonViewOutput)>;
+pub type ToonViewDrawCallback = Box<dyn FnMut(&mut ToonRenderer, &Camera3D, Rect, &GlContext, ToonViewOutput)>;
 
 //==============================================================================
 /// 그리기 함수의 출력. (원본 화면 사각형 객체의 outputFramebuffer, outputViewport)
@@ -119,7 +120,7 @@ impl Drop for ScreenRectGuard<'_> {
 /// # 예제
 /// 노드 사각형 안에 툰 3D 장면 그리기
 /// ```rust
-/// use vanilla::{create_sphere_geometry, Camera3D, Matrix4, MeshBuilder, NodeTree, Rect, ToonDrawOptions, ToonDrawQueue, ToonMesh, ToonPartOptions, ToonRenderer, ToonView3D, ToonViewOutput, Vector3};
+/// use vanilla::{create_sphere_geometry, Camera3D, GlContext, Matrix4, MeshBuilder, NodeTree, Rect, ToonDrawOptions, ToonDrawQueue, ToonMesh, ToonPartOptions, ToonRenderer, ToonView3D, ToonViewOutput, Vector3};
 ///
 /// let mut node_tree = NodeTree::new();
 /// let root_id = node_tree.get_root_id();
@@ -132,7 +133,7 @@ impl Drop for ScreenRectGuard<'_> {
 /// builder.add_part(&create_sphere_geometry(0.5, 24, 16, std::f64::consts::PI), &Matrix4::create_translation(0.0, 0.5, 0.0), "#f0b080", ToonPartOptions::default());
 /// let arrays = builder.read_arrays();
 /// let mut mesh: Option<ToonMesh> = None;
-/// view.set_draw_callback(Some(Box::new(move |renderer: &mut ToonRenderer, camera: &Camera3D, _screen_rect: Rect, gl: &glow::Context, _output: ToonViewOutput| {
+/// view.set_draw_callback(Some(Box::new(move |renderer: &mut ToonRenderer, camera: &Camera3D, _screen_rect: Rect, gl: &GlContext, _output: ToonViewOutput| {
 /// 	if mesh.is_none() {
 /// 		mesh = renderer.create_mesh(gl, &arrays);
 /// 	}
