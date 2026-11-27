@@ -5,8 +5,9 @@
 //! - view_native_rect:	실제 사용되는 뷰 영역. (canvas_native_size 기준의 부분 영역)
 //! - view_size:			실제 사용되는 뷰 크기. (씬이 그리는 좌표계의 크기)
 //! - 원본의 device_pixel_ratio 는 창의 배율(scale factor)이다.
-//! - 렌더 배율 상한(set_max_render_pixel_ratio): 원본은 바로 뷰 영역을 다시 셈해 캔버스 크기를 줄인다.
-//!   러스트 판은 캔버스를 플랫폼이 맞추므로 다음 프레임 첫머리에 상한을 건 배율로 다시 맞춘다. 웹은 캔버스 드로잉 버퍼를 줄이고,
+//! - 렌더 배율 상한(set_max_render_pixel_ratio): 원본과 같이 값만 적고(같은 값이면 하지 않는다) is_view_rect_pending 을 세운다.
+//!   다음 프레임 첫머리에 창 크기 바뀜과 같은 길(Engine::resize)로 상한을 건 배율로 다시 맞추고, calculate_view_rect 가 내린다.
+//!   (프레임 가운데에서 캔버스 크기를 바꾸면 그 프레임이 까맣다) 웹은 캔버스 드로잉 버퍼를 줄이고,
 //!   데스크탑은 기본 프레임버퍼의 왼쪽 아래에 줄인 크기로 그린 뒤 창 크기로 늘인다. (platform/desktop/renderscaler.rs)
 //! - 세이프 에어리어 인셋(get_safe_area_insets, set_safe_area_override)은 원본 { top, right, bottom, left } 처럼 이름 붙은 칸을 가진 SafeAreaInsets 다.
 //!   주소의 ?safeArea=위,오른쪽,아래,왼쪽 자리는 데스크탑에서 환경 변수 VANILLA_SAFE_AREA=위,오른쪽,아래,왼쪽 이다.
@@ -199,6 +200,8 @@ pub struct ViewManager {
 	view_size: Vector2,
 	/// 렌더에 쓸 배율 상한. (0 이면 제한 없음)
 	max_render_pixel_ratio: f64,
+	/// 다음 프레임 머리에 뷰 영역을 다시 셈할지. (렌더 배율 상한을 바꿨을 때, calculate_view_rect 가 내린다)
+	is_view_rect_pending: bool,
 	/// 세이프 에어리어 강제값. (CSS 픽셀, 위 / 오른쪽 / 아래 / 왼쪽)
 	safe_area_override: Option<SafeAreaInsets>,
 	/// 무시할 세이프 에어리어 쪽. (get_safe_area_insets 가 0 으로 돌려준다)
@@ -228,6 +231,7 @@ impl ViewManager {
 			view_native_rect: Rect::zero(),
 			view_size: Vector2::zero(),
 			max_render_pixel_ratio: 0.0,
+			is_view_rect_pending: false,
 			safe_area_override: None,
 			ignored_safe_area_sides: Vec::new(),
 		}
@@ -260,6 +264,7 @@ impl ViewManager {
 		else {
 			1.0
 		};
+		self.is_view_rect_pending = false;
 		let canvas_native_size = Vector2::create((physical_width as f64 / device_pixel_ratio).round(), (physical_height as f64 / device_pixel_ratio).round());
 		let canvas_pixel_size = Vector2::create(physical_width as f64, physical_height as f64);
 		let reference_resolution_size = self.get_reference_resolution_size();
@@ -521,13 +526,43 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 렌더 배율 상한 설정. (고DPI 기기에서 캔버스가 지나치게 커지지 않게, 0 이면 제한하지 않는다)
-	/// - 웹은 다음 프레임 첫머리에 캔버스와 뷰 영역을 다시 맞춘다. 데스크탑은 그 배율로 줄인 크기로 그리고 프레임 끝에 창 크기로 늘인다. (desktop/renderscaler.rs)
+	/// - 같은 값이면 아무것도 하지 않는다. 바뀌면 값만 적고 is_view_rect_pending 을 세운다.
+	/// - 캔버스 크기는 다음 프레임 머리에서 창 크기 바뀜과 같은 길(Engine::resize)로 맞춘다. (씬도 화면 영역이 바뀐 것을 받는다)
+	///   프레임 가운데(tick, draw)에서 캔버스 크기를 바꾸면 그리기 버퍼가 비워지는데 그 프레임은 앞서 맞춘 뷰포트로 그려 한 프레임이 까맣다.
+	/// - 웹은 캔버스 드로잉 버퍼를 줄이고, 데스크탑은 그 배율로 줄인 크기로 그리고 프레임 끝에 창 크기로 늘인다. (desktop/renderscaler.rs)
 	///
 	/// # 인자
 	/// - `max_render_pixel_ratio`: 렌더 배율 상한. (0 이면 제한 없음, 음수는 0 으로 둔다)
 	//==============================================================================
 	pub fn set_max_render_pixel_ratio(&mut self, max_render_pixel_ratio: f64) {
-		self.max_render_pixel_ratio = max_render_pixel_ratio.max(0.0);
+		let next_max_render_pixel_ratio = max_render_pixel_ratio.max(0.0);
+		if next_max_render_pixel_ratio == self.max_render_pixel_ratio {
+			return;
+		}
+		self.max_render_pixel_ratio = next_max_render_pixel_ratio;
+		self.is_view_rect_pending = true;
+	}
+
+	//==============================================================================
+	/// 다음 프레임 머리에 뷰 영역을 다시 셈할지 반환. (렌더 배율 상한을 바꾼 뒤 아직 맞추지 않았으면 true)
+	///
+	/// # 돌려줌
+	/// 다시 셈할 것이 남았으면 true. (calculate_view_rect 가 맞추면 false)
+	///
+	/// # 예제
+	/// 렌더 배율 상한을 바꾼 뒤 맞출 것이 남았는지 보기
+	/// ```rust
+	/// use vanilla::{Vector2, ViewManager, ViewScaleMode};
+	///
+	/// let mut view_manager = ViewManager::new(Vector2::create(1280.0, 720.0), ViewScaleMode::StretchShort);
+	/// view_manager.set_max_render_pixel_ratio(1.0);
+	/// assert!(view_manager.is_view_rect_pending());
+	/// view_manager.calculate_view_rect(1280, 720, 1.0);
+	/// assert!(!view_manager.is_view_rect_pending());
+	/// ```
+	//==============================================================================
+	pub fn is_view_rect_pending(&self) -> bool {
+		self.is_view_rect_pending
 	}
 
 	//==============================================================================

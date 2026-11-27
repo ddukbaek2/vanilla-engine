@@ -154,7 +154,6 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 		is_page_hidden: false,
 		is_window_hidden,
 		window_scale_factor: 1.0,
-		applied_max_render_pixel_ratio: 0.0,
 		render_scaler: None,
 		preserved_drawing_buffer: None,
 		virtual_keyboard_inset: 0.0,
@@ -299,23 +298,32 @@ fn create_window_state(window_event_loop: WindowEventLoop<'_>, engine: &Engine, 
 	// - 크롬은 antialias 캔버스를 min(4, GL_MAX_SAMPLES) 표본의 MSAA 로 칠한다. (블링크 DrawingBuffer::Initialize 의 sample_count_, WebglPreferences.msaa_sample_count 기본 4)
 	// - 멀티샘플을 묻지 않으면 맥 CGL 은 멀티샘플 없는 설정 하나만 주어 도형 가장자리가 계단이 된다. 그래서 먼저 4 를 묻고,
 	//   4 이상인 설정이 없으면 묻지 않고 다시 골라 4 에 가까운 것을 쓴다. (크롬도 기기 최대가 4 보다 작으면 그 수로 칠한다)
+	// - 엔진 설정 antialias 를 끄면(원본 컨텍스트 속성 antialias: false) 멀티샘플을 묻지 않고 표본이 가장 적은 설정을 고른다.
+	let is_antialias = engine_configuration.antialias;
 	let config_template_builder = ConfigTemplateBuilder::new().with_alpha_size(8).with_depth_size(24).with_stencil_size(8);
 	let build_display = |window_attributes: WindowAttributes, config_template_builder: ConfigTemplateBuilder| {
 		let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes));
+		let picker = |configs: Box<dyn Iterator<Item = Config> + '_>| pick_config(configs, is_antialias);
 		match window_event_loop {
 			WindowEventLoop::EventLoop(event_loop) => {
-				display_builder.build(event_loop, config_template_builder, pick_config)
+				display_builder.build(event_loop, config_template_builder, picker)
 			}
 			WindowEventLoop::ActiveEventLoop(event_loop) => {
-				display_builder.build(event_loop, config_template_builder, pick_config)
+				display_builder.build(event_loop, config_template_builder, picker)
 			}
 		}
 	};
-	let (window, gl_config) = match build_display(window_attributes.clone(), config_template_builder.clone().with_multisampling(MULTISAMPLE_COUNT)) {
-		Ok(built) => {
+	let multisampled_built = if is_antialias {
+		build_display(window_attributes.clone(), config_template_builder.clone().with_multisampling(MULTISAMPLE_COUNT)).ok()
+	}
+	else {
+		None
+	};
+	let (window, gl_config) = match multisampled_built {
+		Some(built) => {
 			built
 		}
-		Err(_) => {
+		None => {
 			build_display(window_attributes, config_template_builder).map_err(|error| format!("GL 설정 고르기 실패: {}", error))?
 		}
 	};
@@ -889,8 +897,6 @@ struct DesktopApplication {
 	is_page_hidden: bool,
 	/// 창의 배율. (입력 좌표를 논리 좌표로 바꿀 때, 렌더 배율 상한과 상관없다)
 	window_scale_factor: f64,
-	/// 지금 렌더 크기에 건 배율 상한. (바뀌면 다시 맞춘다)
-	applied_max_render_pixel_ratio: f64,
 	/// 줄인 렌더 영역을 창 크기로 늘이개. (처음 쓸 때 만든다)
 	render_scaler: Option<renderscaler::RenderScaler>,
 	/// 드로잉 버퍼 남기개. (preserve_drawing_buffer 일 때 처음 쓸 때 만든다)
@@ -1013,7 +1019,6 @@ impl DesktopApplication {
 		let render_width = ((canvas_width * render_pixel_ratio).round() as u32).max(1);
 		let render_height = ((canvas_height * render_pixel_ratio).round() as u32).max(1);
 		view_manager.calculate_view_rect(render_width, render_height, render_pixel_ratio);
-		self.applied_max_render_pixel_ratio = view_manager.get_max_render_pixel_ratio();
 		self.window_scale_factor = scale_factor;
 		self.engine_runner.notify_scene_resize();
 	}
@@ -1195,8 +1200,8 @@ impl DesktopApplication {
 			self.virtual_keyboard_inset = virtual_keyboard_inset;
 			self.engine_runner.engine.is_resize_requested = true;
 		}
-		let max_render_pixel_ratio = self.engine_runner.engine.get_view_manager().get_max_render_pixel_ratio();
-		if max_render_pixel_ratio != self.applied_max_render_pixel_ratio || self.engine_runner.engine.is_resize_requested {
+		// 렌더 배율 상한을 바꿨으면 프레임 머리에서 창 크기 바뀜과 같은 길로 맞춘다. (원본 Engine 의 isViewRectPending, 그리는 중에 바꾸면 그 프레임이 까맣다)
+		if self.engine_runner.engine.get_view_manager().is_view_rect_pending() || self.engine_runner.engine.is_resize_requested {
 			self.engine_runner.engine.is_resize_requested = false;
 			self.resize();
 		}
@@ -1681,9 +1686,9 @@ fn is_capture_window_hidden() -> bool {
 }
 
 //==============================================================================
-/// GL 설정 고르기. (스텐실 8 비트 이상, 멀티샘플은 4 에 가까운 것, 4 를 넘으면 작은 쪽)
+/// GL 설정 고르기. (스텐실 8 비트 이상, 멀티샘플은 4 에 가까운 것, 4 를 넘으면 작은 쪽. is_antialias 가 거짓이면 표본이 가장 적은 것)
 //==============================================================================
-fn pick_config(configs: Box<dyn Iterator<Item = Config> + '_>) -> Config {
+fn pick_config(configs: Box<dyn Iterator<Item = Config> + '_>, is_antialias: bool) -> Config {
 	let config_list: Vec<Config> = configs.collect();
 	let mut best_config: Option<Config> = None;
 	for config in config_list.iter() {
@@ -1697,7 +1702,10 @@ fn pick_config(configs: Box<dyn Iterator<Item = Config> + '_>) -> Config {
 			}
 			Some(current_config) => {
 				let current_sample_count = current_config.num_samples();
-				if sample_count <= 4 {
+				if !is_antialias {
+					sample_count < current_sample_count
+				}
+				else if sample_count <= 4 {
 					current_sample_count > 4 || sample_count > current_sample_count
 				}
 				else {
