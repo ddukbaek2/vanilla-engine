@@ -22,6 +22,8 @@ use super::audioparam::{AudioParam, ParamAutomation};
 use super::oscillator::{OscillatorNode, PeriodicWave};
 use super::panner::{ListenerState, PannerNode};
 use super::pannermath::PannerSettings;
+use super::decode::DECODE_SAMPLE_RATE;
+use super::streaming::StreamRingReader;
 use super::{ListenerParam, PannerParam};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
@@ -104,6 +106,16 @@ pub(crate) enum MixerCommand {
 		playback_rate: f64,
 		generation: u64,
 	},
+	/// 스트리밍 소스 시작. (링은 풀개 스레드가 채운다, 시작 자리는 소리의 프레임, 링의 0 번 프레임은 소리의 skip_frame_count 번 프레임)
+	StartStream {
+		player_id: u64,
+		stream_ring_reader: StreamRingReader,
+		start_virtual_read_index: f64,
+		skip_frame_count: u64,
+		is_loop: bool,
+		playback_rate: f64,
+		generation: u64,
+	},
 	StopSource {
 		player_id: u64,
 		time: f64,
@@ -167,7 +179,7 @@ impl MixerShared {
 //==============================================================================
 /// 시간을 표본 자리로. (크롬 audio_utilities::TimeToSampleFrame, 1024 배로 셈해 반올림한 뒤 가장 가까운 정수)
 //==============================================================================
-fn time_to_sample_frame(time: f64, sample_rate: f64) -> f64 {
+pub(super) fn time_to_sample_frame(time: f64, sample_rate: f64) -> f64 {
 	const OVERSAMPLE_FACTOR: f64 = 1024.0;
 	let frame = (time * sample_rate * OVERSAMPLE_FACTOR).round() / OVERSAMPLE_FACTOR;
 	frame.round()
@@ -378,6 +390,230 @@ impl BufferSource {
 }
 
 //==============================================================================
+/// 스트리밍 소스. (원본 MediaElementAudioSourceNode 자리, 풀개 스레드가 채운 링에서 읽는다)
+/// - 읽기 자리는 소리의 프레임으로 들고, 빠르기, 루프의 되감기, 선형 보간과 끝의 선형 외삽을 BufferSource 와 같은 f64 셈으로 한다.
+///   (빠르기 1 이고 자리가 정수면 그대로 베낀다) 그래서 같은 소리를 통째로 푼 버퍼 소스와 비트까지 같은 표본을 낸다.
+///   반복은 풀개가 다음 바퀴의 처음을 바로 뒤에 이어 쓰고, 한 바퀴의 길이는 풀개가 처음 끝에 닿을 때 링에 적는다.
+/// - 링이 비면(풀개가 늦음) 그 프레임은 0 을 내고 자리는 그대로 흐른다. (컨텍스트 시계와 어긋나지 않게, 늦게 온 프레임은 버린다)
+//==============================================================================
+struct StreamSource {
+	stream_ring_reader: StreamRingReader,
+	channel_count: usize,
+	/// 읽는 자리. (소리의 프레임, 소수면 보간, 루프면 버퍼처럼 한 바퀴 안으로 되감는다)
+	virtual_read_index: f64,
+	computed_playback_rate: f64,
+	is_looping: bool,
+	/// 지금 바퀴의 소리 0 번 프레임이 링의 몇 번 프레임인지. (시작은 -skip, 바퀴마다 한 바퀴 길이만큼 는다)
+	loop_base: i64,
+	/// 링에서 꺼내 둔 프레임. (링의 window_start 번부터, 보간과 외삽에 앞 프레임 하나를 남긴다)
+	window: std::collections::VecDeque<[f32; 2]>,
+	window_start: i64,
+	is_finished: bool,
+	/// stop(when) 의 시각. (없으면 끝까지)
+	end_time: Option<f64>,
+}
+
+impl StreamSource {
+	//==============================================================================
+	/// 생성. (시작 자리는 소리의 프레임, 링의 0 번은 소리의 skip_frame_count 번)
+	//==============================================================================
+	fn new(stream_ring_reader: StreamRingReader, start_virtual_read_index: f64, skip_frame_count: u64, is_loop: bool, playback_rate: f64, context_sample_rate: f64) -> StreamSource {
+		let channel_count = stream_ring_reader.get_ring().get_channel_count();
+		let playback_rate = playback_rate as f32 as f64;
+		let computed_playback_rate = (DECODE_SAMPLE_RATE as f64 / context_sample_rate * playback_rate).clamp(-MAXIMUM_PLAYBACK_RATE, MAXIMUM_PLAYBACK_RATE);
+		StreamSource {
+			stream_ring_reader,
+			channel_count,
+			virtual_read_index: start_virtual_read_index,
+			computed_playback_rate,
+			is_looping: is_loop,
+			loop_base: -(skip_frame_count as i64),
+			window: std::collections::VecDeque::new(),
+			window_start: 0,
+			is_finished: false,
+			end_time: None,
+		}
+	}
+
+	//==============================================================================
+	/// 그 링 프레임까지 꺼내 두고, 앞 프레임 하나만 남기고 지난 것을 버린다.
+	//==============================================================================
+	fn pull_until(&mut self, ring_index: i64) {
+		let ring = self.stream_ring_reader.get_ring();
+		let mut available_frame_count = ring.get_available_frame_count();
+		while self.window_start + (self.window.len() as i64) <= ring_index + 1 && available_frame_count > 0 {
+			self.window.push_back(ring.read_frame());
+			available_frame_count -= 1;
+		}
+		while self.window_start + 1 < ring_index && !self.window.is_empty() {
+			self.window.pop_front();
+			self.window_start += 1;
+		}
+		if self.window.is_empty() {
+			self.window_start = ring.get_read_frame_count() as i64;
+		}
+	}
+
+	//==============================================================================
+	/// 소리의 그 프레임. (지금 바퀴 기준, 링에 없으면 None)
+	//==============================================================================
+	fn get_frame(&self, frame_index: i64) -> Option<[f32; 2]> {
+		let ring_index = self.loop_base + frame_index;
+		if ring_index < self.window_start {
+			return None;
+		}
+		self.window.get((ring_index - self.window_start) as usize).copied()
+	}
+
+	//==============================================================================
+	/// 소리 한 바퀴의 길이. (반복이 아니면 링의 끝에서, 반복이면 풀개가 적은 길이, 아직 모르면 None)
+	//==============================================================================
+	fn read_buffer_length(&self) -> Option<i64> {
+		let ring = self.stream_ring_reader.get_ring();
+		if self.is_looping {
+			return ring.get_loop_frame_count().map(|loop_frame_count| loop_frame_count as i64);
+		}
+		ring.get_end_frame_count().map(|end_frame_count| end_frame_count as i64 - self.loop_base)
+	}
+
+	//==============================================================================
+	/// 퀀텀 하나 그리기. (채널 수를 돌려준다, 끝나면 is_finished)
+	//==============================================================================
+	fn render(&mut self, destination: &mut [[f32; RENDER_QUANTUM_FRAMES]; 2], frame_count: usize) -> usize {
+		let channel_count = self.channel_count;
+		for channel in destination.iter_mut().take(channel_count) {
+			channel.fill(0.0);
+		}
+		let computed_playback_rate = self.computed_playback_rate;
+		let mut virtual_read_index = self.virtual_read_index;
+		// 루프: 시작 자리가 끝에 있으면 처음으로. (BufferSource 와 같다)
+		if let Some(buffer_length) = self.read_buffer_length() {
+			if self.is_looping && virtual_read_index >= buffer_length as f64 && buffer_length > 0 {
+				virtual_read_index = 0.0;
+				self.loop_base += buffer_length;
+			}
+		}
+		for write_index in 0..frame_count {
+			let buffer_length = self.read_buffer_length();
+			if let Some(buffer_length) = buffer_length {
+				if !self.is_looping && virtual_read_index >= buffer_length as f64 {
+					self.is_finished = true;
+					break;
+				}
+			}
+			let read_index = virtual_read_index as i64;
+			self.pull_until(self.loop_base + read_index);
+			let interpolation_factor = virtual_read_index - read_index as f64;
+			if let Some(frame) = self.get_frame(read_index) {
+				// 반복이 아닌 소리의 마지막 프레임이면 앞 프레임으로 선형 외삽. (버퍼의 read_index == read_index2)
+				let is_last_frame = !self.is_looping && matches!(buffer_length, Some(buffer_length) if read_index + 1 >= buffer_length);
+				let next_frame = if is_last_frame { None } else { self.get_frame(read_index + 1) };
+				let previous_frame = if is_last_frame && read_index >= 1 { self.get_frame(read_index - 1) } else { None };
+				for channel_index in 0..channel_count {
+					let sample = if computed_playback_rate == 1.0 && interpolation_factor == 0.0 {
+						frame[channel_index]
+					}
+					else if let Some(previous_frame) = previous_frame {
+						let sample1 = previous_frame[channel_index] as f64;
+						let sample2 = frame[channel_index] as f64;
+						(sample2 + (sample2 - sample1) * interpolation_factor) as f32
+					}
+					else {
+						let sample1 = frame[channel_index] as f64;
+						let sample2 = next_frame.map(|next_frame| next_frame[channel_index]).unwrap_or(frame[channel_index]) as f64;
+						((1.0 - interpolation_factor) * sample1 + interpolation_factor * sample2) as f32
+					};
+					destination[channel_index][write_index] = sample;
+				}
+			}
+			virtual_read_index += computed_playback_rate;
+			if let Some(buffer_length) = self.read_buffer_length() {
+				let virtual_end_frame = buffer_length as f64;
+				if virtual_read_index >= virtual_end_frame {
+					if !self.is_looping {
+						virtual_read_index = virtual_read_index.min(virtual_end_frame);
+						self.is_finished = true;
+						break;
+					}
+					// 버퍼의 루프와 같은 셈으로 한 바퀴 안으로 되감는다.
+					let overflow = virtual_read_index - virtual_end_frame;
+					virtual_read_index = virtual_end_frame - virtual_end_frame + overflow % virtual_end_frame;
+					self.loop_base += buffer_length;
+				}
+			}
+		}
+		self.virtual_read_index = virtual_read_index;
+		channel_count
+	}
+}
+
+//==============================================================================
+/// 플레이어의 소스. (버퍼 소리나 스트리밍 소리)
+//==============================================================================
+enum SourceNode {
+	Buffer(BufferSource),
+	Stream(StreamSource),
+}
+
+impl SourceNode {
+	//==============================================================================
+	/// 퀀텀 하나 그리기. (채널 수)
+	//==============================================================================
+	fn render(&mut self, destination: &mut [[f32; RENDER_QUANTUM_FRAMES]; 2], frame_count: usize) -> usize {
+		match self {
+			SourceNode::Buffer(buffer_source) => {
+				buffer_source.render(destination, frame_count)
+			}
+			SourceNode::Stream(stream_source) => {
+				stream_source.render(destination, frame_count)
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 끝났는지.
+	//==============================================================================
+	fn is_finished(&self) -> bool {
+		match self {
+			SourceNode::Buffer(buffer_source) => {
+				buffer_source.is_finished
+			}
+			SourceNode::Stream(stream_source) => {
+				stream_source.is_finished
+			}
+		}
+	}
+
+	//==============================================================================
+	/// stop(when) 의 시각.
+	//==============================================================================
+	fn get_end_time(&self) -> Option<f64> {
+		match self {
+			SourceNode::Buffer(buffer_source) => {
+				buffer_source.end_time
+			}
+			SourceNode::Stream(stream_source) => {
+				stream_source.end_time
+			}
+		}
+	}
+
+	//==============================================================================
+	/// stop(when) 의 시각 걸기.
+	//==============================================================================
+	fn set_end_time(&mut self, end_time: f64) {
+		match self {
+			SourceNode::Buffer(buffer_source) => {
+				buffer_source.end_time = Some(end_time);
+			}
+			SourceNode::Stream(stream_source) => {
+				stream_source.end_time = Some(end_time);
+			}
+		}
+	}
+}
+
+//==============================================================================
 /// 좌우 이득. (크롬 StereoPanner::PanToTargetValue, f64 로 셈해 f32 로)
 //==============================================================================
 fn get_pan_gains(pan: f32, channel_count: usize) -> (f32, f32) {
@@ -407,7 +643,7 @@ struct PlayerNode {
 	/// PannerNode. (공간 소리를 처음 걸 때 생기고 그 뒤로 남는다, 초안)
 	panner: Option<Box<PannerNode>>,
 	output_bus_id: Option<u64>,
-	source: Option<(BufferSource, u64)>,
+	source: Option<(SourceNode, u64)>,
 	ended_generation: Arc<AtomicU64>,
 	/// 플레이어 손잡이를 버렸는지. (WebAudio 소스 노드처럼 트는 소리가 끝날 때까지 남고 끝나면 빠진다)
 	is_released: bool,
@@ -586,17 +822,26 @@ impl MixerRenderer {
 							player.ended_generation.fetch_max(previous_generation, Ordering::Release);
 						}
 						if audio_buffer.get_length() > 0 {
-							player.source = Some((BufferSource::new(audio_buffer, is_loop, offset_seconds, playback_rate, sample_rate), generation));
+							player.source = Some((SourceNode::Buffer(BufferSource::new(audio_buffer, is_loop, offset_seconds, playback_rate, sample_rate)), generation));
 						}
 						else {
 							player.ended_generation.fetch_max(generation, Ordering::Release);
 						}
 					}
 				}
+				MixerCommand::StartStream { player_id, stream_ring_reader, start_virtual_read_index, skip_frame_count, is_loop, playback_rate, generation } => {
+					let sample_rate = self.sample_rate;
+					if let Some(player) = self.find_player(player_id) {
+						if let Some((_, previous_generation)) = player.source.take() {
+							player.ended_generation.fetch_max(previous_generation, Ordering::Release);
+						}
+						player.source = Some((SourceNode::Stream(StreamSource::new(stream_ring_reader, start_virtual_read_index, skip_frame_count, is_loop, playback_rate, sample_rate)), generation));
+					}
+				}
 				MixerCommand::StopSource { player_id, time } => {
 					if let Some(player) = self.find_player(player_id) {
 						if let Some((source, _)) = player.source.as_mut() {
-							source.end_time = Some(time.max(0.0));
+							source.set_end_time(time.max(0.0));
 						}
 					}
 				}
@@ -651,7 +896,7 @@ impl MixerRenderer {
 			// 소스: 예약 정지 시각까지 그리고, 그 퀀텀에 끝낸다.
 			let mut channel_count = 0;
 			if let Some((source, generation)) = player.source.as_mut() {
-				let end_frame = source.end_time.map(|end_time| time_to_sample_frame_rounded_up(end_time, sample_rate));
+				let end_frame = source.get_end_time().map(|end_time| time_to_sample_frame_rounded_up(end_time, sample_rate));
 				let is_stopped_before = end_frame.map(|end_frame| end_frame <= current_frame).unwrap_or(false);
 				if !is_stopped_before {
 					let frame_count = match end_frame {
@@ -665,7 +910,7 @@ impl MixerRenderer {
 					channel_count = source.render(&mut self.source_quantum, frame_count);
 				}
 				let is_end_reached = end_frame.map(|end_frame| end_frame <= quantum_end_frame).unwrap_or(false);
-				if source.is_finished || is_end_reached {
+				if source.is_finished() || is_end_reached {
 					player.ended_generation.fetch_max(*generation, Ordering::Release);
 					player.source = None;
 				}
@@ -882,6 +1127,181 @@ mod tests {
 		let (command_sender, command_receiver) = channel();
 		let shared = Arc::new(MixerShared::new(sample_rate));
 		(command_sender, MixerRenderer::new(command_receiver, shared.clone(), sample_rate), shared)
+	}
+
+	//==============================================================================
+	/// 스트리밍 견주기 설정.
+	//==============================================================================
+	struct StreamCase {
+		file_name: &'static str,
+		context_sample_rate: f64,
+		is_loop: bool,
+		offset_seconds: f64,
+		playback_rate: f64,
+		quantum_count: usize,
+		stop_time: Option<f64>,
+		/// 풀개를 채우지 않는 퀀텀. (링이 비는 때)
+		starved_quantum_count: usize,
+	}
+
+	//==============================================================================
+	/// 같은 파일을 버퍼 소스(통째로 풀기)와 스트리밍 소스로 같은 그래프에 그린다. (스트리밍은 퀀텀마다 풀개를 손으로 채운다)
+	///
+	/// # 돌려줌
+	/// (버퍼 출력, 스트리밍 출력, 버퍼가 끝난 퀀텀, 스트리밍이 끝난 퀀텀)
+	//==============================================================================
+	fn render_buffer_and_stream(stream_case: &StreamCase) -> (Vec<f32>, Vec<f32>, Option<usize>, Option<usize>) {
+		let path = format!("{}/tests/assets/audio/{}", env!("CARGO_MANIFEST_DIR"), stream_case.file_name);
+		let bytes = std::fs::read(&path).unwrap();
+		let decoded = crate::platform::audio::decode::decode_audio_data(&bytes).unwrap();
+		let audio_buffer = create_buffer(decoded.channel_data, decoded.sample_rate as f64);
+		let stream_data = Arc::new(crate::platform::audio::streaming::AudioStreamData::open(crate::platform::audio::decode::stream::StreamMedia::Bytes(Arc::from(bytes))).unwrap());
+		let render = |is_stream: bool| -> (Vec<f32>, Option<usize>) {
+			let (command_sender, mut renderer, _shared) = create_renderer(stream_case.context_sample_rate);
+			let ended_generation = Arc::new(AtomicU64::new(0));
+			command_sender.send(MixerCommand::AddPlayer { player_id: 1, output_bus_id: None, ended_generation: ended_generation.clone(), gain_value: Arc::new(AtomicU32::new(0)) }).unwrap();
+			let mut stream_feeder = None;
+			if is_stream {
+				let (feeder, stream_ring_reader, start_virtual_read_index, skip_frame_count) = crate::platform::audio::streaming::create_stream_start(stream_data.clone(), stream_case.is_loop, stream_case.offset_seconds, stream_case.playback_rate);
+				command_sender.send(MixerCommand::StartStream { player_id: 1, stream_ring_reader, start_virtual_read_index, skip_frame_count, is_loop: stream_case.is_loop, playback_rate: stream_case.playback_rate, generation: 1 }).unwrap();
+				stream_feeder = Some(feeder);
+			}
+			else {
+				command_sender.send(MixerCommand::StartSource { player_id: 1, audio_buffer: audio_buffer.clone(), is_loop: stream_case.is_loop, offset_seconds: stream_case.offset_seconds, playback_rate: stream_case.playback_rate, generation: 1 }).unwrap();
+			}
+			if let Some(stop_time) = stream_case.stop_time {
+				command_sender.send(MixerCommand::StopSource { player_id: 1, time: stop_time }).unwrap();
+			}
+			let mut output = Vec::new();
+			let mut ended_quantum = None;
+			for quantum_index in 0..stream_case.quantum_count {
+				if let Some(stream_feeder) = stream_feeder.as_mut() {
+					if quantum_index >= stream_case.starved_quantum_count {
+						stream_feeder.pump();
+					}
+				}
+				let mut quantum = vec![0.0f32; 2 * RENDER_QUANTUM_FRAMES];
+				renderer.render_interleaved(&mut quantum, 2);
+				output.extend_from_slice(&quantum);
+				if ended_quantum.is_none() && ended_generation.load(Ordering::Acquire) == 1 {
+					ended_quantum = Some(quantum_index);
+				}
+			}
+			(output, ended_quantum)
+		};
+		let (buffer_output, buffer_ended_quantum) = render(false);
+		let (stream_output, stream_ended_quantum) = render(true);
+		(buffer_output, stream_output, buffer_ended_quantum, stream_ended_quantum)
+	}
+
+	//==============================================================================
+	/// 가장 큰 표본 차이.
+	//==============================================================================
+	fn read_maximum_difference(left: &[f32], right: &[f32]) -> f32 {
+		left.iter().zip(right.iter()).map(|(left, right)| (left - right).abs()).fold(0.0, f32::max)
+	}
+
+	//==============================================================================
+	/// 스트리밍 소스가 통째로 푼 버퍼 소스와 같은 표본을 낸다. (재생과 끝, 반복의 이음매, 되감은 자리, 멈춤, 빠르기, 다른 컨텍스트 표본율)
+	/// - 컨텍스트 44100 에 빠르기 1 은 그대로 베껴 비트까지 같다. 보간하는 경우(빠르기 1.5, 컨텍스트 48000)도 같은 f64 셈이라 같다.
+	/// - 반복은 3 바퀴(링 16384 프레임보다 길다)를 그려 이음매에 틈이 없고 버퍼의 루프와 같은지 본다.
+	//==============================================================================
+	#[test]
+	fn stream_source_matches_buffer_source() {
+		let case_list = [
+			// 처음부터 끝까지, 끝난 퀀텀이 같다.
+			StreamCase { file_name: "mp3_stereo.mp3", context_sample_rate: 44100.0, is_loop: false, offset_seconds: 0.0, playback_rate: 1.0, quantum_count: 100, stop_time: None, starved_quantum_count: 0 },
+			// 반복 3 바퀴. (11025 프레임 x 3, 링을 두 번 넘게 돈다)
+			StreamCase { file_name: "mp3_stereo.mp3", context_sample_rate: 44100.0, is_loop: true, offset_seconds: 0.0, playback_rate: 1.0, quantum_count: 260, stop_time: None, starved_quantum_count: 0 },
+			// 48000 소리를 바꿔 푼 것의 반복. (SincResampler 를 조각마다 이어 부른다)
+			StreamCase { file_name: "vorbis_stereo.webm", context_sample_rate: 44100.0, is_loop: true, offset_seconds: 0.0, playback_rate: 1.0, quantum_count: 300, stop_time: None, starved_quantum_count: 0 },
+			// 되감은 자리부터. (0.1 초, 반복)
+			StreamCase { file_name: "mp3_stereo.mp3", context_sample_rate: 44100.0, is_loop: true, offset_seconds: 0.1, playback_rate: 1.0, quantum_count: 200, stop_time: None, starved_quantum_count: 0 },
+			// 멈춤. (stop(when) 이 같은 프레임에서 끊는다)
+			StreamCase { file_name: "mp3_stereo.mp3", context_sample_rate: 44100.0, is_loop: true, offset_seconds: 0.0, playback_rate: 1.0, quantum_count: 120, stop_time: Some(0.4), starved_quantum_count: 0 },
+			// 보간: 빠르기 1.5, 시작 자리 소수.
+			StreamCase { file_name: "mp3_stereo.mp3", context_sample_rate: 44100.0, is_loop: true, offset_seconds: 0.0123, playback_rate: 1.5, quantum_count: 200, stop_time: None, starved_quantum_count: 0 },
+			// 보간: 컨텍스트 48000, 모노, 끝의 외삽.
+			StreamCase { file_name: "mp3_mono22.mp3", context_sample_rate: 48000.0, is_loop: false, offset_seconds: 0.0, playback_rate: 1.0, quantum_count: 120, stop_time: None, starved_quantum_count: 0 },
+			StreamCase { file_name: "mp3_mono22.mp3", context_sample_rate: 48000.0, is_loop: true, offset_seconds: 0.05, playback_rate: 0.75, quantum_count: 300, stop_time: None, starved_quantum_count: 0 },
+		];
+		for stream_case in case_list.iter() {
+			let (buffer_output, stream_output, buffer_ended_quantum, stream_ended_quantum) = render_buffer_and_stream(stream_case);
+			let maximum_difference = read_maximum_difference(&buffer_output, &stream_output);
+			assert_eq!(maximum_difference, 0.0, "{} 반복 {} 자리 {} 빠르기 {} 표본율 {}", stream_case.file_name, stream_case.is_loop, stream_case.offset_seconds, stream_case.playback_rate, stream_case.context_sample_rate);
+			assert_eq!(buffer_ended_quantum, stream_ended_quantum, "{} 끝난 퀀텀", stream_case.file_name);
+			assert!(buffer_output.iter().any(|sample| *sample != 0.0));
+		}
+	}
+
+	//==============================================================================
+	/// 링이 비면 그 동안은 0 을 내고 자리는 컨텍스트 시계대로 흐른다. (풀개가 따라잡은 뒤 표본은 버퍼의 같은 자리와 같다)
+	//==============================================================================
+	#[test]
+	fn starved_stream_keeps_context_timing() {
+		let stream_case = StreamCase { file_name: "mp3_stereo.mp3", context_sample_rate: 44100.0, is_loop: true, offset_seconds: 0.0, playback_rate: 1.0, quantum_count: 120, stop_time: None, starved_quantum_count: 3 };
+		let (buffer_output, stream_output, _, _) = render_buffer_and_stream(&stream_case);
+		let starved_sample_count = 3 * RENDER_QUANTUM_FRAMES * 2;
+		assert!(stream_output[..starved_sample_count].iter().all(|sample| *sample == 0.0));
+		assert_eq!(read_maximum_difference(&buffer_output[starved_sample_count..], &stream_output[starved_sample_count..]), 0.0);
+	}
+
+	//==============================================================================
+	/// 풀개 스레드로 채워도 같다. (소리 스레드 자리의 이 시험 스레드가 퀀텀마다 링이 찰 때까지 기다린다, 반복 3 바퀴)
+	/// - 메모리: 통째로 푼 버퍼는 PCM(프레임 x 채널 x 4 바이트), 스트리밍은 링(16384 x 채널 x 4 바이트)과 메모리에서 읽었으면 압축된 바이트.
+	//==============================================================================
+	#[test]
+	fn stream_feeder_thread_fills_ring() {
+		let path = format!("{}/tests/assets/audio/vorbis_stereo.ogg", env!("CARGO_MANIFEST_DIR"));
+		let decoded = crate::platform::audio::decode::decode_audio_data(&std::fs::read(&path).unwrap()).unwrap();
+		let frame_count = decoded.channel_data[0].len();
+		let stream_data = Arc::new(crate::platform::audio::streaming::AudioStreamData::open(crate::platform::audio::decode::stream::StreamMedia::File(std::path::PathBuf::from(&path))).unwrap());
+		let (stream_feeder, stream_ring_reader, start_virtual_read_index, skip_frame_count) = crate::platform::audio::streaming::create_stream_start(stream_data.clone(), true, 0.0, 1.0);
+		let ring_memory_size = stream_ring_reader.get_ring().get_memory_size();
+		assert_eq!(ring_memory_size, crate::platform::audio::streaming::STREAM_RING_FRAMES * 2 * 4);
+		assert!(ring_memory_size < frame_count * 2 * 4 * 10 || frame_count < 16384);
+		crate::platform::audio::streaming::spawn_stream_feeder(stream_feeder);
+		let (command_sender, mut renderer, _shared) = create_renderer(44100.0);
+		command_sender.send(MixerCommand::AddPlayer { player_id: 1, output_bus_id: None, ended_generation: Arc::new(AtomicU64::new(0)), gain_value: Arc::new(AtomicU32::new(0)) }).unwrap();
+		let mut output = Vec::new();
+		let mut stream_ring_reader = Some(stream_ring_reader);
+		let quantum_count = (frame_count * 3).div_ceil(RENDER_QUANTUM_FRAMES);
+		for _ in 0..quantum_count {
+			if let Some(stream_ring_reader) = stream_ring_reader.take() {
+				let start_instant = std::time::Instant::now();
+				while stream_ring_reader.get_ring().get_available_frame_count() < (RENDER_QUANTUM_FRAMES * 2) as u64 && start_instant.elapsed() < std::time::Duration::from_secs(5) {
+					std::thread::sleep(std::time::Duration::from_millis(1));
+				}
+				command_sender.send(MixerCommand::StartStream { player_id: 1, stream_ring_reader, start_virtual_read_index, skip_frame_count, is_loop: true, playback_rate: 1.0, generation: 1 }).unwrap();
+			}
+			// 소리 스레드처럼 기다리지 않으면 링이 빌 수 있어, 시험은 풀개가 앞서기를 기다린다.
+			let start_instant = std::time::Instant::now();
+			while start_instant.elapsed() < std::time::Duration::from_secs(5) {
+				let is_ready = renderer.player_list.first().and_then(|player| player.source.as_ref()).map(|(source, _)| match source {
+					SourceNode::Stream(stream_source) => {
+						stream_source.stream_ring_reader.get_ring().get_available_frame_count() >= (RENDER_QUANTUM_FRAMES * 2) as u64
+					}
+					SourceNode::Buffer(_) => {
+						true
+					}
+				}).unwrap_or(true);
+				if is_ready {
+					break;
+				}
+				std::thread::sleep(std::time::Duration::from_millis(1));
+			}
+			let mut quantum = vec![0.0f32; 2 * RENDER_QUANTUM_FRAMES];
+			renderer.render_interleaved(&mut quantum, 2);
+			output.extend_from_slice(&quantum);
+		}
+		for (frame_index, frame) in output.chunks(2).enumerate().take(frame_count * 3) {
+			let expected_left = decoded.channel_data[0][frame_index % frame_count];
+			let expected_right = decoded.channel_data[1][frame_index % frame_count];
+			assert_eq!(frame[0], expected_left.clamp(-1.0, 1.0), "프레임 {}", frame_index);
+			assert_eq!(frame[1], expected_right.clamp(-1.0, 1.0), "프레임 {}", frame_index);
+		}
+		// 한 바퀴를 끝까지 풀어 길이가 푼 길이로 바뀌었다.
+		assert_eq!(stream_data.get_frame_count(), frame_count as u64);
 	}
 
 	//==============================================================================

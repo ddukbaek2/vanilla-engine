@@ -12,18 +12,78 @@
 //!   load, load_from_bytes, load_from_asset 은 원본처럼 await 할 수 있는 AudioLoadHandle 을 돌려준다. 디코딩까지 끝나면 Ok, 실패하면 까닭(원본 reject)이다.
 //!   (그 자리에서 실패를 알 수 있는 데스크탑은 손잡이의 get_load_error 로 바로 본다) 이미 읽기를 건 애셋은 wait_for_load().await 로도 기다린다.
 //!   엔진에서는 engine.load_audio_asset("sounds/hit.ogg") 로 애셋 폴더 기준 경로를 읽는다.
+//! - 읽기 방식: set_load_type(AudioLoadType). 원본처럼 기본은 통째로 풀기(DecompressOnLoad), 엔진 SoundSystem 의 배경음악만 소리 표에 load_type 이 없으면 스트리밍이다.
+//!   스트리밍(Streaming)은 풀지 않고 압축된 자리만 들어, 틀 때 조금씩 푼다. 데스크탑은 풀개 스레드가 조각마다 풀어 링 버퍼로 믹서에 내보내고
+//!   (platform/audio/streaming.rs, 통째로 푼 버퍼와 같은 표본), 웹은 원본처럼 HTMLAudioElement 를 MediaElementAudioSourceNode 로 플레이어의 GainNode 에 잇는다.
+//!   자동(Automatic)은 AUTOMATIC_STREAMING_BYTE_THRESHOLD(1 MiB)보다 큰 파일만 스트리밍한다.
 //! - 원본과 다른 점:
 //!   Asset 기반 클래스(애셋 타입)가 없다. 읽기 실패는 예외 대신 Err 로 알린다. (까닭은 원본 getLoadError 처럼 get_load_error() 에 남는다)
 //!   플레이어들이 같이 들 수 있게 `Rc<AudioAsset>` 로 쓰고, 웹에서 디코딩이 끝난 뒤 채우도록 안쪽을 RefCell 로 둔다.
 //==============================================================================
 use crate::core::engine::Engine;
-use crate::platform::audio::{self as audio_backend, AudioBuffer};
+use crate::platform::audio::{self as audio_backend, AudioBuffer, AudioStream};
 use std::cell::{Cell, RefCell};
 use std::future::{Future, IntoFuture};
 use std::path::Path;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
+
+//==============================================================================
+/// 자동(AudioLoadType::Automatic)일 때 스트리밍으로 고르는 파일 크기. (바이트, 이보다 크면 스트리밍)
+/// - 통째로 풀면 1 초에 채널마다 44100 개의 f32 를 든다. (스테레오 1 초 약 345 KiB, 3 분이면 약 61 MiB)
+///   128 kbps MP3 1 MiB 는 약 65 초라 풀면 약 22 MiB 다. 효과음은 거의 이보다 작고, 이보다 큰 WAV 도 6 초 안팎이라 흘려 틀어도 된다.
+///
+/// # 예제
+/// 문턱보다 작은 파일은 자동이어도 통째로 푼다
+/// ```rust
+/// use std::path::Path;
+/// use std::rc::Rc;
+/// use vanilla::{AudioAsset, AudioLoadType, AUTOMATIC_STREAMING_BYTE_THRESHOLD};
+///
+/// let path = Path::new("tests/assets/audio/wav_s16_stereo.wav");
+/// assert!(std::fs::metadata(path).unwrap().len() <= AUTOMATIC_STREAMING_BYTE_THRESHOLD);
+/// let audio_asset = Rc::new(AudioAsset::new());
+/// audio_asset.set_load_type(AudioLoadType::Automatic);
+/// audio_asset.load(path);
+/// assert!(!audio_asset.is_streaming());
+/// assert!(audio_asset.get_audio_buffer().is_some());
+/// ```
+//==============================================================================
+pub const AUTOMATIC_STREAMING_BYTE_THRESHOLD: u64 = 1024 * 1024;
+
+//==============================================================================
+/// 소리 읽기 방식. (원본 AudioLoadType, 유니티 AudioClip 의 Load Type, 언리얼 사운드 웨이브의 스트리밍과 같은 갈래)
+///
+/// # 예제
+/// 배경음은 스트리밍, 효과음은 통째로 풀기
+/// ```rust
+/// use std::path::Path;
+/// use std::rc::Rc;
+/// use vanilla::{AudioAsset, AudioLoadType};
+///
+/// let music_asset = Rc::new(AudioAsset::new());
+/// music_asset.set_load_type(AudioLoadType::Streaming);
+/// music_asset.load(Path::new("tests/assets/audio/mp3_stereo.mp3"));
+/// let effect_asset = Rc::new(AudioAsset::new());
+/// effect_asset.set_load_type(AudioLoadType::DecompressOnLoad);
+/// effect_asset.load(Path::new("tests/assets/audio/mp3_stereo.mp3"));
+/// assert!(music_asset.is_streaming());
+/// assert!(music_asset.get_audio_buffer().is_none());
+/// assert!(!effect_asset.is_streaming());
+/// assert!((music_asset.get_duration() - effect_asset.get_duration()).abs() < 0.001);
+/// ```
+//==============================================================================
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum AudioLoadType {
+	/// 크기를 보고 고른다. (AUTOMATIC_STREAMING_BYTE_THRESHOLD 보다 큰 파일은 스트리밍, 아니면 통째로 풀기, 고른 애셋만)
+	Automatic,
+	/// 읽을 때 PCM 으로 통째로 푼다. (효과음처럼 짧고 자주 겹쳐 트는 소리, 시작이 바로이고 겹쳐 틀어도 싸다, 기본)
+	#[default]
+	DecompressOnLoad,
+	/// 풀지 않고 틀 때 조금씩 풀어 흘린다. (배경음처럼 긴 소리, 메모리는 압축된 파일 크기 이하, 데스크탑은 플레이어마다 링 버퍼 128 KiB)
+	Streaming,
+}
 
 //==============================================================================
 /// 오디오 읽기 손잡이. (AudioAsset 의 load 들이 돌려준다. 원본 load 의 Promise 자리, 애셋을 나눠 든다)
@@ -167,6 +227,9 @@ impl IntoFuture for AudioLoadHandle {
 pub struct AudioAsset {
 	is_loaded: Cell<bool>,
 	audio_buffer: RefCell<Option<AudioBuffer>>,
+	/// 스트리밍으로 읽었으면 틀 자리. (원본 streamUrl 과 길이)
+	audio_stream: RefCell<Option<AudioStream>>,
+	load_type: Cell<AudioLoadType>,
 	load_error: RefCell<Option<String>>,
 }
 
@@ -181,6 +244,8 @@ impl AudioAsset {
 		AudioAsset {
 			is_loaded: Cell::new(false),
 			audio_buffer: RefCell::new(None),
+			audio_stream: RefCell::new(None),
+			load_type: Cell::new(AudioLoadType::DecompressOnLoad),
 			load_error: RefCell::new(None),
 		}
 	}
@@ -217,7 +282,7 @@ impl AudioAsset {
 	pub fn load(self: &Rc<AudioAsset>, asset_path: &Path) -> AudioLoadHandle {
 		if !self.is_loaded() {
 			self.load_error.replace(None);
-			if let Err(load_error) = audio_backend::load_audio_file(self, asset_path) {
+			if let Err(load_error) = audio_backend::load_audio_file(self, asset_path, self.get_load_type()) {
 				self.set_load_error(load_error);
 			}
 		}
@@ -280,7 +345,7 @@ impl AudioAsset {
 	pub fn load_from_bytes(self: &Rc<AudioAsset>, bytes: Vec<u8>) -> AudioLoadHandle {
 		if !self.is_loaded() {
 			self.load_error.replace(None);
-			if let Err(load_error) = audio_backend::load_audio_bytes(self, bytes) {
+			if let Err(load_error) = audio_backend::load_audio_bytes(self, bytes, self.get_load_type()) {
 				self.set_load_error(load_error);
 			}
 		}
@@ -338,25 +403,99 @@ impl AudioAsset {
 	}
 
 	//==============================================================================
+	/// 읽기 방식 설정. (다음 load, load_from_bytes 부터, 이미 읽혔으면 바뀌지 않는다)
+	///
+	/// # 인자
+	/// - `load_type`: 읽기 방식.
+	///
+	/// # 예제
+	/// 긴 배경음을 스트리밍으로 읽기
+	/// ```rust
+	/// use std::path::Path;
+	/// use std::rc::Rc;
+	/// use vanilla::{AudioAsset, AudioLoadType};
+	///
+	/// let audio_asset = Rc::new(AudioAsset::new());
+	/// audio_asset.set_load_type(AudioLoadType::Streaming);
+	/// audio_asset.load(Path::new("tests/assets/audio/vorbis_stereo.ogg"));
+	/// assert_eq!(audio_asset.get_load_type(), AudioLoadType::Streaming);
+	/// assert!(audio_asset.is_streaming());
+	/// assert!(audio_asset.get_duration() > 0.0);
+	/// ```
+	//==============================================================================
+	pub fn set_load_type(&self, load_type: AudioLoadType) {
+		self.load_type.set(load_type);
+	}
+
+	//==============================================================================
+	/// 읽기 방식 반환.
+	///
+	/// # 돌려줌
+	/// 읽기 방식. (기본 DecompressOnLoad, 엔진 SoundSystem 의 배경음악만 소리 표에 load_type 이 없으면 Streaming)
+	//==============================================================================
+	pub fn get_load_type(&self) -> AudioLoadType {
+		self.load_type.get()
+	}
+
+	//==============================================================================
+	/// 스트리밍으로 읽혔는지. (읽기 방식이 Automatic 이면 읽은 뒤에 정해진다)
+	///
+	/// # 돌려줌
+	/// 스트리밍으로 읽혔으면 true. (통째로 풀었거나 읽기 전이면 false)
+	//==============================================================================
+	pub fn is_streaming(&self) -> bool {
+		self.audio_stream.borrow().is_some()
+	}
+
+	//==============================================================================
+	/// 스트리밍 소리의 주소. (원본 getStreamUrl, 웹은 미디어 요소의 src)
+	///
+	/// # 돌려줌
+	/// 웹은 원본처럼 파일 주소나 blob: 주소, 데스크탑은 파일에서 읽었으면 그 경로. (메모리에서 읽은 데스크탑 스트리밍이나 스트리밍이 아니면 None)
+	//==============================================================================
+	pub fn get_stream_url(&self) -> Option<String> {
+		self.audio_stream.borrow().as_ref().and_then(|audio_stream| audio_stream.get_stream_url())
+	}
+
+	//==============================================================================
+	/// 스트리밍 소리. (플레이어가 튼다)
+	//==============================================================================
+	pub(crate) fn get_audio_stream(&self) -> Option<AudioStream> {
+		self.audio_stream.borrow().clone()
+	}
+
+	//==============================================================================
+	/// 스트리밍으로 열린 소리를 채운다. (백엔드가 부른다)
+	//==============================================================================
+	pub(crate) fn set_audio_stream(&self, audio_stream: AudioStream) {
+		self.audio_buffer.replace(None);
+		self.audio_stream.replace(Some(audio_stream));
+		self.is_loaded.set(true);
+	}
+
+	//==============================================================================
 	/// 오디오 버퍼 반환. (값싼 복제: 데스크탑은 Arc, 웹은 자바스크립트 객체 참조)
 	///
 	/// # 돌려줌
-	/// 디코딩한 버퍼. 읽히기 전이거나 실패했으면 None.
+	/// 디코딩한 버퍼. 읽히기 전이거나 실패했거나 스트리밍이면 None.
 	//==============================================================================
 	pub fn get_audio_buffer(&self) -> Option<AudioBuffer> {
 		self.audio_buffer.borrow().clone()
 	}
 
 	//==============================================================================
-	/// 재생 시간 반환. (초, 버퍼가 없으면 0)
+	/// 재생 시간 반환. (초, 읽기 전이면 0)
 	///
 	/// # 돌려줌
-	/// 버퍼의 재생 시간. (초) 버퍼가 없으면 0.
+	/// 버퍼의 재생 시간. (초) 스트리밍이면 컨테이너가 알리는 길이(원본 미디어 요소의 메타데이터 길이 자리, 데스크탑은 끝까지 한 번 풀고 나면 푼 길이). 읽기 전이면 0.
 	//==============================================================================
 	pub fn get_duration(&self) -> f64 {
-		match self.audio_buffer.borrow().as_ref() {
-			Some(audio_buffer) => {
-				audio_backend::get_audio_buffer_duration(audio_buffer)
+		if let Some(audio_buffer) = self.audio_buffer.borrow().as_ref() {
+			return audio_backend::get_audio_buffer_duration(audio_buffer);
+		}
+		match self.audio_stream.borrow().as_ref() {
+			Some(audio_stream) => {
+				audio_stream.get_duration()
 			}
 			None => {
 				0.0
@@ -368,6 +507,7 @@ impl AudioAsset {
 	/// 디코딩한 버퍼를 채운다. (백엔드가 부른다)
 	//==============================================================================
 	pub(crate) fn set_audio_buffer(&self, audio_buffer: AudioBuffer) {
+		self.audio_stream.replace(None);
 		self.audio_buffer.replace(Some(audio_buffer));
 		self.is_loaded.set(true);
 	}

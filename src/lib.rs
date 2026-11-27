@@ -172,7 +172,7 @@ pub use crate::misc::steering2d::Steering2D;
 pub use crate::misc::toucheffect::{TouchEffect, TouchParticle};
 pub use crate::misc::typewriter::{Typewriter, TypewriterOptions, TypewriterTarget};
 pub use crate::misc::virtualpad::{VirtualPad, VirtualPadState};
-pub use crate::resource::audioasset::{AudioAsset, AudioLoadFuture, AudioLoadHandle};
+pub use crate::resource::audioasset::{AudioAsset, AudioLoadFuture, AudioLoadHandle, AudioLoadType, AUTOMATIC_STREAMING_BYTE_THRESHOLD};
 pub use crate::resource::blobasset::BlobAsset;
 pub use crate::resource::fontasset::{FontAsset, FontLoadFuture, FontLoadHandle};
 pub use crate::resource::imageasset::ImageAsset;

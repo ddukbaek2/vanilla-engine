@@ -11,6 +11,8 @@
 //! - 스트림은 관리 스레드가 든다. 장치가 빠지면(맥이 아니면 기본 장치가 바뀌어도) 같은 믹서로 기본 장치를 다시 연다. (원본 크롬도 기본 장치를 따라간다)
 //! - AudioBuffer 자리: 푼 소리를 Arc 로 든다. 복제는 값싸다. 해석은 decode 가 원본의 크롬 decodeAudioData 와 같게 한다.
 //!   (webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC. 앞뒤 다듬기, 44100Hz, WebAudio 스피커 규칙으로 내린 1 채널이나 2 채널)
+//! - AudioStream 자리: 스트리밍으로 읽은 소리. (원본 AudioLoadType.streaming, 압축된 자리(파일 경로나 바이트)와 다듬기 계획만 든다)
+//!   틀 때 플레이어마다 풀개 스레드가 조각마다 풀어 링 버퍼(128 KiB)를 채우고 믹서의 스트리밍 소스가 읽는다. (streaming.rs, 표본은 통째로 푼 버퍼와 같다)
 //! - 음량, 좌우, 정지는 다음 렌더 퀀텀부터 바로 바뀐다. 재생 빠르기는 다음 재생부터다. (원본과 같다)
 //! - 음량은 GainNode 의 AudioParam 이다. 음량 설정은 원본 gain.value 대입, SoundSystem 은 원본처럼 자동화(setValueAtTime 들)와 stop(when)을 건다.
 //!   지금 gain.value(get_gain_value)는 소리 스레드가 퀀텀마다 셈한 내재 값이다.
@@ -18,13 +20,15 @@
 //!   파형의 대역 제한 표(PeriodicWave)는 원본 컨텍스트처럼 표본율마다 한 번 지어 둔다.
 //==============================================================================
 use super::audioparam::ParamAutomation;
+use super::decode::stream::StreamMedia;
 use super::mixer::{AudioBufferData, MixerCommand, MixerRenderer, MixerShared};
+use super::streaming::{create_stream_start, spawn_stream_feeder, AudioStreamData};
 use super::oscillator::{OscillatorType, PeriodicWave};
 use super::pannermath::PannerSettings;
 use super::{GainAutomation, ListenerParam, PannerParam};
 use crate::core::audiomanager::AudioManagerState;
 use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME};
-use crate::resource::audioasset::AudioAsset;
+use crate::resource::audioasset::{AudioAsset, AudioLoadType, AUTOMATIC_STREAMING_BYTE_THRESHOLD};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::cell::{Cell, RefCell};
 use std::path::Path;
@@ -145,6 +149,37 @@ impl AudioBuffer {
 	//==============================================================================
 	pub fn sample_rate(&self) -> f32 {
 		self.data.sample_rate as f32
+	}
+}
+
+//==============================================================================
+/// 스트리밍으로 읽은 소리. (데스크탑: 압축된 자리와 머리를 Arc 로 든다, 복제는 값싸다)
+//==============================================================================
+#[derive(Clone)]
+pub(crate) struct AudioStream {
+	data: Arc<AudioStreamData>,
+}
+
+impl AudioStream {
+	//==============================================================================
+	/// 길이. (초, 열 때는 컨테이너로 셈한 어림, 끝까지 한 번 풀면 푼 길이)
+	//==============================================================================
+	pub(crate) fn get_duration(&self) -> f64 {
+		self.data.get_frame_count() as f64 / super::decode::DECODE_SAMPLE_RATE as f64
+	}
+
+	//==============================================================================
+	/// 틀 주소. (파일에서 읽었으면 그 경로, 메모리면 None)
+	//==============================================================================
+	pub(crate) fn get_stream_url(&self) -> Option<String> {
+		match &self.data.stream_media {
+			StreamMedia::File(path) => {
+				Some(path.to_string_lossy().to_string())
+			}
+			StreamMedia::Bytes(_) => {
+				None
+			}
+		}
 	}
 }
 
@@ -699,6 +734,45 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
+	/// 스트리밍 재생 시작. (time 초부터, 루프면 끝에서 처음으로 이어 튼다. 원본 미디어 요소 currentTime = time, play())
+	/// - 시작 자리는 버퍼와 같게 잡는다. (빠르기 1 이면 TimeToSampleFrame, 아니면 소수 자리) 정수 부분까지는 풀개가 처음부터 풀어 버린다.
+	/// - 처음부터 틀면 링을 그 자리에서 한 번 채워 첫 퀀텀부터 소리가 난다. 앞으로 건너뛰면 풀개 스레드가 건너뛰는 동안 소리가 늦을 수 있다. (자리는 컨텍스트 시계를 따른다)
+	//==============================================================================
+	pub(crate) fn start_stream_playback(&mut self, audio_stream: &AudioStream, is_loop: bool, time: f64) {
+		if self.mixer_link.is_none() {
+			return;
+		}
+		let (mut stream_feeder, stream_ring_reader, start_virtual_read_index, skip_frame_count) = create_stream_start(audio_stream.data.clone(), is_loop, time, self.playback_rate);
+		if time <= 0.0 {
+			stream_feeder.pump();
+		}
+		self.started_generation += 1;
+		self.send(MixerCommand::StartStream {
+			player_id: self.player_id,
+			stream_ring_reader,
+			start_virtual_read_index,
+			skip_frame_count,
+			is_loop,
+			playback_rate: self.playback_rate,
+			generation: self.started_generation,
+		});
+		spawn_stream_feeder(stream_feeder);
+		self.is_source_active = true;
+	}
+
+	//==============================================================================
+	/// 스트리밍 소리의 지금 자리. (웹은 미디어 요소의 currentTime, 데스크탑은 컨텍스트 시계로 셈하므로 None)
+	//==============================================================================
+	pub(crate) fn get_stream_time(&self) -> Option<f64> {
+		None
+	}
+
+	//==============================================================================
+	/// 애셋을 바꿀 때 멈춘 스트리밍이 받아 둔 것을 놓는다. (데스크탑은 멈추면 링과 풀개 스레드를 바로 놓아 할 일이 없다, 웹은 미디어 요소)
+	//==============================================================================
+	pub(crate) fn release_idle_stream(&mut self, _stream_url: Option<&str>) {}
+
+	//==============================================================================
 	/// 재생 빠르기 설정. (1 이면 그대로, 음 높이도 같이 바뀐다, 다음 재생부터)
 	//==============================================================================
 	pub fn set_playback_rate(&mut self, playback_rate: f64) {
@@ -843,7 +917,33 @@ impl AudioBusBackend {
 //==============================================================================
 /// 파일 읽기. (그 자리에서 읽고 디코딩한다, 읽은 파일은 리소스 사용량에 적는다)
 //==============================================================================
-pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path) -> Result<(), String> {
+pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path, load_type: AudioLoadType) -> Result<(), String> {
+	// 스트리밍이거나 자동인데 문턱보다 크면 머리만 읽는다. (원본은 자동이면 받는 머리의 Content-Length 로 가린다)
+	let is_streamed = match load_type {
+		AudioLoadType::Streaming => {
+			true
+		}
+		AudioLoadType::Automatic => {
+			std::fs::metadata(asset_path).map(|metadata| metadata.len() > AUTOMATIC_STREAMING_BYTE_THRESHOLD).unwrap_or(false)
+		}
+		AudioLoadType::DecompressOnLoad => {
+			false
+		}
+	};
+	if is_streamed {
+		return match AudioStreamData::open(StreamMedia::File(asset_path.to_path_buf())) {
+			Ok(audio_stream_data) => {
+				crate::base::platform::record_loaded_file(&asset_path.to_string_lossy(), std::fs::metadata(asset_path).map(|metadata| metadata.len()).unwrap_or(0));
+				audio_asset.set_audio_stream(AudioStream { data: Arc::new(audio_stream_data) });
+				Ok(())
+			}
+			Err(error) => {
+				let load_error = format!("Error loading sound: {} ({})", asset_path.display(), error);
+				audio_asset.set_load_error(load_error.clone());
+				Err(load_error)
+			}
+		};
+	}
 	let decode_result = std::fs::read(asset_path).map_err(|error| format!("{}", error)).and_then(|bytes| {
 		crate::base::platform::record_loaded_file(&asset_path.to_string_lossy(), bytes.len() as u64);
 		create_audio_buffer(&bytes)
@@ -864,7 +964,22 @@ pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path) -> Resul
 //==============================================================================
 /// 메모리에서 읽기. (그 자리에서 디코딩한다)
 //==============================================================================
-pub fn load_audio_bytes(audio_asset: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<(), String> {
+pub fn load_audio_bytes(audio_asset: &Rc<AudioAsset>, bytes: Vec<u8>, load_type: AudioLoadType) -> Result<(), String> {
+	// 스트리밍이거나 자동인데 문턱보다 크면 압축된 바이트를 그대로 든다. (원본 blob: 주소)
+	let is_streamed = load_type == AudioLoadType::Streaming || (load_type == AudioLoadType::Automatic && bytes.len() as u64 > AUTOMATIC_STREAMING_BYTE_THRESHOLD);
+	if is_streamed {
+		return match AudioStreamData::open(StreamMedia::Bytes(Arc::from(bytes))) {
+			Ok(audio_stream_data) => {
+				audio_asset.set_audio_stream(AudioStream { data: Arc::new(audio_stream_data) });
+				Ok(())
+			}
+			Err(error) => {
+				let load_error = format!("Error loading sound from memory ({})", error);
+				audio_asset.set_load_error(load_error.clone());
+				Err(load_error)
+			}
+		};
+	}
 	match create_audio_buffer(&bytes) {
 		Ok(audio_buffer) => {
 			audio_asset.set_audio_buffer(audio_buffer);

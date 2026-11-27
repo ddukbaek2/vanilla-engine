@@ -6,7 +6,8 @@
 //!   AudioPlayerBackend(플레이어 하나의 소리 내는 부분), AudioBusBackend(버스 하나의 소리 모으는 부분, create_player_backend 로 그 버스로 트는 플레이어),
 //!   HAS_USER_GESTURE_AT_START,
 //!   create_audio_platform_state, create_audio_context, resume_audio_context, is_audio_context_running,
-//!   load_audio_file, load_audio_bytes, get_audio_buffer_duration, play_beep_tone
+//!   load_audio_file, load_audio_bytes(읽기 방식 AudioLoadType 을 받는다), get_audio_buffer_duration, play_beep_tone,
+//!   AudioStream(스트리밍으로 읽은 소리, get_duration, get_stream_url), AudioPlayerBackend::start_stream_playback, get_stream_time
 //!   suspend_audio_context(컨텍스트 멈춤), get_audio_context_time(컨텍스트 시계), AudioPlayerBackend::set_pan(좌우)
 //! - 데스크탑: cpal 출력 위의 엔진 믹서. (desktop.rs, mixer.rs. 노드 그래프와 셈이 크롬 WebAudio 와 같다) 소리 파일 해석은 크롬 decodeAudioData 와 같게 decode/ 가 한다. (symphonia 0.6, Opus 는 opus-pure)
 //!   PannerNode(초안, panner.rs)의 HRTF 는 크롬의 HRTFPanner 와 IRCAM 자료(Composite.flac)를 옮긴 hrtf/ 가 셈한다. (FFT 는 크롬과 같은 rustfft)
@@ -28,11 +29,15 @@ mod oscillator;
 #[cfg(not(target_arch = "wasm32"))]
 mod panner;
 #[cfg(not(target_arch = "wasm32"))]
+mod streaming;
+#[cfg(not(target_arch = "wasm32"))]
 mod threadpriority;
 /// PannerNode 셈. (초안, 데스크탑 믹서와 experimental::spatialaudio 가 같이 쓴다)
 pub(crate) mod pannermath;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use desktop::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use desktop::AudioStream;
 #[cfg(not(target_arch = "wasm32"))]
 pub use desktop::{AudioBuffer, AudioContext};
 
@@ -40,6 +45,8 @@ pub use desktop::{AudioBuffer, AudioContext};
 mod web;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::*;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use web::AudioStream;
 #[cfg(target_arch = "wasm32")]
 pub use web::{AudioBuffer, AudioContext};
 

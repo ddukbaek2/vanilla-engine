@@ -79658,8 +79658,8 @@
 		{
 			"name": "core/soundsystem",
 			"summary": {
-				"ko": "소리 표로 다루는 배경음악과 효과음. (vanilla.js core/soundsystem.js 의 SoundSystem)\n- AudioManager 와 AudioAsset 을 쓴다. 소리를 합성하지 않고 파일만 튼다.\n- 소리 표의 줄마다 SoundRow { id, paths, volume, minimum_interval, is_music, maximum_voices, pitch_variation, play_seconds, fade_out_seconds }.\n  paths: 같은 소리를 여러 번 녹음한 무리. 낼 때마다 받아 둔 것 가운데 하나를 고르고 바로 앞과 같은 것은 고르지 않는다.\n  minimum_interval: 같은 소리를 다시 낼 수 있는 간격. (초, 한꺼번에 몰려 시끄럽지 않게)\n  maximum_voices: 같은 소리가 한꺼번에 날 수 있는 수. (넘으면 가장 오래된 것을 끊는다, None 이면 효과음 전체의 수까지, 0 이면 원본처럼 하나)\n  pitch_variation: 낼 때마다 음 높이를 흔드는 비. (0.05 면 ±5%)\n  play_seconds, fade_out_seconds: 효과음을 앞의 play_seconds 초만 틀고 fade_out_seconds 초 동안 줄여 끈다. (0 이면 끝까지)\n- 크기: 배경음악 = 음악 크기 × 음악의 비 × 소리의 크기, 효과음 = 효과음 크기 × 소리의 크기 × 부를 때의 크기.\n  음악과 효과음의 크기는 버스(get_music_bus, get_effect_bus 의 AudioBus)에 걸고, 바꿀 때 0.05 초를 시간 상수로 따라간다. (원본 setTargetAtTime)\n  버스는 첫 누름 뒤에 만든다. (그 전에는 None) 버스로 만든 플레이어(AudioBus::create_audio_player)도 설정 크기와 음소거를 따른다.\n- 배경음악은 틀어 달라고 한 것(get_music_id)을 기억해 두고, 받기 전이거나 첫 누름 전이면 그때 튼다. (\"\" 이면 끈다)\n  겹쳐 바꿀 수 있고(fade_seconds), 멈췄던 자리를 소리마다 기억해 이어 틀 수 있다. (is_resumed) 첫 파일을 받지 못했으면 틀지 않는다.\n- 음소거는 설정한 크기보다 먼저다. 아래 가운데 하나라도 맞으면 소리가 나지 않는다.\n  바깥의 음소거(set_external_mute_provider, 플랫폼 SDK 나 광고), 사용자의 음소거(set_user_muted), 페이지가 가려짐(다른 탭, 앱 전환),\n  터치가 주된 기기에서 창이 포커스를 잃음(blur). 아이폰은 페이지가 가려졌다는 알림이 앱이 내려간 뒤에 와서 오디오가 멈추지 못한 채 얼어\n  마지막 소리 조각이 되풀이되는데, 포커스를 잃는 알림은 그보다 먼저 온다. 데스크탑(마우스)은 캔버스 바깥을 누를 때도 포커스를 잃어 따르지 않는다.\n  포커스가 돌아오거나 화면을 누르거나 페이지가 다시 보이면 풀린다.\n- 음소거인 동안은 AudioContext 도 멈춘다. (풀리면 깨운다) 아이폰은 돌던 AudioContext 를 앱 전환이나 전면 광고가 가로채면 돌아와서 깨워도\n  소리가 나지 않아, 그 전에 스스로 멈춰 둔다. 풀린 뒤에도 돌지 않으면 0.5 초마다 다시 깨워 본다.\n- 허락하면(set_autoplay_allowed_provider, 주지 않으면 허락) 누르기 전에도 첫 update 에서 한 번 깨워 본다. 막히면 엔진이 첫 누름에 깨운다.\n  첫 누름(user gesture) 전이거나 AudioContext 가 돌지 않을 때는 효과음을 내지 않는다. (멈춘 동안 부른 소리가 깨어날 때 한꺼번에 나지 않게)\n- 소리 파일은 놀이를 막지 않게 뒤에서 받는다. (웹은 디코딩이 끝나면 난다) 못 받은 소리는 나지 않을 뿐이다.\n- 시각: 같은 소리 간격과 다시 깨우기 간격은 원본 performance.now() 처럼 벽시계(web_time::Instant), 크기 따라가기와 줄이기,\n  음악의 멈춘 자리는 원본처럼 AudioContext 시계(AudioManager::get_context_time)로 센다.\n- 함께 쓰는 소리: set_sound_system, read_sound_system. (원본 모듈 변수, 스레드 하나에 하나)\n- 원본과 다른 것:\n  - 만들 때 AudioManager 대신 엔진을 받는다. 원본은 document 와 window 에 리스너를 다는데, 러스트 판은 엔진의 페이지 이벤트(PageEvent)로 받기 때문이다.\n    이벤트가 온 그 자리에서는 AudioContext 를 멈추거나 깨우고(소리가 바로 멎는다), 효과음 끊기는 다음 update 에서 한다.\n  - load_sounds, load_sound 는 애셋 폴더 기준 경로를 풀 엔진을 받는다. (원본은 브라우저가 페이지 주소로 푼다) 데스크탑은 그 자리에서 읽는다.\n    load_sounds 는 원본처럼 await 할 수 있는 SoundLoadHandle 을 돌려준다. (걸어 둔 소리를 다 받거나 실패할 때까지 기다린다, wait_for_load().await 도 같다)\n  - 크기 바꾸기와 줄이기는 원본처럼 GainNode 의 AudioParam 자동화(value 대입, setValueAtTime, linearRampToValueAtTime, setTargetAtTime,\n    cancelScheduledValues)와 source.stop(when)으로 소리 장치에 맡긴다. 웹은 WebAudio 에, 데스크탑은 믹서(크로미엄과 같은 셈)에 건다.\n    원본 { source, gainNode } 자리는 버스로 만든 AudioPlayer 하나이고, 끝난 소리(원본 onended)는 update 에서 목록에서 뺀다.\n    원본처럼 버스의 set_volume, mute 로 건 값은 SoundSystem 이 크기를 다시 걸 때까지 간다.\n  - 무리에서 고르기와 음 높이 흔들기는 원본 Math.random 자리인 엔진 math::random(처음 쓸 때 시각으로 씨앗을 정한다)을 쓴다.\n  - add_sound_asset(파일로 받지 않는 소리 더하기)과 get_effect_voice_count 는 러스트 판에서 먼저 만들었다. (원본에도 같은 이름으로 넣었다)",
-				"en": "Background music and sound effects handled by a sound table. (SoundSystem of vanilla.js core/soundsystem.js)\n- Uses AudioManager and AudioAsset. Does not synthesize sound, only plays files.\n- Each row of the sound table is SoundRow { id, paths, volume, minimum_interval, is_music, maximum_voices, pitch_variation, play_seconds, fade_out_seconds }.\n  paths: a group of multiple recordings of the same sound. Each time it plays, one of the loaded ones is picked, never the same as the one just before.\n  minimum_interval: interval before the same sound can play again. (seconds, so it does not pile up and get noisy)\n  maximum_voices: number of copies of the same sound that can play at once. (over that, the oldest is cut, None means up to the total sound effect count, 0 means one as in the original)\n  pitch_variation: ratio by which the pitch wobbles each time it plays. (0.05 means ±5%)\n  play_seconds, fade_out_seconds: plays only the first play_seconds seconds of a sound effect and fades it out over fade_out_seconds seconds. (0 means to the end)\n- Volume: background music = music volume × music ratio × sound volume, sound effect = effect volume × sound volume × volume at the call.\n  Music and effect volumes are applied on buses (AudioBus from get_music_bus, get_effect_bus), and follow changes with a 0.05 second time constant. (the original setTargetAtTime)\n  Buses are created after the first press. (None before that) Players created from a bus (AudioBus::create_audio_player) also follow the set volume and mute.\n- Background music remembers what was requested (get_music_id) and plays it then if it is not loaded yet or before the first press. (\"\" stops it)\n  It can crossfade (fade_seconds), and remembers where each sound stopped so it can resume. (is_resumed) It does not play if the first file failed to load.\n- Mute takes priority over the set volume. If any of the following holds, no sound is made.\n  External mute (set_external_mute_provider, platform SDK or ads), user mute (set_user_muted), the page being hidden (another tab, app switch),\n  the window losing focus (blur) on touch-primary devices. On iPhone the page-hidden notification arrives after the app goes down, so audio freezes without stopping and\n  the last sound fragment repeats, but the focus-lost notification comes before that. Desktop (mouse) also loses focus when clicking outside the canvas, so it does not follow this.\n  It is released when focus returns, the screen is pressed, or the page becomes visible again.\n- While muted, the AudioContext is suspended too. (woken when released) On iPhone, if an app switch or an interstitial ad takes over a running AudioContext, waking it on return\n  makes no sound, so it suspends itself beforehand. If it still does not run after being released, it tries waking it again every 0.5 seconds.\n- If allowed (set_autoplay_allowed_provider, allowed if not given), it tries waking once on the first update even before a press. If blocked, the engine wakes it on the first press.\n  Before the first press (user gesture) or when the AudioContext is not running, sound effects are not played. (so sounds called while suspended do not all play at once on wake)\n- Sound files are loaded in the background so they do not block play. (on the web they play once decoding finishes) Sounds that fail to load simply do not play.\n- Time: the same-sound interval and the re-wake interval use the wall clock (web_time::Instant) like the original performance.now(), and volume following, fade out,\n  and the music's stopped position use the AudioContext clock (AudioManager::get_context_time) as in the original.\n- Shared sound: set_sound_system, read_sound_system. (the original module variable, one per thread)\n- Differences from the original:\n  - It takes the engine instead of AudioManager at creation. The original attaches listeners to document and window, but the Rust version receives them through the engine's page events (PageEvent).\n    The AudioContext is suspended or woken right where the event arrives (the sound stops immediately), and cutting sound effects happens on the next update.\n  - load_sounds, load_sound take the engine to resolve paths relative to the asset folder. (in the original the browser resolves them against the page address) Desktop reads them on the spot.\n    load_sounds returns an awaitable SoundLoadHandle as in the original. (waits until all requested sounds are loaded or fail, same as wait_for_load().await)\n  - Volume changes and fade out are left to the sound device as in the original, with GainNode AudioParam automation (value assignment, setValueAtTime, linearRampToValueAtTime, setTargetAtTime,\n    cancelScheduledValues) and source.stop(when). On the web they are applied to WebAudio, on desktop to the mixer (same math as Chromium).\n    The original { source, gainNode } is one AudioPlayer created from a bus, and finished sounds (the original onended) are removed from the list in update.\n    As in the original, values set with the bus's set_volume, mute last until SoundSystem applies the volume again.\n  - Picking from a group and wobbling the pitch use the engine's math::random (seeded with the time on first use) in place of the original Math.random.\n  - add_sound_asset (adding a sound not loaded from a file) and get_effect_voice_count were made in the Rust version first. (also added to the original under the same names)"
+				"ko": "소리 표로 다루는 배경음악과 효과음. (vanilla.js core/soundsystem.js 의 SoundSystem)\n- AudioManager 와 AudioAsset 을 쓴다. 소리를 합성하지 않고 파일만 튼다.\n- 소리 표의 줄마다 SoundRow { id, paths, volume, minimum_interval, is_music, maximum_voices, pitch_variation, play_seconds, fade_out_seconds, load_type }.\n  paths: 같은 소리를 여러 번 녹음한 무리. 낼 때마다 받아 둔 것 가운데 하나를 고르고 바로 앞과 같은 것은 고르지 않는다.\n  minimum_interval: 같은 소리를 다시 낼 수 있는 간격. (초, 한꺼번에 몰려 시끄럽지 않게)\n  maximum_voices: 같은 소리가 한꺼번에 날 수 있는 수. (넘으면 가장 오래된 것을 끊는다, None 이면 효과음 전체의 수까지, 0 이면 원본처럼 하나)\n  pitch_variation: 낼 때마다 음 높이를 흔드는 비. (0.05 면 ±5%)\n  play_seconds, fade_out_seconds: 효과음을 앞의 play_seconds 초만 틀고 fade_out_seconds 초 동안 줄여 끈다. (0 이면 끝까지)\n  load_type: 읽기 방식. (AudioLoadType, None 이면 배경음악은 Streaming, 효과음은 DecompressOnLoad, 효과음은 겹쳐 트므로 통째로 풀어야 난다)\n- 크기: 배경음악 = 음악 크기 × 음악의 비 × 소리의 크기, 효과음 = 효과음 크기 × 소리의 크기 × 부를 때의 크기.\n  음악과 효과음의 크기는 버스(get_music_bus, get_effect_bus 의 AudioBus)에 걸고, 바꿀 때 0.05 초를 시간 상수로 따라간다. (원본 setTargetAtTime)\n  버스는 첫 누름 뒤에 만든다. (그 전에는 None) 버스로 만든 플레이어(AudioBus::create_audio_player)도 설정 크기와 음소거를 따른다.\n- 배경음악은 틀어 달라고 한 것(get_music_id)을 기억해 두고, 받기 전이거나 첫 누름 전이면 그때 튼다. (\"\" 이면 끈다)\n  겹쳐 바꿀 수 있고(fade_seconds), 멈췄던 자리를 소리마다 기억해 이어 틀 수 있다. (is_resumed) 첫 파일을 받지 못했으면 틀지 않는다.\n- 음소거는 설정한 크기보다 먼저다. 아래 가운데 하나라도 맞으면 소리가 나지 않는다.\n  바깥의 음소거(set_external_mute_provider, 플랫폼 SDK 나 광고), 사용자의 음소거(set_user_muted), 페이지가 가려짐(다른 탭, 앱 전환),\n  터치가 주된 기기에서 창이 포커스를 잃음(blur). 아이폰은 페이지가 가려졌다는 알림이 앱이 내려간 뒤에 와서 오디오가 멈추지 못한 채 얼어\n  마지막 소리 조각이 되풀이되는데, 포커스를 잃는 알림은 그보다 먼저 온다. 데스크탑(마우스)은 캔버스 바깥을 누를 때도 포커스를 잃어 따르지 않는다.\n  포커스가 돌아오거나 화면을 누르거나 페이지가 다시 보이면 풀린다.\n- 음소거인 동안은 AudioContext 도 멈춘다. (풀리면 깨운다) 아이폰은 돌던 AudioContext 를 앱 전환이나 전면 광고가 가로채면 돌아와서 깨워도\n  소리가 나지 않아, 그 전에 스스로 멈춰 둔다. 풀린 뒤에도 돌지 않으면 0.5 초마다 다시 깨워 본다.\n- 허락하면(set_autoplay_allowed_provider, 주지 않으면 허락) 누르기 전에도 첫 update 에서 한 번 깨워 본다. 막히면 엔진이 첫 누름에 깨운다.\n  첫 누름(user gesture) 전이거나 AudioContext 가 돌지 않을 때는 효과음을 내지 않는다. (멈춘 동안 부른 소리가 깨어날 때 한꺼번에 나지 않게)\n- 소리 파일은 놀이를 막지 않게 뒤에서 받는다. (웹은 디코딩이 끝나면 난다) 못 받은 소리는 나지 않을 뿐이다.\n- 시각: 같은 소리 간격과 다시 깨우기 간격은 원본 performance.now() 처럼 벽시계(web_time::Instant), 크기 따라가기와 줄이기,\n  음악의 멈춘 자리는 원본처럼 AudioContext 시계(AudioManager::get_context_time)로 센다.\n- 함께 쓰는 소리: set_sound_system, read_sound_system. (원본 모듈 변수, 스레드 하나에 하나)\n- 원본과 다른 것:\n  - 만들 때 AudioManager 대신 엔진을 받는다. 원본은 document 와 window 에 리스너를 다는데, 러스트 판은 엔진의 페이지 이벤트(PageEvent)로 받기 때문이다.\n    이벤트가 온 그 자리에서는 AudioContext 를 멈추거나 깨우고(소리가 바로 멎는다), 효과음 끊기는 다음 update 에서 한다.\n  - load_sounds, load_sound 는 애셋 폴더 기준 경로를 풀 엔진을 받는다. (원본은 브라우저가 페이지 주소로 푼다) 데스크탑은 그 자리에서 읽는다.\n    load_sounds 는 원본처럼 await 할 수 있는 SoundLoadHandle 을 돌려준다. (걸어 둔 소리를 다 받거나 실패할 때까지 기다린다, wait_for_load().await 도 같다)\n  - 크기 바꾸기와 줄이기는 원본처럼 GainNode 의 AudioParam 자동화(value 대입, setValueAtTime, linearRampToValueAtTime, setTargetAtTime,\n    cancelScheduledValues)와 source.stop(when)으로 소리 장치에 맡긴다. 웹은 WebAudio 에, 데스크탑은 믹서(크로미엄과 같은 셈)에 건다.\n    원본 { source, gainNode } 자리는 버스로 만든 AudioPlayer 하나이고, 끝난 소리(원본 onended)는 update 에서 목록에서 뺀다.\n    원본처럼 버스의 set_volume, mute 로 건 값은 SoundSystem 이 크기를 다시 걸 때까지 간다.\n  - 무리에서 고르기와 음 높이 흔들기는 원본 Math.random 자리인 엔진 math::random(처음 쓸 때 시각으로 씨앗을 정한다)을 쓴다.\n  - add_sound_asset(파일로 받지 않는 소리 더하기)과 get_effect_voice_count 는 러스트 판에서 먼저 만들었다. (원본에도 같은 이름으로 넣었다)",
+				"en": "Background music and sound effects handled by a sound table. (SoundSystem of vanilla.js core/soundsystem.js)\n- Uses AudioManager and AudioAsset. Does not synthesize sound, only plays files.\n- Each row of the sound table is SoundRow { id, paths, volume, minimum_interval, is_music, maximum_voices, pitch_variation, play_seconds, fade_out_seconds, load_type }.\n  paths: a group of multiple recordings of the same sound. Each time it plays, one of the loaded ones is picked, never the same as the one just before.\n  minimum_interval: interval before the same sound can play again. (seconds, so it does not pile up and get noisy)\n  maximum_voices: number of copies of the same sound that can play at once. (over that, the oldest is cut, None means up to the total sound effect count, 0 means one as in the original)\n  pitch_variation: ratio by which the pitch wobbles each time it plays. (0.05 means ±5%)\n  play_seconds, fade_out_seconds: plays only the first play_seconds seconds of a sound effect and fades it out over fade_out_seconds seconds. (0 means to the end)\n  load_type: load type. (AudioLoadType, None means Streaming for background music and DecompressOnLoad for sound effects; sound effects overlap, so they must be fully decoded to play)\n- Volume: background music = music volume × music ratio × sound volume, sound effect = effect volume × sound volume × volume at the call.\n  Music and effect volumes are applied on buses (AudioBus from get_music_bus, get_effect_bus), and follow changes with a 0.05 second time constant. (the original setTargetAtTime)\n  Buses are created after the first press. (None before that) Players created from a bus (AudioBus::create_audio_player) also follow the set volume and mute.\n- Background music remembers what was requested (get_music_id) and plays it then if it is not loaded yet or before the first press. (\"\" stops it)\n  It can crossfade (fade_seconds), and remembers where each sound stopped so it can resume. (is_resumed) It does not play if the first file failed to load.\n- Mute takes priority over the set volume. If any of the following holds, no sound is made.\n  External mute (set_external_mute_provider, platform SDK or ads), user mute (set_user_muted), the page being hidden (another tab, app switch),\n  the window losing focus (blur) on touch-primary devices. On iPhone the page-hidden notification arrives after the app goes down, so audio freezes without stopping and\n  the last sound fragment repeats, but the focus-lost notification comes before that. Desktop (mouse) also loses focus when clicking outside the canvas, so it does not follow this.\n  It is released when focus returns, the screen is pressed, or the page becomes visible again.\n- While muted, the AudioContext is suspended too. (woken when released) On iPhone, if an app switch or an interstitial ad takes over a running AudioContext, waking it on return\n  makes no sound, so it suspends itself beforehand. If it still does not run after being released, it tries waking it again every 0.5 seconds.\n- If allowed (set_autoplay_allowed_provider, allowed if not given), it tries waking once on the first update even before a press. If blocked, the engine wakes it on the first press.\n  Before the first press (user gesture) or when the AudioContext is not running, sound effects are not played. (so sounds called while suspended do not all play at once on wake)\n- Sound files are loaded in the background so they do not block play. (on the web they play once decoding finishes) Sounds that fail to load simply do not play.\n- Time: the same-sound interval and the re-wake interval use the wall clock (web_time::Instant) like the original performance.now(), and volume following, fade out,\n  and the music's stopped position use the AudioContext clock (AudioManager::get_context_time) as in the original.\n- Shared sound: set_sound_system, read_sound_system. (the original module variable, one per thread)\n- Differences from the original:\n  - It takes the engine instead of AudioManager at creation. The original attaches listeners to document and window, but the Rust version receives them through the engine's page events (PageEvent).\n    The AudioContext is suspended or woken right where the event arrives (the sound stops immediately), and cutting sound effects happens on the next update.\n  - load_sounds, load_sound take the engine to resolve paths relative to the asset folder. (in the original the browser resolves them against the page address) Desktop reads them on the spot.\n    load_sounds returns an awaitable SoundLoadHandle as in the original. (waits until all requested sounds are loaded or fail, same as wait_for_load().await)\n  - Volume changes and fade out are left to the sound device as in the original, with GainNode AudioParam automation (value assignment, setValueAtTime, linearRampToValueAtTime, setTargetAtTime,\n    cancelScheduledValues) and source.stop(when). On the web they are applied to WebAudio, on desktop to the mixer (same math as Chromium).\n    The original { source, gainNode } is one AudioPlayer created from a bus, and finished sounds (the original onended) are removed from the list in update.\n    As in the original, values set with the bus's set_volume, mute last until SoundSystem applies the volume again.\n  - Picking from a group and wobbling the pitch use the engine's math::random (seeded with the time on first use) in place of the original Math.random.\n  - add_sound_asset (adding a sound not loaded from a file) and get_effect_voice_count were made in the Rust version first. (also added to the original under the same names)"
 			},
 			"classes": [
 				{
@@ -79897,6 +79897,25 @@
 							"source": "src/core/soundsystem.rs"
 						},
 						{
+							"kind": "field",
+							"name": "load_type",
+							"signature": "pub load_type: Option<AudioLoadType>",
+							"params": [],
+							"returns": {
+								"type": "Option<AudioLoadType>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "읽기 방식. (None 이면 배경음악은 Streaming, 효과음은 DecompressOnLoad, 원본 소리 표의 loadType)",
+								"en": "Load type. (None means Streaming for background music and DecompressOnLoad for sound effects, the original sound table loadType)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/soundsystem.rs"
+						},
+						{
 							"kind": "static",
 							"name": "create_effect",
 							"signature": "pub fn create_effect(id: &str, paths: &[&str], volume: f64) -> SoundRow",
@@ -79929,8 +79948,8 @@
 							"returns": {
 								"type": "SoundRow",
 								"description": {
-									"ko": "효과음 줄. (minimum_interval, pitch_variation, play_seconds, fade_out_seconds 는 0, maximum_voices 는 None)",
-									"en": "Sound effect row. (minimum_interval, pitch_variation, play_seconds, fade_out_seconds are 0, maximum_voices is None)"
+									"ko": "효과음 줄. (minimum_interval, pitch_variation, play_seconds, fade_out_seconds 는 0, maximum_voices 와 load_type 은 None)",
+									"en": "Sound effect row. (minimum_interval, pitch_variation, play_seconds, fade_out_seconds are 0, maximum_voices and load_type are None)"
 								}
 							},
 							"description": {
@@ -155022,8 +155041,8 @@
 		{
 			"name": "platform/audio",
 			"summary": {
-				"ko": "오디오 백엔드.\n- AudioManager, AudioPlayer, AudioAsset, BeepPlayer 가 소리를 낼 때 부르는 아래층이다. 공통 코드는 core, resource, misc 에 있다.\n- 백엔드마다 아래 이름을 같은 꼴로 낸다.\n  AudioContext(공유 컨텍스트), AudioBuffer(디코딩한 소리), AudioPlatformState(매니저가 드는 백엔드 상태),\n  AudioPlayerBackend(플레이어 하나의 소리 내는 부분), AudioBusBackend(버스 하나의 소리 모으는 부분, create_player_backend 로 그 버스로 트는 플레이어),\n  HAS_USER_GESTURE_AT_START,\n  create_audio_platform_state, create_audio_context, resume_audio_context, is_audio_context_running,\n  load_audio_file, load_audio_bytes, get_audio_buffer_duration, play_beep_tone\n  suspend_audio_context(컨텍스트 멈춤), get_audio_context_time(컨텍스트 시계), AudioPlayerBackend::set_pan(좌우)\n- 데스크탑: cpal 출력 위의 엔진 믹서. (desktop.rs, mixer.rs. 노드 그래프와 셈이 크롬 WebAudio 와 같다) 소리 파일 해석은 크롬 decodeAudioData 와 같게 decode/ 가 한다. (symphonia 0.6, Opus 는 opus-pure)\n  PannerNode(초안, panner.rs)의 HRTF 는 크롬의 HRTFPanner 와 IRCAM 자료(Composite.flac)를 옮긴 hrtf/ 가 셈한다. (FFT 는 크롬과 같은 rustfft)\n- 웹: 원본과 같은 WebAudio 를 web-sys 로 직접 부른다. (web.rs)\n- 게임 코드가 이름을 부를 수 있게 AudioContext, AudioBuffer 두 타입만 밖으로 낸다. 나머지는 엔진 안에서만 쓴다.",
-				"en": "Audio backend.\n- The lower layer AudioManager, AudioPlayer, AudioAsset and BeepPlayer call to make sound. The common code is in core, resource and misc.\n- Each backend exposes the following names in the same form.\n  AudioContext (the shared context), AudioBuffer (decoded sound), AudioPlatformState (the backend state the manager holds),\n  AudioPlayerBackend (the sound-making part of one player), AudioBusBackend (the sound-gathering part of one bus, create_player_backend makes a player that plays into that bus),\n  HAS_USER_GESTURE_AT_START,\n  create_audio_platform_state, create_audio_context, resume_audio_context, is_audio_context_running,\n  load_audio_file, load_audio_bytes, get_audio_buffer_duration, play_beep_tone\n  suspend_audio_context (suspending the context), get_audio_context_time (the context clock), AudioPlayerBackend::set_pan (left and right)\n- Desktop: the engine mixer on top of cpal output. (desktop.rs, mixer.rs. The node graph and math are the same as Chrome WebAudio) Sound files are decoded by decode/ the same way as Chrome decodeAudioData. (symphonia 0.6, opus-pure for Opus)\n  The HRTF of PannerNode (draft, panner.rs) is computed by hrtf/, a port of Chrome's HRTFPanner and the IRCAM data (Composite.flac). (the FFT is the same rustfft as Chrome)\n- Web: calls the same WebAudio as the original directly through web-sys. (web.rs)\n- Only the two types AudioContext and AudioBuffer are exposed so game code can name them. The rest are used only inside the engine."
+				"ko": "오디오 백엔드.\n- AudioManager, AudioPlayer, AudioAsset, BeepPlayer 가 소리를 낼 때 부르는 아래층이다. 공통 코드는 core, resource, misc 에 있다.\n- 백엔드마다 아래 이름을 같은 꼴로 낸다.\n  AudioContext(공유 컨텍스트), AudioBuffer(디코딩한 소리), AudioPlatformState(매니저가 드는 백엔드 상태),\n  AudioPlayerBackend(플레이어 하나의 소리 내는 부분), AudioBusBackend(버스 하나의 소리 모으는 부분, create_player_backend 로 그 버스로 트는 플레이어),\n  HAS_USER_GESTURE_AT_START,\n  create_audio_platform_state, create_audio_context, resume_audio_context, is_audio_context_running,\n  load_audio_file, load_audio_bytes(읽기 방식 AudioLoadType 을 받는다), get_audio_buffer_duration, play_beep_tone,\n  AudioStream(스트리밍으로 읽은 소리, get_duration, get_stream_url), AudioPlayerBackend::start_stream_playback, get_stream_time\n  suspend_audio_context(컨텍스트 멈춤), get_audio_context_time(컨텍스트 시계), AudioPlayerBackend::set_pan(좌우)\n- 데스크탑: cpal 출력 위의 엔진 믹서. (desktop.rs, mixer.rs. 노드 그래프와 셈이 크롬 WebAudio 와 같다) 소리 파일 해석은 크롬 decodeAudioData 와 같게 decode/ 가 한다. (symphonia 0.6, Opus 는 opus-pure)\n  PannerNode(초안, panner.rs)의 HRTF 는 크롬의 HRTFPanner 와 IRCAM 자료(Composite.flac)를 옮긴 hrtf/ 가 셈한다. (FFT 는 크롬과 같은 rustfft)\n- 웹: 원본과 같은 WebAudio 를 web-sys 로 직접 부른다. (web.rs)\n- 게임 코드가 이름을 부를 수 있게 AudioContext, AudioBuffer 두 타입만 밖으로 낸다. 나머지는 엔진 안에서만 쓴다.",
+				"en": "Audio backend.\n- The lower layer AudioManager, AudioPlayer, AudioAsset and BeepPlayer call to make sound. The common code is in core, resource and misc.\n- Each backend exposes the following names in the same form.\n  AudioContext (the shared context), AudioBuffer (decoded sound), AudioPlatformState (the backend state the manager holds),\n  AudioPlayerBackend (the sound-making part of one player), AudioBusBackend (the sound-gathering part of one bus, create_player_backend makes a player that plays into that bus),\n  HAS_USER_GESTURE_AT_START,\n  create_audio_platform_state, create_audio_context, resume_audio_context, is_audio_context_running,\n  load_audio_file, load_audio_bytes (take the load type AudioLoadType), get_audio_buffer_duration, play_beep_tone,\n  AudioStream (a sound loaded for streaming, get_duration, get_stream_url), AudioPlayerBackend::start_stream_playback, get_stream_time\n  suspend_audio_context (suspending the context), get_audio_context_time (the context clock), AudioPlayerBackend::set_pan (left and right)\n- Desktop: the engine mixer on top of cpal output. (desktop.rs, mixer.rs. The node graph and math are the same as Chrome WebAudio) Sound files are decoded by decode/ the same way as Chrome decodeAudioData. (symphonia 0.6, opus-pure for Opus)\n  The HRTF of PannerNode (draft, panner.rs) is computed by hrtf/, a port of Chrome's HRTFPanner and the IRCAM data (Composite.flac). (the FFT is the same rustfft as Chrome)\n- Web: calls the same WebAudio as the original directly through web-sys. (web.rs)\n- Only the two types AudioContext and AudioBuffer are exposed so game code can name them. The rest are used only inside the engine."
 			},
 			"classes": [],
 			"functions": [],
@@ -155032,8 +155051,8 @@
 		{
 			"name": "platform/audio/desktop",
 			"summary": {
-				"ko": "데스크탑 오디오 백엔드. (윈도우, 맥, 리눅스, cpal 출력 위의 엔진 믹서)\n- AudioContext 자리: cpal 로 기본 출력 장치를 열고 그 표본율로 도는 믹서(mixer.rs). 장치가 없으면 한 번 알리고 다시 열지 않는다.\n  브라우저 자동재생 정책이 없어서 user gesture 는 처음부터 있는 것으로 둔다. sample_rate(), current_time() 은 웹 AudioContext 와 같은 이름이다.\n- 노드 그래프는 원본 WebAudio 와 같고 셈도 크롬과 같다. (mixer.rs 머리 주석)\n  AudioPlayer 하나 = 소스 + GainNode (+ 0 이 아닌 좌우를 처음 걸면 StereoPannerNode), 내보낼 곳(AudioOutputNode)을 주면 그 버스로, 없으면 출력으로.\n  AudioBus 하나 = 출력에 이은 GainNode. (AudioGainNode, 원본 getGainNode) 버스로 만든 플레이어는 버스 손잡이를 들고 있어,\n  원본 WebAudio 처럼 이어진 플레이어가 있는 동안 버스가 살아 있다. 손잡이가 모두 없어지면 노드를 뺀다.\n- 컨텍스트 멈춤(SoundSystem 이 음소거 동안 부른다): 믹서가 그리기를 멈춰 소리와 시계가 그 자리에서 선다. (원본 AudioContext.suspend) resume 이 다시 돌린다.\n- 컨텍스트 시계(get_audio_context_time)는 그린 시간이다. (원본 currentTime, 128 프레임 퀀텀마다 128 / 표본율 초씩 오른다)\n- 스트림은 관리 스레드가 든다. 장치가 빠지면(맥이 아니면 기본 장치가 바뀌어도) 같은 믹서로 기본 장치를 다시 연다. (원본 크롬도 기본 장치를 따라간다)\n- AudioBuffer 자리: 푼 소리를 Arc 로 든다. 복제는 값싸다. 해석은 decode 가 원본의 크롬 decodeAudioData 와 같게 한다.\n  (webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC. 앞뒤 다듬기, 44100Hz, WebAudio 스피커 규칙으로 내린 1 채널이나 2 채널)\n- 음량, 좌우, 정지는 다음 렌더 퀀텀부터 바로 바뀐다. 재생 빠르기는 다음 재생부터다. (원본과 같다)\n- 음량은 GainNode 의 AudioParam 이다. 음량 설정은 원본 gain.value 대입, SoundSystem 은 원본처럼 자동화(setValueAtTime 들)와 stop(when)을 건다.\n  지금 gain.value(get_gain_value)는 소리 스레드가 퀀텀마다 셈한 내재 값이다.\n- BeepPlayer 의 톤은 원본 playTone 처럼 믹서에 OscillatorNode → GainNode(엔벨로프 자동화) → 출력을 짓는다. (셈은 크롬과 같다, oscillator.rs)\n  파형의 대역 제한 표(PeriodicWave)는 원본 컨텍스트처럼 표본율마다 한 번 지어 둔다.",
-				"en": "Desktop audio backend. (Windows, Mac, Linux, the engine mixer on top of cpal output)\n- In place of AudioContext: opens the default output device with cpal and runs a mixer at its sample rate (mixer.rs). If there is no device it reports once and does not open again.\n  There is no browser autoplay policy, so the user gesture is treated as present from the start. sample_rate(), current_time() have the same names as the web AudioContext.\n- The node graph is the same as the original WebAudio and the math matches Chrome. (header comment of mixer.rs)\n  One AudioPlayer = source + GainNode (+ StereoPannerNode when a nonzero pan is first set), to that bus if an output (AudioOutputNode) is given, otherwise to the output.\n  One AudioBus = a GainNode connected to the output. (AudioGainNode, the original getGainNode) Players made on a bus hold a bus handle,\n  so as in the original WebAudio the bus stays alive while connected players exist. The node is removed once all handles are gone.\n- Context suspend (SoundSystem calls it while muted): the mixer stops rendering, so the sound and clock stop in place. (the original AudioContext.suspend) resume starts it again.\n- The context clock (get_audio_context_time) is the rendered time. (the original currentTime, rises by 128 / sample rate seconds every 128-frame quantum)\n- A management thread holds the stream. When the device is removed (or, except on Mac, when the default device changes), it reopens the default device with the same mixer. (the original Chrome also follows the default device)\n- In place of AudioBuffer: holds decoded sound in an Arc. Cloning is cheap. decode decodes it the same way as the original Chrome decodeAudioData.\n  (Opus and Vorbis in webm, ogg, mp3, wav, flac, AAC in m4a and aac. Trimming of both ends, 44100Hz, downmixed to 1 or 2 channels by the WebAudio speaker rules)\n- Volume, pan and stop change right from the next render quantum. Playback rate applies from the next playback. (same as the original)\n- Volume is the AudioParam of the GainNode. Setting the volume is assigning the original gain.value, and SoundSystem sets automation (setValueAtTime calls) and stop(when) as in the original.\n  The current gain.value (get_gain_value) is the intrinsic value the sound thread computes every quantum.\n- BeepPlayer's tones build OscillatorNode → GainNode (envelope automation) → output on the mixer like the original playTone. (the math matches Chrome, oscillator.rs)\n  The waveform's band-limited tables (PeriodicWave) are built once per sample rate, as in the original context."
+				"ko": "데스크탑 오디오 백엔드. (윈도우, 맥, 리눅스, cpal 출력 위의 엔진 믹서)\n- AudioContext 자리: cpal 로 기본 출력 장치를 열고 그 표본율로 도는 믹서(mixer.rs). 장치가 없으면 한 번 알리고 다시 열지 않는다.\n  브라우저 자동재생 정책이 없어서 user gesture 는 처음부터 있는 것으로 둔다. sample_rate(), current_time() 은 웹 AudioContext 와 같은 이름이다.\n- 노드 그래프는 원본 WebAudio 와 같고 셈도 크롬과 같다. (mixer.rs 머리 주석)\n  AudioPlayer 하나 = 소스 + GainNode (+ 0 이 아닌 좌우를 처음 걸면 StereoPannerNode), 내보낼 곳(AudioOutputNode)을 주면 그 버스로, 없으면 출력으로.\n  AudioBus 하나 = 출력에 이은 GainNode. (AudioGainNode, 원본 getGainNode) 버스로 만든 플레이어는 버스 손잡이를 들고 있어,\n  원본 WebAudio 처럼 이어진 플레이어가 있는 동안 버스가 살아 있다. 손잡이가 모두 없어지면 노드를 뺀다.\n- 컨텍스트 멈춤(SoundSystem 이 음소거 동안 부른다): 믹서가 그리기를 멈춰 소리와 시계가 그 자리에서 선다. (원본 AudioContext.suspend) resume 이 다시 돌린다.\n- 컨텍스트 시계(get_audio_context_time)는 그린 시간이다. (원본 currentTime, 128 프레임 퀀텀마다 128 / 표본율 초씩 오른다)\n- 스트림은 관리 스레드가 든다. 장치가 빠지면(맥이 아니면 기본 장치가 바뀌어도) 같은 믹서로 기본 장치를 다시 연다. (원본 크롬도 기본 장치를 따라간다)\n- AudioBuffer 자리: 푼 소리를 Arc 로 든다. 복제는 값싸다. 해석은 decode 가 원본의 크롬 decodeAudioData 와 같게 한다.\n  (webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC. 앞뒤 다듬기, 44100Hz, WebAudio 스피커 규칙으로 내린 1 채널이나 2 채널)\n- AudioStream 자리: 스트리밍으로 읽은 소리. (원본 AudioLoadType.streaming, 압축된 자리(파일 경로나 바이트)와 다듬기 계획만 든다)\n  틀 때 플레이어마다 풀개 스레드가 조각마다 풀어 링 버퍼(128 KiB)를 채우고 믹서의 스트리밍 소스가 읽는다. (streaming.rs, 표본은 통째로 푼 버퍼와 같다)\n- 음량, 좌우, 정지는 다음 렌더 퀀텀부터 바로 바뀐다. 재생 빠르기는 다음 재생부터다. (원본과 같다)\n- 음량은 GainNode 의 AudioParam 이다. 음량 설정은 원본 gain.value 대입, SoundSystem 은 원본처럼 자동화(setValueAtTime 들)와 stop(when)을 건다.\n  지금 gain.value(get_gain_value)는 소리 스레드가 퀀텀마다 셈한 내재 값이다.\n- BeepPlayer 의 톤은 원본 playTone 처럼 믹서에 OscillatorNode → GainNode(엔벨로프 자동화) → 출력을 짓는다. (셈은 크롬과 같다, oscillator.rs)\n  파형의 대역 제한 표(PeriodicWave)는 원본 컨텍스트처럼 표본율마다 한 번 지어 둔다.",
+				"en": "Desktop audio backend. (Windows, Mac, Linux, the engine mixer on top of cpal output)\n- In place of AudioContext: opens the default output device with cpal and runs a mixer at its sample rate (mixer.rs). If there is no device it reports once and does not open again.\n  There is no browser autoplay policy, so the user gesture is treated as present from the start. sample_rate(), current_time() have the same names as the web AudioContext.\n- The node graph is the same as the original WebAudio and the math matches Chrome. (header comment of mixer.rs)\n  One AudioPlayer = source + GainNode (+ StereoPannerNode when a nonzero pan is first set), to that bus if an output (AudioOutputNode) is given, otherwise to the output.\n  One AudioBus = a GainNode connected to the output. (AudioGainNode, the original getGainNode) Players made on a bus hold a bus handle,\n  so as in the original WebAudio the bus stays alive while connected players exist. The node is removed once all handles are gone.\n- Context suspend (SoundSystem calls it while muted): the mixer stops rendering, so the sound and clock stop in place. (the original AudioContext.suspend) resume starts it again.\n- The context clock (get_audio_context_time) is the rendered time. (the original currentTime, rises by 128 / sample rate seconds every 128-frame quantum)\n- A management thread holds the stream. When the device is removed (or, except on Mac, when the default device changes), it reopens the default device with the same mixer. (the original Chrome also follows the default device)\n- In place of AudioBuffer: holds decoded sound in an Arc. Cloning is cheap. decode decodes it the same way as the original Chrome decodeAudioData.\n  (Opus and Vorbis in webm, ogg, mp3, wav, flac, AAC in m4a and aac. Trimming of both ends, 44100Hz, downmixed to 1 or 2 channels by the WebAudio speaker rules)\n- In place of AudioStream: a sound loaded for streaming. (the original AudioLoadType.streaming, holds only the compressed source (a file path or bytes) and the trim plan)\n  When played, a decoder thread per player decodes chunk by chunk into a ring buffer (128 KiB) that the mixer's streaming source reads. (streaming.rs, the samples are the same as the fully decoded buffer)\n- Volume, pan and stop change right from the next render quantum. Playback rate applies from the next playback. (same as the original)\n- Volume is the AudioParam of the GainNode. Setting the volume is assigning the original gain.value, and SoundSystem sets automation (setValueAtTime calls) and stop(when) as in the original.\n  The current gain.value (get_gain_value) is the intrinsic value the sound thread computes every quantum.\n- BeepPlayer's tones build OscillatorNode → GainNode (envelope automation) → output on the mixer like the original playTone. (the math matches Chrome, oscillator.rs)\n  The waveform's band-limited tables (PeriodicWave) are built once per sample rate, as in the original context."
 			},
 			"classes": [
 				{
@@ -157887,8 +157906,8 @@
 		{
 			"name": "resource/audioasset",
 			"summary": {
-				"ko": "오디오 애셋.\n- 원본 resource/audioasset.js. 소리 파일을 디코딩한 오디오 버퍼를 들고 있다.\n- 오디오 버퍼 자리는 백엔드가 채운다. (platform/audio 의 AudioBuffer)\n  데스크탑: 푼 소리를 Arc 로 든 AudioBuffer. (platform/audio/decode 가 원본의 크롬 decodeAudioData 와 같은 길이, 표본율(44100), 표본으로 푼다.\n  webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC. 꼴은 확장자가 아니라 내용으로 가린다)\n  웹: 원본과 같은 WebAudio AudioBuffer. (OfflineAudioContext 로 디코딩한다, 없으면 잠시 쓰는 AudioContext)\n- 읽기:\n  데스크탑은 load / load_from_bytes 가 그 자리에서 파일을 읽고 디코딩한 뒤 돌아온다. 실패하면 Err.\n  웹은 막을 수 없어서 load 가 fetch 와 디코딩을 걸어 두고 바로 Ok 로 돌아온다. 끝나면 is_loaded() 가 참이 되고,\n  실패하면 get_load_error() 에 까닭이 남는다. 그 전에 플레이어에 실어 둬도 되고, 버퍼가 없는 동안 play 는 아무것도 하지 않는다.\n  load, load_from_bytes, load_from_asset 은 원본처럼 await 할 수 있는 AudioLoadHandle 을 돌려준다. 디코딩까지 끝나면 Ok, 실패하면 까닭(원본 reject)이다.\n  (그 자리에서 실패를 알 수 있는 데스크탑은 손잡이의 get_load_error 로 바로 본다) 이미 읽기를 건 애셋은 wait_for_load().await 로도 기다린다.\n  엔진에서는 engine.load_audio_asset(\"sounds/hit.ogg\") 로 애셋 폴더 기준 경로를 읽는다.\n- 원본과 다른 점:\n  Asset 기반 클래스(애셋 타입)가 없다. 읽기 실패는 예외 대신 Err 로 알린다. (까닭은 원본 getLoadError 처럼 get_load_error() 에 남는다)\n  플레이어들이 같이 들 수 있게 `Rc<AudioAsset>` 로 쓰고, 웹에서 디코딩이 끝난 뒤 채우도록 안쪽을 RefCell 로 둔다.",
-				"en": "Audio asset.\n- The original resource/audioasset.js. Holds the audio buffer decoded from a sound file.\n- The audio buffer is filled by the backend. (AudioBuffer of platform/audio)\n  Desktop: an AudioBuffer holding the decoded sound in an Arc. (platform/audio/decode decodes it to the same length, sample rate (44100) and samples as the original Chrome decodeAudioData.\n  Opus and Vorbis in webm, ogg, mp3, wav, flac, AAC in m4a and aac. The format is told by content, not extension)\n  Web: the same WebAudio AudioBuffer as the original. (decoded with OfflineAudioContext, or a temporary AudioContext if missing)\n- Reading:\n  On desktop load / load_from_bytes read and decode the file on the spot before returning. Err on failure.\n  Web cannot block, so load sets up fetch and decoding and returns Ok right away. When done, is_loaded() becomes true,\n  and on failure the reason stays in get_load_error(). It may be loaded into a player before that, and play does nothing while there is no buffer.\n  load, load_from_bytes, load_from_asset return an AudioLoadHandle that can be awaited as in the original. Ok once decoding finishes, the reason (the original reject) on failure.\n  (desktop, which knows failure on the spot, checks it right away with the handle's get_load_error) An asset whose read has already been started can also be awaited with wait_for_load().await.\n  In the engine, engine.load_audio_asset(\"sounds/hit.ogg\") reads a path relative to the asset folder.\n- Differences from the original:\n  There is no Asset base class (asset type). Read failures are reported with Err instead of exceptions. (the reason stays in get_load_error() like the original getLoadError)\n  It is used as `Rc<AudioAsset>` so players can share it, and its inside is a RefCell so it can be filled after decoding finishes on web."
+				"ko": "오디오 애셋.\n- 원본 resource/audioasset.js. 소리 파일을 디코딩한 오디오 버퍼를 들고 있다.\n- 오디오 버퍼 자리는 백엔드가 채운다. (platform/audio 의 AudioBuffer)\n  데스크탑: 푼 소리를 Arc 로 든 AudioBuffer. (platform/audio/decode 가 원본의 크롬 decodeAudioData 와 같은 길이, 표본율(44100), 표본으로 푼다.\n  webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC. 꼴은 확장자가 아니라 내용으로 가린다)\n  웹: 원본과 같은 WebAudio AudioBuffer. (OfflineAudioContext 로 디코딩한다, 없으면 잠시 쓰는 AudioContext)\n- 읽기:\n  데스크탑은 load / load_from_bytes 가 그 자리에서 파일을 읽고 디코딩한 뒤 돌아온다. 실패하면 Err.\n  웹은 막을 수 없어서 load 가 fetch 와 디코딩을 걸어 두고 바로 Ok 로 돌아온다. 끝나면 is_loaded() 가 참이 되고,\n  실패하면 get_load_error() 에 까닭이 남는다. 그 전에 플레이어에 실어 둬도 되고, 버퍼가 없는 동안 play 는 아무것도 하지 않는다.\n  load, load_from_bytes, load_from_asset 은 원본처럼 await 할 수 있는 AudioLoadHandle 을 돌려준다. 디코딩까지 끝나면 Ok, 실패하면 까닭(원본 reject)이다.\n  (그 자리에서 실패를 알 수 있는 데스크탑은 손잡이의 get_load_error 로 바로 본다) 이미 읽기를 건 애셋은 wait_for_load().await 로도 기다린다.\n  엔진에서는 engine.load_audio_asset(\"sounds/hit.ogg\") 로 애셋 폴더 기준 경로를 읽는다.\n- 읽기 방식: set_load_type(AudioLoadType). 원본처럼 기본은 통째로 풀기(DecompressOnLoad), 엔진 SoundSystem 의 배경음악만 소리 표에 load_type 이 없으면 스트리밍이다.\n  스트리밍(Streaming)은 풀지 않고 압축된 자리만 들어, 틀 때 조금씩 푼다. 데스크탑은 풀개 스레드가 조각마다 풀어 링 버퍼로 믹서에 내보내고\n  (platform/audio/streaming.rs, 통째로 푼 버퍼와 같은 표본), 웹은 원본처럼 HTMLAudioElement 를 MediaElementAudioSourceNode 로 플레이어의 GainNode 에 잇는다.\n  자동(Automatic)은 AUTOMATIC_STREAMING_BYTE_THRESHOLD(1 MiB)보다 큰 파일만 스트리밍한다.\n- 원본과 다른 점:\n  Asset 기반 클래스(애셋 타입)가 없다. 읽기 실패는 예외 대신 Err 로 알린다. (까닭은 원본 getLoadError 처럼 get_load_error() 에 남는다)\n  플레이어들이 같이 들 수 있게 `Rc<AudioAsset>` 로 쓰고, 웹에서 디코딩이 끝난 뒤 채우도록 안쪽을 RefCell 로 둔다.",
+				"en": "Audio asset.\n- The original resource/audioasset.js. Holds the audio buffer decoded from a sound file.\n- The audio buffer is filled by the backend. (AudioBuffer of platform/audio)\n  Desktop: an AudioBuffer holding the decoded sound in an Arc. (platform/audio/decode decodes it to the same length, sample rate (44100) and samples as the original Chrome decodeAudioData.\n  Opus and Vorbis in webm, ogg, mp3, wav, flac, AAC in m4a and aac. The format is told by content, not extension)\n  Web: the same WebAudio AudioBuffer as the original. (decoded with OfflineAudioContext, or a temporary AudioContext if missing)\n- Reading:\n  On desktop load / load_from_bytes read and decode the file on the spot before returning. Err on failure.\n  Web cannot block, so load sets up fetch and decoding and returns Ok right away. When done, is_loaded() becomes true,\n  and on failure the reason stays in get_load_error(). It may be loaded into a player before that, and play does nothing while there is no buffer.\n  load, load_from_bytes, load_from_asset return an AudioLoadHandle that can be awaited as in the original. Ok once decoding finishes, the reason (the original reject) on failure.\n  (desktop, which knows failure on the spot, checks it right away with the handle's get_load_error) An asset whose read has already been started can also be awaited with wait_for_load().await.\n  In the engine, engine.load_audio_asset(\"sounds/hit.ogg\") reads a path relative to the asset folder.\n- Load type: set_load_type(AudioLoadType). As in the original the default is full decoding (DecompressOnLoad), and only background music of the engine SoundSystem streams when the sound table has no load_type.\n  Streaming does not decode up front and holds only the compressed source, decoding a little at a time while playing. On desktop a decoder thread decodes chunk by chunk into a ring buffer for the mixer\n  (platform/audio/streaming.rs, the same samples as the fully decoded buffer), and on the web, as in the original, an HTMLAudioElement is connected to the player's GainNode through a MediaElementAudioSourceNode.\n  Automatic streams only files larger than AUTOMATIC_STREAMING_BYTE_THRESHOLD (1 MiB).\n- Differences from the original:\n  There is no Asset base class (asset type). Read failures are reported with Err instead of exceptions. (the reason stays in get_load_error() like the original getLoadError)\n  It is used as `Rc<AudioAsset>` so players can share it, and its inside is a RefCell so it can be filled after decoding finishes on web."
 			},
 			"classes": [
 				{
@@ -158255,14 +158274,126 @@
 						},
 						{
 							"kind": "method",
+							"name": "set_load_type",
+							"signature": "pub fn set_load_type(&self, load_type: AudioLoadType)",
+							"params": [
+								{
+									"name": "load_type",
+									"type": "AudioLoadType",
+									"description": {
+										"ko": "읽기 방식.",
+										"en": "Load type."
+									}
+								}
+							],
+							"description": {
+								"ko": "읽기 방식 설정. (다음 load, load_from_bytes 부터, 이미 읽혔으면 바뀌지 않는다)",
+								"en": "Sets the load type. (from the next load, load_from_bytes; an asset already loaded does not change)"
+							},
+							"since": "0.4.0",
+							"source": "src/resource/audioasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "resource/audioasset",
+								"class": "AudioAsset",
+								"name": "setLoadType"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "긴 배경음을 스트리밍으로 읽기",
+										"en": "Loading long background music for streaming"
+									},
+									"code": "use std::path::Path;\nuse std::rc::Rc;\nuse vanilla::{AudioAsset, AudioLoadType};\n\nlet audio_asset = Rc::new(AudioAsset::new());\naudio_asset.set_load_type(AudioLoadType::Streaming);\naudio_asset.load(Path::new(\"tests/assets/audio/vorbis_stereo.ogg\"));\nassert_eq!(audio_asset.get_load_type(), AudioLoadType::Streaming);\nassert!(audio_asset.is_streaming());\nassert!(audio_asset.get_duration() > 0.0);",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "get_load_type",
+							"signature": "pub fn get_load_type(&self) -> AudioLoadType",
+							"params": [],
+							"returns": {
+								"type": "AudioLoadType",
+								"description": {
+									"ko": "읽기 방식. (기본 DecompressOnLoad, 엔진 SoundSystem 의 배경음악만 소리 표에 load_type 이 없으면 Streaming)",
+									"en": "Load type. (DecompressOnLoad by default, only background music of the engine SoundSystem uses Streaming when the sound table has no load_type)"
+								}
+							},
+							"description": {
+								"ko": "읽기 방식 반환.",
+								"en": "Returns the load type."
+							},
+							"since": "0.4.0",
+							"source": "src/resource/audioasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "resource/audioasset",
+								"class": "AudioAsset",
+								"name": "getLoadType"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "is_streaming",
+							"signature": "pub fn is_streaming(&self) -> bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "스트리밍으로 읽혔으면 true. (통째로 풀었거나 읽기 전이면 false)",
+									"en": "true if loaded for streaming. (false if fully decoded or before loading)"
+								}
+							},
+							"description": {
+								"ko": "스트리밍으로 읽혔는지. (읽기 방식이 Automatic 이면 읽은 뒤에 정해진다)",
+								"en": "Whether it was loaded for streaming. (with the Automatic load type this is decided after loading)"
+							},
+							"since": "0.4.0",
+							"source": "src/resource/audioasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "resource/audioasset",
+								"class": "AudioAsset",
+								"name": "isStreaming"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_stream_url",
+							"signature": "pub fn get_stream_url(&self) -> Option<String>",
+							"params": [],
+							"returns": {
+								"type": "Option<String>",
+								"description": {
+									"ko": "웹은 원본처럼 파일 주소나 blob: 주소, 데스크탑은 파일에서 읽었으면 그 경로. (메모리에서 읽은 데스크탑 스트리밍이나 스트리밍이 아니면 None)",
+									"en": "On the web the file URL or a blob: URL as in the original, on desktop the path when loaded from a file. (None for desktop streaming loaded from memory or when not streaming)"
+								}
+							},
+							"description": {
+								"ko": "스트리밍 소리의 주소. (원본 getStreamUrl, 웹은 미디어 요소의 src)",
+								"en": "Address of the streaming sound. (the original getStreamUrl, the media element src on the web)"
+							},
+							"since": "0.4.0",
+							"source": "src/resource/audioasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "resource/audioasset",
+								"class": "AudioAsset",
+								"name": "getStreamUrl"
+							}
+						},
+						{
+							"kind": "method",
 							"name": "get_audio_buffer",
 							"signature": "pub fn get_audio_buffer(&self) -> Option<AudioBuffer>",
 							"params": [],
 							"returns": {
 								"type": "Option<AudioBuffer>",
 								"description": {
-									"ko": "디코딩한 버퍼. 읽히기 전이거나 실패했으면 None.",
-									"en": "Decoded buffer. None before it is read or if it failed."
+									"ko": "디코딩한 버퍼. 읽히기 전이거나 실패했거나 스트리밍이면 None.",
+									"en": "Decoded buffer. None before it is read, if it failed, or when streaming."
 								}
 							},
 							"description": {
@@ -158286,13 +158417,13 @@
 							"returns": {
 								"type": "f64",
 								"description": {
-									"ko": "버퍼의 재생 시간. (초) 버퍼가 없으면 0.",
-									"en": "Duration of the buffer. (seconds) 0 if there is no buffer."
+									"ko": "버퍼의 재생 시간. (초) 스트리밍이면 컨테이너가 알리는 길이(원본 미디어 요소의 메타데이터 길이 자리, 데스크탑은 끝까지 한 번 풀고 나면 푼 길이). 읽기 전이면 0.",
+									"en": "Duration of the buffer. (seconds) When streaming, the length the container reports (in place of the original media element metadata duration; on desktop it becomes the decoded length once decoded to the end). 0 before loading."
 								}
 							},
 							"description": {
-								"ko": "재생 시간 반환. (초, 버퍼가 없으면 0)",
-								"en": "Returns the duration. (seconds, 0 if there is no buffer)"
+								"ko": "재생 시간 반환. (초, 읽기 전이면 0)",
+								"en": "Returns the duration. (seconds, 0 before loading)"
 							},
 							"since": "0.3.2",
 							"source": "src/resource/audioasset.rs",
@@ -158316,8 +158447,99 @@
 					]
 				}
 			],
-			"functions": [],
-			"enums": []
+			"functions": [
+				{
+					"kind": "field",
+					"name": "AUTOMATIC_STREAMING_BYTE_THRESHOLD",
+					"signature": "pub const AUTOMATIC_STREAMING_BYTE_THRESHOLD: u64 = 1024 * 1024",
+					"params": [],
+					"returns": {
+						"type": "u64",
+						"description": {
+							"ko": "",
+							"en": ""
+						}
+					},
+					"description": {
+						"ko": "자동(AudioLoadType::Automatic)일 때 스트리밍으로 고르는 파일 크기. (바이트, 이보다 크면 스트리밍)\n- 통째로 풀면 1 초에 채널마다 44100 개의 f32 를 든다. (스테레오 1 초 약 345 KiB, 3 분이면 약 61 MiB)\n  128 kbps MP3 1 MiB 는 약 65 초라 풀면 약 22 MiB 다. 효과음은 거의 이보다 작고, 이보다 큰 WAV 도 6 초 안팎이라 흘려 틀어도 된다.",
+						"en": "File size above which automatic (AudioLoadType::Automatic) picks streaming. (bytes, larger files stream)\n- Full decoding holds 44100 f32 values per channel per second. (about 345 KiB per stereo second, about 61 MiB for 3 minutes)\n  1 MiB of 128 kbps MP3 is about 65 seconds, about 22 MiB when decoded. Sound effects are almost always smaller, and a WAV larger than this is still only around 6 seconds, so streaming it is fine."
+					},
+					"since": "0.4.0",
+					"source": "src/resource/audioasset.rs",
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "resource/audioasset",
+						"name": "AUTOMATIC_STREAMING_BYTE_THRESHOLD"
+					},
+					"examples": [
+						{
+							"title": {
+								"ko": "문턱보다 작은 파일은 자동이어도 통째로 푼다",
+								"en": "A file under the threshold is fully decoded even with automatic"
+							},
+							"code": "use std::path::Path;\nuse std::rc::Rc;\nuse vanilla::{AudioAsset, AudioLoadType, AUTOMATIC_STREAMING_BYTE_THRESHOLD};\n\nlet path = Path::new(\"tests/assets/audio/wav_s16_stereo.wav\");\nassert!(std::fs::metadata(path).unwrap().len() <= AUTOMATIC_STREAMING_BYTE_THRESHOLD);\nlet audio_asset = Rc::new(AudioAsset::new());\naudio_asset.set_load_type(AudioLoadType::Automatic);\naudio_asset.load(path);\nassert!(!audio_asset.is_streaming());\nassert!(audio_asset.get_audio_buffer().is_some());",
+							"language": "rust"
+						}
+					]
+				}
+			],
+			"enums": [
+				{
+					"name": "AudioLoadType",
+					"summary": {
+						"ko": "소리 읽기 방식. (원본 AudioLoadType, 유니티 AudioClip 의 Load Type, 언리얼 사운드 웨이브의 스트리밍과 같은 갈래)",
+						"en": "Sound load type. (the original AudioLoadType, the same family as Unity AudioClip Load Type and Unreal sound wave streaming)"
+					},
+					"traits": [
+						"Clone",
+						"Copy",
+						"Debug",
+						"Default",
+						"PartialEq",
+						"Eq",
+						"Hash"
+					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "resource/audioasset",
+						"class": "AudioLoadType"
+					},
+					"source": "src/resource/audioasset.rs",
+					"values": [
+						{
+							"name": "Automatic",
+							"description": {
+								"ko": "크기를 보고 고른다. (AUTOMATIC_STREAMING_BYTE_THRESHOLD 보다 큰 파일은 스트리밍, 아니면 통째로 풀기, 고른 애셋만)",
+								"en": "Picks by size. (files larger than AUTOMATIC_STREAMING_BYTE_THRESHOLD stream, otherwise full decoding, only for assets that choose it)"
+							}
+						},
+						{
+							"name": "DecompressOnLoad",
+							"description": {
+								"ko": "읽을 때 PCM 으로 통째로 푼다. (효과음처럼 짧고 자주 겹쳐 트는 소리, 시작이 바로이고 겹쳐 틀어도 싸다, 기본)",
+								"en": "Fully decodes to PCM on load. (short sounds played often and overlapping, like sound effects; starts immediately and overlapping is cheap, the default)"
+							}
+						},
+						{
+							"name": "Streaming",
+							"description": {
+								"ko": "풀지 않고 틀 때 조금씩 풀어 흘린다. (배경음처럼 긴 소리, 메모리는 압축된 파일 크기 이하, 데스크탑은 플레이어마다 링 버퍼 128 KiB)",
+								"en": "Does not decode up front and decodes a little at a time while playing. (long sounds like background music; memory is at most the compressed file size, plus a 128 KiB ring buffer per player on desktop)"
+							}
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "배경음은 스트리밍, 효과음은 통째로 풀기",
+								"en": "Background music streams, sound effects are fully decoded"
+							},
+							"code": "use std::path::Path;\nuse std::rc::Rc;\nuse vanilla::{AudioAsset, AudioLoadType};\n\nlet music_asset = Rc::new(AudioAsset::new());\nmusic_asset.set_load_type(AudioLoadType::Streaming);\nmusic_asset.load(Path::new(\"tests/assets/audio/mp3_stereo.mp3\"));\nlet effect_asset = Rc::new(AudioAsset::new());\neffect_asset.set_load_type(AudioLoadType::DecompressOnLoad);\neffect_asset.load(Path::new(\"tests/assets/audio/mp3_stereo.mp3\"));\nassert!(music_asset.is_streaming());\nassert!(music_asset.get_audio_buffer().is_none());\nassert!(!effect_asset.is_streaming());\nassert!((music_asset.get_duration() - effect_asset.get_duration()).abs() < 0.001);",
+							"language": "rust"
+						}
+					]
+				}
+			]
 		},
 		{
 			"name": "resource/blobasset",

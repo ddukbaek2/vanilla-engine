@@ -182,14 +182,12 @@ impl AudioPlayer {
 				return;
 			}
 		};
-		let audio_buffer = match audio_asset.get_audio_buffer() {
-			Some(audio_buffer) => {
-				audio_buffer
-			}
-			None => {
-				return;
-			}
-		};
+		// 스트리밍 애셋은 미디어 요소(웹)나 풀개 스레드의 링(데스크탑)으로 같은 GainNode 에서 튼다. (원본 startStreamPlayback)
+		let audio_stream = audio_asset.get_audio_stream();
+		let audio_buffer = audio_asset.get_audio_buffer();
+		if audio_stream.is_none() && audio_buffer.is_none() {
+			return;
+		}
 		let start_duration = audio_asset.get_duration();
 
 		// 재생 중일 경우 정지.
@@ -202,7 +200,15 @@ impl AudioPlayer {
 
 		// 내부 재생 시작.
 		self.is_loop = is_loop;
-		self.audio_player_backend.start_playback(&audio_buffer, is_loop, self.time);
+		match (&audio_stream, &audio_buffer) {
+			(Some(audio_stream), _) => {
+				self.audio_player_backend.start_stream_playback(audio_stream, is_loop, self.time);
+			}
+			(None, Some(audio_buffer)) => {
+				self.audio_player_backend.start_playback(audio_buffer, is_loop, self.time);
+			}
+			(None, None) => {}
+		}
 		self.start_context_time = self.read_audio_context_time();
 		self.start_playback_rate = self.playback_rate;
 		self.start_duration = start_duration;
@@ -349,7 +355,17 @@ impl AudioPlayer {
 	/// - `audio_asset`: 틀 애셋. (engine.load_audio_asset 으로 읽은 것)
 	//==============================================================================
 	pub fn set_audio_asset(&mut self, audio_asset: Rc<AudioAsset>) {
+		// 스트리밍으로 틀던 것이 멈춰 있으면 그 미디어 요소가 받아 둔 것을 놓는다. (웹, 원본 setAudioAsset)
+		let stream_url = audio_asset.get_stream_url();
+		self.audio_player_backend.release_idle_stream(stream_url.as_deref());
 		self.audio_asset = Some(audio_asset);
+	}
+
+	//==============================================================================
+	/// 스트리밍 소리의 지금 자리. (웹은 미디어 요소의 currentTime, 데스크탑과 버퍼 소리는 None, SoundSystem 이 멈춘 자리를 셀 때)
+	//==============================================================================
+	pub(crate) fn get_stream_time(&self) -> Option<f64> {
+		self.audio_player_backend.get_stream_time()
 	}
 
 	//==============================================================================
@@ -394,8 +410,21 @@ impl AudioPlayer {
 		if !self.is_playing() || self.audio_manager_state.is_none() {
 			return self.time;
 		}
+		// 웹 스트리밍은 미디어 요소의 자리가 곧 재생 위치다. (원본 getTime, 반복이면 요소가 되감고, 컨텍스트가 멈추면 요소도 멈춰 있다)
+		if let Some(stream_time) = self.audio_player_backend.get_stream_time() {
+			return stream_time;
+		}
+		// 데스크탑 스트리밍의 길이는 끝까지 한 번 풀면 푼 길이로 바뀌어 지금 길이로 되감는다.
+		let duration = match &self.audio_asset {
+			Some(audio_asset) if audio_asset.is_streaming() => {
+				audio_asset.get_duration()
+			}
+			_ => {
+				self.start_duration
+			}
+		};
 		let elapsed_seconds = (self.read_audio_context_time() - self.start_context_time).max(0.0) * self.start_playback_rate;
-		read_playback_position(self.time, elapsed_seconds, self.start_duration, self.is_loop)
+		read_playback_position(self.time, elapsed_seconds, duration, self.is_loop)
 	}
 
 	//==============================================================================

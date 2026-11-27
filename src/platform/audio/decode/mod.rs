@@ -12,6 +12,7 @@
 mod aac;
 mod opus;
 pub(crate) mod resample;
+pub(crate) mod stream;
 mod trim;
 
 use opus::OpusPacketDecoder;
@@ -118,6 +119,8 @@ pub(crate) fn down_mix_channels(mut channel_list: Vec<Vec<f32>>) -> Vec<Vec<f32>
 /// 패킷 하나를 다듬지 않고 푼 것. (symphonia 가 매긴 길이와 다듬기 값을 함께 든다)
 //==============================================================================
 pub(crate) struct RawPacket {
+	/// 패킷 시각. (트랙 시간 단위, 스트리밍의 길이 어림에 쓴다)
+	pub timestamp: u64,
 	pub duration: u64,
 	pub trim_start: u64,
 	pub trim_end: u64,
@@ -230,79 +233,130 @@ fn copy_planes(buffer: &GenericAudioBufferRef<'_>, bits_per_sample: Option<u32>,
 }
 
 //==============================================================================
-/// 다듬지 않고 풀기. (symphonia 로 디먹스해 패킷마다 풀고, 다듬기는 trim.rs 가 크롬처럼 한다)
+/// 패킷 읽개. (symphonia 로 디먹스해 패킷마다 푼다, 통째로 풀기(decode_raw)와 스트리밍(stream.rs)이 같이 쓴다)
 /// - 풀기 오류가 난 패킷은 크롬 SymphoniaAudioDecoder 처럼 버리고 이어 가되, 두 번 잇따르면 실패로 친다.
 //==============================================================================
-pub(crate) fn decode_raw(bytes: &[u8]) -> Result<RawDecode, String> {
-	let media_source_stream = MediaSourceStream::new(Box::new(Cursor::new(bytes.to_vec())), Default::default());
-	let mut format_reader = symphonia::default::get_probe().probe(&Hint::new(), media_source_stream, FormatOptions::default(), MetadataOptions::default()).map_err(|error| format!("{}", error))?;
-	let format_name = format_reader.format_info().short_name.to_string();
-	let track = format_reader.default_track(TrackType::Audio).ok_or_else(|| String::from("no audio track"))?.clone();
-	let codec_params = track.codec_params.as_ref().and_then(|codec_params| codec_params.audio()).ok_or_else(|| String::from("no audio codec parameters"))?.clone();
-	let mut decoder = get_codec_registry().make_audio_decoder(&codec_params, &AudioDecoderOptions::default()).map_err(|error| format!("{}", error))?;
-	let codec_name = decoder.codec_info().short_name.to_string();
-	let bits_per_sample = codec_params.bits_per_sample;
-	let is_clamped = codec_params.codec == symphonia::core::codecs::audio::well_known::CODEC_ID_MP3;
-	let mut packet_list: Vec<RawPacket> = Vec::new();
-	let mut sample_rate = codec_params.sample_rate.unwrap_or(0);
-	let mut channel_count = codec_params.channels.as_ref().map(|channels| channels.count()).unwrap_or(0);
-	let mut consecutive_error_count = 0;
-	loop {
-		let mut packet = match format_reader.next_packet() {
-			Ok(Some(packet)) => {
-				packet
-			}
-			Ok(None) => {
-				break;
-			}
-			Err(error) => {
-				return Err(format!("{}", error));
-			}
-		};
-		if packet.track_id != track.id {
-			continue;
-		}
-		// 해석기가 다듬지 않게 다듬기 값을 덜어 둔다. (크롬도 다듬지 않은 패킷을 넘긴다)
-		let trim_start = packet.trim_start.get();
-		let trim_end = packet.trim_end.get();
-		packet.trim_start = symphonia::core::units::Duration::from(0u64);
-		packet.trim_end = symphonia::core::units::Duration::from(0u64);
-		let planes = match decoder.decode(&packet) {
-			Ok(buffer) => {
-				consecutive_error_count = 0;
-				sample_rate = buffer.spec().rate();
-				channel_count = buffer.spec().channels().count();
-				copy_planes(&buffer, bits_per_sample, is_clamped)
-			}
-			Err(symphonia::core::errors::Error::DecodeError(error)) => {
-				consecutive_error_count += 1;
-				if consecutive_error_count > 1 {
-					return Err(format!("decode: {}", error));
-				}
-				vec![Vec::new(); channel_count]
-			}
-			Err(error) => {
-				return Err(format!("decode: {}", error));
-			}
-		};
-		packet_list.push(RawPacket {
-			duration: packet.dur.get(),
-			trim_start,
-			trim_end,
-			planes,
-		});
+pub(crate) struct PacketReader {
+	format_reader: Box<dyn symphonia::core::formats::FormatReader>,
+	decoder: Box<dyn symphonia::core::codecs::audio::AudioDecoder>,
+	track_id: u32,
+	bits_per_sample: Option<u32>,
+	is_clamped: bool,
+	consecutive_error_count: usize,
+	/// 머리 정보. (packet_list 는 비어 있다, sample_rate 와 channel_count 는 푼 패킷마다 고친다)
+	header: RawDecode,
+}
+
+impl PacketReader {
+	//==============================================================================
+	/// 열기. (바이트나 파일, 꼴은 내용으로 가린다)
+	//==============================================================================
+	pub(crate) fn open(media_source: Box<dyn symphonia::core::io::MediaSource>) -> Result<PacketReader, String> {
+		let media_source_stream = MediaSourceStream::new(media_source, Default::default());
+		let format_reader = symphonia::default::get_probe().probe(&Hint::new(), media_source_stream, FormatOptions::default(), MetadataOptions::default()).map_err(|error| format!("{}", error))?;
+		let format_name = format_reader.format_info().short_name.to_string();
+		let track = format_reader.default_track(TrackType::Audio).ok_or_else(|| String::from("no audio track"))?.clone();
+		let codec_params = track.codec_params.as_ref().and_then(|codec_params| codec_params.audio()).ok_or_else(|| String::from("no audio codec parameters"))?.clone();
+		let decoder = get_codec_registry().make_audio_decoder(&codec_params, &AudioDecoderOptions::default()).map_err(|error| format!("{}", error))?;
+		let codec_name = decoder.codec_info().short_name.to_string();
+		Ok(PacketReader {
+			format_reader,
+			decoder,
+			track_id: track.id,
+			bits_per_sample: codec_params.bits_per_sample,
+			is_clamped: codec_params.codec == symphonia::core::codecs::audio::well_known::CODEC_ID_MP3,
+			consecutive_error_count: 0,
+			header: RawDecode {
+				format_name,
+				codec_name,
+				sample_rate: codec_params.sample_rate.unwrap_or(0),
+				channel_count: codec_params.channels.as_ref().map(|channels| channels.count()).unwrap_or(0),
+				time_base: track.time_base.map(|time_base| (time_base.numer.get(), time_base.denom.get())),
+				track_delay: track.delay,
+				track_padding: track.padding,
+				opus_pre_skip: OpusPacketDecoder::read_pre_skip(&codec_params),
+				packet_list: Vec::new(),
+			},
+		})
 	}
-	Ok(RawDecode {
-		format_name,
-		codec_name,
-		sample_rate,
-		channel_count,
-		time_base: track.time_base.map(|time_base| (time_base.numer.get(), time_base.denom.get())),
-		track_delay: track.delay,
-		track_padding: track.padding,
-		opus_pre_skip: OpusPacketDecoder::read_pre_skip(&codec_params),
-		packet_list,
-	})
+
+	//==============================================================================
+	/// 머리 정보. (지금까지 푼 패킷의 표본율과 채널 수)
+	//==============================================================================
+	pub(crate) fn get_header(&self) -> &RawDecode {
+		&self.header
+	}
+
+	//==============================================================================
+	/// 다음 패킷. (is_decoded 가 거짓이면 풀지 않고 길이와 다듬기 값만, 끝이면 None)
+	//==============================================================================
+	pub(crate) fn read_packet(&mut self, is_decoded: bool) -> Result<Option<RawPacket>, String> {
+		loop {
+			let mut packet = match self.format_reader.next_packet() {
+				Ok(Some(packet)) => {
+					packet
+				}
+				Ok(None) => {
+					return Ok(None);
+				}
+				Err(error) => {
+					return Err(format!("{}", error));
+				}
+			};
+			if packet.track_id != self.track_id {
+				continue;
+			}
+			// 해석기가 다듬지 않게 다듬기 값을 덜어 둔다. (크롬도 다듬지 않은 패킷을 넘긴다)
+			let trim_start = packet.trim_start.get();
+			let trim_end = packet.trim_end.get();
+			packet.trim_start = symphonia::core::units::Duration::from(0u64);
+			packet.trim_end = symphonia::core::units::Duration::from(0u64);
+			let planes = if !is_decoded {
+				Vec::new()
+			}
+			else {
+				match self.decoder.decode(&packet) {
+					Ok(buffer) => {
+						self.consecutive_error_count = 0;
+						self.header.sample_rate = buffer.spec().rate();
+						self.header.channel_count = buffer.spec().channels().count();
+						copy_planes(&buffer, self.bits_per_sample, self.is_clamped)
+					}
+					Err(symphonia::core::errors::Error::DecodeError(error)) => {
+						self.consecutive_error_count += 1;
+						if self.consecutive_error_count > 1 {
+							return Err(format!("decode: {}", error));
+						}
+						vec![Vec::new(); self.header.channel_count]
+					}
+					Err(error) => {
+						return Err(format!("decode: {}", error));
+					}
+				}
+			};
+			return Ok(Some(RawPacket {
+				timestamp: packet.pts.get().max(0) as u64,
+				duration: packet.dur.get(),
+				trim_start,
+				trim_end,
+				planes,
+			}));
+		}
+	}
+}
+
+//==============================================================================
+/// 다듬지 않고 풀기. (symphonia 로 디먹스해 패킷마다 풀고, 다듬기는 trim.rs 가 크롬처럼 한다)
+//==============================================================================
+pub(crate) fn decode_raw(bytes: &[u8]) -> Result<RawDecode, String> {
+	let mut packet_reader = PacketReader::open(Box::new(Cursor::new(bytes.to_vec())))?;
+	let mut packet_list: Vec<RawPacket> = Vec::new();
+	while let Some(raw_packet) = packet_reader.read_packet(true)? {
+		packet_list.push(raw_packet);
+	}
+	let mut raw_decode = packet_reader.header;
+	raw_decode.packet_list = packet_list;
+	Ok(raw_decode)
 }
 
 #[cfg(test)]

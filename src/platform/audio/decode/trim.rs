@@ -16,142 +16,257 @@
 use super::RawDecode;
 
 //==============================================================================
-/// 크롬처럼 다듬어 채널마다 이어 붙이기.
+/// 다듬기 계획. (꼴마다 버릴 프레임, 푼 표본 없이 패킷의 길이와 다듬기 값, 파일 바이트로 정한다)
+/// - 통째로 풀기(trim_like_chrome)와 스트리밍(stream.rs)이 같은 계획과 같은 TrimState 로 다듬어 같은 프레임을 남긴다.
+/// - 끝에서 버리는 것은 둘로 나눈다. 이어 붙인 소리의 마지막 tail_discard 프레임(MP3 채움, Ogg 의 granule),
+///   패킷마다 그 패킷 뒤에서 버리는 것(WebM 의 DiscardPadding, MP4 AAC 의 마지막 패킷). 앞에서 버리는 것은 이어 붙인 소리의 처음 front_discard 프레임이다.
 //==============================================================================
-pub(crate) fn trim_like_chrome(raw: &RawDecode, bytes: &[u8]) -> Vec<Vec<f32>> {
-	let frame_count_list: Vec<usize> = raw.packet_list.iter().map(|packet| packet.planes.first().map(|plane| plane.len()).unwrap_or(0)).collect();
-	let (front_discard, end_discard_list, total_limit) = match (raw.format_name.as_str(), raw.codec_name.as_str()) {
-		("mp3", _) => {
-			let front_discard = raw.track_delay.unwrap_or(0) as usize;
-			let end_discard = raw.track_padding.unwrap_or(0) as usize;
-			(front_discard, create_last_end_discard(&frame_count_list, end_discard), None)
-		}
-		("ogg", "opus") => {
-			let front_discard = raw.opus_pre_skip as usize;
-			let end_discard: u64 = raw.packet_list.iter().map(|packet| packet.trim_end).sum();
-			(front_discard, create_last_end_discard(&frame_count_list, end_discard as usize), None)
-		}
-		("ogg", "vorbis") => {
-			let mut end_discard: u64 = raw.packet_list.iter().map(|packet| packet.trim_end).sum();
-			if is_first_ogg_data_page_last(bytes) {
-				end_discard += raw.packet_list.first().map(|packet| packet.trim_start).unwrap_or(0);
+#[derive(Clone, Debug)]
+pub(crate) struct TrimPlan {
+	front_discard: usize,
+	tail_discard: usize,
+	/// (패킷 차례, 그 패킷 뒤에서 버릴 프레임) (WebM DiscardPadding, 차례대로)
+	packet_end_discard_list: Vec<(usize, usize)>,
+	/// MP4 AAC 의 마지막 패킷. (차례, 컨테이너가 매긴 그 패킷 길이(마이크로초), 방법 2 의 컨테이너 길이(프레임))
+	mp4_aac_last_packet: Option<(usize, i64, Option<usize>)>,
+	/// 다듬은 소리의 길이 한계. (MP4 iTunSMPB 의 remainder)
+	total_limit: Option<usize>,
+	sample_rate: f64,
+}
+
+impl TrimPlan {
+	//==============================================================================
+	/// 계획 세우기. (raw 의 패킷은 길이와 다듬기 값만 본다, 표본은 보지 않는다)
+	//==============================================================================
+	pub(crate) fn new(raw: &RawDecode, bytes: &[u8]) -> TrimPlan {
+		let packet_count = raw.packet_list.len();
+		let sample_rate = raw.sample_rate as f64;
+		let mut trim_plan = TrimPlan {
+			front_discard: 0,
+			tail_discard: 0,
+			packet_end_discard_list: Vec::new(),
+			mp4_aac_last_packet: None,
+			total_limit: None,
+			sample_rate,
+		};
+		match (raw.format_name.as_str(), raw.codec_name.as_str()) {
+			("mp3", _) => {
+				trim_plan.front_discard = raw.track_delay.unwrap_or(0) as usize;
+				trim_plan.tail_discard = raw.track_padding.unwrap_or(0) as usize;
 			}
-			(0, create_last_end_discard(&frame_count_list, end_discard as usize), None)
-		}
-		("matroska", codec_name) => {
-			let matroska_timing = read_matroska_timing(bytes);
-			let pre_skip = if codec_name == "opus" { raw.opus_pre_skip as usize } else { 0 };
-			let sample_rate = raw.sample_rate as f64;
-			// 첫 블록 시각. (마이크로초, FFmpeg 는 트랙 시간 단위로 반올림한 CodecDelay 를 뺀다)
-			let time_base_nanoseconds = matroska_timing.timecode_scale as f64;
-			let codec_delay_in_track_time_base = round_half_away_from_zero(matroska_timing.codec_delay as f64 / time_base_nanoseconds);
-			let first_timestamp_microseconds = (matroska_timing.first_block_timecode.saturating_sub(codec_delay_in_track_time_base) as f64 * time_base_nanoseconds / 1000.0).round() as i64;
-			// pre-skip 을 버린 뒤의 시각. (AudioTimestampHelper::ComputeTimestamp)
-			let microseconds_per_frame = 1000000.0 / sample_rate;
-			let timestamp_after_pre_skip = first_timestamp_microseconds.saturating_add((microseconds_per_frame * pre_skip as f64) as i64);
-			let negative_discard = if timestamp_after_pre_skip < 0 { (-(timestamp_after_pre_skip as f64) / 1000000.0 * sample_rate).round() as usize } else { 0 };
-			// 블록의 DiscardPadding. (나노초 → 표본(반올림) → 마이크로초(버림) → 프레임(+0.5 버림))
-			let mut end_discard_list = vec![0usize; frame_count_list.len()];
-			for (block_index, discard_padding_nanoseconds) in &matroska_timing.discard_padding_list {
-				if *block_index < end_discard_list.len() && *discard_padding_nanoseconds > 0 {
-					let discard_samples = round_half_away_from_zero(*discard_padding_nanoseconds as f64 * sample_rate / 1000000000.0);
-					let discard_microseconds = (discard_samples as f64 * 1000000.0 / sample_rate) as i64;
-					end_discard_list[*block_index] = (discard_microseconds as f64 / 1000000.0 * sample_rate + 0.5) as usize;
+			("ogg", "opus") => {
+				trim_plan.front_discard = raw.opus_pre_skip as usize;
+				trim_plan.tail_discard = raw.packet_list.iter().map(|packet| packet.trim_end).sum::<u64>() as usize;
+			}
+			("ogg", "vorbis") => {
+				let mut end_discard: u64 = raw.packet_list.iter().map(|packet| packet.trim_end).sum();
+				if is_first_ogg_data_page_last(bytes) {
+					end_discard += raw.packet_list.first().map(|packet| packet.trim_start).unwrap_or(0);
 				}
+				trim_plan.tail_discard = end_discard as usize;
 			}
-			(pre_skip.saturating_add(negative_discard), end_discard_list, None)
-		}
-		("isomp4", _) => {
-			let mp4_timing = read_mp4_timing(bytes);
-			let sample_rate = raw.sample_rate as f64;
-			let to_samples = |media_units: i64| -> usize {
-				if mp4_timing.media_timescale > 0 { (media_units as f64 * sample_rate / mp4_timing.media_timescale as f64).round().max(0.0) as usize } else { 0 }
-			};
-			let mut end_discard_list = vec![0usize; frame_count_list.len()];
-			let mut total_limit = None;
-			// 편집 목록이 있으면 그 media_time, 없으면 iTunSMPB 의 priming 을 앞에서. remainder 는 (길이 - remainder) 부터 버린다. (mov.c)
-			let front_discard = if mp4_timing.has_edit_list {
-				to_samples(mp4_timing.edit_media_time)
-			}
-			else if mp4_timing.itunes_priming > 0 && mp4_timing.itunes_priming < 16384 {
-				to_samples(mp4_timing.itunes_priming)
-			}
-			else {
-				0
-			};
-			if !mp4_timing.has_edit_list && mp4_timing.itunes_remainder > 0 {
-				let duration = to_samples(mp4_timing.media_duration as i64);
-				let remainder = to_samples(mp4_timing.itunes_remainder);
-				if duration > remainder {
-					total_limit = Some((duration - remainder).saturating_sub(front_discard));
+			("matroska", codec_name) => {
+				let matroska_timing = read_matroska_timing(bytes);
+				let pre_skip = if codec_name == "opus" { raw.opus_pre_skip as usize } else { 0 };
+				// 첫 블록 시각. (마이크로초, FFmpeg 는 트랙 시간 단위로 반올림한 CodecDelay 를 뺀다)
+				let time_base_nanoseconds = matroska_timing.timecode_scale as f64;
+				let codec_delay_in_track_time_base = round_half_away_from_zero(matroska_timing.codec_delay as f64 / time_base_nanoseconds);
+				let first_timestamp_microseconds = (matroska_timing.first_block_timecode.saturating_sub(codec_delay_in_track_time_base) as f64 * time_base_nanoseconds / 1000.0).round() as i64;
+				// pre-skip 을 버린 뒤의 시각. (AudioTimestampHelper::ComputeTimestamp)
+				let microseconds_per_frame = 1000000.0 / sample_rate;
+				let timestamp_after_pre_skip = first_timestamp_microseconds.saturating_add((microseconds_per_frame * pre_skip as f64) as i64);
+				let negative_discard = if timestamp_after_pre_skip < 0 { (-(timestamp_after_pre_skip as f64) / 1000000.0 * sample_rate).round() as usize } else { 0 };
+				// 블록의 DiscardPadding. (나노초 → 표본(반올림) → 마이크로초(버림) → 프레임(+0.5 버림))
+				for (block_index, discard_padding_nanoseconds) in &matroska_timing.discard_padding_list {
+					if *block_index < packet_count && *discard_padding_nanoseconds > 0 {
+						let discard_samples = round_half_away_from_zero(*discard_padding_nanoseconds as f64 * sample_rate / 1000000000.0);
+						let discard_microseconds = (discard_samples as f64 * 1000000.0 / sample_rate) as i64;
+						trim_plan.packet_end_discard_list.push((*block_index, (discard_microseconds as f64 / 1000000.0 * sample_rate + 0.5) as usize));
+					}
 				}
+				trim_plan.packet_end_discard_list.sort_by_key(|(block_index, _)| *block_index);
+				trim_plan.packet_end_discard_list.dedup_by_key(|(block_index, _)| *block_index);
+				trim_plan.front_discard = pre_skip.saturating_add(negative_discard);
 			}
-			if raw.codec_name == "aac" {
-				// 방법 1: 마지막 패킷 길이가 디코드한 길이보다 짧으면 그 비로 줄인다. (TimeDelta 마이크로초끼리의 비)
-				let last_index = frame_count_list.len().saturating_sub(1);
-				let last_frame_count = frame_count_list.get(last_index).copied().unwrap_or(0);
-				let last_duration_microseconds = match (raw.packet_list.get(last_index), raw.time_base) {
-					(Some(packet), Some((numerator, denominator))) => {
-						(packet.duration as f64 * numerator as f64 * 1000000.0 / denominator as f64).round() as i64
-					}
-					_ => {
-						0
-					}
+			("isomp4", _) => {
+				let mp4_timing = read_mp4_timing(bytes);
+				let to_samples = |media_units: i64| -> usize {
+					if mp4_timing.media_timescale > 0 { (media_units as f64 * sample_rate / mp4_timing.media_timescale as f64).round().max(0.0) as usize } else { 0 }
 				};
-				let frame_duration_microseconds = (last_frame_count as f64 * 1000000.0 / sample_rate) as i64;
-				if last_duration_microseconds > 0 && last_duration_microseconds < frame_duration_microseconds {
-					let kept = (last_frame_count as f64 * (last_duration_microseconds as f64 / frame_duration_microseconds as f64)).floor() as usize;
-					end_discard_list[last_index] = last_frame_count - kept;
+				// 편집 목록이 있으면 그 media_time, 없으면 iTunSMPB 의 priming 을 앞에서. remainder 는 (길이 - remainder) 부터 버린다. (mov.c)
+				let front_discard = if mp4_timing.has_edit_list {
+					to_samples(mp4_timing.edit_media_time)
 				}
-				else if mp4_timing.duration_seconds > 0.0 {
-					// 방법 2: 컨테이너 길이. (마이크로초로 반올림한 길이의 프레임 수)
-					let duration_microseconds = (mp4_timing.duration_seconds * 1000000.0).round();
-					let container_limit = (duration_microseconds / 1000000.0 * sample_rate).round() as usize;
-					total_limit = Some(total_limit.map(|limit: usize| limit.min(container_limit)).unwrap_or(container_limit));
+				else if mp4_timing.itunes_priming > 0 && mp4_timing.itunes_priming < 16384 {
+					to_samples(mp4_timing.itunes_priming)
 				}
+				else {
+					0
+				};
+				if !mp4_timing.has_edit_list && mp4_timing.itunes_remainder > 0 {
+					let duration = to_samples(mp4_timing.media_duration as i64);
+					let remainder = to_samples(mp4_timing.itunes_remainder);
+					if duration > remainder {
+						trim_plan.total_limit = Some((duration - remainder).saturating_sub(front_discard));
+					}
+				}
+				if raw.codec_name == "aac" && packet_count > 0 {
+					// 방법 1 은 마지막 패킷을 푼 길이를 보고 정한다. (TrimState) 방법 2 의 컨테이너 길이는 여기서 셈해 둔다. (마이크로초로 반올림한 길이의 프레임 수)
+					let last_index = packet_count - 1;
+					let last_duration_microseconds = match (raw.packet_list.get(last_index), raw.time_base) {
+						(Some(packet), Some((numerator, denominator))) => {
+							(packet.duration as f64 * numerator as f64 * 1000000.0 / denominator as f64).round() as i64
+						}
+						_ => {
+							0
+						}
+					};
+					let container_limit = if mp4_timing.duration_seconds > 0.0 {
+						let duration_microseconds = (mp4_timing.duration_seconds * 1000000.0).round();
+						Some((duration_microseconds / 1000000.0 * sample_rate).round() as usize)
+					}
+					else {
+						None
+					};
+					trim_plan.mp4_aac_last_packet = Some((last_index, last_duration_microseconds, container_limit));
+				}
+				trim_plan.front_discard = front_discard;
 			}
-			(front_discard, end_discard_list, total_limit)
+			_ => {}
 		}
-		_ => {
-			(0, vec![0; frame_count_list.len()], None)
-		}
-	};
-	let mut channel_data: Vec<Vec<f32>> = vec![Vec::new(); raw.channel_count];
-	let mut remaining_front_discard = front_discard;
-	for (packet_index, packet) in raw.packet_list.iter().enumerate() {
-		let frame_count = frame_count_list[packet_index];
-		let end_discard = end_discard_list.get(packet_index).copied().unwrap_or(0).min(frame_count);
-		let front = remaining_front_discard.min(frame_count - end_discard);
-		remaining_front_discard -= remaining_front_discard.min(frame_count);
-		for (channel_index, channel) in channel_data.iter_mut().enumerate() {
-			if let Some(plane) = packet.planes.get(channel_index) {
-				channel.extend_from_slice(&plane[front..frame_count - end_discard]);
-			}
-		}
+		trim_plan
 	}
-	if let Some(total_limit) = total_limit {
-		for channel in channel_data.iter_mut() {
-			channel.truncate(total_limit);
-		}
+
+	//==============================================================================
+	/// 앞에서 버리는 프레임 수.
+	//==============================================================================
+	pub(crate) fn get_front_discard(&self) -> usize {
+		self.front_discard
 	}
-	channel_data
+
+	//==============================================================================
+	/// 이어 붙인 소리의 끝에서 버리는 프레임 수.
+	//==============================================================================
+	pub(crate) fn get_tail_discard(&self) -> usize {
+		self.tail_discard
+	}
+
+	//==============================================================================
+	/// 다듬은 소리의 길이 한계. (MP4 iTunSMPB)
+	//==============================================================================
+	pub(crate) fn get_total_limit(&self) -> Option<usize> {
+		self.total_limit
+	}
 }
 
 //==============================================================================
-/// 끝에서 버릴 수를 마지막 패킷들에 나눠 두기. (뒤 패킷부터, 한 패킷보다 많으면 앞 패킷으로 넘긴다)
+/// 다듬기 진행. (패킷을 차례로 넣으면 남길 프레임을 내놓는다, 끝의 tail_discard 프레임은 쥐고 있다가 버린다)
 //==============================================================================
-fn create_last_end_discard(frame_count_list: &[usize], end_discard: usize) -> Vec<usize> {
-	let mut end_discard_list = vec![0usize; frame_count_list.len()];
-	let mut remaining = end_discard;
-	for packet_index in (0..frame_count_list.len()).rev() {
-		if remaining == 0 {
-			break;
+pub(crate) struct TrimState {
+	trim_plan: TrimPlan,
+	remaining_front_discard: usize,
+	/// 끝에서 버릴지 모르는 프레임. (채널마다, tail_discard 개까지 쥔다)
+	held_channel_list: Vec<std::collections::VecDeque<f32>>,
+	/// 내놓은 프레임 수와 그 한계.
+	emitted_frame_count: usize,
+	total_limit: Option<usize>,
+	packet_end_discard_position: usize,
+}
+
+impl TrimState {
+	//==============================================================================
+	/// 생성. (channel_count 는 내놓을 채널 수)
+	//==============================================================================
+	pub(crate) fn new(trim_plan: TrimPlan, channel_count: usize) -> TrimState {
+		let remaining_front_discard = trim_plan.front_discard;
+		let total_limit = trim_plan.total_limit;
+		TrimState {
+			trim_plan,
+			remaining_front_discard,
+			held_channel_list: vec![std::collections::VecDeque::new(); channel_count],
+			emitted_frame_count: 0,
+			total_limit,
+			packet_end_discard_position: 0,
 		}
-		let discard = remaining.min(frame_count_list[packet_index]);
-		end_discard_list[packet_index] = discard;
-		remaining -= discard;
 	}
-	end_discard_list
+
+	//==============================================================================
+	/// 패킷 하나 넣기. (packet_index 차례의 푼 표본, 남길 프레임을 output 의 채널마다 덧붙인다)
+	//==============================================================================
+	pub(crate) fn push_packet(&mut self, packet_index: usize, planes: &[Vec<f32>], output: &mut [Vec<f32>]) {
+		let frame_count = planes.first().map(|plane| plane.len()).unwrap_or(0);
+		let mut end_discard = 0usize;
+		while let Some((block_index, discard)) = self.trim_plan.packet_end_discard_list.get(self.packet_end_discard_position).copied() {
+			if block_index > packet_index {
+				break;
+			}
+			if block_index == packet_index {
+				end_discard = discard;
+			}
+			self.packet_end_discard_position += 1;
+		}
+		if let Some((last_index, last_duration_microseconds, container_limit)) = self.trim_plan.mp4_aac_last_packet {
+			if packet_index == last_index {
+				// 방법 1: 마지막 패킷 길이가 디코드한 길이보다 짧으면 그 비로 줄인다. (TimeDelta 마이크로초끼리의 비) 아니면 방법 2: 컨테이너 길이.
+				let frame_duration_microseconds = (frame_count as f64 * 1000000.0 / self.trim_plan.sample_rate) as i64;
+				if last_duration_microseconds > 0 && last_duration_microseconds < frame_duration_microseconds {
+					let kept = (frame_count as f64 * (last_duration_microseconds as f64 / frame_duration_microseconds as f64)).floor() as usize;
+					end_discard = frame_count - kept;
+				}
+				else if let Some(container_limit) = container_limit {
+					self.total_limit = Some(self.total_limit.map(|limit| limit.min(container_limit)).unwrap_or(container_limit));
+				}
+			}
+		}
+		let end_discard = end_discard.min(frame_count);
+		let front = self.remaining_front_discard.min(frame_count - end_discard);
+		self.remaining_front_discard -= self.remaining_front_discard.min(frame_count);
+		let kept_count = frame_count - end_discard - front;
+		if kept_count == 0 {
+			return;
+		}
+		let tail_discard = self.trim_plan.tail_discard;
+		for (channel_index, held_channel) in self.held_channel_list.iter_mut().enumerate() {
+			match planes.get(channel_index) {
+				Some(plane) => {
+					held_channel.extend(&plane[front..frame_count - end_discard]);
+				}
+				None => {
+					held_channel.extend(std::iter::repeat_n(0.0, kept_count));
+				}
+			}
+		}
+		// 쥔 것이 tail_discard 를 넘으면 앞의 것을 내놓는다. (한계를 넘는 것은 버린다)
+		let held_count = self.held_channel_list.first().map(|held_channel| held_channel.len()).unwrap_or(0);
+		if held_count <= tail_discard {
+			return;
+		}
+		let release_count = held_count - tail_discard;
+		let allowed_count = match self.total_limit {
+			Some(total_limit) => {
+				release_count.min(total_limit.saturating_sub(self.emitted_frame_count))
+			}
+			None => {
+				release_count
+			}
+		};
+		for (held_channel, output_channel) in self.held_channel_list.iter_mut().zip(output.iter_mut()) {
+			output_channel.extend(held_channel.drain(..release_count).take(allowed_count));
+		}
+		self.emitted_frame_count += allowed_count;
+	}
+}
+
+//==============================================================================
+/// 크롬처럼 다듬어 채널마다 이어 붙이기. (TrimPlan 과 TrimState 로, 스트리밍과 같은 길)
+//==============================================================================
+pub(crate) fn trim_like_chrome(raw: &RawDecode, bytes: &[u8]) -> Vec<Vec<f32>> {
+	let mut trim_state = TrimState::new(TrimPlan::new(raw, bytes), raw.channel_count);
+	let mut channel_data: Vec<Vec<f32>> = vec![Vec::new(); raw.channel_count];
+	for (packet_index, packet) in raw.packet_list.iter().enumerate() {
+		trim_state.push_packet(packet_index, &packet.planes, &mut channel_data);
+	}
+	channel_data
 }
 
 //==============================================================================
@@ -539,7 +654,7 @@ mod tests {
 			track_delay: None,
 			track_padding: None,
 			opus_pre_skip: 312,
-			packet_list: vec![RawPacket { duration: 960, trim_start: 0, trim_end: 0, planes: vec![vec![0.0; 960]] }],
+			packet_list: vec![RawPacket { timestamp: 0, duration: 960, trim_start: 0, trim_end: 0, planes: vec![vec![0.0; 960]] }],
 		}
 	}
 

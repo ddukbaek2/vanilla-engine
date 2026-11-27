@@ -12,12 +12,12 @@ const KERNEL_SIZE: usize = 32;
 /// 커널 사이 오프셋 수. (kKernelOffsetCount)
 const KERNEL_OFFSET_COUNT: usize = 32;
 /// 한 번에 읽는 프레임 수. (Blink 가 넘기는 request_frames)
-const REQUEST_FRAMES: usize = 64;
+pub(crate) const REQUEST_FRAMES: usize = 64;
 
 //==============================================================================
-/// SincResampler.
+/// SincResampler. (스트리밍도 채널마다 하나를 두고 조각마다 부른다)
 //==============================================================================
-struct SincResampler {
+pub(crate) struct SincResampler {
 	io_sample_rate_ratio: f64,
 	virtual_source_index: f64,
 	is_buffer_primed: bool,
@@ -33,7 +33,7 @@ impl SincResampler {
 	//==============================================================================
 	/// 생성. (크롬 생성자와 InitializeKernel, Flush)
 	//==============================================================================
-	fn new(io_sample_rate_ratio: f64) -> SincResampler {
+	pub(crate) fn new(io_sample_rate_ratio: f64) -> SincResampler {
 		let mut sinc_resampler = SincResampler {
 			io_sample_rate_ratio,
 			virtual_source_index: 0.0,
@@ -86,7 +86,7 @@ impl SincResampler {
 	//==============================================================================
 	/// 바꾸기. (Resample, read 는 받은 칸을 원본으로 채운다)
 	//==============================================================================
-	fn resample(&mut self, destination: &mut [f32], read: &mut dyn FnMut(&mut [f32])) {
+	pub(crate) fn resample(&mut self, destination: &mut [f32], read: &mut dyn FnMut(&mut [f32])) {
 		let mut remaining_frame_count = destination.len();
 		let mut destination_index = 0;
 		if !self.is_buffer_primed && remaining_frame_count > 0 {
