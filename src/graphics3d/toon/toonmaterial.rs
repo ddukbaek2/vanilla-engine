@@ -26,7 +26,7 @@
 //! # 예제
 //! 표면 조각으로 줄무늬를 넣고 텍스처와 유니폼을 그리기마다 넘기기
 //! ```rust,no_run
-//! use vanilla::{create_box_geometry, Matrix4, MeshBuilder, ShaderProgram, ToonDrawOptions, ToonMaterialChunks, ToonPartOptions, ToonProgramKind, ToonRenderer, ToonTextureOptions, Vector3};
+//! use vanilla::{create_box_geometry, GlContext, Matrix4, MeshBuilder, ShaderProgram, ToonDrawOptions, ToonMaterialChunks, ToonPartOptions, ToonProgramKind, ToonRenderer, ToonTextureOptions, Vector3};
 //! use glow::HasContext;
 //!
 //! fn draw_stripe(gl: &glow::Context) -> Result<(), String> {
@@ -46,7 +46,7 @@
 //! 	let mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("mesh failed")?;
 //! 	let view_matrix = Matrix4::create_look_at(Vector3::create(2.0, 2.0, 3.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
 //! 	renderer.begin_frame_with_matrices(gl, &view_matrix, &Matrix4::create_perspective(0.8, 1.0, 0.1, 20.0));
-//! 	let set_shift = |program: &ShaderProgram, gl: &glow::Context, _kind: ToonProgramKind| unsafe {
+//! 	let set_shift = |program: &ShaderProgram, gl: &GlContext, _kind: ToonProgramKind| unsafe {
 //! 		gl.uniform_1_f32(program.get_uniform_location(gl, "stripeShift").as_ref(), 0.25);
 //! 	};
 //! 	renderer.draw_mesh(gl, &mesh, &Matrix4::create_identity(), ToonDrawOptions {

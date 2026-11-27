@@ -42294,7 +42294,7 @@
 						{
 							"kind": "method",
 							"name": "run_external_pass",
-							"signature": "pub fn run_external_pass<R>(&mut self, is_depth_cleared: bool, pass: impl FnOnce(&glow::Context) -> R) -> R",
+							"signature": "pub fn run_external_pass<R>(&mut self, is_depth_cleared: bool, pass: impl FnOnce(&GlContext) -> R) -> R",
 							"params": [
 								{
 									"name": "is_depth_cleared",
@@ -42306,7 +42306,7 @@
 								},
 								{
 									"name": "pass",
-									"type": "impl FnOnce(&glow::Context) -> R",
+									"type": "impl FnOnce(&GlContext) -> R",
 									"description": {
 										"ko": "GL 컨텍스트를 받아 그리는 함수.",
 										"en": "Function that receives the GL context and draws."
@@ -42321,8 +42321,8 @@
 								}
 							},
 							"description": {
-								"ko": "2D 그리기 사이에 GL 패스 끼우기. (원본 runExternalPass)\n- 앞의 2D 묶음을 내보내고, 기억한 프로그램과 텍스처를 잊고, is_depth_cleared 면 깊이를 비운 뒤 pass 를 부르고, 끝나면 restore_render_state 를 부른다.\n- pass 는 GL 컨텍스트를 받아 프로그램, 버텍스 어레이, 뷰포트, 섞기, 깊이, 면 가리기를 바꿔도 된다. (클립 중이면 스텐실 테스트는 restore_render_state 가 다시 켠다)\n- pass 가 돌려준 값을 그대로 돌려준다. pass 가 패닉해도 풀리는 동안 가드가 restore_render_state 를 부른다. (원본은 던져도 되돌린다)",
-								"en": "Inserts a GL pass between 2D draws. (the original runExternalPass)\n- Flushes the preceding 2D batch, forgets the remembered program and texture, clears depth if is_depth_cleared, calls pass, and calls restore_render_state when done.\n- pass receives the GL context and may change the program, vertex array, viewport, blending, depth and face culling. (if clipping, restore_render_state turns the stencil test back on)\n- Returns the value pass returned as is. Even if pass panics, a guard calls restore_render_state while unwinding. (the original restores even if it throws)"
+								"ko": "2D 그리기 사이에 GL 패스 끼우기. (원본 runExternalPass)\n- 앞의 2D 묶음을 내보내고, 기억한 프로그램과 텍스처를 잊고, is_depth_cleared 면 깊이를 비운 뒤 pass 를 부르고, 끝나면 restore_render_state 를 부른다.\n- pass 는 GL 컨텍스트를 받아 프로그램, 버텍스 어레이, 뷰포트, 섞기, 깊이, 면 가리기를 바꿔도 된다. (클립 중이면 스텐실 테스트는 restore_render_state 가 다시 켠다)\n- 받은 컨텍스트(GlContext)의 상태 함수는 GL 상태 캐시를 거치므로, pass 안에서 상태를 바꾼 뒤 엔진 그리기를 이어 불러도 엔진이 바뀐 상태를 안다.\n- pass 가 돌려준 값을 그대로 돌려준다. pass 가 패닉해도 풀리는 동안 가드가 restore_render_state 를 부른다. (원본은 던져도 되돌린다)",
+								"en": "Insert a GL pass between 2D drawing. (original runExternalPass)\n- Flushes the previous 2D batch, forgets the remembered program and texture, clears depth if is_depth_cleared, calls pass, and calls restore_render_state when it ends.\n- pass receives the GL context and may change the program, vertex array, viewport, blending, depth and face culling. (While clipping, restore_render_state turns the stencil test back on)\n- State functions of the received context (GlContext) go through the GL state cache, so the engine knows the changed state even when engine drawing continues inside pass after changing state.\n- Returns the value pass returned. If pass panics, the guard calls restore_render_state while unwinding. (The original also restores when it throws)"
 							},
 							"since": "0.4.0",
 							"source": "src/core/graphic.rs",
@@ -45764,18 +45764,18 @@
 						{
 							"kind": "method",
 							"name": "get_gl",
-							"signature": "pub fn get_gl(&self) -> &glow::Context",
+							"signature": "pub fn get_gl(&self) -> &GlContext",
 							"params": [],
 							"returns": {
-								"type": "&glow::Context",
+								"type": "&GlContext",
 								"description": {
-									"ko": "Graphic 이 든 GL 컨텍스트.",
-									"en": "GL context held by Graphic."
+									"ko": "Graphic 이 든 GL 컨텍스트. 엔진 함수의 `&glow::Context` 인자로도 그대로 넘긴다.",
+									"en": "GL context held by Graphic. It can also be passed as is to engine functions taking `&glow::Context`."
 								}
 							},
 							"description": {
-								"ko": "GL 컨텍스트 반환.\n- 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, 기억한 프로그램과 텍스처, GL 상태 캐시를 잊는다. (다음 그리기에서 다시 건다)",
-								"en": "Return the GL context.\n- The receiver can change the program or textures, so the remembered program and textures and the GL state cache are forgotten. (The next draw sets them again)"
+								"ko": "GL 컨텍스트 반환. (원본 getWebGL2RenderingContext)\n- 받은 컨텍스트(GlContext)의 상태 함수는 GL 상태 캐시를 거치므로, 받은 뒤 바꾼 상태를 엔진이 안다.\n- 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, Graphic 이 2D 그리기에 묶어 둔 프로그램과 텍스처의 기억은 잊는다. (다음 그리기에서 상태 캐시에 물어 다시 건다)\n- GL 상태 캐시도 잊는다. 안의 glow::Context 를 꺼내(`&glow::Context` 꼴의 함수에 넘기면 저절로 바뀐다) 바꾼 상태를 다음 받을 때 바로잡는 안전망이다.",
+								"en": "Returns the GL context. (original getWebGL2RenderingContext)\n- State functions of the received context (GlContext) go through the GL state cache, so the engine knows state changed after receiving it.\n- The receiver may change the program or texture, so Graphic forgets the program and texture it bound for 2D drawing. (The next draw asks the state cache and binds them again)\n- It also resets the GL state cache. This is a safety net that corrects state changed through the inner glow::Context (passing it to a function taking `&glow::Context` converts it automatically) the next time the context is received."
 							},
 							"since": "0.3.2",
 							"source": "src/core/graphic.rs"
@@ -45846,8 +45846,8 @@
 							"signature": "pub fn reset_gl_state_cache(&self)",
 							"params": [],
 							"description": {
-								"ko": "GL 상태 캐시 잊기. (원본 resetGLStateCache, 상태 캐시를 거치지 않고 glow 로 GL 상태를 바꾼 뒤 부른다, 다음에 읽을 때 GL 에 한 번씩 묻는다)\n- get_gl 은 받은 쪽이 상태를 바꿀 수 있어 스스로 잊는다. run_external_pass 는 pass 가 끝나면 스스로 잊는다.\n- 툰 렌더러의 on_before_draw 와 그리기 줄의 단계 콜백이 끝나면 렌더러가 스스로 잊는다.",
-								"en": "Forget the GL state cache. (original resetGLStateCache, call it after changing GL state through glow without going through the state cache; the next reads ask GL once each)\n- get_gl forgets by itself because the receiver can change state. run_external_pass forgets by itself when the pass ends.\n- The renderer forgets by itself after the toon renderer's on_before_draw and draw queue stage callbacks."
+								"ko": "GL 상태 캐시 잊기. (원본 resetGLStateCache, 상태 캐시를 거치지 않고 GL 상태를 바꾼 뒤 부른다, 다음에 읽을 때 GL 에 한 번씩 묻는다)\n- get_gl, run_external_pass, 툰 렌더러의 콜백이 주는 GlContext 는 상태 함수가 상태 캐시를 거치므로, 같은 콜백 안에서 엔진 그리기를 이어 불러도 부를 것 없다.\n- GlContext 에서 안의 glow::Context 를 꺼내(`let raw: &glow::Context = gl;`, `&glow::Context` 꼴의 함수에 넘기기) 상태 함수를 바로 불렀거나,\n  다른 라이브러리가 같은 GL 컨텍스트의 상태를 바꾼 뒤 같은 콜백 안에서 엔진 그리기를 이어 부를 때 부른다.\n- get_gl 과 run_external_pass 의 끝, 툰 렌더러의 on_before_draw 와 그리기 줄의 단계 콜백 뒤에는 엔진이 스스로 잊는다. (안전망)",
+								"en": "Reset the GL state cache. (original resetGLStateCache, call it after changing GL state without going through the state cache; each value is asked from GL once on the next read)\n- The GlContext given by get_gl, run_external_pass and toon renderer callbacks sends state functions through the state cache, so there is no need to call this even when engine drawing continues inside the same callback.\n- Call it when state functions were called directly on the inner glow::Context taken out of GlContext (`let raw: &glow::Context = gl;`, passing it to a function taking `&glow::Context`),\n  or when another library changed the state of the same GL context and engine drawing continues inside the same callback.\n- The engine resets by itself at get_gl, at the end of run_external_pass, and after the toon renderer's on_before_draw and draw queue stage callbacks. (safety net)"
 							},
 							"since": "0.4.0",
 							"source": "src/core/graphic.rs",
@@ -46691,6 +46691,1518 @@
 					]
 				}
 			]
+		},
+		{
+			"name": "core/glcontext",
+			"summary": {
+				"ko": "엔진 GL 컨텍스트. (원본 Graphic.getWebGL2RenderingContext 가 주는 컨텍스트, 상태 함수를 가로챈 것)\n- 원본은 컨텍스트 객체의 상태 함수를 가로채 게임이 직접 부른 GL 까지 상태 캐시가 기억한다. glow 의 HasContext 는 봉인된 트레이트라\n  밖에서 구현할 수 없어, glow::Context 를 감싼 이 형이 상태 함수를 같은 이름, 같은 꼴의 고유 메서드로 가로채 상태 캐시를 거쳐 부른다.\n- 상태 함수 밖의 것(그리기, 버퍼, 유니폼, 셰이더 같은 것)은 Deref 로 안의 glow::Context 에 그대로 간다. (원본도 가로채지 않은 함수는 그대로다)\n  고유 메서드가 트레이트 메서드보다 먼저 골리므로 `use glow::HasContext;` 를 둔 게임 코드도 고칠 것 없이 상태 캐시를 거친다.\n- 엔진 함수가 받는 `&glow::Context` 자리에 그대로 넘긴다. (Deref 로 바뀐다, 엔진 안은 상태 캐시를 거쳐 부른다)\n- `let raw: &glow::Context = gl;` 처럼 안의 glow::Context 를 꺼내 상태 함수를 바로 부르면 상태 캐시가 모른다. 그때는 Graphic::reset_gl_state_cache 를 부른다.\n  (원본에서 WebGL2RenderingContext.prototype.viewport.call 처럼 가로채지 못한 길로 부른 것과 같다)",
+				"en": "Engine GL context. (the context returned by the original Graphic.getWebGL2RenderingContext, with intercepted state functions)\n- The original intercepts the state functions of the context object, so the state cache remembers even GL that the game calls directly. glow's HasContext is a sealed trait that\n  cannot be implemented outside glow, so this type, which wraps glow::Context, intercepts the state functions as inherent methods with the same names and signatures and calls them through the state cache.\n- Everything other than state functions (drawing, buffers, uniforms, shaders and the like) goes to the inner glow::Context as is through Deref. (The original also leaves functions it does not intercept as they are)\n  Inherent methods are picked before trait methods, so game code with `use glow::HasContext;` goes through the state cache without changes.\n- Pass it as is where engine functions take `&glow::Context`. (Deref converts it; inside, the engine calls through the state cache)\n- Calling state functions directly on the inner glow::Context taken out, as in `let raw: &glow::Context = gl;`, is unknown to the state cache. In that case call Graphic::reset_gl_state_cache.\n  (The same as calling through a path the original cannot intercept, such as WebGL2RenderingContext.prototype.viewport.call)"
+			},
+			"classes": [
+				{
+					"name": "GlContext",
+					"kind": "struct",
+					"summary": {
+						"ko": "엔진 GL 컨텍스트. (원본 WebGL2RenderingContext, Graphic::get_gl 이 준다, 상태 함수가 상태 캐시를 거친다)\n- 상태 함수(묶기, 켜고 끄기, 뷰포트, 가위, 섞기, 깊이, 면, 프로그램, 버텍스 어레이, 텍스처, 비우기 색, 픽셀 저장)는 상태 캐시를 거쳐 GL 을 부르고,\n  읽기(get_parameter_*, is_enabled)는 기억한 값으로 답한다. 그 밖의 함수는 안의 glow::Context 를 그대로 부른다.\n- 게임 코드가 이것으로 상태를 바꾼 직후 같은 콜백 안에서 엔진 그리기를 이어 불러도 엔진이 바뀐 상태를 안다.",
+						"en": "Engine GL context. (original WebGL2RenderingContext, given by Graphic::get_gl, state functions go through the state cache)\n- State functions (binding, enabling and disabling, viewport, scissor, blending, depth, faces, program, vertex array, texture, clear color, pixel store) call GL through the state cache,\n  and reads (get_parameter_*, is_enabled) are answered from remembered values. Other functions call the inner glow::Context as is.\n- Even when game code changes state with it and engine drawing continues right after inside the same callback, the engine knows the changed state."
+					},
+					"traits": [
+						"std::ops::Deref"
+					],
+					"source": "src/core/glcontext.rs",
+					"members": [
+						{
+							"kind": "method",
+							"name": "create_framebuffer",
+							"signature": "pub unsafe fn create_framebuffer(&self) -> Result<GlFramebuffer, String>",
+							"params": [],
+							"returns": {
+								"type": "Result<GlFramebuffer, String>",
+								"description": {
+									"ko": "새 프레임 버퍼. 못 만들면 까닭.",
+									"en": "New framebuffer. The reason if it could not be created."
+								}
+							},
+							"description": {
+								"ko": "프레임 버퍼 만들기. (glow 의 같은 이름, 지운 이름을 GL 이 다시 주면 상태 캐시가 지운 기억에서 뺀다)",
+								"en": "Create a framebuffer. (glow function of the same name; when GL hands out a deleted name again, the state cache removes it from the deleted memory)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "bind_framebuffer",
+							"signature": "pub unsafe fn bind_framebuffer(&self, target: u32, framebuffer: Option<GlFramebuffer>)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "FRAMEBUFFER, DRAW_FRAMEBUFFER, READ_FRAMEBUFFER.",
+										"en": "FRAMEBUFFER, DRAW_FRAMEBUFFER, READ_FRAMEBUFFER."
+									}
+								},
+								{
+									"name": "framebuffer",
+									"type": "Option<GlFramebuffer>",
+									"description": {
+										"ko": "묶을 프레임 버퍼. None 이면 기본 프레임 버퍼.",
+										"en": "Framebuffer to bind. None means the default framebuffer."
+									}
+								}
+							],
+							"description": {
+								"ko": "프레임 버퍼 묶기. (원본 bindFramebuffer)",
+								"en": "Bind a framebuffer. (original bindFramebuffer)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "delete_framebuffer",
+							"signature": "pub unsafe fn delete_framebuffer(&self, framebuffer: GlFramebuffer)",
+							"params": [
+								{
+									"name": "framebuffer",
+									"type": "GlFramebuffer",
+									"description": {
+										"ko": "지울 프레임 버퍼.",
+										"en": "Framebuffer to delete."
+									}
+								}
+							],
+							"description": {
+								"ko": "프레임 버퍼 지우기. (원본 deleteFramebuffer, 묶인 것을 지우면 기본 프레임 버퍼로 돌아간다)",
+								"en": "Delete a framebuffer. (original deleteFramebuffer, deleting the bound one returns to the default framebuffer)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "viewport",
+							"signature": "pub unsafe fn viewport(&self, x: i32, y: i32, width: i32, height: i32)",
+							"params": [
+								{
+									"name": "x",
+									"type": "i32",
+									"description": {
+										"ko": "왼쪽. (픽셀, 왼쪽 아래가 원점)",
+										"en": "Left. (pixels, origin at the bottom left)"
+									}
+								},
+								{
+									"name": "y",
+									"type": "i32",
+									"description": {
+										"ko": "아래쪽. (픽셀)",
+										"en": "Bottom. (pixels)"
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "너비. (픽셀)",
+										"en": "Width. (pixels)"
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "높이. (픽셀)",
+										"en": "Height. (pixels)"
+									}
+								}
+							],
+							"description": {
+								"ko": "뷰포트. (원본 viewport)",
+								"en": "Viewport. (original viewport)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "viewport_f32_slice",
+							"signature": "pub unsafe fn viewport_f32_slice(&self, first: u32, count: i32, values: &[[f32; 4]])",
+							"params": [
+								{
+									"name": "first",
+									"type": "u32",
+									"description": {
+										"ko": "첫 뷰포트 번호.",
+										"en": "First viewport index."
+									}
+								},
+								{
+									"name": "count",
+									"type": "i32",
+									"description": {
+										"ko": "뷰포트 수.",
+										"en": "Number of viewports."
+									}
+								},
+								{
+									"name": "values",
+									"type": "&[[f32; 4]]",
+									"description": {
+										"ko": "뷰포트마다 x, y, 너비, 높이.",
+										"en": "x, y, width and height of each viewport."
+									}
+								}
+							],
+							"description": {
+								"ko": "뷰포트 여럿. (데스크탑 GL 의 glViewportArrayv, 0 번을 바꾸면 상태 캐시가 뷰포트를 잊는다)",
+								"en": "Several viewports. (desktop GL glViewportArrayv, changing viewport 0 makes the state cache forget the viewport)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "scissor",
+							"signature": "pub unsafe fn scissor(&self, x: i32, y: i32, width: i32, height: i32)",
+							"params": [
+								{
+									"name": "x",
+									"type": "i32",
+									"description": {
+										"ko": "왼쪽. (픽셀, 왼쪽 아래가 원점)",
+										"en": "Left. (pixels, origin at the bottom left)"
+									}
+								},
+								{
+									"name": "y",
+									"type": "i32",
+									"description": {
+										"ko": "아래쪽. (픽셀)",
+										"en": "Bottom. (pixels)"
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "너비. (픽셀)",
+										"en": "Width. (pixels)"
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "높이. (픽셀)",
+										"en": "Height. (pixels)"
+									}
+								}
+							],
+							"description": {
+								"ko": "가위 상자. (원본 scissor)",
+								"en": "Scissor box. (original scissor)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "scissor_slice",
+							"signature": "pub unsafe fn scissor_slice(&self, first: u32, count: i32, scissors: &[[i32; 4]])",
+							"params": [
+								{
+									"name": "first",
+									"type": "u32",
+									"description": {
+										"ko": "첫 가위 상자 번호.",
+										"en": "First scissor box index."
+									}
+								},
+								{
+									"name": "count",
+									"type": "i32",
+									"description": {
+										"ko": "가위 상자 수.",
+										"en": "Number of scissor boxes."
+									}
+								},
+								{
+									"name": "scissors",
+									"type": "&[[i32; 4]]",
+									"description": {
+										"ko": "가위 상자마다 x, y, 너비, 높이.",
+										"en": "x, y, width and height of each scissor box."
+									}
+								}
+							],
+							"description": {
+								"ko": "가위 상자 여럿. (데스크탑 GL 의 glScissorArrayv, 0 번을 바꾸면 상태 캐시가 가위 상자를 잊는다)",
+								"en": "Several scissor boxes. (desktop GL glScissorArrayv, changing box 0 makes the state cache forget the scissor box)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "enable",
+							"signature": "pub unsafe fn enable(&self, parameter: u32)",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "켤 기능. (BLEND, DEPTH_TEST, SCISSOR_TEST 같은 것)",
+										"en": "Capability to enable. (BLEND, DEPTH_TEST, SCISSOR_TEST and the like)"
+									}
+								}
+							],
+							"description": {
+								"ko": "기능 켜기. (원본 enable)",
+								"en": "Enable a capability. (original enable)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "disable",
+							"signature": "pub unsafe fn disable(&self, parameter: u32)",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "끌 기능. (BLEND, DEPTH_TEST, SCISSOR_TEST 같은 것)",
+										"en": "Capability to disable. (BLEND, DEPTH_TEST, SCISSOR_TEST and the like)"
+									}
+								}
+							],
+							"description": {
+								"ko": "기능 끄기. (원본 disable)",
+								"en": "Disable a capability. (original disable)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "enable_draw_buffer",
+							"signature": "pub unsafe fn enable_draw_buffer(&self, parameter: u32, draw_buffer: u32)",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "켤 기능. (BLEND 같은 것)",
+										"en": "Capability to enable. (BLEND and the like)"
+									}
+								},
+								{
+									"name": "draw_buffer",
+									"type": "u32",
+									"description": {
+										"ko": "그리기 버퍼 번호.",
+										"en": "Draw buffer index."
+									}
+								}
+							],
+							"description": {
+								"ko": "그리기 버퍼 하나의 기능 켜기. (데스크탑 GL 의 glEnablei, 상태 캐시가 그 기능을 잊는다)",
+								"en": "Enable a capability for one draw buffer. (desktop GL glEnablei, the state cache forgets that capability)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "disable_draw_buffer",
+							"signature": "pub unsafe fn disable_draw_buffer(&self, parameter: u32, draw_buffer: u32)",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "끌 기능. (BLEND 같은 것)",
+										"en": "Capability to disable. (BLEND and the like)"
+									}
+								},
+								{
+									"name": "draw_buffer",
+									"type": "u32",
+									"description": {
+										"ko": "그리기 버퍼 번호.",
+										"en": "Draw buffer index."
+									}
+								}
+							],
+							"description": {
+								"ko": "그리기 버퍼 하나의 기능 끄기. (데스크탑 GL 의 glDisablei, 상태 캐시가 그 기능을 잊는다)",
+								"en": "Disable a capability for one draw buffer. (desktop GL glDisablei, the state cache forgets that capability)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "is_enabled",
+							"signature": "pub unsafe fn is_enabled(&self, parameter: u32) -> bool",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "물을 기능.",
+										"en": "Capability to ask about."
+									}
+								}
+							],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "켜졌으면 true.",
+									"en": "true if enabled."
+								}
+							},
+							"description": {
+								"ko": "기능이 켜졌는지. (원본 isEnabled, 기억한 값으로 답한다)",
+								"en": "Whether a capability is enabled. (original isEnabled, answered from the remembered value)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "clear_color",
+							"signature": "pub unsafe fn clear_color(&self, red: f32, green: f32, blue: f32, alpha: f32)",
+							"params": [
+								{
+									"name": "red",
+									"type": "f32",
+									"description": {
+										"ko": "빨강. (0 ~ 1)",
+										"en": "Red. (0 ~ 1)"
+									}
+								},
+								{
+									"name": "green",
+									"type": "f32",
+									"description": {
+										"ko": "초록. (0 ~ 1)",
+										"en": "Green. (0 ~ 1)"
+									}
+								},
+								{
+									"name": "blue",
+									"type": "f32",
+									"description": {
+										"ko": "파랑. (0 ~ 1)",
+										"en": "Blue. (0 ~ 1)"
+									}
+								},
+								{
+									"name": "alpha",
+									"type": "f32",
+									"description": {
+										"ko": "알파. (0 ~ 1)",
+										"en": "Alpha. (0 ~ 1)"
+									}
+								}
+							],
+							"description": {
+								"ko": "비우기 색. (원본 clearColor)",
+								"en": "Clear color. (original clearColor)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "color_mask",
+							"signature": "pub unsafe fn color_mask(&self, red: bool, green: bool, blue: bool, alpha: bool)",
+							"params": [
+								{
+									"name": "red",
+									"type": "bool",
+									"description": {
+										"ko": "빨강을 쓰는지.",
+										"en": "Whether red is written."
+									}
+								},
+								{
+									"name": "green",
+									"type": "bool",
+									"description": {
+										"ko": "초록을 쓰는지.",
+										"en": "Whether green is written."
+									}
+								},
+								{
+									"name": "blue",
+									"type": "bool",
+									"description": {
+										"ko": "파랑을 쓰는지.",
+										"en": "Whether blue is written."
+									}
+								},
+								{
+									"name": "alpha",
+									"type": "bool",
+									"description": {
+										"ko": "알파를 쓰는지.",
+										"en": "Whether alpha is written."
+									}
+								}
+							],
+							"description": {
+								"ko": "색 쓰기 가림. (원본 colorMask)",
+								"en": "Color write mask. (original colorMask)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "color_mask_draw_buffer",
+							"signature": "pub unsafe fn color_mask_draw_buffer(&self, buffer: u32, red: bool, green: bool, blue: bool, alpha: bool)",
+							"params": [
+								{
+									"name": "buffer",
+									"type": "u32",
+									"description": {
+										"ko": "그리기 버퍼 번호.",
+										"en": "Draw buffer index."
+									}
+								},
+								{
+									"name": "red",
+									"type": "bool",
+									"description": {
+										"ko": "빨강을 쓰는지.",
+										"en": "Whether red is written."
+									}
+								},
+								{
+									"name": "green",
+									"type": "bool",
+									"description": {
+										"ko": "초록을 쓰는지.",
+										"en": "Whether green is written."
+									}
+								},
+								{
+									"name": "blue",
+									"type": "bool",
+									"description": {
+										"ko": "파랑을 쓰는지.",
+										"en": "Whether blue is written."
+									}
+								},
+								{
+									"name": "alpha",
+									"type": "bool",
+									"description": {
+										"ko": "알파를 쓰는지.",
+										"en": "Whether alpha is written."
+									}
+								}
+							],
+							"description": {
+								"ko": "그리기 버퍼 하나의 색 쓰기 가림. (데스크탑 GL 의 glColorMaski, 상태 캐시가 색 쓰기 가림을 잊는다)",
+								"en": "Color write mask for one draw buffer. (desktop GL glColorMaski, the state cache forgets the color write mask)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "blend_func",
+							"signature": "pub unsafe fn blend_func(&self, src: u32, dst: u32)",
+							"params": [
+								{
+									"name": "src",
+									"type": "u32",
+									"description": {
+										"ko": "소스 인자. (SRC_ALPHA 같은 것)",
+										"en": "Source factor. (SRC_ALPHA and the like)"
+									}
+								},
+								{
+									"name": "dst",
+									"type": "u32",
+									"description": {
+										"ko": "대상 인자. (ONE_MINUS_SRC_ALPHA 같은 것)",
+										"en": "Destination factor. (ONE_MINUS_SRC_ALPHA and the like)"
+									}
+								}
+							],
+							"description": {
+								"ko": "섞기 인자. (원본 blendFunc)",
+								"en": "Blend factors. (original blendFunc)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "blend_func_separate",
+							"signature": "pub unsafe fn blend_func_separate(&self, src_rgb: u32, dst_rgb: u32, src_alpha: u32, dst_alpha: u32)",
+							"params": [
+								{
+									"name": "src_rgb",
+									"type": "u32",
+									"description": {
+										"ko": "색의 소스 인자.",
+										"en": "Source factor for color."
+									}
+								},
+								{
+									"name": "dst_rgb",
+									"type": "u32",
+									"description": {
+										"ko": "색의 대상 인자.",
+										"en": "Destination factor for color."
+									}
+								},
+								{
+									"name": "src_alpha",
+									"type": "u32",
+									"description": {
+										"ko": "알파의 소스 인자.",
+										"en": "Source factor for alpha."
+									}
+								},
+								{
+									"name": "dst_alpha",
+									"type": "u32",
+									"description": {
+										"ko": "알파의 대상 인자.",
+										"en": "Destination factor for alpha."
+									}
+								}
+							],
+							"description": {
+								"ko": "섞기 인자 따로. (원본 blendFuncSeparate)",
+								"en": "Separate blend factors. (original blendFuncSeparate)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "blend_func_draw_buffer",
+							"signature": "pub unsafe fn blend_func_draw_buffer(&self, draw_buffer: u32, src: u32, dst: u32)",
+							"params": [
+								{
+									"name": "draw_buffer",
+									"type": "u32",
+									"description": {
+										"ko": "그리기 버퍼 번호.",
+										"en": "Draw buffer index."
+									}
+								},
+								{
+									"name": "src",
+									"type": "u32",
+									"description": {
+										"ko": "소스 인자.",
+										"en": "Source factor."
+									}
+								},
+								{
+									"name": "dst",
+									"type": "u32",
+									"description": {
+										"ko": "대상 인자.",
+										"en": "Destination factor."
+									}
+								}
+							],
+							"description": {
+								"ko": "그리기 버퍼 하나의 섞기 인자. (데스크탑 GL 의 glBlendFunci, 상태 캐시가 섞기 인자를 잊는다)",
+								"en": "Blend factors for one draw buffer. (desktop GL glBlendFunci, the state cache forgets the blend factors)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "blend_func_separate_draw_buffer",
+							"signature": "pub unsafe fn blend_func_separate_draw_buffer(&self, draw_buffer: u32, src_rgb: u32, dst_rgb: u32, src_alpha: u32, dst_alpha: u32)",
+							"params": [
+								{
+									"name": "draw_buffer",
+									"type": "u32",
+									"description": {
+										"ko": "그리기 버퍼 번호.",
+										"en": "Draw buffer index."
+									}
+								},
+								{
+									"name": "src_rgb",
+									"type": "u32",
+									"description": {
+										"ko": "색의 소스 인자.",
+										"en": "Source factor for color."
+									}
+								},
+								{
+									"name": "dst_rgb",
+									"type": "u32",
+									"description": {
+										"ko": "색의 대상 인자.",
+										"en": "Destination factor for color."
+									}
+								},
+								{
+									"name": "src_alpha",
+									"type": "u32",
+									"description": {
+										"ko": "알파의 소스 인자.",
+										"en": "Source factor for alpha."
+									}
+								},
+								{
+									"name": "dst_alpha",
+									"type": "u32",
+									"description": {
+										"ko": "알파의 대상 인자.",
+										"en": "Destination factor for alpha."
+									}
+								}
+							],
+							"description": {
+								"ko": "그리기 버퍼 하나의 섞기 인자 따로. (데스크탑 GL 의 glBlendFuncSeparatei, 상태 캐시가 섞기 인자를 잊는다)",
+								"en": "Separate blend factors for one draw buffer. (desktop GL glBlendFuncSeparatei, the state cache forgets the blend factors)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "blend_equation",
+							"signature": "pub unsafe fn blend_equation(&self, mode: u32)",
+							"params": [
+								{
+									"name": "mode",
+									"type": "u32",
+									"description": {
+										"ko": "섞기 식. (FUNC_ADD, FUNC_SUBTRACT, FUNC_REVERSE_SUBTRACT, MIN, MAX)",
+										"en": "Blend equation. (FUNC_ADD, FUNC_SUBTRACT, FUNC_REVERSE_SUBTRACT, MIN, MAX)"
+									}
+								}
+							],
+							"description": {
+								"ko": "섞기 식. (원본 blendEquation)",
+								"en": "Blend equation. (original blendEquation)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "blend_equation_separate",
+							"signature": "pub unsafe fn blend_equation_separate(&self, mode_rgb: u32, mode_alpha: u32)",
+							"params": [
+								{
+									"name": "mode_rgb",
+									"type": "u32",
+									"description": {
+										"ko": "색의 섞기 식.",
+										"en": "Blend equation for color."
+									}
+								},
+								{
+									"name": "mode_alpha",
+									"type": "u32",
+									"description": {
+										"ko": "알파의 섞기 식.",
+										"en": "Blend equation for alpha."
+									}
+								}
+							],
+							"description": {
+								"ko": "섞기 식 따로. (원본 blendEquationSeparate)",
+								"en": "Separate blend equations. (original blendEquationSeparate)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "blend_equation_draw_buffer",
+							"signature": "pub unsafe fn blend_equation_draw_buffer(&self, draw_buffer: u32, mode: u32)",
+							"params": [
+								{
+									"name": "draw_buffer",
+									"type": "u32",
+									"description": {
+										"ko": "그리기 버퍼 번호.",
+										"en": "Draw buffer index."
+									}
+								},
+								{
+									"name": "mode",
+									"type": "u32",
+									"description": {
+										"ko": "섞기 식.",
+										"en": "Blend equation."
+									}
+								}
+							],
+							"description": {
+								"ko": "그리기 버퍼 하나의 섞기 식. (데스크탑 GL 의 glBlendEquationi, 상태 캐시가 섞기 식을 잊는다)",
+								"en": "Blend equation for one draw buffer. (desktop GL glBlendEquationi, the state cache forgets the blend equation)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "blend_equation_separate_draw_buffer",
+							"signature": "pub unsafe fn blend_equation_separate_draw_buffer(&self, buffer: u32, mode_rgb: u32, mode_alpha: u32)",
+							"params": [
+								{
+									"name": "buffer",
+									"type": "u32",
+									"description": {
+										"ko": "그리기 버퍼 번호.",
+										"en": "Draw buffer index."
+									}
+								},
+								{
+									"name": "mode_rgb",
+									"type": "u32",
+									"description": {
+										"ko": "색의 섞기 식.",
+										"en": "Blend equation for color."
+									}
+								},
+								{
+									"name": "mode_alpha",
+									"type": "u32",
+									"description": {
+										"ko": "알파의 섞기 식.",
+										"en": "Blend equation for alpha."
+									}
+								}
+							],
+							"description": {
+								"ko": "그리기 버퍼 하나의 섞기 식 따로. (데스크탑 GL 의 glBlendEquationSeparatei, 상태 캐시가 섞기 식을 잊는다)",
+								"en": "Separate blend equations for one draw buffer. (desktop GL glBlendEquationSeparatei, the state cache forgets the blend equation)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "depth_mask",
+							"signature": "pub unsafe fn depth_mask(&self, value: bool)",
+							"params": [
+								{
+									"name": "value",
+									"type": "bool",
+									"description": {
+										"ko": "깊이를 쓰는지.",
+										"en": "Whether depth is written."
+									}
+								}
+							],
+							"description": {
+								"ko": "깊이 쓰기. (원본 depthMask)",
+								"en": "Depth write. (original depthMask)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "depth_func",
+							"signature": "pub unsafe fn depth_func(&self, func: u32)",
+							"params": [
+								{
+									"name": "func",
+									"type": "u32",
+									"description": {
+										"ko": "견주기. (NEVER ~ ALWAYS)",
+										"en": "Comparison. (NEVER to ALWAYS)"
+									}
+								}
+							],
+							"description": {
+								"ko": "깊이 견주기. (원본 depthFunc)",
+								"en": "Depth comparison. (original depthFunc)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "front_face",
+							"signature": "pub unsafe fn front_face(&self, value: u32)",
+							"params": [
+								{
+									"name": "value",
+									"type": "u32",
+									"description": {
+										"ko": "CW 나 CCW.",
+										"en": "CW or CCW."
+									}
+								}
+							],
+							"description": {
+								"ko": "앞면 감김 방향. (원본 frontFace)",
+								"en": "Front face winding. (original frontFace)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "cull_face",
+							"signature": "pub unsafe fn cull_face(&self, value: u32)",
+							"params": [
+								{
+									"name": "value",
+									"type": "u32",
+									"description": {
+										"ko": "FRONT, BACK, FRONT_AND_BACK.",
+										"en": "FRONT, BACK, FRONT_AND_BACK."
+									}
+								}
+							],
+							"description": {
+								"ko": "가리는 면. (원본 cullFace)",
+								"en": "Culled face. (original cullFace)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "create_program",
+							"signature": "pub unsafe fn create_program(&self) -> Result<GlProgram, String>",
+							"params": [],
+							"returns": {
+								"type": "Result<GlProgram, String>",
+								"description": {
+									"ko": "새 프로그램. 못 만들면 까닭.",
+									"en": "New program. The reason if it could not be created."
+								}
+							},
+							"description": {
+								"ko": "프로그램 만들기. (glow 의 같은 이름, 지운 이름을 GL 이 다시 주면 상태 캐시가 그 이름의 링크 결과를 잊는다)",
+								"en": "Create a program. (glow function of the same name; when GL hands out a deleted name again, the state cache forgets the link result of that name)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "link_program",
+							"signature": "pub unsafe fn link_program(&self, program: GlProgram)",
+							"params": [
+								{
+									"name": "program",
+									"type": "GlProgram",
+									"description": {
+										"ko": "링크할 프로그램.",
+										"en": "Program to link."
+									}
+								}
+							],
+							"description": {
+								"ko": "프로그램 링크. (원본 linkProgram)",
+								"en": "Link a program. (original linkProgram)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_program_link_status",
+							"signature": "pub unsafe fn get_program_link_status(&self, program: GlProgram) -> bool",
+							"params": [
+								{
+									"name": "program",
+									"type": "GlProgram",
+									"description": {
+										"ko": "물을 프로그램.",
+										"en": "Program to ask about."
+									}
+								}
+							],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "링크에 성공했으면 true.",
+									"en": "true if linking succeeded."
+								}
+							},
+							"description": {
+								"ko": "링크 결과 묻기. (원본 getProgramParameter(LINK_STATUS), 상태 캐시가 보고 기억한다)",
+								"en": "Ask the link result. (original getProgramParameter(LINK_STATUS), the state cache sees and remembers it)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_program_parameter_i32",
+							"signature": "pub unsafe fn get_program_parameter_i32(&self, program: GlProgram, parameter: u32) -> i32",
+							"params": [
+								{
+									"name": "program",
+									"type": "GlProgram",
+									"description": {
+										"ko": "물을 프로그램.",
+										"en": "Program to ask about."
+									}
+								},
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "물을 값. (LINK_STATUS, ACTIVE_UNIFORMS 같은 것)",
+										"en": "Value to ask. (LINK_STATUS, ACTIVE_UNIFORMS and the like)"
+									}
+								}
+							],
+							"returns": {
+								"type": "i32",
+								"description": {
+									"ko": "그 값.",
+									"en": "The value."
+								}
+							},
+							"description": {
+								"ko": "프로그램 값 묻기. (원본 getProgramParameter, LINK_STATUS 는 상태 캐시가 보고 기억한다)",
+								"en": "Ask a program value. (original getProgramParameter, the state cache sees and remembers LINK_STATUS)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "use_program",
+							"signature": "pub unsafe fn use_program(&self, program: Option<GlProgram>)",
+							"params": [
+								{
+									"name": "program",
+									"type": "Option<GlProgram>",
+									"description": {
+										"ko": "쓸 프로그램. None 이면 풀기.",
+										"en": "Program to use. None unbinds."
+									}
+								}
+							],
+							"description": {
+								"ko": "프로그램 쓰기. (원본 useProgram)",
+								"en": "Use a program. (original useProgram)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "delete_program",
+							"signature": "pub unsafe fn delete_program(&self, program: GlProgram)",
+							"params": [
+								{
+									"name": "program",
+									"type": "GlProgram",
+									"description": {
+										"ko": "지울 프로그램.",
+										"en": "Program to delete."
+									}
+								}
+							],
+							"description": {
+								"ko": "프로그램 지우기. (원본 deleteProgram)",
+								"en": "Delete a program. (original deleteProgram)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "create_vertex_array",
+							"signature": "pub unsafe fn create_vertex_array(&self) -> Result<GlVertexArray, String>",
+							"params": [],
+							"returns": {
+								"type": "Result<GlVertexArray, String>",
+								"description": {
+									"ko": "새 버텍스 어레이. 못 만들면 까닭.",
+									"en": "New vertex array. The reason if it could not be created."
+								}
+							},
+							"description": {
+								"ko": "버텍스 어레이 만들기. (glow 의 같은 이름, 지운 이름을 GL 이 다시 주면 상태 캐시가 지운 기억에서 뺀다)",
+								"en": "Create a vertex array. (glow function of the same name; when GL hands out a deleted name again, the state cache removes it from the deleted memory)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "bind_vertex_array",
+							"signature": "pub unsafe fn bind_vertex_array(&self, vertex_array: Option<GlVertexArray>)",
+							"params": [
+								{
+									"name": "vertex_array",
+									"type": "Option<GlVertexArray>",
+									"description": {
+										"ko": "묶을 버텍스 어레이. None 이면 풀기.",
+										"en": "Vertex array to bind. None unbinds."
+									}
+								}
+							],
+							"description": {
+								"ko": "버텍스 어레이 묶기. (원본 bindVertexArray)",
+								"en": "Bind a vertex array. (original bindVertexArray)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "delete_vertex_array",
+							"signature": "pub unsafe fn delete_vertex_array(&self, vertex_array: GlVertexArray)",
+							"params": [
+								{
+									"name": "vertex_array",
+									"type": "GlVertexArray",
+									"description": {
+										"ko": "지울 버텍스 어레이.",
+										"en": "Vertex array to delete."
+									}
+								}
+							],
+							"description": {
+								"ko": "버텍스 어레이 지우기. (원본 deleteVertexArray)",
+								"en": "Delete a vertex array. (original deleteVertexArray)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "create_texture",
+							"signature": "pub unsafe fn create_texture(&self) -> Result<GlTexture, String>",
+							"params": [],
+							"returns": {
+								"type": "Result<GlTexture, String>",
+								"description": {
+									"ko": "새 텍스처. 못 만들면 까닭.",
+									"en": "New texture. The reason if it could not be created."
+								}
+							},
+							"description": {
+								"ko": "텍스처 만들기. (glow 의 같은 이름, 지운 이름을 GL 이 다시 주면 상태 캐시가 지운 기억과 처음 묶은 대상을 뺀다)",
+								"en": "Create a texture. (glow function of the same name; when GL hands out a deleted name again, the state cache removes it from the deleted memory and the first bound target)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "active_texture",
+							"signature": "pub unsafe fn active_texture(&self, unit: u32)",
+							"params": [
+								{
+									"name": "unit",
+									"type": "u32",
+									"description": {
+										"ko": "TEXTURE0 + 유닛 번호.",
+										"en": "TEXTURE0 + unit index."
+									}
+								}
+							],
+							"description": {
+								"ko": "활성 텍스처 유닛. (원본 activeTexture)",
+								"en": "Active texture unit. (original activeTexture)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "bind_texture",
+							"signature": "pub unsafe fn bind_texture(&self, target: u32, texture: Option<GlTexture>)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "TEXTURE_2D, TEXTURE_CUBE_MAP, TEXTURE_3D, TEXTURE_2D_ARRAY.",
+										"en": "TEXTURE_2D, TEXTURE_CUBE_MAP, TEXTURE_3D, TEXTURE_2D_ARRAY."
+									}
+								},
+								{
+									"name": "texture",
+									"type": "Option<GlTexture>",
+									"description": {
+										"ko": "묶을 텍스처. None 이면 풀기.",
+										"en": "Texture to bind. None unbinds."
+									}
+								}
+							],
+							"description": {
+								"ko": "텍스처 묶기. (원본 bindTexture, 활성 유닛에)",
+								"en": "Bind a texture. (original bindTexture, to the active unit)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "bind_texture_unit",
+							"signature": "pub unsafe fn bind_texture_unit(&self, unit: u32, texture: Option<GlTexture>)",
+							"params": [
+								{
+									"name": "unit",
+									"type": "u32",
+									"description": {
+										"ko": "유닛 번호. (0 부터)",
+										"en": "Unit index. (from 0)"
+									}
+								},
+								{
+									"name": "texture",
+									"type": "Option<GlTexture>",
+									"description": {
+										"ko": "묶을 텍스처. None 이면 풀기.",
+										"en": "Texture to bind. None unbinds."
+									}
+								}
+							],
+							"description": {
+								"ko": "유닛에 텍스처 바로 묶기. (데스크탑 GL 의 glBindTextureUnit, 상태 캐시가 그 유닛의 묶음을 잊는다)",
+								"en": "Bind a texture directly to a unit. (desktop GL glBindTextureUnit, the state cache forgets the bindings of that unit)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "delete_texture",
+							"signature": "pub unsafe fn delete_texture(&self, texture: GlTexture)",
+							"params": [
+								{
+									"name": "texture",
+									"type": "GlTexture",
+									"description": {
+										"ko": "지울 텍스처.",
+										"en": "Texture to delete."
+									}
+								}
+							],
+							"description": {
+								"ko": "텍스처 지우기. (원본 deleteTexture, 묶인 것을 지우면 그 유닛에서 풀린다)",
+								"en": "Delete a texture. (original deleteTexture, deleting a bound one unbinds it from that unit)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "pixel_store_i32",
+							"signature": "pub unsafe fn pixel_store_i32(&self, parameter: u32, value: i32)",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "설정 이름. (UNPACK_ALIGNMENT, PACK_ALIGNMENT 같은 것)",
+										"en": "Setting name. (UNPACK_ALIGNMENT, PACK_ALIGNMENT and the like)"
+									}
+								},
+								{
+									"name": "value",
+									"type": "i32",
+									"description": {
+										"ko": "값.",
+										"en": "Value."
+									}
+								}
+							],
+							"description": {
+								"ko": "픽셀 저장 설정. (원본 pixelStorei)",
+								"en": "Pixel store setting. (original pixelStorei)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_parameter_i32",
+							"signature": "pub unsafe fn get_parameter_i32(&self, parameter: u32) -> i32",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "읽을 값. (DEPTH_FUNC, ACTIVE_TEXTURE, MAX_TEXTURE_SIZE 같은 것)",
+										"en": "Value to read. (DEPTH_FUNC, ACTIVE_TEXTURE, MAX_TEXTURE_SIZE and the like)"
+									}
+								}
+							],
+							"returns": {
+								"type": "i32",
+								"description": {
+									"ko": "그 값.",
+									"en": "The value."
+								}
+							},
+							"description": {
+								"ko": "정수 하나 읽기. (원본 getParameter, 기억한 값으로 답한다)",
+								"en": "Read one integer. (original getParameter, answered from the remembered value)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_parameter_bool",
+							"signature": "pub unsafe fn get_parameter_bool(&self, parameter: u32) -> bool",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "읽을 값. (DEPTH_WRITEMASK 같은 것)",
+										"en": "Value to read. (DEPTH_WRITEMASK and the like)"
+									}
+								}
+							],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "그 값.",
+									"en": "The value."
+								}
+							},
+							"description": {
+								"ko": "참 거짓 하나 읽기. (원본 getParameter, 기억한 값으로 답한다)",
+								"en": "Read one boolean. (original getParameter, answered from the remembered value)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_parameter_bool_array",
+							"signature": "pub unsafe fn get_parameter_bool_array<const N: usize>(&self, parameter: u32) -> [bool; N]",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "읽을 값.",
+										"en": "Value to read."
+									}
+								}
+							],
+							"returns": {
+								"type": "[bool; N]",
+								"description": {
+									"ko": "그 값들.",
+									"en": "The values."
+								}
+							},
+							"description": {
+								"ko": "참 거짓 여럿 읽기. (원본 getParameter, COLOR_WRITEMASK 는 기억한 값으로 답한다)",
+								"en": "Read several booleans. (original getParameter, COLOR_WRITEMASK is answered from the remembered value)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_parameter_i32_slice",
+							"signature": "pub unsafe fn get_parameter_i32_slice(&self, parameter: u32, out: &mut [i32])",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "읽을 값.",
+										"en": "Value to read."
+									}
+								},
+								{
+									"name": "out",
+									"type": "&mut [i32]",
+									"description": {
+										"ko": "값을 받을 자리.",
+										"en": "Place that receives the values."
+									}
+								}
+							],
+							"description": {
+								"ko": "정수 여럿 읽기. (원본 getParameter, VIEWPORT, SCISSOR_BOX, MAX_VIEWPORT_DIMS 는 기억한 값으로 답한다)",
+								"en": "Read several integers. (original getParameter, VIEWPORT, SCISSOR_BOX and MAX_VIEWPORT_DIMS are answered from remembered values)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_parameter_f32_slice",
+							"signature": "pub unsafe fn get_parameter_f32_slice(&self, parameter: u32, out: &mut [f32])",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "읽을 값.",
+										"en": "Value to read."
+									}
+								},
+								{
+									"name": "out",
+									"type": "&mut [f32]",
+									"description": {
+										"ko": "값을 받을 자리.",
+										"en": "Place that receives the values."
+									}
+								}
+							],
+							"description": {
+								"ko": "실수 여럿 읽기. (원본 getParameter, COLOR_CLEAR_VALUE 는 기억한 값으로 답한다)",
+								"en": "Read several floats. (original getParameter, COLOR_CLEAR_VALUE is answered from the remembered value)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_parameter_framebuffer",
+							"signature": "pub unsafe fn get_parameter_framebuffer(&self, parameter: u32) -> Option<GlFramebuffer>",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "읽을 묶음.",
+										"en": "Binding to read."
+									}
+								}
+							],
+							"returns": {
+								"type": "Option<GlFramebuffer>",
+								"description": {
+									"ko": "묶인 프레임 버퍼. 기본 프레임 버퍼면 None.",
+									"en": "Bound framebuffer. None for the default framebuffer."
+								}
+							},
+							"description": {
+								"ko": "묶인 프레임 버퍼 읽기. (원본 getParameter, FRAMEBUFFER_BINDING, DRAW_FRAMEBUFFER_BINDING, READ_FRAMEBUFFER_BINDING 은 기억한 값으로 답한다)",
+								"en": "Read the bound framebuffer. (original getParameter, FRAMEBUFFER_BINDING, DRAW_FRAMEBUFFER_BINDING and READ_FRAMEBUFFER_BINDING are answered from remembered values)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_parameter_program",
+							"signature": "pub unsafe fn get_parameter_program(&self, parameter: u32) -> Option<GlProgram>",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "CURRENT_PROGRAM.",
+										"en": "CURRENT_PROGRAM."
+									}
+								}
+							],
+							"returns": {
+								"type": "Option<GlProgram>",
+								"description": {
+									"ko": "쓰는 프로그램. 없으면 None.",
+									"en": "Program in use. None if there is none."
+								}
+							},
+							"description": {
+								"ko": "쓰는 프로그램 읽기. (원본 getParameter(CURRENT_PROGRAM), 기억한 값으로 답한다)",
+								"en": "Read the program in use. (original getParameter(CURRENT_PROGRAM), answered from the remembered value)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_parameter_vertex_array",
+							"signature": "pub unsafe fn get_parameter_vertex_array(&self, parameter: u32) -> Option<GlVertexArray>",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "VERTEX_ARRAY_BINDING.",
+										"en": "VERTEX_ARRAY_BINDING."
+									}
+								}
+							],
+							"returns": {
+								"type": "Option<GlVertexArray>",
+								"description": {
+									"ko": "묶인 버텍스 어레이. 없으면 None.",
+									"en": "Bound vertex array. None if there is none."
+								}
+							},
+							"description": {
+								"ko": "묶인 버텍스 어레이 읽기. (원본 getParameter(VERTEX_ARRAY_BINDING), 기억한 값으로 답한다)",
+								"en": "Read the bound vertex array. (original getParameter(VERTEX_ARRAY_BINDING), answered from the remembered value)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_parameter_texture",
+							"signature": "pub unsafe fn get_parameter_texture(&self, parameter: u32) -> Option<GlTexture>",
+							"params": [
+								{
+									"name": "parameter",
+									"type": "u32",
+									"description": {
+										"ko": "TEXTURE_BINDING_2D 같은 것.",
+										"en": "TEXTURE_BINDING_2D and the like."
+									}
+								}
+							],
+							"returns": {
+								"type": "Option<GlTexture>",
+								"description": {
+									"ko": "묶인 텍스처. 없으면 None.",
+									"en": "Bound texture. None if there is none."
+								}
+							},
+							"description": {
+								"ko": "활성 유닛에 묶인 텍스처 읽기. (원본 getParameter, TEXTURE_BINDING_2D 는 기억한 값으로 답한다)",
+								"en": "Read the texture bound to the active unit. (original getParameter, TEXTURE_BINDING_2D is answered from the remembered value)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "가위로 왼쪽 위 칸만 비운 뒤 엔진 그리기 잇기",
+								"en": "Clear only one corner cell with the scissor, then continue engine drawing"
+							},
+							"code": "use glow::HasContext;\nuse vanilla::{Colors, Graphic, Rect};\n\nfn draw(graphic: &mut Graphic) {\n\tlet gl = graphic.get_gl();\n\tunsafe {\n\t\tgl.enable(glow::SCISSOR_TEST);\n\t\tgl.scissor(0, 0, 64, 64);\n\t\tgl.clear_color(0.0, 0.0, 0.0, 1.0);\n\t\tgl.clear(glow::COLOR_BUFFER_BIT);\n\t\tgl.disable(glow::SCISSOR_TEST);\n\t\tassert!(!gl.is_enabled(glow::SCISSOR_TEST));\n\t}\n\tgraphic.set_fill_color(Colors::WHITE);\n\tgraphic.draw_rect(Rect::create(8.0, 8.0, 32.0, 32.0));\n}",
+							"language": "rust"
+						}
+					]
+				}
+			],
+			"functions": [],
+			"enums": []
 		},
 		{
 			"name": "core/image",
@@ -100881,7 +102393,7 @@
 						"ko": "그리기 전에 부르는 콜백. (프로그램, GL, 프로그램 종류, 머티리얼의 유니폼을 쓸 때)",
 						"en": "Callback called before drawing. (program, GL, program kind, for setting the material's uniforms)"
 					},
-					"signature": "pub type ToonBeforeDrawCallback<'a> = &'a dyn Fn(&ShaderProgram, &glow::Context, ToonProgramKind)",
+					"signature": "pub type ToonBeforeDrawCallback<'a> = &'a dyn Fn(&ShaderProgram, &GlContext, ToonProgramKind)",
 					"source": "src/graphics3d/toon/toonrenderer.rs",
 					"members": []
 				},
@@ -105022,7 +106534,7 @@
 						"ko": "단계 콜백. (gl, 렌더러)",
 						"en": "Stage callback. (gl, renderer)"
 					},
-					"signature": "pub type ToonPassCallback<'a> = Box<dyn FnMut(&glow::Context, &mut ToonRenderer) + 'a>",
+					"signature": "pub type ToonPassCallback<'a> = Box<dyn FnMut(&GlContext, &mut ToonRenderer) + 'a>",
 					"source": "src/graphics3d/toon/toondrawqueue.rs",
 					"members": []
 				},
@@ -105160,7 +106672,7 @@
 						{
 							"kind": "method",
 							"name": "add_pass",
-							"signature": "pub fn add_pass(&mut self, stage: ToonDrawStage, callback: impl FnMut(&glow::Context, &mut ToonRenderer) + 'a)",
+							"signature": "pub fn add_pass(&mut self, stage: ToonDrawStage, callback: impl FnMut(&GlContext, &mut ToonRenderer) + 'a)",
 							"params": [
 								{
 									"name": "stage",
@@ -105172,7 +106684,7 @@
 								},
 								{
 									"name": "callback",
-									"type": "impl FnMut(&glow::Context, &mut ToonRenderer) + 'a",
+									"type": "impl FnMut(&GlContext, &mut ToonRenderer) + 'a",
 									"description": {
 										"ko": "(gl, renderer) 를 받는다. 부른 뒤 렌더러가 프레임의 그리기 상태를 다시 건다.",
 										"en": "Receives (gl, renderer). After the call, the renderer sets the frame's draw state again."
@@ -105539,7 +107051,7 @@
 						"ko": "그리기 함수. (렌더러, 카메라, 화면 사각형, GL, 출력)",
 						"en": "Draw function. (renderer, camera, screen rectangle, GL, output)"
 					},
-					"signature": "pub type ToonViewDrawCallback = Box<dyn FnMut(&mut ToonRenderer, &Camera3D, Rect, &glow::Context, ToonViewOutput)>",
+					"signature": "pub type ToonViewDrawCallback = Box<dyn FnMut(&mut ToonRenderer, &Camera3D, Rect, &GlContext, ToonViewOutput)>",
 					"source": "src/graphics3d/toon/toonview3d.rs",
 					"members": []
 				},
@@ -106050,7 +107562,7 @@
 								"ko": "노드 사각형 안에 툰 3D 장면 그리기",
 								"en": "Draw a toon 3D scene inside a node rectangle"
 							},
-							"code": "use vanilla::{create_sphere_geometry, Camera3D, Matrix4, MeshBuilder, NodeTree, Rect, ToonDrawOptions, ToonDrawQueue, ToonMesh, ToonPartOptions, ToonRenderer, ToonView3D, ToonViewOutput, Vector3};\n\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet view_id = node_tree.create_child(root_id, \"view\");\nnode_tree[view_id].set_content_size_xy(320.0, 240.0);\nlet view = node_tree[view_id].add_component(ToonView3D::new());\nview.get_camera_mut().set_perspective(0.8, 0.1, 100.0);\nview.get_camera_mut().look_at(Vector3::create(0.0, 1.5, 3.0), Vector3::create(0.0, 0.5, 0.0), Vector3::create(0.0, 1.0, 0.0));\nlet mut builder = MeshBuilder::new();\nbuilder.add_part(&create_sphere_geometry(0.5, 24, 16, std::f64::consts::PI), &Matrix4::create_translation(0.0, 0.5, 0.0), \"#f0b080\", ToonPartOptions::default());\nlet arrays = builder.read_arrays();\nlet mut mesh: Option<ToonMesh> = None;\nview.set_draw_callback(Some(Box::new(move |renderer: &mut ToonRenderer, camera: &Camera3D, _screen_rect: Rect, gl: &glow::Context, _output: ToonViewOutput| {\n\tif mesh.is_none() {\n\t\tmesh = renderer.create_mesh(gl, &arrays);\n\t}\n\tif let Some(mesh) = mesh.as_ref() {\n\t\tlet mut queue = ToonDrawQueue::new();\n\t\tqueue.add_mesh(mesh, &Matrix4::create_identity(), ToonDrawOptions::default());\n\t\tqueue.draw(gl, renderer, camera);\n\t}\n})));\nassert!(view.get_renderer().is_none());\nassert!(view.is_depth_cleared());\nassert_eq!(view.get_render_scale(), 1.0);",
+							"code": "use vanilla::{create_sphere_geometry, Camera3D, GlContext, Matrix4, MeshBuilder, NodeTree, Rect, ToonDrawOptions, ToonDrawQueue, ToonMesh, ToonPartOptions, ToonRenderer, ToonView3D, ToonViewOutput, Vector3};\n\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet view_id = node_tree.create_child(root_id, \"view\");\nnode_tree[view_id].set_content_size_xy(320.0, 240.0);\nlet view = node_tree[view_id].add_component(ToonView3D::new());\nview.get_camera_mut().set_perspective(0.8, 0.1, 100.0);\nview.get_camera_mut().look_at(Vector3::create(0.0, 1.5, 3.0), Vector3::create(0.0, 0.5, 0.0), Vector3::create(0.0, 1.0, 0.0));\nlet mut builder = MeshBuilder::new();\nbuilder.add_part(&create_sphere_geometry(0.5, 24, 16, std::f64::consts::PI), &Matrix4::create_translation(0.0, 0.5, 0.0), \"#f0b080\", ToonPartOptions::default());\nlet arrays = builder.read_arrays();\nlet mut mesh: Option<ToonMesh> = None;\nview.set_draw_callback(Some(Box::new(move |renderer: &mut ToonRenderer, camera: &Camera3D, _screen_rect: Rect, gl: &GlContext, _output: ToonViewOutput| {\n\tif mesh.is_none() {\n\t\tmesh = renderer.create_mesh(gl, &arrays);\n\t}\n\tif let Some(mesh) = mesh.as_ref() {\n\t\tlet mut queue = ToonDrawQueue::new();\n\t\tqueue.add_mesh(mesh, &Matrix4::create_identity(), ToonDrawOptions::default());\n\t\tqueue.draw(gl, renderer, camera);\n\t}\n})));\nassert!(view.get_renderer().is_none());\nassert!(view.is_depth_cleared());\nassert_eq!(view.get_render_scale(), 1.0);",
 							"language": "rust",
 							"image": "toon-view.webp"
 						}
@@ -114227,7 +115739,7 @@
 						"ko": "표면 조각으로 줄무늬를 넣고 텍스처와 유니폼을 그리기마다 넘기기",
 						"en": "Put stripes in with a surface chunk and pass a texture and uniforms per draw"
 					},
-					"code": "use vanilla::{create_box_geometry, Matrix4, MeshBuilder, ShaderProgram, ToonDrawOptions, ToonMaterialChunks, ToonPartOptions, ToonProgramKind, ToonRenderer, ToonTextureOptions, Vector3};\nuse glow::HasContext;\n\nfn draw_stripe(gl: &glow::Context) -> Result<(), String> {\n\tlet mut renderer = ToonRenderer::new(gl)?;\n\tlet material = renderer.create_material(ToonMaterialChunks {\n\t\tname: String::from(\"stripe\"),\n\t\tuniform_chunk: String::from(\"uniform sampler2D stripeTexture;\\nuniform float stripeShift;\\n\"),\n\t\tsurface_chunk: String::from(\"void applySurface(inout ToonSurface surface) {\n\t\t\tfloat stripe = texture(stripeTexture, vec2(surface.localPosition.y * 4.0 + stripeShift, 0.5)).r;\n\t\t\tsurface.baseColor *= mix(0.5, 1.0, stripe);\n\t\t}\"),\n\t\t..ToonMaterialChunks::default()\n\t});\n\tlet stripe_texture = renderer.create_texture(gl, 2, 1, &[255, 255, 255, 255, 0, 0, 0, 255], ToonTextureOptions { is_mipmapped: false, ..ToonTextureOptions::default() })?;\n\tlet mut builder = MeshBuilder::new();\n\tbuilder.add_part(&create_box_geometry(1.0, 1.0, 1.0), &Matrix4::create_identity(), \"#80c0e0\", ToonPartOptions::default());\n\tlet mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or(\"mesh failed\")?;\n\tlet view_matrix = Matrix4::create_look_at(Vector3::create(2.0, 2.0, 3.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));\n\trenderer.begin_frame_with_matrices(gl, &view_matrix, &Matrix4::create_perspective(0.8, 1.0, 0.1, 20.0));\n\tlet set_shift = |program: &ShaderProgram, gl: &glow::Context, _kind: ToonProgramKind| unsafe {\n\t\tgl.uniform_1_f32(program.get_uniform_location(gl, \"stripeShift\").as_ref(), 0.25);\n\t};\n\trenderer.draw_mesh(gl, &mesh, &Matrix4::create_identity(), ToonDrawOptions {\n\t\tmaterial: Some(&material),\n\t\ttextures: &[(\"stripeTexture\", stripe_texture)],\n\t\ton_before_draw: Some(&set_shift),\n\t\t..ToonDrawOptions::default()\n\t});\n\trenderer.end_frame(gl);\n\tOk(())\n}",
+					"code": "use vanilla::{create_box_geometry, GlContext, Matrix4, MeshBuilder, ShaderProgram, ToonDrawOptions, ToonMaterialChunks, ToonPartOptions, ToonProgramKind, ToonRenderer, ToonTextureOptions, Vector3};\nuse glow::HasContext;\n\nfn draw_stripe(gl: &glow::Context) -> Result<(), String> {\n\tlet mut renderer = ToonRenderer::new(gl)?;\n\tlet material = renderer.create_material(ToonMaterialChunks {\n\t\tname: String::from(\"stripe\"),\n\t\tuniform_chunk: String::from(\"uniform sampler2D stripeTexture;\\nuniform float stripeShift;\\n\"),\n\t\tsurface_chunk: String::from(\"void applySurface(inout ToonSurface surface) {\n\t\t\tfloat stripe = texture(stripeTexture, vec2(surface.localPosition.y * 4.0 + stripeShift, 0.5)).r;\n\t\t\tsurface.baseColor *= mix(0.5, 1.0, stripe);\n\t\t}\"),\n\t\t..ToonMaterialChunks::default()\n\t});\n\tlet stripe_texture = renderer.create_texture(gl, 2, 1, &[255, 255, 255, 255, 0, 0, 0, 255], ToonTextureOptions { is_mipmapped: false, ..ToonTextureOptions::default() })?;\n\tlet mut builder = MeshBuilder::new();\n\tbuilder.add_part(&create_box_geometry(1.0, 1.0, 1.0), &Matrix4::create_identity(), \"#80c0e0\", ToonPartOptions::default());\n\tlet mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or(\"mesh failed\")?;\n\tlet view_matrix = Matrix4::create_look_at(Vector3::create(2.0, 2.0, 3.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));\n\trenderer.begin_frame_with_matrices(gl, &view_matrix, &Matrix4::create_perspective(0.8, 1.0, 0.1, 20.0));\n\tlet set_shift = |program: &ShaderProgram, gl: &GlContext, _kind: ToonProgramKind| unsafe {\n\t\tgl.uniform_1_f32(program.get_uniform_location(gl, \"stripeShift\").as_ref(), 0.25);\n\t};\n\trenderer.draw_mesh(gl, &mesh, &Matrix4::create_identity(), ToonDrawOptions {\n\t\tmaterial: Some(&material),\n\t\ttextures: &[(\"stripeTexture\", stripe_texture)],\n\t\ton_before_draw: Some(&set_shift),\n\t\t..ToonDrawOptions::default()\n\t});\n\trenderer.end_frame(gl);\n\tOk(())\n}",
 					"language": "rust",
 					"image": "toon-material.webp"
 				}
