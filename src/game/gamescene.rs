@@ -28,11 +28,12 @@
 //!   GameSceneBase 함수를 Scene 함수에서 직접 부르는 길도 그대로 된다. 그때는 tick 이 돌려준 bool 을 보고 씬이 자기 layout 을 부르고, post_draw 도 직접 부른다.
 //! - 원본과 다른 점:
 //!   - 원본 load(비동기)의 "load_assets 를 기다린 뒤 최소 시간 / 터치까지 기다림"은 러스트 애셋 흐름으로 옮겼다.
-//!     load 에서 "로딩 문" 읽기 손잡이 하나를 맡겨 두고, draw_on_load 가 최소 시간이 지나거나 화면을 누르면 문을 연다.
+//!     load 에서 "로딩 문" 읽기 손잡이 하나를 맡겨 두고(SceneBase 가 든다), 엔진이 로딩 중 프레임마다 최소 시간이 지나거나 화면을 누르면 문을 연다.
+//!     (원본 load 가 거는 엔진 프레임 함수와 같은 자리, 덮어쓸 수 있는 draw_on_load 에 기대지 않아 씬이 바탕 draw_on_load 를 부르지 않아도 멈추지 않는다)
 //!     엔진은 맡긴 애셋이 모두(문 포함) 끝나야 initialize 를 부르므로 결과는 원본과 같다. (애셋 다 읽힘 + (최소 시간 또는 터치))
 //! - 두 엔진이 같게 하는 것:
 //!   - 로딩 시간은 엔진 시계(get_realtime_since_startup)로 잰다. 엔진 시계가 아직 돌지 않았으면(첫 프레임 전, 0) 첫 로딩 화면 프레임의 시각부터 잰다.
-//!   - 로딩 화면 누름은 엔진 입력(is_touch_pressed)으로 draw_on_load 가 프레임마다 본다.
+//!   - 로딩 화면 누름은 엔진 입력(is_touch_pressed)으로 엔진이 로딩 중 프레임마다 본다.
 //!   - TouchRecognizer 는 원본처럼 initialize 에서 만든다. (그 전에는 get_touch_recognizer 가 None, 원본 undefined)
 //!     터치는 원본 touchPress 같은 함수 대신 tick 이 넘긴다. (SceneBase 의 터치 레이캐스터와 첫 터치 콜백은 쓰지 않는다)
 //! - 그 밖에 원본과 다른 점:
@@ -68,7 +69,6 @@ use crate::base::color::Color;
 use crate::base::pivot::Pivot;
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
-use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::{NodeId, NodeTree};
@@ -91,8 +91,6 @@ const DEFAULT_LOAD_MIN_DURATION_MS: f64 = 3000.0;
 /// 로딩 게이지 높이. (뷰 좌표)
 const LOADING_BAR_HEIGHT: f64 = 24.0;
 
-/// 로딩 문 손잡이 경로. (애셋이 아닌 대기 표시)
-const LOADING_GATE_PATH: &str = "GameSceneBase.loadingGate";
 
 /// 로딩 화면 그리기 함수. (graphic, 뷰 크기, 보이는 진행률 0 ~ 1, 로딩을 시작한 뒤의 초. 뷰 좌표계가 걸려 있다)
 pub type LoadingDrawer = Box<dyn FnMut(&mut Graphic, Vector2, f64, f64)>;
@@ -385,13 +383,8 @@ pub struct GameSceneBase {
 	last_view_size_y: f64,
 	loading_image_asset: Option<ImageAsset>,
 	loading_image_url: String,
-	/// 로딩 시작 시각. (엔진 시작 뒤 초)
-	load_start_time: f64,
+	/// 로딩 최소 노출 시간. (밀리초, 로딩 문의 시작 시각과 건너뛰기는 SceneBase 의 로딩 문이 든다)
 	load_min_duration_ms: f64,
-	load_touched_to_skip: bool,
-	/// 첫 프레임 전에 로딩을 시작해 시작 시각을 첫 로딩 화면 프레임에서 잡을지.
-	is_load_start_time_pending: bool,
-	load_gate_handle: Option<AssetLoadHandle>,
 	view_scale_mode: ViewScaleMode,
 	/// 세이프 에어리어 인셋. (CSS 픽셀, 위 / 오른쪽 / 아래 / 왼쪽. 없으면 뷰 매니저에서 읽는다)
 	safe_area_insets: Option<SafeAreaInsets>,
@@ -451,11 +444,7 @@ impl GameSceneBase {
 			last_view_size_y: 0.0,
 			loading_image_asset: None,
 			loading_image_url: String::new(),
-			load_start_time: 0.0,
 			load_min_duration_ms: DEFAULT_LOAD_MIN_DURATION_MS,
-			load_touched_to_skip: false,
-			is_load_start_time_pending: false,
-			load_gate_handle: None,
 			view_scale_mode: ViewScaleMode::None,
 			safe_area_insets: None,
 			loading_drawer: None,
@@ -623,6 +612,7 @@ impl GameSceneBase {
 	//==============================================================================
 	pub fn set_loading_min_duration_ms(&mut self, milliseconds: f64) {
 		self.load_min_duration_ms = milliseconds;
+		self.scene_base.set_loading_gate_min_duration_ms(milliseconds);
 	}
 
 	//==============================================================================
@@ -799,7 +789,7 @@ impl GameSceneBase {
 		if !self.is_loading_progress_reported {
 			return;
 		}
-		let are_assets_finished = match self.load_gate_handle.as_ref() {
+		let are_assets_finished = match self.scene_base.get_loading_gate_handle() {
 			Some(load_gate_handle) => {
 				self.scene_base.are_tracked_assets_finished_except(load_gate_handle)
 			}
@@ -861,30 +851,21 @@ impl GameSceneBase {
 	//==============================================================================
 	pub fn load(&mut self, engine: &Engine) {
 		let current_time = engine.get_time_manager().get_realtime_since_startup();
-		self.begin_loading(current_time);
-		// 엔진 시계가 아직 돌지 않았으면(첫 프레임 전) 첫 로딩 화면 프레임의 시각부터 잰다. (원본 load 와 같은 규칙)
-		self.is_load_start_time_pending = current_time <= 0.0;
+		// 엔진 시계가 아직 돌지 않았으면(첫 프레임 전) 첫 로딩 프레임의 시각부터 잰다. (원본 load 와 같은 규칙)
+		self.scene_base.begin_loading_gate(current_time, current_time <= 0.0, self.load_min_duration_ms);
 		self.load_assets();
 	}
 
 	//==============================================================================
 	/// 로딩 시작. (시작 시각을 적고, 최소 시간 / 터치를 기다리는 로딩 문을 씬에 맡긴다)
 	/// - 최소 노출 시간이 0 이하이면 로딩 문을 처음부터 열어 둔다.
+	/// - 문은 엔진이 로딩 중 프레임마다(엔진 시계와 엔진 입력으로) 갱신해 연다. 덮어쓸 수 있는 draw_on_load 에 기대지 않아, 씬이 바탕 draw_on_load 를 부르지 않아도 initialize 가 불린다. (원본 load 가 거는 엔진 프레임 함수)
 	///
 	/// # 인자
 	/// - `current_time`: 지금 시각. (초, 엔진 시작 뒤 실제 경과 시간)
 	//==============================================================================
 	pub fn begin_loading(&mut self, current_time: f64) {
-		self.load_start_time = current_time;
-		self.load_touched_to_skip = false;
-		self.is_load_start_time_pending = false;
-		let load_gate_handle = AssetLoadHandle::create_pending(LOADING_GATE_PATH);
-		self.scene_base.track_load_handle(&load_gate_handle);
-		self.scene_base.set_engine_clock_load_handle(&load_gate_handle);
-		if self.load_min_duration_ms <= 0.0 {
-			load_gate_handle.finish(Ok(Vec::new()));
-		}
-		self.load_gate_handle = Some(load_gate_handle);
+		self.scene_base.begin_loading_gate(current_time, false, self.load_min_duration_ms);
 	}
 
 	//==============================================================================
@@ -905,6 +886,7 @@ impl GameSceneBase {
 	//==============================================================================
 	/// 로딩 갱신. (누르면 건너뛰기로 적고, 최소 시간이 지났거나 건너뛰었으면 로딩 문을 연다)
 	/// - begin_loading 전이거나 문이 이미 열렸으면 문은 그대로다.
+	/// - 엔진이 로딩 중 프레임마다 같은 갱신을 부른다. 게임이 따로 부르지 않아도 된다. (시각을 손으로 주는 시험과 도구 자리)
 	///
 	/// # 인자
 	/// - `current_time`: 지금 시각. (초, begin_loading 에 준 것과 같은 시계)
@@ -937,24 +919,7 @@ impl GameSceneBase {
 	/// ```
 	//==============================================================================
 	pub fn update_loading(&mut self, current_time: f64, is_touch_pressed: bool) {
-		if is_touch_pressed {
-			self.load_touched_to_skip = true;
-		}
-		let load_gate_handle = match self.load_gate_handle.as_ref() {
-			Some(load_gate_handle) => {
-				load_gate_handle
-			}
-			None => {
-				return;
-			}
-		};
-		if load_gate_handle.is_finished() {
-			return;
-		}
-		let elapsed_milliseconds = (current_time - self.load_start_time) * 1000.0;
-		if elapsed_milliseconds >= self.load_min_duration_ms || self.load_touched_to_skip {
-			load_gate_handle.finish(Ok(Vec::new()));
-		}
+		self.scene_base.update_loading_gate(current_time, is_touch_pressed);
 	}
 
 	//==============================================================================
@@ -970,7 +935,7 @@ impl GameSceneBase {
 		if self.load_min_duration_ms <= 0.0 {
 			return 1.0;
 		}
-		let elapsed_milliseconds = (current_time - self.load_start_time) * 1000.0;
+		let elapsed_milliseconds = (current_time - self.scene_base.get_loading_gate_start_time()) * 1000.0;
 		(elapsed_milliseconds / self.load_min_duration_ms).clamp(0.0, 1.0)
 	}
 
@@ -981,25 +946,20 @@ impl GameSceneBase {
 	/// begin_loading 뒤 update_loading 에 누름이 왔으면 true.
 	//==============================================================================
 	pub fn is_load_touched_to_skip(&self) -> bool {
-		self.load_touched_to_skip
+		self.scene_base.is_loading_gate_touched_to_skip()
 	}
 
 	//==============================================================================
 	/// 로딩 화면 출력. (엔진이 initialize 전까지 매 프레임 부른다. 바깥 색 캔버스 + 바탕색 뷰 + (그리기 함수, 없으면 가운데 로딩 이미지 + 아래 게이지))
-	/// - 그리기 전에 로딩 문을 갱신하고, 맡긴 받기를 갱신하고, 보이는 진행률을 따라가게 한다.
+	/// - 그리기 전에 맡긴 받기를 갱신하고, 보이는 진행률을 따라가게 한다. (로딩 시각과 건너뛰기는 엔진이 로딩 중 프레임마다 잡는다)
 	///
 	/// # 인자
 	/// - `graphic`: 로딩 화면을 그릴 그래픽.
 	//==============================================================================
 	pub fn draw_on_load(&mut self, graphic: &mut Graphic) {
 		let engine = crate::core::globalengine::expect_global_engine("GameSceneBase::draw_on_load");
+		// 지금 시각. (로딩 시각과 건너뛰기는 엔진이 프레임마다 SceneBase 의 로딩 문에서 잡는다)
 		let current_time = engine.get_time_manager().get_realtime_since_startup();
-		if self.is_load_start_time_pending {
-			self.load_start_time = current_time;
-			self.is_load_start_time_pending = false;
-		}
-		let is_touch_pressed = engine.get_input_manager().is_touch_pressed();
-		self.update_loading(current_time, is_touch_pressed);
 
 		// 진행률. (맡긴 애셋 함께 받기를 갱신해 읽고, 로딩 문을 뺀 애셋이 다 끝났으면 1 로 채우고, 보이는 정도를 따라가게 한다)
 		self.update_tracked_asset_loaders(engine);
@@ -1012,7 +972,7 @@ impl GameSceneBase {
 		else {
 			self.get_loading_progress(current_time)
 		};
-		let elapsed_seconds = (current_time - self.load_start_time).max(0.0);
+		let elapsed_seconds = (current_time - self.scene_base.get_loading_gate_start_time()).max(0.0);
 
 		let view_manager = engine.get_view_manager();
 		let canvas_native_size = view_manager.get_canvas_native_size();
@@ -2451,6 +2411,7 @@ macro_rules! game_scene {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::core::asset::AssetLoadHandle;
 	use crate::core::engine::EngineConfiguration;
 	use crate::core::viewmanager::SafeAreaSide;
 
