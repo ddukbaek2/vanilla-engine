@@ -2028,6 +2028,62 @@ pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f3
 }
 
 //==============================================================================
+/// 글리프 자리를 1/4 픽셀 서브픽셀로 나눌지. (크롬 블링크가 SkFont::setSubpixel 에 주는 값)
+/// - 맥, 윈도우: 늘 켠다. (안티에일리어스 글)
+/// - 리눅스: fontconfig 의 힌팅이 꽉(hintfull)이면 끄고 그 밖은 켠다. (WebFontRenderStyle::ApplyToSkFont 의 force_subpixel_positioning 은 힌팅이 kFull 이 아닐 때 참이고,
+///   use_subpixel_positioning 은 기기 배율이 1 보다 클 때만 참이다. 안티에일리어스가 꺼진 글꼴은 크롬 GetFontRenderParams 가 힌팅을 꽉으로 바꾼다)
+///   얼굴의 가족 이름, 크기, 굵기, 기울기로 묻는다. (rasterize_glyph_at 의 힌팅과 같은 물음)
+/// - 그 밖(웹): 끈다. (브라우저 캔버스가 정한다)
+///
+/// # 인자
+/// - `face`: 그릴 얼굴.
+/// - `pixel_size`: 글자 크기. (픽셀)
+///
+/// # 돌려줌
+/// 켜면 true. 끄면 글리프 자리를 반올림한 정수 자리에 두고 서브픽셀 몫은 0 이다.
+///
+/// # 예제
+/// 맥과 윈도우는 늘 켠다
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::core::textshaping::{is_subpixel_positioned, LoadedFont, ResolvedFontFace};
+/// use vanilla::platform::find_fallback_font_file;
+/// use vanilla::FontFaceDescriptors;
+///
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let face = ResolvedFontFace {
+/// 		font: Rc::new(LoadedFont::create_from_bytes(std::fs::read(&source.path).expect("font file")).expect("font")),
+/// 		descriptors: FontFaceDescriptors::new(),
+/// 		is_synthetic_bold: false,
+/// 		is_synthetic_italic: false,
+/// 	};
+/// 	let is_subpixel = is_subpixel_positioned(&face, 16.0);
+/// 	if cfg!(any(target_os = "macos", target_os = "windows")) {
+/// 		assert!(is_subpixel);
+/// 	}
+/// }
+/// ```
+//==============================================================================
+pub fn is_subpixel_positioned(face: &ResolvedFontFace, pixel_size: f32) -> bool {
+	#[cfg(any(target_os = "macos", target_os = "windows"))]
+	{
+		let _ = (face, pixel_size);
+		true
+	}
+	#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+	{
+		let shaping_face = face.font.get_shaping_face();
+		let (is_antialiased, hint_level, _) = crate::platform::desktop::systemfont::read_font_render_style(&read_family_name(shaping_face), pixel_size, shaping_face.weight().to_number(), shaping_face.is_italic());
+		is_antialiased && hint_level != 3
+	}
+	#[cfg(not(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android")))))]
+	{
+		let _ = (face, pixel_size);
+		false
+	}
+}
+
+//==============================================================================
 /// 서브픽셀 자리와 글자 색 밝기로 글리프 래스터. (맥은 CoreText, 윈도우는 DirectWrite, 리눅스는 skrifa 힌팅 윤곽으로 크롬처럼 그린다)
 /// - 맥: 색이 아닌 글리프는 크롬 맥 Canvas2D 와 같은 길로 그린다. (스키아 SkScalerContext_Mac 의 A8 마스크: 글꼴 부드럽게, CoreGraphics 감마 풀기, 글자 색 밝기의 감마 전보정)
 ///   글자 색 밝기는 맥 스키아처럼 글꼴 부드럽게가 회색이면 1/2 을 곱한 색의 3 비트 단계이고, 감마는 크롬 맥의 sRGB, 대비는 0 이다. (SkTypeface_Mac::onFilterRec, 크로미엄 skia/BUILD.gn)

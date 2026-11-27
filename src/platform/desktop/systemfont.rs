@@ -1758,7 +1758,30 @@ mod tests {
 //==============================================================================
 /// 리눅스 글꼴의 렌더 설정. ((안티에일리어스, 힌팅 단계 0 ~ 3, 자동 힌팅 강제), 크롬처럼 fontconfig 로 묻는다)
 //==============================================================================
+/// - 같은 이름, 크기, 굵기, 기울기는 한 번만 묻는다. (글리프마다 FcFontMatch 를 부르지 않게, 상한을 넘으면 비운다)
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 pub(crate) fn read_font_render_style(family_name: &str, pixel_size: f32, weight: u16, is_italic: bool) -> (bool, u8, bool) {
-	platform_font::read_font_render_style(family_name, pixel_size, weight, is_italic)
+	let key = (family_name.to_string(), pixel_size.to_bits(), weight, is_italic);
+	if let Some(render_style) = FONT_RENDER_STYLE_CACHE.with(|cache| cache.borrow().get(&key).copied()) {
+		return render_style;
+	}
+	let render_style = platform_font::read_font_render_style(family_name, pixel_size, weight, is_italic);
+	FONT_RENDER_STYLE_CACHE.with(|cache| {
+		let mut cache = cache.borrow_mut();
+		if cache.len() >= MAXIMUM_FONT_RENDER_STYLE_COUNT {
+			cache.clear();
+		}
+		cache.insert(key, render_style);
+	});
+	render_style
 }
+
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+thread_local! {
+	/// 리눅스 렌더 설정 캐시. ((가족 이름, 크기 비트, 굵기, 기울기) → (안티에일리어스, 힌팅 단계, 자동 힌팅 강제))
+	static FONT_RENDER_STYLE_CACHE: std::cell::RefCell<std::collections::HashMap<(String, u32, u16, bool), (bool, u8, bool)>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// 리눅스 렌더 설정 캐시 상한. (넘으면 비운다)
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+const MAXIMUM_FONT_RENDER_STYLE_COUNT: usize = 256;
