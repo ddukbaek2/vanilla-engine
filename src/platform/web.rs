@@ -9,7 +9,7 @@
 //! - 페이지: visibilitychange, blur, focus, pointerdown 을 엔진의 페이지 이벤트로 넘기고, 다시 보이면 on_page_visibility_restored,
 //!   문서 resume 과 pageshow(persisted) 면 on_page_process_restored 를 부른다. (원본 setupAllDocumentEvents)
 //! - 최대 FPS 는 원본처럼 세기 시작한 뒤 처리한 프레임 수로 차례를 정한다. (platform/framelimiter.rs, 90 Hz 에서 60 FPS 도 평균 60)
-//! - 캔버스의 webglcontextlost, webglcontextrestored 에서 원본 Graphic 처럼 묶음 기억을 잊는다.
+//! - 캔버스의 webglcontextlost, webglcontextrestored 에서 원본 WebGLStateCache 처럼 GL 상태 기억을 잊는다.
 //! - 키, 마우스, 손가락, 페이지 사건은 프레임 콜백 안에서 다시 들어와도(게임 코드의 dispatchEvent, focus() 같은 것) 겹쳐 빌리지 않는다.
 //!   바로 빌릴 수 있으면 그 자리에서 처리하고, 못 빌리면 줄에 쌓았다가 프레임 콜백 끝에 온 차례대로 처리한다. (platform/eventqueue.rs)
 //! - exit_application: 원본처럼 Capacitor 의 App.exitApp, 없으면 window.close 를 시도한다.
