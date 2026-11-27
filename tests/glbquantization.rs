@@ -266,7 +266,7 @@ fn toon_reader_builds_flat_normals_when_normals_are_missing() {
 }
 
 //==============================================================================
-/// 툰 읽기: 바이너리 덩어리 밖을 읽는 접근자와 bufferView 가 없는 접근자는 0 으로 채우지 않고 Err. (원본 readAccessor 에 넣을 범위 검사와 같은 글, HANDOFF)
+/// 툰 읽기: 바이너리 덩어리 밖을 읽는 접근자는 0 으로 채우지 않고 Err, bufferView 가 없는 접근자는 glTF 명세대로 0 으로 채운다. (원본 SkinnedModel 의 접근자 읽기와 같은 뜻, 원본 툰 readAccessor 에 넣을 검사는 HANDOFF)
 //==============================================================================
 #[test]
 fn toon_reader_rejects_accessor_outside_binary_chunk() {
@@ -282,6 +282,6 @@ fn toon_reader_rejects_accessor_outside_binary_chunk() {
 	assert!(read_glb_arrays(&create_glb(&tail_json, &binary_buffer), None).is_err(), "끝이 덩어리를 넘는 접근자도 Err");
 	let mut missing_json = json.clone();
 	missing_json["accessors"][position_accessor].as_object_mut().unwrap().remove("bufferView");
-	let expected_missing_message = format!("GLB 접근자 {} 에 bufferView 가 없습니다. (bufferView 없는 접근자는 읽지 못한다)", position_accessor);
-	assert_eq!(read_glb_arrays(&create_glb(&missing_json, &binary_buffer), None).err().as_deref(), Some(expected_missing_message.as_str()), "bufferView 없는 접근자는 Err");
+	let missing_arrays = read_glb_arrays(&create_glb(&missing_json, &binary_buffer), None).unwrap();
+	assert!(!missing_arrays.vertex_data.is_empty() && read_vertex_columns(&missing_arrays.vertex_data, 0).iter().all(|value| *value == 0.0), "bufferView 없는 접근자는 0 으로 채운다 (bufferView 0 을 읽지 않는다)");
 }

@@ -536,7 +536,8 @@ fn check_required_extensions(json: &Value) -> Result<(), String> {
 //==============================================================================
 /// 접근자 하나를 수 목록으로 읽기. (촘촘한 것과 byteStride 로 띄운 것, 정수는 담긴 값 그대로)
 /// - 바이너리 덩어리(buffers[0]) 밖의 버퍼를 가리키면 Err. (EXT_meshopt_compression 의 fallback 버퍼도 여기 든다)
-/// - bufferView 가 없거나 읽을 바이트가 바이너리 덩어리 밖에 걸치면 Err. (0 으로 채우거나 짧게 읽지 않는다)
+/// - 읽을 바이트가 바이너리 덩어리 밖에 걸치면 Err. (0 으로 채우거나 짧게 읽지 않는다, 원본 SkinnedModel 의 접근자 읽기처럼)
+/// - bufferView 가 없으면 glTF 명세대로 0 으로 채운 count 개다. (원본 SkinnedModel 의 접근자 읽기와 같다, sparse 는 읽지 않는다)
 //==============================================================================
 fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Result<Vec<f64>, String> {
 	let accessor = &chunks.json["accessors"][accessor_index];
@@ -575,7 +576,7 @@ fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Result<Vec<f64>, 
 			buffer_view_index as usize
 		}
 		None => {
-			return Err(format!("GLB 접근자 {} 에 bufferView 가 없습니다. (bufferView 없는 접근자는 읽지 못한다)", accessor_index));
+			return Ok(vec![0.0; count * component_count]);
 		}
 	};
 	let buffer_view = &chunks.json["bufferViews"][buffer_view_index];

@@ -54,6 +54,7 @@ third_party/         고쳐 쓰는 남의 크레이트 (워크스페이스 밖, 
   rustybuzz/         rustybuzz 0.20.1 에 크롬 HarfBuzz 처럼 자리 배율(Face::set_scale, 16.16)과 축 값 정규화를 더한 판
   ttf-parser/        ttf-parser 0.25.1 에서 짝 커닝(PairPos 꼴 1)의 장치 표 기준을 HarfBuzz 처럼 바로잡은 판 (fontdue 는 crates.io 판을 쓴다)
 tests/               데스크탑 플랫폼 시험 desktopplatform.rs (#[ignore], 시스템 글꼴과 대체 글꼴, 색 이모지, 클립보드, 같은 기계의 크롬 measureText 견주기)
+                     glTF 양자화 읽기 glbquantization.rs, 툰 강조 찍기 시험 toonhighlight.rs (시험 틀 없이 main, 숨긴 창의 GL, 원본 크롬 시험과 같은 장면을 화소까지 견줌)
   assets/            크롬 기대값 자료와 그것을 찍는 스크립트 (소리 해석, 믹서, 비프, PannerNode, 글 재기)
 .github/workflows/   CI platforms.yml: 윈도우, 리눅스(X11 과 웨이랜드), 인텔 맥에서 시험, 예제 찍기(메사 llvmpipe 소프트웨어 GL), 같은 기계의 크롬과 견주기, wasm32 빌드
 .github/scripts/     CI 도구 (captureexamples.cjs 예제 찍기, chromecompare.cjs 원본 예제를 헤드리스 크롬으로 찍어 화소 견주기)
