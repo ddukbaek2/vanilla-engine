@@ -183,8 +183,9 @@ float readTapWeight(vec3 position, vec3 normal, ivec2 cell, out float occlusion)
 "
 	};
 }
-/// 가로 흐림. (반 해상도, 가우스 7 탭)
+/// 가로, 세로 흐림. (반 해상도, 가우스 7 탭, 방향은 blurDirection)
 const AMBIENT_OCCLUSION_BLUR_FRAGMENT_SHADER: &str = concat!(ambient_occlusion_common_chunk!(), ambient_occlusion_weight_chunk!(), "
+uniform ivec2 blurDirection;
 const float GAUSSIAN_WEIGHTS[4] = float[4](1.0, 0.8, 0.45, 0.2);
 void main() {
 	ivec2 cell = ivec2(gl_FragCoord.xy);
@@ -200,18 +201,18 @@ void main() {
 	float weightSum = 0.0;
 	for (int offset = -3; offset <= 3; ++offset) {
 		float occlusion;
-		float weight = GAUSSIAN_WEIGHTS[abs(offset)] * readTapWeight(position, normal, cell + ivec2(offset, 0), occlusion);
+		float weight = GAUSSIAN_WEIGHTS[abs(offset)] * readTapWeight(position, normal, cell + blurDirection * offset, occlusion);
 		occlusionSum += occlusion * weight;
 		weightSum += weight;
 	}
 	fragmentColor = vec4(weightSum > 0.0001 ? occlusionSum / weightSum : 1.0, 0.0, 0.0, 1.0);
 }
 ");
-/// 세로 흐림과 온 해상도로 키우기. (화소에서 가까운 반 해상도 두 줄 x 7 탭을 화소의 깊이와 노멀로 고른다, 세기를 걸고 깊이 24 비트를 gba 에)
+/// 온 해상도로 키우기. (화소에서 가까운 반 해상도 2 x 2 칸을 쌍선형 무게에 화소의 깊이와 노멀로 고른 무게를 곱해 섞는다, 세기를 걸고 깊이 24 비트를 gba 에)
+/// - 가로와 세로 흐림은 반 해상도에서 끝났으니 온 해상도 화소는 탭 넷만 읽는다. (유니티 URP 의 SSAO 처럼 흐림은 줄인 판에서, 키울 때는 깊이를 보는 쌍선형)
 /// - 몸 셰이더가 제 깊이와 견주어 같은 면일 때만 읽는다. (비치는 것, 선의 판에 없는 것은 어둡히지 않는다)
 const AMBIENT_OCCLUSION_UPSAMPLE_FRAGMENT_SHADER: &str = concat!(ambient_occlusion_common_chunk!(), ambient_occlusion_weight_chunk!(), "
 uniform float intensity;
-const float GAUSSIAN_WEIGHTS[4] = float[4](1.0, 0.8, 0.45, 0.2);
 vec3 packDepth(float depth) {
 	float value = floor(depth * 16777215.0 + 0.5);
 	float high = floor(value / 65536.0);
@@ -228,19 +229,17 @@ void main() {
 	vec3 position = readViewPosition(pixel, depth);
 	vec3 normal = readViewNormal(pixel);
 	vec2 point = (gl_FragCoord.xy - 0.5) / sourceScale;
-	ivec2 nearestCell = ivec2(floor(point + 0.5));
-	int sideX = point.x >= float(nearestCell.x) ? 1 : -1;
+	ivec2 baseCell = ivec2(floor(point));
+	vec2 fraction = point - vec2(baseCell);
 	float occlusionSum = 0.0;
 	float weightSum = 0.0;
-	for (int column = 0; column < 2; ++column) {
-		int cellX = nearestCell.x + column * sideX;
-		float columnWeight = column == 0 ? 1.0 : 0.5;
-		for (int offset = -3; offset <= 3; ++offset) {
-			float occlusion;
-			float weight = columnWeight * GAUSSIAN_WEIGHTS[abs(offset)] * readTapWeight(position, normal, ivec2(cellX, nearestCell.y + offset), occlusion);
-			occlusionSum += occlusion * weight;
-			weightSum += weight;
-		}
+	for (int index = 0; index < 4; ++index) {
+		ivec2 corner = ivec2(index & 1, index >> 1);
+		float bilinear = (corner.x == 1 ? fraction.x : 1.0 - fraction.x) * (corner.y == 1 ? fraction.y : 1.0 - fraction.y);
+		float occlusion;
+		float weight = (bilinear + 0.0001) * readTapWeight(position, normal, baseCell + corner, occlusion);
+		occlusionSum += occlusion * weight;
+		weightSum += weight;
 	}
 	float visibility = weightSum > 0.0001 ? occlusionSum / weightSum : 1.0;
 	fragmentColor = vec4(1.0 - intensity * (1.0 - visibility), packDepth(depth));
@@ -1235,16 +1234,23 @@ impl ToonPostProcess {
 			gl.uniform_1_f64(occlusion_pass.get_uniform_location(gl, "pixelsPerUnit").as_ref(), 0.5 * (projection_elements[0] as f64).abs() * width as f64);
 			occlusion_pass.draw(gl);
 
-			// 2. 가로 흐림. (반 해상도)
+			// 2. 가로 흐림. (반 해상도, GTAO 판에서 흐림 판으로)
 			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(target.blur_framebuffer));
 			bind_common(&passes[1], target.occlusion_texture);
+			gl.uniform_2_i32(passes[1].get_uniform_location(gl, "blurDirection").as_ref(), 1, 0);
 			passes[1].draw(gl);
 
-			// 3. 세로 흐림과 키우기. (선의 판 해상도, 세기를 건다)
+			// 3. 세로 흐림. (반 해상도, 흐림 판에서 GTAO 판으로, 판 둘을 돌려 쓴다)
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(target.occlusion_framebuffer));
+			bind_common(&passes[1], target.blur_texture);
+			gl.uniform_2_i32(passes[1].get_uniform_location(gl, "blurDirection").as_ref(), 0, 1);
+			passes[1].draw(gl);
+
+			// 4. 키우기. (선의 판 해상도, 세기를 건다)
 			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(target.result_framebuffer));
 			crate::core::glstatecache::viewport(gl, 0, 0, width, height);
 			let upsample_pass = &passes[2];
-			bind_common(upsample_pass, target.blur_texture);
+			bind_common(upsample_pass, target.occlusion_texture);
 			gl.uniform_1_f64(upsample_pass.get_uniform_location(gl, "intensity").as_ref(), ambient_occlusion.intensity);
 			upsample_pass.draw(gl);
 
@@ -1364,5 +1370,39 @@ impl ToonPostProcess {
 				}
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// 원본 파일에서 `const 이름 = ...` 뒤 첫 백틱 문자열을 읽는다. (원본 뿌리 ../vanilla.js, 없으면 None 이라 견주기를 건너뛴다)
+	fn read_original_template(name: &str, after: &str) -> Option<String> {
+		let path = std::env::var("VANILLA_JS_PATH").unwrap_or_else(|_| format!("{}/../vanilla.js", env!("CARGO_MANIFEST_DIR")));
+		let source = std::fs::read_to_string(format!("{}/src/graphics3d/toon/toonpostprocess.js", path)).ok()?;
+		let start = source.find(&format!("const {} = ", name))?;
+		let tail_start = start + source[start..].find(after)? + after.len();
+		let tail_end = tail_start + source[tail_start..].find("`;")?;
+		Some(source[tail_start..tail_end].to_string())
+	}
+
+	//==============================================================================
+	/// AO 흐림은 방향 유니폼 하나로 가로와 세로를 같이 하고, 키우기는 반 해상도 칸 2 x 2 쌍선형 네 탭이다. (원본 394f5af, 셰이더 글자까지 같다)
+	//==============================================================================
+	#[test]
+	fn ambient_occlusion_blur_and_upsample_match_original() {
+		assert!(AMBIENT_OCCLUSION_BLUR_FRAGMENT_SHADER.contains("uniform ivec2 blurDirection;"));
+		assert!(AMBIENT_OCCLUSION_BLUR_FRAGMENT_SHADER.contains("cell + blurDirection * offset"));
+		assert!(AMBIENT_OCCLUSION_UPSAMPLE_FRAGMENT_SHADER.contains("ivec2 baseCell = ivec2(floor(point));"));
+		assert!(!AMBIENT_OCCLUSION_UPSAMPLE_FRAGMENT_SHADER.contains("GAUSSIAN_WEIGHTS"));
+		assert!(!AMBIENT_OCCLUSION_UPSAMPLE_FRAGMENT_SHADER.contains("nearestCell"));
+		let Some(blur) = read_original_template("AMBIENT_OCCLUSION_BLUR_FRAGMENT_SHADER", "AMBIENT_OCCLUSION_WEIGHT_CHUNK + `") else {
+			println!("(원본 저장소가 없어 셰이더 글자 견주기는 건너뜀)");
+			return;
+		};
+		assert!(AMBIENT_OCCLUSION_BLUR_FRAGMENT_SHADER.ends_with(&blur), "흐림 셰이더가 원본과 다름");
+		let upsample = read_original_template("AMBIENT_OCCLUSION_UPSAMPLE_FRAGMENT_SHADER", "AMBIENT_OCCLUSION_WEIGHT_CHUNK + `").expect("원본 키우기");
+		assert!(AMBIENT_OCCLUSION_UPSAMPLE_FRAGMENT_SHADER.ends_with(&upsample), "키우기 셰이더가 원본과 다름");
 	}
 }
