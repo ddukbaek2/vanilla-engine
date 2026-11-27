@@ -229,7 +229,7 @@ impl Scene for ToonShowcaseScene {
 				let mut animation_name_list: Vec<&String> = skeleton.animations.keys().collect();
 				animation_name_list.sort();
 				let walk_name = animation_name_list.iter().find(|name| name.to_lowercase().contains("walk")).or(animation_name_list.first()).map(|name| name.as_str()).unwrap_or("");
-				write_skin_pose(skeleton, walk_name, elapsed_seconds, &mut joint_matrices, None, None);
+				write_skin_pose(skeleton, walk_name, elapsed_seconds, &mut joint_matrices, None, None, None);
 				joint_matrices
 			});
 			pose_list.push(pose);
