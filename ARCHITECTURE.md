@@ -195,6 +195,8 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 
 이름은 러스트 규칙(Rust API Guidelines C-CASE)을 따른다: 함수, 메서드, 변수, 필드, 모듈은 snake_case, 타입과 트레이트와 열거 값은 UpperCamelCase, 상수는 SCREAMING_SNAKE_CASE. vanilla.js 의 이름은 이 규칙으로 바꿔 옮긴다. (setFillColor → set_fill_color, Colors.white → Colors::WHITE) 나머지는 vanilla.js 지침을 따른다: 이름 줄이지 않기, 중괄호 늘 쓰기, else 는 다음 줄, `//====` 머리 주석에 독백체 설명, 파일 머리에 원본과의 대응과 다른 점. rustfmt 는 else 줄바꿈을 망가뜨려서 돌리지 않는다.
 
+수 꼴: 로직 수(자리, 크기, 각, 색 성분, 시간, 트윈, 물리, 반사 값, UIDocument 의 수)는 원본 JS number 와 같은 f64 다. (언리얼 5 의 큰 세계 좌표처럼 CPU 는 배정밀도, GPU 는 단정밀도) f32 는 원본이 Float32Array, Math.fround 를 쓰거나 크롬이 float 로 셈하는 경계에만 둔다: GPU 로 가는 정점, 인덱스, 유니폼 배열(그리기 함수가 정점 버퍼에 넣을 때, core/gluniform.rs 의 GlUniformF64 가 유니폼을 올릴 때 f32 로 줄인다), Matrix4 의 칸(원본처럼 f32 로 담고 칸마다 f64 로 셈한다, 칸을 셈에 쓸 때는 read_elements), 소리 표본과 믹서와 AudioParam(크롬 WebAudio 의 float), Canvas2D 안쪽과 글리프 래스터(스키아의 float, 공개 함수는 f64 를 받아 블링크처럼 받자마자 줄인다), 그림 해독기와 색 관리(크롬과 비트까지 같아야 하는 셈). 셈 가운데에서 f32 로 줄였다 넓히지 않는다. `as f32` 는 이 경계에서만 쓴다.
+
 문서 주석: 머리 주석(`//====` 두 줄 사이)의 설명 줄은 rustdoc 의 `///`, 파일 머리는 `//!` 다. 인자는 `# 인자` 절의 `` - `이름`: 설명 ``, 돌려줌은 `# 돌려줌` 절, 예제는 `# 예제` 절의 ```rust 칸(바로 앞 한 줄이 제목)으로 쓰고, 칸 바로 뒤 줄의 `<!-- image: <파일 이름> -->` 이 예제 그림(docs/guide/<판>/images/, 가이드와 같이 씀)이다. 예제는 `cargo test --doc` 이 컴파일하고 돌린다. (창이나 GL 이 있어야 하면 no_run) 이 주석에서 API 문서 자료(docs/api/<판>.json)를 뽑는다. (tools/apidoc) 자세한 꼴은 CLAUDE.md 의 '문서 주석'.
 
 ## 9. 원본과의 대응
@@ -285,7 +287,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 상속 대신 트레이트와 품기 (Scene + SceneBase, Component + ComponentBase, ShaderSprite 는 Sprite 를 품고 Deref) | 러스트에 클래스 상속이 없어 공통 상태는 구조체로, 덮어쓰기는 트레이트 함수로 둔다. 원본 상위 클래스를 품은 컴포넌트는 Component::get_base_component 로 그것을 알려, get_component::<Sprite>() 가 ShaderSprite 도 찾는다(원본 instanceof 와 같음) |
 | 반사는 원본 상위 클래스 몫을 품은 필드로 잇는다 (#[reflect(base = 필드)], 결과 목록과 차례는 원본과 같다). &mut self 게터는 &mut 로 트리를 받는 갈래(UIDocument::to_json_text_mut, serialize_node_mut, 인스펙터는 tick 에서 읽어 둔다)로 읽는다. &NodeTree 만 받는 to_json_text 는 &mut self 게터를 읽지 못한다 | 상속이 없다. &self 로 &mut self 함수를 부를 수 없다 (엔진 컴포넌트의 저장 속성에는 &mut self 게터가 없어 두 갈래 결과가 같다) |
 | 그리기 함수와 with_graphic 의 클로저 안에서는 engine.get_graphic() 이 None 이고 인자로 받은 graphic 을 쓴다 (원본 getGraphic 은 어디서나 같은 그래픽) | &mut Engine 과 &mut Graphic 을 함께 넘기려면 그동안 그래픽이 엔진 밖에 있어야 한다. 엔진이 그래픽을 Option::take 로 잠깐 꺼내 넘기고 돌려 넣어 RefCell 이나 unsafe 없이 이중 빌림을 막는다 (3 장 그래픽 빌림) |
-| 수는 f32 다 (Format, LocalStorage 처럼 JS 수의 글을 그대로 내야 하는 곳은 f64) | GL 에 올리는 값과 같은 정밀도로 들고 메모리를 아낀다. 원본 Matrix4 는 f32 로 담고 f64 로 셈해 끝자리가 조금 다를 수 있다 |
+| 수 꼴을 나눠 쓴다: 로직 수는 원본 number 와 같은 f64, 원본이 Float32Array 에 담는 곳(Matrix4 의 칸, GPU 정점과 유니폼)과 크롬이 float 로 셈하는 곳(Canvas2D 안쪽, 소리 표본과 믹서, 글리프 래스터, 그림 해독, 색 관리)은 f32, 개수와 번호는 정수 (8 장 수 꼴) | JS 수는 number 하나뿐이고 러스트는 꼴을 고른다. 로직을 원본과 같은 배정밀도로 셈해 끝자리까지 같고, f32 자리는 원본과 크롬이 실제로 쓰는 정밀도라 거기서도 같다 |
 | GL 을 쓰는 객체는 컨텍스트를 들지 않고 함수마다 gl 을 받는다 (FullscreenPass, RenderTarget, 툰 렌더러 같은 것) | 컨텍스트는 Graphic 이 들고, 객체마다 나눠 쥐면 수명과 빌림이 엮인다 |
 | 트리를 받는 `*_in_tree` 함수를 따로 둔 곳 15 개 (UIScrollView::set_shows_vertical_scroll_bar_in_tree, UIWindow::close_in_tree, ParticleSystem::emit_in_tree 같은 것) | 씬 코드가 컴포넌트를 쥔 동안 같은 트리의 다른 노드를 함께 빌릴 수 없다 |
 | 선택 인자 객체 대신 기본값을 가진 옵션 구조체 (ToonDrawOptions, ToonParticleOptions, RenderTargetOptions, ToonPostProcessOptions, UIConfirmWindowOptions 같은 것) | 러스트에는 이름 붙은 선택 인자가 없다. 필드를 더해도 `..Default::default()` 로 지은 코드는 그대로 돈다 |
@@ -311,5 +313,5 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 원본 Component 의 tick, draw 덮어쓰기는 Component 트레이트 함수다 | 엔진 꼴(상속 대신 트레이트)과 같다 |
 | 질의 콜백은 돌려줌이 정해져 있다 (광선은 f64 몫, 겹침은 bool). 원본은 false 일 때만 멈추고 undefined 는 이어 간다 | 러스트 함수는 돌려줌을 빼먹을 수 없다. 같은 값을 돌려주면 같게 돈다 |
 | 정수 꼴: 타일 값 u32, 덩이 크기 i32, 세이브 판 u32 와 순번 u64, 거르기 비트 u32, 무리 번호 i32 (원본은 number) | 받는 값의 범위는 두 엔진이 같게 검사한다 (타일 값은 0 ~ 2^32 - 1 의 정수만, 세이브 판은 u32 안, 덩이 크기는 1 이상) |
-| 초안의 실수는 원본 number 처럼 f64 다 (물리, 공간 나누기, 세이브, 공간 소리의 배율과 깊이). 엔진 본체와 닿는 값(노드 자리, 엔진 Vector2)은 f32 로 반올림해 넘긴다 | 두 엔진이 비트까지 같은 결과를 내려고. 물리의 실수 고르기도 원본 Math.max, min 과 같은 뜻(experimental::jsmath)이다 |
+| 초안(물리, 공간 나누기)의 실수 고르기는 f64::max, min 이 아니라 원본 Math.max, min 과 같은 뜻의 js_max, js_min 이다 (experimental::jsmath) | f64::max, min 은 NaN 을 버리고 (-0, 0) 부호를 약속하지 않는다. 두 엔진이 NaN 과 ±0 에서도 비트까지 같은 결과를 내려고 |
 | 원본의 문서상 비공개(@private)는 러스트에서 pub(crate) 나 비공개다 (skeleton2djsonreader, dragonbonesreader 모듈, collect_track_events 같은 것) | 공개 API 를 두 엔진이 같게 둔다 |

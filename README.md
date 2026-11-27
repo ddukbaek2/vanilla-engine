@@ -126,7 +126,7 @@ cargo run --example quickstart
 ```rust
 struct Spin {
 	component_base: ComponentBase,
-	degrees_per_second: f32,
+	degrees_per_second: f64,
 }
 
 impl Component for Spin {
@@ -142,7 +142,7 @@ impl Component for Spin {
 		"Spin"
 	}
 
-	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let transform = context.get_transform_mut();
 		let local_rotation = transform.get_local_rotation();
 		transform.set_local_rotation(local_rotation + self.degrees_per_second * time_delta);
@@ -174,11 +174,11 @@ square_node.add_component(Spin {
 ```rust
 #[vanilla::reflect]
 impl Spin {
-	pub fn set_degrees_per_second(&mut self, degrees_per_second: f32) {
+	pub fn set_degrees_per_second(&mut self, degrees_per_second: f64) {
 		self.degrees_per_second = degrees_per_second;
 	}
 
-	pub fn get_degrees_per_second(&self) -> f32 {
+	pub fn get_degrees_per_second(&self) -> f64 {
 		self.degrees_per_second
 	}
 }

@@ -8,11 +8,12 @@
 //! - 결정론: 셈은 모두 f64 이고 삼각 함수는 직접 짰다. 같은 차례로 만들고 같은 step 을 부르면 원본 vanilla.js 의 같은 월드와 결과가 비트까지 같다.
 //!   (짝 찾기는 열쇠 차례로 닿음을 만들고, 해시 표는 찾기에만 쓰며 훑기는 늘 칸 차례다)
 //! - 원본과 다른 점: 질의(cast_ray, overlap_*)는 순간 이동을 먼저 반영하느라 &mut self 다. 몸과 모양은 get_body_mut, `world[body_id]` 로 바꾼다.
-//!   advance 의 고정 걸음 누적은 원본 FixedStepper 와 같은 셈을 월드 안에 둔다. (f64)
+//!   advance 는 원본처럼 FixedStepper(misc::fixedstepper, 1 / 60 초, 한 프레임 5 걸음)로 걸음을 쌓아 돌린다.
 //! - 아직 없는 것: 연속 충돌(빠른 총알이 얇은 벽을 뚫지 않게 하는 TOI), 한쪽 면 사슬, 프리즘, 모터, 마우스 관절, 몸 종류 바꾸기, 여러 스레드.
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use crate::experimental::jsmath::{js_max, js_min};
+use crate::misc::fixedstepper::FixedStepper;
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
@@ -262,9 +263,7 @@ pub struct PhysicsWorld2D {
 	contact_end_event_list: Vec<ContactEvent2D>,
 	sensor_begin_event_list: Vec<SensorEvent2D>,
 	sensor_end_event_list: Vec<SensorEvent2D>,
-	fixed_step_seconds: f64,
-	maximum_steps_per_frame: u32,
-	accumulated_seconds: f64,
+	fixed_stepper: FixedStepper,
 	sub_step_count: u32,
 	interpolation_alpha: f64,
 }
@@ -327,9 +326,7 @@ impl PhysicsWorld2D {
 			contact_end_event_list: Vec::new(),
 			sensor_begin_event_list: Vec::new(),
 			sensor_end_event_list: Vec::new(),
-			fixed_step_seconds: 1.0 / 60.0,
-			maximum_steps_per_frame: 5,
-			accumulated_seconds: 0.0,
+			fixed_stepper: FixedStepper::new(1.0 / 60.0, 5),
 			sub_step_count: 4,
 			interpolation_alpha: 1.0,
 		}
@@ -1139,10 +1136,7 @@ impl PhysicsWorld2D {
 	/// - `step_seconds`: 한 걸음의 시간. (초)
 	//==============================================================================
 	pub fn set_fixed_step_seconds(&mut self, step_seconds: f64) {
-		if !step_seconds.is_finite() || step_seconds <= 0.0 {
-			return;
-		}
-		self.fixed_step_seconds = step_seconds;
+		self.fixed_stepper.set_step_seconds(step_seconds);
 	}
 
 	//==============================================================================
@@ -1152,7 +1146,7 @@ impl PhysicsWorld2D {
 	/// 한 걸음의 시간. (초)
 	//==============================================================================
 	pub fn get_fixed_step_seconds(&self) -> f64 {
-		self.fixed_step_seconds
+		self.fixed_stepper.get_step_seconds()
 	}
 
 	//==============================================================================
@@ -1177,7 +1171,7 @@ impl PhysicsWorld2D {
 
 	//==============================================================================
 	/// 프레임 시간만큼 고정 걸음으로 나아가기. (그리기 보간 몫을 돌려준다)
-	/// - 원본 FixedStepper 와 같은 셈이다. 한 프레임에 5 걸음까지 돌고, 그러고도 남은 시간은 버린다.
+	/// - 원본처럼 FixedStepper 로 돈다. 한 프레임에 5 걸음까지 돌고, 그러고도 남은 시간은 버린다.
 	///
 	/// # 인자
 	/// - `time_delta`: 이번 프레임의 시간. (초)
@@ -1186,22 +1180,14 @@ impl PhysicsWorld2D {
 	/// 앞 걸음과 지금 걸음 사이 몫. (0 ~ 1, Body2D::get_interpolated_position 에 준다)
 	//==============================================================================
 	pub fn advance(&mut self, time_delta: f64) -> f64 {
-		let step_seconds = self.fixed_step_seconds;
-		if time_delta.is_finite() && time_delta > 0.0 {
-			self.accumulated_seconds += time_delta;
-		}
-		let mut step_count = 0;
-		while self.accumulated_seconds >= step_seconds && step_count < self.maximum_steps_per_frame {
-			let sub_step_count = self.sub_step_count;
+		let sub_step_count = self.sub_step_count;
+		// 걸음 함수가 월드를 빌려야 해서 고정 걸음을 잠깐 꺼내 돌리고 돌려 넣는다.
+		let mut fixed_stepper = std::mem::take(&mut self.fixed_stepper);
+		self.interpolation_alpha = fixed_stepper.advance(time_delta, |step_seconds| {
 			self.step(step_seconds, sub_step_count);
-			self.accumulated_seconds -= step_seconds;
-			step_count += 1;
-		}
-		if step_count >= self.maximum_steps_per_frame && self.accumulated_seconds >= step_seconds {
-			self.accumulated_seconds = 0.0;
-		}
-		let alpha = self.accumulated_seconds / step_seconds;
-		self.interpolation_alpha = js_max(0.0, js_min(1.0, alpha));
+			true
+		});
+		self.fixed_stepper = fixed_stepper;
 		self.interpolation_alpha
 	}
 

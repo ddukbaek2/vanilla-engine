@@ -165,7 +165,20 @@ impl FixedStepper {
 	/// 쌓인 시간을 걸음 시간으로 나눠 0 ~ 1 로 자른 값.
 	//==============================================================================
 	pub fn get_alpha(&self) -> f64 {
-		(self.accumulated_seconds / self.step_seconds).clamp(0.0, 1.0)
+		let alpha = self.accumulated_seconds / self.step_seconds;
+		// 원본 Math.max(0, Math.min(1, alpha)) 와 같은 뜻: NaN 은 NaN, 0 이하(-0 포함)는 +0.
+		if alpha.is_nan() {
+			alpha
+		}
+		else if alpha >= 1.0 {
+			1.0
+		}
+		else if alpha <= 0.0 {
+			0.0
+		}
+		else {
+			alpha
+		}
 	}
 
 	//==============================================================================

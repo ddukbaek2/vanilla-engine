@@ -170,7 +170,7 @@ The two engines keep no feature differences. The remaining differences are only 
 | Nodes live in `NodeTree` and are referenced by `NodeId` | Pointing parents and children at each other with `Rc<RefCell>` brings reference cycles and run-time borrow checks |
 | There is one node type, `WorldNode` | Rust has no class inheritance, so the node is one form and features are attached as components |
 | Traits and embedding instead of inheritance (`Scene` + `SceneBase`, `Component` + `ComponentBase`) | Shared state goes in structs, overrides in trait functions |
-| Numbers are `f64` (`f64` where JS number text must come out unchanged) | Kept at the same precision as the values uploaded to GL |
+| Number types are split: logic numbers are `f64` like the original JS number, and `f32` is used where the original stores into a `Float32Array` (`Matrix4` elements, GPU vertices and uniforms) or where Chrome computes in float (inside `Canvas2D`, audio, glyph rasterization, image decoding, color management) | JS has only one number type, while Rust picks one. Logic is computed in the same double precision as the original so results match to the last digit, and the `f32` places use the precision the original and Chrome actually use |
 | Objects that use GL do not hold the context; each function receives gl | The context is held by `Graphic`, and sharing it would tangle lifetimes and borrows |
 | Some places have separate `*_in_tree` functions that take the tree | While scene code holds a component, it cannot also borrow other nodes in the same tree |
 | Option structs with defaults instead of optional argument objects (`RenderTargetOptions`, `UIConfirmWindowOptions` and others) | Rust has no named optional arguments |
