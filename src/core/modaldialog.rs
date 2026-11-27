@@ -850,8 +850,9 @@ mod engine_dialog {
 			let text = dialog.edit_buffer.get_text().to_string();
 			let composition = dialog.edit_buffer.get_composition().to_string();
 			let display_text = dialog.edit_buffer.build_display_text();
-			let text_before_cursor = dialog.edit_buffer.get_text_before_cursor().to_string();
-			let caret_width = graphic.measure_text(&format!("{}{}", text_before_cursor, composition)).width;
+			// 조합 글은 조합 자리(고른 채 조합하면 고른 글의 앞)부터, 커서는 조합 글 뒤.
+			let text_before_composition = text[..convert_character_index_to_byte_index(&text, dialog.edit_buffer.get_composition_start())].to_string();
+			let caret_width = graphic.measure_text(&dialog.edit_buffer.get_display_text_before_cursor()).width;
 			let inner_width = field_rect.size.x - FIELD_PADDING_X * 2.0;
 			if caret_width - dialog.text_scroll_x > inner_width {
 				dialog.text_scroll_x = caret_width - inner_width;
@@ -862,7 +863,8 @@ mod engine_dialog {
 			let text_x = field_rect.position.x + FIELD_PADDING_X - dialog.text_scroll_x;
 			let middle_y = field_rect.position.y + field_rect.size.y * 0.5;
 			graphic.begin_clip_rect(Rect::create(field_rect.position.x + 2.0, field_rect.position.y + 2.0, field_rect.size.x - 4.0, field_rect.size.y - 4.0), 0.0);
-			if let Some((start_index, end_index)) = dialog.edit_buffer.get_selection_range() {
+			// 선택. (조합 중엔 그리지 않는다, 입력 칸과 같다)
+			if let Some((start_index, end_index)) = dialog.edit_buffer.get_selection_range().filter(|_| composition.is_empty()) {
 				let start_width = graphic.measure_text(&text[..convert_character_index_to_byte_index(&text, start_index)]).width;
 				let end_width = graphic.measure_text(&text[..convert_character_index_to_byte_index(&text, end_index)]).width;
 				graphic.set_fill_color(COLOR_SELECTION);
@@ -871,7 +873,7 @@ mod engine_dialog {
 			graphic.set_fill_color(COLOR_TITLE);
 			graphic.draw_fill_text(&display_text, text_x, middle_y);
 			if !composition.is_empty() {
-				let composition_start = graphic.measure_text(&text_before_cursor).width;
+				let composition_start = graphic.measure_text(&text_before_composition).width;
 				graphic.draw_rect(Rect::create(text_x + composition_start, middle_y + 8.0, caret_width - composition_start, 1.0));
 			}
 			let caret_x = text_x + caret_width;

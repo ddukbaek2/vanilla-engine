@@ -1,6 +1,8 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- UIInputField IME 두 가지(원본과 같게, 한 줄과 여러 줄, 데스크탑 질문 창 입력 칸도): 글을 고른 채 조합하면 조합 중 보이는 글이 [고른 글 앞, 조합 글, 고른 글 뒤] 다(get_display_text, TextEditBuffer::build_display_text, 그리기, 커서와 밑줄 자리, 지금까지는 고른 글을 남긴 채 커서 자리에 끼웠다. 확정은 전처럼 고른 글을 갈음한다). TextEditBuffer::get_composition_start, get_composition_end, get_display_text_before_cursor 를 더했다. 조합 중 set_text 는 조합 상태와 조합 글을 비운다(지금까지는 조합 상태에 갇혀 보이는 글에 옛 조합 글이 남았다).
+
 - UIDocument 그림과 노드 데이터 고침(원본과 같게): 같은 문서로 적고 읽은 복제본이 본의 그림을 그대로 쓴다. 쓰기(serialize_node, to_json_text)가 imagePath 를 적은 컴포넌트의 그림을 경로로 기억하고, 해석기와 load_images 애셋에서 못 찾으면 그 그림을 넣는다(유니티 Instantiate 처럼). 그래서 UIListView::set_template_node 로 복제한 항목에 그림이 나온다(전에는 해석기가 없으면 항목에 그림이 없었다). 전용 핸들러는 UIDocumentSaveContext::write_image_path(문서 값, 경로, 그림)로 경로를 적으면 같이 기억된다. bind_pending_images 는 그사이 게임이 그림을 넣었거나 경로를 바꾼 컴포넌트를 덮지 않는다. 그래서 UIDocumentLoadContext::bind_image 가 그 자리를 볼 함수 둘(지금 경로, 지금 그림)을 더 받는다. load_images 가 읽지 못한 그림은 다음 load_images 가 다시 요청한다. 노드 참조가 이름이 같은 앞 형제가 있는 노드를 가리키면 적을 때 경고한다(경로는 이름으로만 적어 다시 읽으면 앞 형제에 이어진다). 숨긴 노드(set_visible(false))는 노드 데이터에 visible: false 를 적고 되살린다(보이는 노드는 적지 않아 지금까지 적은 문서와 기대값은 그대로다. 보임을 active 로 쓰는 UIToast 는 지금처럼 active 로만 적는다).
 
 - 찍기 모드 결정성(원본과 같게): 찍기 모드(VANILLA_CAPTURE_*, 웹 ?capture=)에서 씬을 불러온 뒤 로딩 화면 0.3 초 기다림을 실제 시각 대신 엔진 시계(프레임마다 1/60 초)로 센다. 애셋 받기처럼 실제 시간이 드는 불러오기(엔진 시계로 열리는 GameScene 로딩 문을 뺀 맡긴 애셋과 작업)가 남은 씬이 있으면 그 프레임은 프레임 번호와 시계를 올리지 않아, 다 받은 뒤부터 센다. 같은 예제를 두 번 찍으면 같은 프레임 번호의 그림이 바이트까지 같다. (.github/scripts/capturedeterminism.cjs 가 quickstart, loadingshowcase 를 두 번씩 찍어 견준다)

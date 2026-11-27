@@ -229,9 +229,10 @@ impl TextEditBuffer {
 	/// 값 설정. (max_length 로 자르고 커서는 끝에. 원본 setText)
 	///
 	/// # 인자
-	/// - `text`: 넣을 글. (되돌리기와 다시 하기 목록도 비운다)
+	/// - `text`: 넣을 글. (되돌리기와 다시 하기 목록과 조합 중인 글도 비운다)
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
+		self.composition.clear();
 		self.value = text.to_string();
 		self.truncate_to_max_length();
 		self.cursor_index = count_characters(&self.value);
@@ -667,17 +668,60 @@ impl TextEditBuffer {
 	}
 
 	//==============================================================================
-	/// 보이는 글. (커서 자리에 조합 글을 끼운 것. 원본 refreshTexts)
+	/// 조합 글이 들어갈 값의 자리. (조합 중이면 고른 글의 앞, 아니면 커서. 원본 #getCompositionStart)
+	/// - 고른 채 조합하면 확정이 고른 글을 갈음한다. 보이는 글은 [고른 글 앞, 조합 글, 고른 글 뒤] 다.
 	///
 	/// # 돌려줌
-	/// 보이는 글.
+	/// 글자 자리.
+	//==============================================================================
+	pub fn get_composition_start(&self) -> usize {
+		if self.composition.is_empty() {
+			self.cursor_index
+		}
+		else {
+			self.selection_start.min(self.cursor_index)
+		}
+	}
+
+	//==============================================================================
+	/// 조합 글이 갈음할 값의 끝. (조합 중이면 고른 글의 뒤, 아니면 커서. 원본 #getCompositionEnd)
+	///
+	/// # 돌려줌
+	/// 글자 자리.
+	//==============================================================================
+	pub fn get_composition_end(&self) -> usize {
+		if self.composition.is_empty() {
+			self.cursor_index
+		}
+		else {
+			self.selection_start.max(self.cursor_index)
+		}
+	}
+
+	//==============================================================================
+	/// 보이는 글의 커서 앞까지. (조합 중이면 조합 글이 들어갈 자리 앞의 값과 조합 글, 아니면 값의 커서 앞)
+	///
+	/// # 돌려줌
+	/// 보이는 글에서 커서 앞까지의 글.
+	//==============================================================================
+	pub fn get_display_text_before_cursor(&self) -> String {
+		let byte_index = convert_character_index_to_byte_index(&self.value, self.get_composition_start());
+		format!("{}{}", &self.value[..byte_index], self.composition)
+	}
+
+	//==============================================================================
+	/// 보이는 글. (커서 자리에 조합 글을 끼운 것, 고른 채 조합하면 고른 글 자리를 조합 글로 갈음한 것. 원본 getDisplayText)
+	///
+	/// # 돌려줌
+	/// 보이는 글. (조합 중이 아니면 값 그대로)
 	//==============================================================================
 	pub fn build_display_text(&self) -> String {
-		let byte_index = convert_character_index_to_byte_index(&self.value, self.cursor_index);
+		let start_byte_index = convert_character_index_to_byte_index(&self.value, self.get_composition_start());
+		let end_byte_index = convert_character_index_to_byte_index(&self.value, self.get_composition_end());
 		let mut display_text = String::with_capacity(self.value.len() + self.composition.len());
-		display_text.push_str(&self.value[..byte_index]);
+		display_text.push_str(&self.value[..start_byte_index]);
 		display_text.push_str(&self.composition);
-		display_text.push_str(&self.value[byte_index..]);
+		display_text.push_str(&self.value[end_byte_index..]);
 		display_text
 	}
 }
@@ -1344,11 +1388,13 @@ impl UIInputField {
 
 	//==============================================================================
 	/// 값 설정. (max_length 로 자르고 커서는 끝에. 바뀜 이벤트는 부르지 않는다. 원본 setText)
+	/// - 조합 중이었으면 조합을 버린다. (조합 글은 바꾸기 전 값에 끼운 것이다. 남겨 두면 확정이 오지 않을 때 조합 상태에 갇힌다)
 	///
 	/// # 인자
-	/// - `text`: 넣을 글. (되돌리기와 다시 하기 목록도 비운다)
+	/// - `text`: 넣을 글. (되돌리기와 다시 하기 목록과 조합 중인 글도 비운다)
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
+		self.is_composing = false;
 		self.edit_buffer.set_text(text);
 		self.bump_value_revision();
 	}
@@ -1364,10 +1410,10 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 보이는 글 반환. (값의 커서 자리에 조합 글을 끼운 것)
+	/// 보이는 글 반환. (값의 커서 자리에 조합 글을 끼운 것, 고른 채 조합하면 고른 글 자리를 조합 글로 갈음한 것. 원본 getDisplayText)
 	///
 	/// # 돌려줌
-	/// 보이는 글.
+	/// 보이는 글. (조합 중이 아니면 값 그대로)
 	//==============================================================================
 	pub fn get_display_text(&self) -> String {
 		self.edit_buffer.build_display_text()
@@ -2600,10 +2646,10 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 보이는 글의 커서 자리. (조합 중이면 조합 글 뒤)
+	/// 보이는 글의 커서 자리. (조합 중이면 조합 글 뒤, 고른 채 조합하면 고른 글 앞에 놓인 조합 글 뒤)
 	//==============================================================================
 	fn get_display_cursor_index(&self) -> usize {
-		self.edit_buffer.get_cursor_index() + count_characters(self.edit_buffer.get_composition())
+		self.edit_buffer.get_composition_start() + count_characters(self.edit_buffer.get_composition())
 	}
 
 	//==============================================================================
@@ -2848,7 +2894,7 @@ impl UIInputField {
 		// 조합 밑줄. (조합 글이 걸친 줄마다)
 		let composition_count = count_characters(self.edit_buffer.get_composition());
 		if composition_count > 0 {
-			let composition_start = self.edit_buffer.get_cursor_index();
+			let composition_start = self.edit_buffer.get_composition_start();
 			let composition_end = composition_start + composition_count;
 			graphic.set_stroke_color(self.composition_underline_color);
 			for (line_index, line) in self.text_area_layout.line_list.iter().enumerate() {
@@ -3804,8 +3850,8 @@ impl Component for UIInputField {
 		// 4) 조합 밑줄, 커서, 포커스 테두리.
 		graphic.push_state();
 		graphic.set_font_string(&font_string);
-		let cursor_index = self.edit_buffer.get_cursor_index();
-		let before_width = self.get_character_offset(cursor_index);
+		// 조합 글은 조합 자리(고른 채 조합하면 고른 글의 앞)부터 그린다.
+		let before_width = self.get_character_offset(self.edit_buffer.get_composition_start());
 		let composition = self.edit_buffer.get_composition().to_string();
 		let cursor_x = if composition.is_empty() {
 			padding + before_width
@@ -3815,7 +3861,7 @@ impl Component for UIInputField {
 			let underline_y = draw_y + font_size * 0.55;
 			graphic.set_stroke_color(self.composition_underline_color);
 			graphic.draw_line(&[Vector2::create(padding + before_width, underline_y), Vector2::create(padding + before_width + composition_width, underline_y)], 2.0);
-			let cursor_before_text = format!("{}{}", self.edit_buffer.get_text_before_cursor(), composition);
+			let cursor_before_text = self.edit_buffer.get_display_text_before_cursor();
 			padding + graphic.measure_text(&cursor_before_text).width
 		};
 		self.caret_local_x = cursor_x;
@@ -4476,6 +4522,79 @@ mod tests {
 		assert_eq!(get_field(&mut node_tree, field_id).get_cursor_index(), 1);
 		assert_eq!(*submitted_text.borrow(), "c");
 		assert_eq!(change_count.get(), 4);
+	}
+
+	//==============================================================================
+	/// IME: 고른 채 조합하면 보이는 글은 [고른 글 앞, 조합 글, 고른 글 뒤] 이고 커서는 조합 글 뒤, 확정하면 고른 글을 갈음한다. (원본 getDisplayText, 크롬 입력 칸)
+	//==============================================================================
+	#[test]
+	fn ime_preedit_over_selection_replaces_selection_in_display() {
+		let mut edit_buffer = TextEditBuffer::new();
+		edit_buffer.set_text("가나다라");
+		edit_buffer.set_selection(3, 1);
+		edit_buffer.set_composition("마");
+		assert_eq!(edit_buffer.build_display_text(), "가마라");
+		assert_eq!(edit_buffer.get_composition_start(), 1);
+		assert_eq!(edit_buffer.get_display_text_before_cursor(), "가마");
+
+		let engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, field_id) = create_field_tree();
+		{
+			let field = get_field(&mut node_tree, field_id);
+			field.set_text("가나다라");
+			field.move_cursor(1, false);
+			field.move_cursor(3, true);
+			field.focus();
+		}
+		push_event(engine, TextInputEventKind::CompositionStart);
+		push_event(engine, TextInputEventKind::Preedit {
+			text: String::from("마"),
+			cursor_index: Some(1),
+		});
+		run_frame(&mut node_tree, engine);
+		{
+			let field = get_field(&mut node_tree, field_id);
+			assert_eq!(field.get_text(), "가나다라");
+			assert_eq!(field.get_display_text(), "가마라");
+			assert_eq!(field.get_display_cursor_index(), 2);
+		}
+		push_event(engine, TextInputEventKind::Preedit {
+			text: String::new(),
+			cursor_index: None,
+		});
+		push_event(engine, TextInputEventKind::CompositionEnd);
+		push_event(engine, TextInputEventKind::Commit(String::from("마")));
+		run_frame(&mut node_tree, engine);
+		let field = get_field(&mut node_tree, field_id);
+		assert_eq!(field.get_text(), "가마라");
+		assert_eq!(field.get_cursor_index(), 2);
+	}
+
+	//==============================================================================
+	/// 조합 중 set_text 는 조합 상태와 조합 글을 비운다. (원본 setText, 남겨 두면 확정이 오지 않을 때 조합 상태에 갇힌다)
+	//==============================================================================
+	#[test]
+	fn set_text_while_composing_clears_composition() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, field_id) = create_field_tree();
+		{
+			let field = get_field(&mut node_tree, field_id);
+			field.set_text("가");
+			field.focus();
+		}
+		push_event(engine, TextInputEventKind::CompositionStart);
+		push_event(engine, TextInputEventKind::Preedit {
+			text: String::from("한"),
+			cursor_index: Some(1),
+		});
+		run_frame(&mut node_tree, engine);
+		let field = get_field(&mut node_tree, field_id);
+		assert!(field.is_composing());
+		field.set_text("abc");
+		assert!(!field.is_composing());
+		assert_eq!(field.get_composition(), "");
+		assert_eq!(field.get_display_text(), "abc");
+		assert_eq!(field.get_cursor_index(), 3);
 	}
 
 	//==============================================================================
