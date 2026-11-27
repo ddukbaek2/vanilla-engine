@@ -108,6 +108,9 @@ struct BoundsAccumulator {
 }
 
 impl BoundsAccumulator {
+	//==============================================================================
+	/// 생성. (아직 아무것도 모으지 않았다)
+	//==============================================================================
 	fn new() -> BoundsAccumulator {
 		BoundsAccumulator {
 			is_found: false,
@@ -128,6 +131,9 @@ impl BoundsAccumulator {
 		self.add_bounds(rect.position.x, rect.position.y, rect.position.x + rect.size.x, rect.position.y + rect.size.y);
 	}
 
+	//==============================================================================
+	/// 최소, 최대 좌표로 더하기.
+	//==============================================================================
 	fn add_bounds(&mut self, minimum_x: f64, minimum_y: f64, maximum_x: f64, maximum_y: f64) {
 		if !self.is_found {
 			self.minimum_x = minimum_x;
@@ -143,6 +149,9 @@ impl BoundsAccumulator {
 		self.maximum_y = self.maximum_y.max(maximum_y);
 	}
 
+	//==============================================================================
+	/// 모은 사각형. (아무것도 없으면 크기 0)
+	//==============================================================================
 	fn to_rect(&self) -> Rect {
 		if !self.is_found {
 			return Rect::create(0.0, 0.0, 0.0, 0.0);
@@ -1696,7 +1705,6 @@ impl NodeTree {
 	/// 	node_tree[row_id].set_rect(0.0, row_index as f64 * 40.0, 200.0, 36.0);
 	/// 	node_tree.add_component(row_id, Paint::new());
 	/// }
-	/// // 그리기는 NodeTree::draw 가 루트부터 draw_node 로 들어가며 노드마다 draw_children 을 부른다.
 	/// assert_eq!(node_tree.get_child_count(list_id), 100);
 	/// ```
 	//==============================================================================
@@ -1911,7 +1919,6 @@ impl NodeTree {
 	/// 	node_tree[row_id].set_pivot(Pivot::TOP_LEFT);
 	/// 	node_tree[row_id].set_rect(10.0, 20.0, 100.0, 30.0);
 	/// 	node_tree.add_component(row_id, Paint::new());
-	/// 	// Paint 는 내용 영역 안에만 그리므로 내용 영역을 한 단위씩 넓혀 본다.
 	/// 	let bounds = node_tree.read_subtree_draw_bounds(list_id, graphic).expect("known");
 	/// 	assert_eq!(bounds, Rect::create(9.0, 19.0, 102.0, 32.0));
 	/// 	assert_eq!(node_tree.read_parent_draw_bounds(row_id), Some(Rect::create(9.0, 19.0, 102.0, 32.0)));

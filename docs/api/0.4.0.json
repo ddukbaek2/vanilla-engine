@@ -21208,6 +21208,87 @@
 								"class": "Component",
 								"name": "isGizmoVisible"
 							}
+						},
+						{
+							"kind": "method",
+							"name": "mark_drawn_rect_dirty",
+							"signature": "pub fn mark_drawn_rect_dirty(&self)",
+							"params": [],
+							"description": {
+								"ko": "그리는 사각형(Component::calculate_drawn_rect)이 바뀌었음을 노드에 알린다. (원본 Component.markDrawnRectDirty)\n- 붙은 노드와 조상이 다음 그리기 전에 하위 트리 그리기 경계를 다시 셈한다. 노드에 붙지 않았으면 할 일이 없다.\n- 그리는 사각형을 바꾸는 세터마다 부른다. (부르지 않으면 넓어진 그림이 화면에 들어와도 하위 트리째 건너뛰어 안 그려질 수 있다)",
+								"en": "Tells the node that the drawn rect (Component::calculate_drawn_rect) changed. (original Component.markDrawnRectDirty)\n- The attached node and its ancestors recompute their subtree draw bounds before the next draw. Does nothing if not attached to a node.\n- Call it from every setter that changes the drawn rect. (Without it, a drawing that grew into the screen may still be skipped with its subtree and not drawn)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/component.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/component",
+								"class": "Component",
+								"name": "markDrawnRectDirty"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "세터에서 알리기",
+										"en": "Notify from a setter"
+									},
+									"code": "use vanilla::ComponentBase;\n\nlet component_base = ComponentBase::new();\ncomponent_base.mark_drawn_rect_dirty();",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "static",
+							"name": "mark_all_drawn_rects_dirty",
+							"signature": "pub fn mark_all_drawn_rects_dirty()",
+							"params": [],
+							"description": {
+								"ko": "모든 컴포넌트의 그리는 사각형이 바뀌었음을 알린다. (원본 Component.markAllDrawnRectsDirty, 글꼴을 새로 읽어 글 너비가 바뀔 때 같은)\n- 세대를 하나 올려 모든 노드가 다음에 경계를 읽을 때 다시 셈하게 한다.",
+								"en": "Tells that the drawn rects of all components changed. (original Component.markAllDrawnRectsDirty, e.g. when a newly loaded font changes text widths)\n- Raises the generation by one so every node recomputes its bounds the next time they are read."
+							},
+							"since": "0.4.0",
+							"source": "src/core/component.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/component",
+								"class": "Component",
+								"name": "markAllDrawnRectsDirty"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "세대가 오른다",
+										"en": "The generation goes up"
+									},
+									"code": "use vanilla::ComponentBase;\n\nlet generation = ComponentBase::get_drawn_rect_generation();\nComponentBase::mark_all_drawn_rects_dirty();\nassert!(ComponentBase::get_drawn_rect_generation() > generation);",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "static",
+							"name": "get_drawn_rect_generation",
+							"signature": "pub fn get_drawn_rect_generation() -> u64",
+							"params": [],
+							"returns": {
+								"type": "u64",
+								"description": {
+									"ko": "지금 세대. (1 부터)",
+									"en": "Current generation. (from 1)"
+								}
+							},
+							"description": {
+								"ko": "컴포넌트 그리는 사각형 세대. (원본 Component.getDrawnRectGeneration, mark_all_drawn_rects_dirty 마다 하나 오른다)",
+								"en": "Component drawn rect generation. (original Component.getDrawnRectGeneration, goes up by one on every mark_all_drawn_rects_dirty)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/component.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/component",
+								"class": "Component",
+								"name": "getDrawnRectGeneration"
+							}
 						}
 					],
 					"examples": [
@@ -21660,6 +21741,43 @@
 								"module": "core/component",
 								"class": "Component",
 								"name": "isDrawnInsideContent"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "is_draw_overridden",
+							"signature": "fn is_draw_overridden(&self) -> bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "draw 를 덮어썼으면 true.",
+									"en": "true if draw is overridden."
+								}
+							},
+							"description": {
+								"ko": "draw 를 덮어썼는지. (원본은 component.draw 가 Component.prototype.draw 와 다른지로 본다)\n- false 면 아무것도 그리지 않는 컴포넌트라 화면 밖 거르기와 하위 트리 그리기 경계에서 빠진다. (ButtonMotion, UINode 같은)\n- #[reflect] 를 붙인 impl Component 블록에 fn draw 가 없으면 매크로가 false 를 돌려주게 짓는다. 매크로 없이 쓰면 기본 true. (어디에 그리는지 모르는 것으로 본다)",
+								"en": "Whether draw is overridden. (the original checks whether component.draw differs from Component.prototype.draw)\n- false means a component that draws nothing, so it is left out of off-screen culling and subtree draw bounds. (like ButtonMotion, UINode)\n- When an impl Component block with #[reflect] has no fn draw, the macro generates a version that returns false. Without the macro the default is true. (treated as drawing somewhere unknown)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/component.rs"
+						},
+						{
+							"kind": "method",
+							"name": "mark_drawn_rect_dirty",
+							"signature": "fn mark_drawn_rect_dirty(&self)",
+							"params": [],
+							"description": {
+								"ko": "그리는 사각형(calculate_drawn_rect)이 바뀌었음을 노드에 알린다. (원본 Component.markDrawnRectDirty, ComponentBase::mark_drawn_rect_dirty)",
+								"en": "Tells the node that the drawn rect (calculate_drawn_rect) changed. (original Component.markDrawnRectDirty, ComponentBase::mark_drawn_rect_dirty)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/component.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/component",
+								"class": "Component",
+								"name": "markDrawnRectDirty"
 							}
 						},
 						{
@@ -43421,6 +43539,155 @@
 								"class": "Graphic",
 								"name": "isLocalRectVisible"
 							}
+						},
+						{
+							"kind": "method",
+							"name": "set_subtree_culling_enabled",
+							"signature": "pub fn set_subtree_culling_enabled(&mut self, is_subtree_culling_enabled: bool)",
+							"params": [
+								{
+									"name": "is_subtree_culling_enabled",
+									"type": "bool",
+									"description": {
+										"ko": "true 면 화면 밖 하위 트리를 통째로 건너뛴다.",
+										"en": "true skips off-screen subtrees as a whole."
+									}
+								}
+							],
+							"description": {
+								"ko": "하위 트리째 그리기 건너뛰기 켜고 끄기. (기본 켬, 원본 setSubtreeCullingEnabled)\n- 켜면 노드와 자손이 그리는 곳을 모두 품는 하위 트리 그리기 경계(NodeTree::read_subtree_draw_bounds)가 화면과 걸린 자르기 밖일 때 그 노드와 자손의 그리기를 통째로 건너뛴다. tick 은 그대로 돈다.\n- 화면 밖 거르기(set_culling_enabled)가 꺼져 있으면 이것도 하지 않는다. 기즈모를 모두 그리게 했으면 건너뛰지 않는다.",
+								"en": "Turns subtree draw skipping on or off. (on by default, original setSubtreeCullingEnabled)\n- When on, if the subtree draw bounds that hold everything a node and its descendants draw (NodeTree::read_subtree_draw_bounds) are outside the screen and the active clip, drawing of the node and its descendants is skipped as a whole. tick still runs.\n- Does nothing while off-screen culling (set_culling_enabled) is off. Never skips while all gizmos are drawn."
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "setSubtreeCullingEnabled"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "끄고 켜기",
+										"en": "Turn off and on"
+									},
+									"code": "use vanilla::Graphic;\n\nfn compare_culling(graphic: &mut Graphic) {\n\tassert!(graphic.is_subtree_culling_enabled());\n\tgraphic.set_subtree_culling_enabled(false);\n\tassert!(!graphic.is_subtree_culling_enabled());\n\tlet culled_subtree_count = graphic.get_last_frame_culled_subtree_count();\n\tassert!(culled_subtree_count < u32::MAX);\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "is_subtree_culling_enabled",
+							"signature": "pub fn is_subtree_culling_enabled(&self) -> bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "켜져 있으면 true. (처음 true)",
+									"en": "true if on. (true at first)"
+								}
+							},
+							"description": {
+								"ko": "하위 트리째 그리기 건너뛰기 여부. (원본 isSubtreeCullingEnabled)",
+								"en": "Whether subtree draw skipping is on. (original isSubtreeCullingEnabled)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "isSubtreeCullingEnabled"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_last_frame_culled_subtree_count",
+							"signature": "pub fn get_last_frame_culled_subtree_count(&self) -> u32",
+							"params": [],
+							"returns": {
+								"type": "u32",
+								"description": {
+									"ko": "지난 프레임에 건너뛴 하위 트리 수. (begin_frame_statistics 가 넘겨 둔 값, 건너뛴 노드의 자손은 세지 않는다)",
+									"en": "Number of subtrees skipped last frame. (the value begin_frame_statistics carried over, descendants of a skipped node are not counted)"
+								}
+							},
+							"description": {
+								"ko": "지난 프레임에 화면 밖이라 그리기를 통째로 건너뛴 하위 트리 수. (원본 getLastFrameCulledSubtreeCount)",
+								"en": "Number of subtrees whose drawing was skipped as a whole last frame because they were off screen. (original getLastFrameCulledSubtreeCount)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "getLastFrameCulledSubtreeCount"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "add_culled_subtree_count",
+							"signature": "pub fn add_culled_subtree_count(&mut self, culled_subtree_count: u32)",
+							"params": [
+								{
+									"name": "culled_subtree_count",
+									"type": "u32",
+									"description": {
+										"ko": "더할 하위 트리 수.",
+										"en": "Number of subtrees to add."
+									}
+								}
+							],
+							"description": {
+								"ko": "이번 프레임에 화면 밖이라 그리기를 통째로 건너뛴 하위 트리 수 더하기. (원본 addCulledSubtreeCount, NodeTree::draw_children 이 보이는 범위 밖 자식을 한꺼번에 건너뛰고 부른다)",
+								"en": "Adds to the number of subtrees skipped as a whole this frame because they were off screen. (original addCulledSubtreeCount, NodeTree::draw_children calls it after skipping the children outside the visible range at once)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "addCulledSubtreeCount"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "read_local_visible_bounds",
+							"signature": "pub fn read_local_visible_bounds(&mut self) -> Option<Rect>",
+							"params": [],
+							"returns": {
+								"type": "Option<Rect>",
+								"description": {
+									"ko": "지역 좌표의 보이는 경계 상자. 화면 밖 거르기나 하위 트리 거르기가 꺼졌거나, 기즈모를 모두 그리거나, 뷰포트를 아직 정하지 않았거나, 변환을 거꾸로 걸 수 없으면(배율 0) None.",
+									"en": "Visible bounding box in local coordinates. None if off-screen culling or subtree culling is off, all gizmos are drawn, the viewport is not set yet, or the transform cannot be inverted (scale 0)."
+								}
+							},
+							"description": {
+								"ko": "보이는 사각형(화면과 걸린 자르기, is_local_rect_visible 과 같은 것)을 지금 변환의 지역 좌표로 거꾸로 옮긴 경계 상자 읽기. (원본 readLocalVisibleBounds)\n- 돌림이나 기울임이 있으면 넉넉하다(네 꼭짓점의 경계 상자, 디바이스 사각형을 한 픽셀씩 넓혀 옮김). 이 사각형 밖에 그리는 것은 보이지 않는다.\n- 노드가 많은 자식 가운데 보이는 범위를 찾을 때 쓴다(NodeTree::draw_children). 변환과 자르기가 같으면 다시 셈하지 않는다.",
+								"en": "Reads the visible rect (the screen and the active clip, the same as is_local_rect_visible) moved back into the local coordinates of the current transform as a bounding box. (original readLocalVisibleBounds)\n- Generous with rotation or skew (bounding box of the four corners, the device rect is widened by one pixel before moving). Anything drawn outside this rect is not visible.\n- Used to find the visible range among a node's many children (NodeTree::draw_children). Not recomputed while the transform and the clip stay the same."
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "readLocalVisibleBounds"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "두 배로 키운 변환에서는 보이는 사각형이 반이 된다",
+										"en": "Under a transform scaled twice the visible rect is half"
+									},
+									"code": "use vanilla::Graphic;\n\nfn read_scaled(graphic: &mut Graphic) {\n\tif let Some(visible_rect) = graphic.read_local_visible_bounds() {\n\t\tgraphic.push_state();\n\t\tgraphic.scale(2.0, 2.0);\n\t\tlet scaled_rect = graphic.read_local_visible_bounds().expect(\"visible\");\n\t\tassert!((scaled_rect.size.x * 2.0 - visible_rect.size.x).abs() < 1e-9);\n\t\tgraphic.pop_state();\n\t}\n}",
+									"language": "rust"
+								}
+							]
 						},
 						{
 							"kind": "method",
@@ -74384,6 +74651,137 @@
 						},
 						{
 							"kind": "method",
+							"name": "draw_children",
+							"signature": "pub fn draw_children(&mut self, node_id: NodeId, graphic: &mut Graphic)",
+							"params": [
+								{
+									"name": "node_id",
+									"type": "NodeId",
+									"description": {
+										"ko": "자식을 그릴 노드.",
+										"en": "Node whose children are drawn."
+									}
+								},
+								{
+									"name": "graphic",
+									"type": "&mut Graphic",
+									"description": {
+										"ko": "그릴 Graphic.",
+										"en": "Graphic to draw to."
+									}
+								}
+							],
+							"description": {
+								"ko": "자식 목록 출력. (자식 차례대로 draw_node, draw_node 가 부른다, 원본 TransformNode.drawChildren)\n- 하위 트리 거르기가 켜졌으면 부모 좌표의 보이는 사각형(Graphic::read_local_visible_bounds)으로 보이는 자식 범위를 이분 찾기로 좁혀 그 앞뒤 자식은 부르지 않는다.\n  범위 밖 자식 가운데 하나씩 거를 때 셀 것은 Graphic::add_culled_subtree_count 로 더한다. (건너뛴 하위 트리 수가 하나씩 거를 때와 같다)\n- 지금 변환은 이 노드의 내용 좌표여야 한다. (push_transform 을 건 뒤)",
+								"en": "Draws the child list. (draw_node for each child in order, called by draw_node, original TransformNode.drawChildren)\n- With subtree culling on, narrows the visible child range by binary search with the visible rect in parent coordinates (Graphic::read_local_visible_bounds) and does not call the children before and after it.\n  Children outside the range that would be counted when culled one by one are added with Graphic::add_culled_subtree_count. (the skipped subtree count is the same as culling one by one)\n- The current transform must be this node's content coordinates. (after push_transform)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/node/nodetree.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/transformnode",
+								"class": "TransformNode",
+								"name": "drawChildren"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "화면 밖 자식은 부르지 않는다",
+										"en": "Off-screen children are not called"
+									},
+									"code": "use vanilla::{NodeTree, Paint, Pivot};\n\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet list_id = node_tree.create_child(root_id, \"list\");\nnode_tree[list_id].set_pivot(Pivot::TOP_LEFT);\nfor row_index in 0..100 {\n\tlet row_id = node_tree.create_child(list_id, \"row\");\n\tnode_tree[row_id].set_pivot(Pivot::TOP_LEFT);\n\tnode_tree[row_id].set_rect(0.0, row_index as f64 * 40.0, 200.0, 36.0);\n\tnode_tree.add_component(row_id, Paint::new());\n}\nassert_eq!(node_tree.get_child_count(list_id), 100);",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "read_subtree_draw_bounds",
+							"signature": "pub fn read_subtree_draw_bounds(&mut self, node_id: NodeId, graphic: &mut Graphic) -> Option<Rect>",
+							"params": [
+								{
+									"name": "node_id",
+									"type": "NodeId",
+									"description": {
+										"ko": "읽을 노드.",
+										"en": "Node to read."
+									}
+								},
+								{
+									"name": "graphic",
+									"type": "&mut Graphic",
+									"description": {
+										"ko": "컴포넌트가 그리는 사각형을 셀 때 쓰는 Graphic. (글 크기 재기)",
+										"en": "Graphic used to compute the components' drawn rects. (text measuring)"
+									}
+								}
+							],
+							"returns": {
+								"type": "Option<Rect>",
+								"description": {
+									"ko": "경계. 어디에 그리는지 모르는 것(경계를 알리지 않는 컴포넌트, 기즈모를 그리는 노드)이 들거나 없는 노드면 None.",
+									"en": "Bounds. None if it holds something that draws somewhere unknown (a component that does not report its bounds, a node that draws gizmos) or the node does not exist."
+								}
+							},
+							"description": {
+								"ko": "하위 트리 그리기 경계 읽기. (이 노드의 내용 좌표, push_transform 을 건 뒤의 좌표, 원본 TransformNode.readSubtreeDrawBounds)\n- 이 노드와 켜지고 보이는 자손이 그리는 곳을 모두 품는 사각형이다. 크기가 0 이면 아무것도 그리지 않는다.\n- 바뀐 때만 다시 셈하고 그 밖에는 셈해 둔 것을 준다. 그리기 순회가 이 사각형이 화면과 자르기 밖이면 하위 트리를 통째로 건너뛴다.\n- 자기 그림: 켜지고 그리는 컴포넌트(Component::is_draw_overridden)의 calculate_drawn_rect. 내용 영역 안에서만 그리는 컴포넌트는 내용 영역을 한 단위씩 넓혀 본다.\n- 자식: 자식의 경계를 자식의 변환(위치, 회전, 배율, 피봇)으로 옮긴 이 노드의 내용 좌표 경계 상자. 마스크로 잘라도 줄이지 않는다. (넉넉하게 본다)",
+								"en": "Reads the subtree draw bounds. (this node's content coordinates, the coordinates after push_transform, original TransformNode.readSubtreeDrawBounds)\n- The rect that holds everything this node and its enabled, visible descendants draw. Size 0 means nothing is drawn.\n- Recomputed only when something changed, otherwise the stored value is returned. The draw traversal skips the whole subtree when this rect is outside the screen and the clip.\n- Own drawing: calculate_drawn_rect of enabled drawing components (Component::is_draw_overridden). Components that draw only inside the content area count as the content area widened by one unit.\n- Children: bounding box in this node's content coordinates of each child's bounds moved by the child's transform (position, rotation, scale, pivot). Not reduced by a mask clip. (generous)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/node/nodetree.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/transformnode",
+								"class": "TransformNode",
+								"name": "readSubtreeDrawBounds"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "자식 경계가 부모 좌표로 모인다",
+										"en": "Child bounds gather in parent coordinates"
+									},
+									"code": "use vanilla::{Graphic, NodeTree, Paint, Pivot, Rect};\n\nfn read_bounds(graphic: &mut Graphic) {\n\tlet mut node_tree = NodeTree::new();\n\tlet root_id = node_tree.get_root_id();\n\tlet list_id = node_tree.create_child(root_id, \"list\");\n\tnode_tree[list_id].set_pivot(Pivot::TOP_LEFT);\n\tlet row_id = node_tree.create_child(list_id, \"row\");\n\tnode_tree[row_id].set_pivot(Pivot::TOP_LEFT);\n\tnode_tree[row_id].set_rect(10.0, 20.0, 100.0, 30.0);\n\tnode_tree.add_component(row_id, Paint::new());\n\tlet bounds = node_tree.read_subtree_draw_bounds(list_id, graphic).expect(\"known\");\n\tassert_eq!(bounds, Rect::create(9.0, 19.0, 102.0, 32.0));\n\tassert_eq!(node_tree.read_parent_draw_bounds(row_id), Some(Rect::create(9.0, 19.0, 102.0, 32.0)));\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "read_parent_draw_bounds",
+							"signature": "pub fn read_parent_draw_bounds(&self, node_id: NodeId) -> Option<Rect>",
+							"params": [
+								{
+									"name": "node_id",
+									"type": "NodeId",
+									"description": {
+										"ko": "읽을 노드.",
+										"en": "Node to read."
+									}
+								}
+							],
+							"returns": {
+								"type": "Option<Rect>",
+								"description": {
+									"ko": "부모 좌표 경계. 부모가 아직 셈하지 않았거나 셈한 뒤 바뀌었거나, 이 노드가 어디에 그리는지 모르면 None. (아무것도 그리지 않으면 크기 0)",
+									"en": "Bounds in parent coordinates. None if the parent has not computed them yet, something changed since, or this node draws somewhere unknown. (size 0 if nothing is drawn)"
+								}
+							},
+							"description": {
+								"ko": "부모가 셈해 둔 이 노드의 하위 트리 그리기 경계 읽기. (부모의 내용 좌표, 이 노드의 변환을 건 경계 상자, 원본 TransformNode.readParentDrawBounds)\n- 부모가 하위 트리 경계를 셈할 때 자식마다 옮겨 적어 둔 것이다. 이 노드의 변환이나 경계가 바뀌면 부모가 다시 셈하므로 그때까지 그대로 쓴다.\n- 그리기 순회가 부모의 변환 아래에서 이 사각형을 먼저 보아, 부모 좌표의 보이는 사각형 밖이면 이 노드에 변환을 걸지 않고 건너뛴다.",
+								"en": "Reads this node's subtree draw bounds stored by the parent. (parent's content coordinates, bounding box with this node's transform applied, original TransformNode.readParentDrawBounds)\n- The parent writes it for each child while computing its subtree bounds. When this node's transform or bounds change the parent recomputes, so it is used as is until then.\n- The draw traversal checks this rect first under the parent's transform and skips this node without applying its transform when it is outside the visible rect in parent coordinates."
+							},
+							"since": "0.4.0",
+							"source": "src/core/node/nodetree.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/transformnode",
+								"class": "TransformNode",
+								"name": "readParentDrawBounds"
+							}
+						},
+						{
+							"kind": "method",
 							"name": "find_topmost_interactable_node",
 							"signature": "pub fn find_topmost_interactable_node(&self, view_position: Vector2) -> Option<NodeId>",
 							"params": [
@@ -76638,20 +77036,28 @@
 						{
 							"kind": "method",
 							"name": "set_last_drawn_maximum_scale",
-							"signature": "pub fn set_last_drawn_maximum_scale(&mut self, last_drawn_maximum_scale: f64)",
+							"signature": "pub fn set_last_drawn_maximum_scale(&mut self, last_drawn_maximum_scale: f64, frame_number: u64)",
 							"params": [
 								{
 									"name": "last_drawn_maximum_scale",
 									"type": "f64",
 									"description": {
-										"ko": "지난번 그릴 때 변환의 가장 큰 배율. (0 이면 모른다)",
-										"en": "Largest scale of the transform at the last draw. (unknown if 0)"
+										"ko": "변환의 가장 큰 배율. (0 이면 모른다)",
+										"en": "Largest scale of the transform. (0 if unknown)"
+									}
+								},
+								{
+									"name": "frame_number",
+									"type": "u64",
+									"description": {
+										"ko": "그린 그리기 프레임 번호. (모르면 0)",
+										"en": "Draw frame number it was drawn in. (0 if unknown)"
 									}
 								}
 							],
 							"description": {
-								"ko": "지난번 그릴 때 변환의 가장 큰 배율. (NodeTree 가 그릴 때 Graphic.update_text_bake_scale_moving 으로 쓴다)",
-								"en": "Largest scale of the transform at the last draw. (NodeTree uses it in Graphic.update_text_bake_scale_moving when drawing)"
+								"ko": "지난번 그릴 때의 가장 큰 배율과 그 그리기 프레임 번호 기억. (NodeTree 가 push_transform 뒤에 부른다, 원본 setLastDrawnMaximumScale)\n- 그리기 프레임 번호는 Graphic::begin_frame_statistics 마다 하나씩 오른다. 지난 프레임에 그리지 않은 노드(화면 밖이라 하위 트리째 건너뛴 것)는 다음에 그릴 때 처음 그리는 것으로 본다.",
+								"en": "Remembers the largest scale of the last draw and its draw frame number. (NodeTree calls it after push_transform, original setLastDrawnMaximumScale)\n- The draw frame number goes up by one on every Graphic::begin_frame_statistics. A node not drawn last frame (skipped with its subtree because it was off screen) is treated as drawn for the first time when drawn next."
 							},
 							"since": "0.4.0",
 							"source": "src/core/node/worldnode.rs",
@@ -76685,6 +77091,87 @@
 								"module": "core/node/transformnode",
 								"class": "TransformNode",
 								"name": "getLastDrawnMaximumScale"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_last_drawn_frame_number",
+							"signature": "pub fn get_last_drawn_frame_number(&self) -> u64",
+							"params": [],
+							"returns": {
+								"type": "u64",
+								"description": {
+									"ko": "set_last_drawn_maximum_scale 로 기억한 프레임 번호. (그린 적 없으면 0)",
+									"en": "Frame number remembered with set_last_drawn_maximum_scale. (0 if never drawn)"
+								}
+							},
+							"description": {
+								"ko": "지난번 그린 그리기 프레임 번호. (원본 getLastDrawnFrameNumber)",
+								"en": "Draw frame number of the last draw. (original getLastDrawnFrameNumber)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/node/worldnode.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/transformnode",
+								"class": "TransformNode",
+								"name": "getLastDrawnFrameNumber"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "기억한 배율과 프레임 번호 읽기",
+										"en": "Read the remembered scale and frame number"
+									},
+									"code": "use vanilla::WorldNode;\n\nlet mut node = WorldNode::new(\"label\");\nassert_eq!(node.get_last_drawn_frame_number(), 0);\nnode.set_last_drawn_maximum_scale(2.0, 7);\nassert_eq!(node.get_last_drawn_maximum_scale(), 2.0);\nassert_eq!(node.get_last_drawn_frame_number(), 7);",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "mark_draw_bounds_dirty",
+							"signature": "pub fn mark_draw_bounds_dirty(&self)",
+							"params": [],
+							"description": {
+								"ko": "이 노드의 하위 트리 그리기 경계가 바뀌었음을 알린다. (원본 TransformNode.markDrawBoundsDirty)\n- 내용 크기, 기즈모 표시, 컴포넌트 더하고 빼기는 엔진이 알아서 부른다. 컴포넌트의 그리는 사각형이 바뀌면 컴포넌트가 mark_drawn_rect_dirty 를 부른다.\n- 다음에 경계를 읽을 때(그리기 전) 이 노드와 조상이 다시 셈한다. 트리에 들지 않은 노드면 할 일이 없다.",
+								"en": "Tells that this node's subtree draw bounds changed. (original TransformNode.markDrawBoundsDirty)\n- The engine calls it by itself for content size, gizmo display and adding or removing components. When a component's drawn rect changes the component calls mark_drawn_rect_dirty.\n- This node and its ancestors recompute the next time the bounds are read (before drawing). Does nothing for a node not in a tree."
+							},
+							"since": "0.4.0",
+							"source": "src/core/node/worldnode.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/transformnode",
+								"class": "TransformNode",
+								"name": "markDrawBoundsDirty"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "경계를 다시 셈하게 하기",
+										"en": "Make the bounds recompute"
+									},
+									"code": "use vanilla::{NodeTree, Paint, Pivot};\n\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet node_id = node_tree.create_child(root_id, \"panel\");\nnode_tree[node_id].set_pivot(Pivot::TOP_LEFT);\nnode_tree[node_id].set_rect(10.0, 20.0, 100.0, 50.0);\nnode_tree[node_id].mark_draw_bounds_dirty();\nnode_tree[node_id].mark_parent_draw_bounds_dirty();",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "mark_parent_draw_bounds_dirty",
+							"signature": "pub fn mark_parent_draw_bounds_dirty(&self)",
+							"params": [],
+							"description": {
+								"ko": "부모의 하위 트리 그리기 경계가 바뀌었음을 알린다. (원본 TransformNode.markParentDrawBoundsDirty, 이 노드의 변환, 켜짐, 보임이 바뀌면 엔진이 알아서 부른다)",
+								"en": "Tells that the parent's subtree draw bounds changed. (original TransformNode.markParentDrawBoundsDirty, the engine calls it by itself when this node's transform, active state or visibility changes)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/node/worldnode.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/transformnode",
+								"class": "TransformNode",
+								"name": "markParentDrawBoundsDirty"
 							}
 						},
 						{
@@ -194536,8 +195023,8 @@
 		{
 			"name": "macros",
 			"summary": {
-				"ko": "바닐라엔진 절차 매크로. (원본 vanilla.js 의 실행 중 반사 자리)\n- 원본은 자바스크립트라 실행 중에 객체의 프로토타입을 훑어 get, is, set 함수를 찾는다.\n  (ui/uidocument.js 의 collectReflectedProperties, misc/devtools.js 의 getComponentProperties)\n  러스트에는 실행 중 반사가 없어, 언리얼의 UHT(UPROPERTY), Qt 의 moc 처럼 컴파일 때 코드를 지어 같은 일을 한다.\n- `#[reflect]` 를 컴포넌트의 impl 블록에 붙이면 블록 안의 `pub fn get_*(&self) -> T`, `pub fn is_*(&self) -> T` 와\n  그 짝 `pub fn set_*(&mut self, value)` 를 모아 vanilla::core::reflection::Reflect 구현을 짓는다.\n- `#[reflect]` 를 impl Component 블록에 붙이면 그 블록에서 다시 정의한 게터(원본 하위 클래스가 덮어쓴 isTickNeeded 같은 것)를 인스펙터용으로 모은다.\n  두 블록 모두 붙여야 한다. Reflect 가 Component 의 상위 트레이트라 어느 쪽을 빠뜨려도 컴파일 에러다. (원본처럼 모든 컴포넌트가 반사된다)\n  게터가 없는 타입은 빈 블록 `#[reflect] impl 타입 {}` 에 붙인다.\n- 원본 규칙을 그대로 따른다:\n  - 게터는 인자 없는 `get*`, `is*` 함수다. (원본 `getterFunction.length === 0`) 저장 속성은 같은 키의 `set*` 이 있는 게터만이다. (원본 `\"set\" + baseName`)\n    &mut self 게터도 게터다. (원본 함수에는 &self, &mut self 구별이 없다) 반사가 &mut 를 받는 갈래(get_reflected_value_mut, collect_reflected_getters_mut)로 부른다.\n    러스트의 _mut 접근자(get_uiview_mut 같은 것)와 &mut 를 돌려주는 함수는 원본 게터가 아니라 뺀다.\n  - 세터는 값 하나를 받는 `set*` 이다. 트리를 받고 값을 받는 세터(set_snap_current_index(트리, 칸) 같은 것)도 알아보고,\n    트리를 쥔 쪽(UIDocument 읽기)이 set_reflected_value_in_tree 로 원본처럼 부른다.\n  - 트리만 받는 게터(get_target_button(&self, 트리) 같은 것)도 원본 게터다. 원본은 이웃 컴포넌트를 바로 쥐지만 러스트 판은 트리에서 꺼낸다.\n    트리를 쥔 쪽(DevTools 인스펙터)이 collect_reflected_getters_in_tree 로 부른다. 저장 속성은 아니다.\n  - 키는 접두어(get, is)를 뗀 원본 이름이다. 러스트 snake_case 를 원본 camelCase 로 되돌린다. (get_line_width → getLineWidth → LineWidth)\n  - 차례는 정의 차례, 같은 키는 먼저 나온 것이다.\n- 값으로 바꿀 수 없는 꼴의 게터도 컴파일 에러를 내지 않는다. 자동 참조 특수화(autoref specialization)로 바꿀 수 있는 꼴만 값으로 읽고,\n  나머지는 원본처럼 저장에서 건너뛰고 인스펙터에는 `[종류 이름]` 으로 보인다.\n- 함수에 붙이는 것: `#[reflect(skip)]` 반사에서 뺀다. `#[reflect(transient)]` 인스펙터에는 보이되 속성 목록에서 뺀다.\n  `#[reflect(unsaved)]` 속성 목록에는 두되 반사 저장과 읽기에서 뺀다. (원본에서 값이 객체라 saveByReflection 이 적지 않는 속성, ShadowText 의 FontFace)\n  `#[reflect(name = \"UIScale\")]` 원본 키 이름을 정한다. (원본 이름의 머리글자 낱말처럼 snake_case 에서 되돌릴 수 없는 이름, 원본과 이름이 다른 게터)\n  `#[reflect(after = \"getFittedFontSize\")]` impl Component 블록의 게터를 인스펙터 목록에서 그 원본 게터 뒤에 둔다. (원본 클래스 몸통의 차례, 없으면 맨 앞)\n- 블록에 붙이는 것: `#[reflect(base = 필드)]` 품은 값의 반사를 원본 상위 클래스처럼 뒤에 잇는다.\n  `#[reflect(crate = 경로)]` 엔진 경로. (기본 ::vanilla, 엔진 크레이트 안에서는 lib.rs 의 extern crate self as vanilla 로 같은 경로가 통한다)",
-				"en": "vanilla-engine procedural macros. (in place of the runtime reflection of the original vanilla.js)\n- The original is JavaScript, so at runtime it walks an object's prototype to find get, is, set functions.\n  (collectReflectedProperties in ui/uidocument.js, getComponentProperties in misc/devtools.js)\n  Rust has no runtime reflection, so like Unreal's UHT (UPROPERTY) and Qt's moc, it generates code at compile time to do the same job.\n- Putting `#[reflect]` on a component's impl block gathers the block's `pub fn get_*(&self) -> T`, `pub fn is_*(&self) -> T` and\n  their paired `pub fn set_*(&mut self, value)` to build a vanilla::core::reflection::Reflect implementation.\n- `#[reflect]` on an impl Component block collects the getters redefined in that block (like isTickNeeded overridden by an original subclass) for the inspector.\n  Both blocks must have it. Reflect is a supertrait of Component, so leaving out either one is a compile error. (Like the original, every component is reflected)\n  A type without getters takes it on an empty block, `#[reflect] impl Type {}`.\n- Follows the original rules as is:\n  - Getters are argumentless `get*`, `is*` functions. (original `getterFunction.length === 0`) Saved properties are only getters with a `set*` of the same key. (original `\"set\" + baseName`)\n    &mut self getters are getters too. (the original functions make no &self, &mut self distinction) Reflection calls them through the branches that take &mut (get_reflected_value_mut, collect_reflected_getters_mut).\n    Rust _mut accessors (like get_uiview_mut) and functions returning &mut are not original getters, so they are excluded.\n  - Setters are `set*` taking one value. Setters taking the tree and a value (like set_snap_current_index(tree, slot)) are also recognized,\n    and the side holding the tree (UIDocument reading) calls them with set_reflected_value_in_tree as in the original.\n  - Getters taking only the tree (like get_target_button(&self, tree)) are original getters too. The original holds neighbor components directly, but the Rust version takes them out of the tree.\n    The side holding the tree (the DevTools inspector) calls them with collect_reflected_getters_in_tree. They are not saved properties.\n  - The key is the original name with the prefix (get, is) removed. Rust snake_case is turned back into the original camelCase. (get_line_width → getLineWidth → LineWidth)\n  - The order is definition order, and on the same key the first one wins.\n- Getters of types that cannot be turned into values do not cause compile errors either. Through autoref specialization (autoref specialization) only convertible types are read as values,\n  and the rest are skipped in saving as in the original and shown in the inspector as `[kind name]`.\n- Put on functions: `#[reflect(skip)]` excludes from reflection. `#[reflect(transient)]` shows in the inspector but excludes from the property list.\n  `#[reflect(unsaved)]` keeps it in the property list but excludes it from reflection saving and reading. (properties saveByReflection does not write because the value is an object in the original, ShadowText's FontFace)\n  `#[reflect(name = \"UIScale\")]` sets the original key name. (names that cannot be recovered from snake_case, like acronym words in original names, and getters whose names differ from the original)\n  `#[reflect(after = \"getFittedFontSize\")]` places an impl Component block getter after that original getter in the inspector list. (the order in the original class body, at the front if absent)\n- Put on blocks: `#[reflect(base = field)]` chains the reflection of a held value afterwards, like an original superclass.\n  `#[reflect(crate = path)]` engine path. (default ::vanilla, inside the engine crate the same path works through extern crate self as vanilla in lib.rs)"
+				"ko": "바닐라엔진 절차 매크로. (원본 vanilla.js 의 실행 중 반사 자리)\n- 원본은 자바스크립트라 실행 중에 객체의 프로토타입을 훑어 get, is, set 함수를 찾는다.\n  (ui/uidocument.js 의 collectReflectedProperties, misc/devtools.js 의 getComponentProperties)\n  러스트에는 실행 중 반사가 없어, 언리얼의 UHT(UPROPERTY), Qt 의 moc 처럼 컴파일 때 코드를 지어 같은 일을 한다.\n- `#[reflect]` 를 컴포넌트의 impl 블록에 붙이면 블록 안의 `pub fn get_*(&self) -> T`, `pub fn is_*(&self) -> T` 와\n  그 짝 `pub fn set_*(&mut self, value)` 를 모아 vanilla::core::reflection::Reflect 구현을 짓는다.\n- `#[reflect]` 를 impl Component 블록에 붙이면 그 블록에서 다시 정의한 게터(원본 하위 클래스가 덮어쓴 isTickNeeded 같은 것)를 인스펙터용으로 모은다.\n  그 블록에 fn draw 가 없으면 Component::is_draw_overridden 을 false 로 짓는다. (그리지 않는 컴포넌트, 원본 draw === Component.prototype.draw)\n  두 블록 모두 붙여야 한다. Reflect 가 Component 의 상위 트레이트라 어느 쪽을 빠뜨려도 컴파일 에러다. (원본처럼 모든 컴포넌트가 반사된다)\n  게터가 없는 타입은 빈 블록 `#[reflect] impl 타입 {}` 에 붙인다.\n- 원본 규칙을 그대로 따른다:\n  - 게터는 인자 없는 `get*`, `is*` 함수다. (원본 `getterFunction.length === 0`) 저장 속성은 같은 키의 `set*` 이 있는 게터만이다. (원본 `\"set\" + baseName`)\n    &mut self 게터도 게터다. (원본 함수에는 &self, &mut self 구별이 없다) 반사가 &mut 를 받는 갈래(get_reflected_value_mut, collect_reflected_getters_mut)로 부른다.\n    러스트의 _mut 접근자(get_uiview_mut 같은 것)와 &mut 를 돌려주는 함수는 원본 게터가 아니라 뺀다.\n  - 세터는 값 하나를 받는 `set*` 이다. 트리를 받고 값을 받는 세터(set_snap_current_index(트리, 칸) 같은 것)도 알아보고,\n    트리를 쥔 쪽(UIDocument 읽기)이 set_reflected_value_in_tree 로 원본처럼 부른다.\n  - 트리만 받는 게터(get_target_button(&self, 트리) 같은 것)도 원본 게터다. 원본은 이웃 컴포넌트를 바로 쥐지만 러스트 판은 트리에서 꺼낸다.\n    트리를 쥔 쪽(DevTools 인스펙터)이 collect_reflected_getters_in_tree 로 부른다. 저장 속성은 아니다.\n  - 키는 접두어(get, is)를 뗀 원본 이름이다. 러스트 snake_case 를 원본 camelCase 로 되돌린다. (get_line_width → getLineWidth → LineWidth)\n  - 차례는 정의 차례, 같은 키는 먼저 나온 것이다.\n- 값으로 바꿀 수 없는 꼴의 게터도 컴파일 에러를 내지 않는다. 자동 참조 특수화(autoref specialization)로 바꿀 수 있는 꼴만 값으로 읽고,\n  나머지는 원본처럼 저장에서 건너뛰고 인스펙터에는 `[종류 이름]` 으로 보인다.\n- 함수에 붙이는 것: `#[reflect(skip)]` 반사에서 뺀다. `#[reflect(transient)]` 인스펙터에는 보이되 속성 목록에서 뺀다.\n  `#[reflect(unsaved)]` 속성 목록에는 두되 반사 저장과 읽기에서 뺀다. (원본에서 값이 객체라 saveByReflection 이 적지 않는 속성, ShadowText 의 FontFace)\n  `#[reflect(name = \"UIScale\")]` 원본 키 이름을 정한다. (원본 이름의 머리글자 낱말처럼 snake_case 에서 되돌릴 수 없는 이름, 원본과 이름이 다른 게터)\n  `#[reflect(after = \"getFittedFontSize\")]` impl Component 블록의 게터를 인스펙터 목록에서 그 원본 게터 뒤에 둔다. (원본 클래스 몸통의 차례, 없으면 맨 앞)\n- 블록에 붙이는 것: `#[reflect(base = 필드)]` 품은 값의 반사를 원본 상위 클래스처럼 뒤에 잇는다.\n  `#[reflect(crate = 경로)]` 엔진 경로. (기본 ::vanilla, 엔진 크레이트 안에서는 lib.rs 의 extern crate self as vanilla 로 같은 경로가 통한다)",
+				"en": "vanilla-engine procedural macros. (in place of the runtime reflection of the original vanilla.js)\n- The original is JavaScript, so at runtime it walks an object's prototype to find get, is, set functions.\n  (collectReflectedProperties in ui/uidocument.js, getComponentProperties in misc/devtools.js)\n  Rust has no runtime reflection, so like Unreal's UHT (UPROPERTY) and Qt's moc, it generates code at compile time to do the same job.\n- Putting `#[reflect]` on a component's impl block gathers the block's `pub fn get_*(&self) -> T`, `pub fn is_*(&self) -> T` and\n  their paired `pub fn set_*(&mut self, value)` to build a vanilla::core::reflection::Reflect implementation.\n- `#[reflect]` on an impl Component block collects the getters redefined in that block (like isTickNeeded overridden by an original subclass) for the inspector.\n  When that block has no fn draw, it generates Component::is_draw_overridden returning false. (a component that draws nothing, original draw === Component.prototype.draw)\n  Both blocks must have it. Reflect is a supertrait of Component, so leaving out either one is a compile error. (Like the original, every component is reflected)\n  A type without getters takes it on an empty block, `#[reflect] impl Type {}`.\n- Follows the original rules as is:\n  - Getters are argumentless `get*`, `is*` functions. (original `getterFunction.length === 0`) Saved properties are only getters with a `set*` of the same key. (original `\"set\" + baseName`)\n    &mut self getters are getters too. (the original functions make no &self, &mut self distinction) Reflection calls them through the branches that take &mut (get_reflected_value_mut, collect_reflected_getters_mut).\n    Rust _mut accessors (like get_uiview_mut) and functions returning &mut are not original getters, so they are excluded.\n  - Setters are `set*` taking one value. Setters taking the tree and a value (like set_snap_current_index(tree, slot)) are also recognized,\n    and the side holding the tree (UIDocument reading) calls them with set_reflected_value_in_tree as in the original.\n  - Getters taking only the tree (like get_target_button(&self, tree)) are original getters too. The original holds neighbor components directly, but the Rust version takes them out of the tree.\n    The side holding the tree (the DevTools inspector) calls them with collect_reflected_getters_in_tree. They are not saved properties.\n  - The key is the original name with the prefix (get, is) removed. Rust snake_case is turned back into the original camelCase. (get_line_width → getLineWidth → LineWidth)\n  - The order is definition order, and on the same key the first one wins.\n- Getters of types that cannot be turned into values do not cause compile errors either. Through autoref specialization (autoref specialization) only convertible types are read as values,\n  and the rest are skipped in saving as in the original and shown in the inspector as `[kind name]`.\n- Put on functions: `#[reflect(skip)]` excludes from reflection. `#[reflect(transient)]` shows in the inspector but excludes from the property list.\n  `#[reflect(unsaved)]` keeps it in the property list but excludes it from reflection saving and reading. (properties saveByReflection does not write because the value is an object in the original, ShadowText's FontFace)\n  `#[reflect(name = \"UIScale\")]` sets the original key name. (names that cannot be recovered from snake_case, like acronym words in original names, and getters whose names differ from the original)\n  `#[reflect(after = \"getFittedFontSize\")]` places an impl Component block getter after that original getter in the inspector list. (the order in the original class body, at the front if absent)\n- Put on blocks: `#[reflect(base = field)]` chains the reflection of a held value afterwards, like an original superclass.\n  `#[reflect(crate = path)]` engine path. (default ::vanilla, inside the engine crate the same path works through extern crate self as vanilla in lib.rs)"
 			},
 			"examples": [
 				{

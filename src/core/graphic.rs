@@ -2992,7 +2992,8 @@ impl Graphic {
 	/// 	assert!(graphic.is_subtree_culling_enabled());
 	/// 	graphic.set_subtree_culling_enabled(false);
 	/// 	assert!(!graphic.is_subtree_culling_enabled());
-	/// 	println!("건너뛴 하위 트리 {}", graphic.get_last_frame_culled_subtree_count());
+	/// 	let culled_subtree_count = graphic.get_last_frame_culled_subtree_count();
+	/// 	assert!(culled_subtree_count < u32::MAX);
 	/// }
 	/// ```
 	//==============================================================================
