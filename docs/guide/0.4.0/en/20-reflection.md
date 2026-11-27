@@ -584,7 +584,7 @@ node_tree[root_id].add_component(Marker {
 	component_base: ComponentBase::new(),
 });
 
-let json_text = document.to_json_text(&node_tree, root_id, false);
+let json_text = document.to_json_text(&mut node_tree, root_id, false);
 assert!(json_text.contains("\"DegreesPerSecond\":45"));
 assert!(json_text.contains("\"type\":\"Spin\""));
 assert!(json_text.contains("\"type\":\"Marker\""));
@@ -597,7 +597,7 @@ assert_eq!(loaded_spin.get_degrees_per_second(), 45.0);
 - An unregistered component that has reflection is still written through reflection, like the original, with the type name as its `type`. When loading, only registered kinds are created; the rest are skipped with a warning.
 - A component without getters (`Marker` above) is reflected too, so like the original it is written with the common properties and `type` (the type name). A component without reflection does not compile, so no component is left out.
 - Like the original `REFLECTED_PROPERTY_EXCLUDE_NAMES`, properties whose key is `Parent`, `Node`, `Owner`, `Scene`, `Content`, `Children`, `AllComponents`, `Component`, `Components`, `Root`, `Graphic`, `Camera`, or `Target` are not saved. A game component's `get_target` and `set_target` are not saved either, so use another name.
-- `to_json_text` takes only `&NodeTree` and cannot read `&mut self` getters. If such a getter is a saved property, write with `to_json_text_mut` or `serialize_node_mut`, which take `&mut NodeTree`.
+- `to_json_text` and `serialize_node` are single functions like the original `toJsonText` and `serializeNode`, and read `&mut self` getters too. That is why they take `&mut NodeTree`.
 - Setters that take the tree and a value are called on the spot while loading, with the component taken out of the tree for a moment (the same order as the original).
 - To write the save and load functions by hand, register with `register_component_type_with_handler(name, create_function, save, load)` instead of reflection. Even then, reflected properties that point at nodes are added separately, like the original `saveNodeReferences`.
 
@@ -644,5 +644,5 @@ So the UI document writes unregistered components by reflection like the origina
 - `ToReflectValue`, `FromReflectValue`
 - In `vanilla::core::reflection`: `collect_reflected_properties`, `read_reflected_property`, `read_reflected_property_mut`, `write_reflected_property`, `write_reflected_property_in_tree`, `collect_reflected_getters`, `collect_reflected_getters_in_tree`, `collect_reflected_getters_mut`, `has_mutable_getters`, `COMPONENT_REFLECTED_PROPERTIES`
 - `Component` (supertrait `Reflect`)
-- `UIDocument` (`register_component_type`, `register_component_type_with_handler`, `save_by_reflection`, `load_by_reflection`, `get_reflected_properties`, `to_json_text_mut`)
+- `UIDocument` (`register_component_type`, `register_component_type_with_handler`, `save_by_reflection`, `load_by_reflection`, `get_reflected_properties`, `to_json_text`)
 - `DevTools` (`set_ui_document`, `get_ui_document_mut`)

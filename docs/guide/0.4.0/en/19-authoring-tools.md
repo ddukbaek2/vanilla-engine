@@ -156,7 +156,7 @@ assert!(node_tree[field_id].get_component::<UIInputField>().is_some());
 
 ### Saving documents from the game
 
-`to_json_text(node_tree, root_id, is_pretty)` turns a node tree into text of the same form. Key order and indentation (tabs) match the original `JSON.stringify`, and numbers are written as the shortest decimal of an `f64`. Registered types are written under their registered names. Unregistered components are written through getters and setters as in the original, but without `#[vanilla::reflect]` they cannot be written, so a warning is printed and they are left out. There is no need to worry about a bundler renaming classes as in the original. To write components that have `&mut self` getters, use `to_json_text_mut`.
+`to_json_text(node_tree, root_id, is_pretty)` turns a node tree into text of the same form. Key order and indentation (tabs) match the original `JSON.stringify`, and numbers are written as the shortest decimal of an `f64`. Registered types are written under their registered names. Unregistered components are written through getters and setters as in the original, but without `#[vanilla::reflect]` they cannot be written, so a warning is printed and they are left out. There is no need to worry about a bundler renaming classes as in the original. It also writes components that have `&mut self` getters (which is why it takes the tree as `&mut NodeTree`).
 
 ## Playing Timeline Editor documents
 
