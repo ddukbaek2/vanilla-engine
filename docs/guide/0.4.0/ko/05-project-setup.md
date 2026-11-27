@@ -61,7 +61,7 @@ strip = false
 ```
 
 - `release` 는 한 덩어리로 묶어 최적화하고 디버그 기호를 뺍니다.
-- `wasm-release` 는 `release` 와 같되 기호를 남겨 wasm-bindgen 이 wasm 기능 정보를 읽게 합니다. 크기를 줄이는 것은 wasm-bindgen 이 합니다.
+- `wasm-release` 는 `release` 와 같되 기호를 남겨 wasm-bindgen 이 wasm 기능 정보를 읽게 합니다. 크기를 줄이는 것은 wasm-bindgen 이 합니다. (`--remove-name-section` 은 함수 이름 절을, `--remove-producers-section` 은 만든 도구 절을 뺍니다. 브라우저 오류 자리에서 함수 이름을 보려면 이 둘을 빼고 짓습니다)
 - 데스크탑 AVIF 그림은 rav1d 로 풉니다. rav1d 는 opt-level 0 이면 느려서(1600 x 1200 한 장이 dev 빌드에서 2.9 초, rav1d 만 opt-level 3 이면 0.9 초) dev 빌드에서도 rav1d 만 최적화하기를 권합니다.
 
 ```toml
@@ -199,7 +199,7 @@ cargo build --release
 ```bash
 rustup target add wasm32-unknown-unknown
 cargo build --profile wasm-release --target wasm32-unknown-unknown
-wasm-bindgen --target web --no-typescript --out-dir web target/wasm32-unknown-unknown/wasm-release/mygame.wasm
+wasm-bindgen --target web --no-typescript --remove-name-section --remove-producers-section --out-dir web target/wasm32-unknown-unknown/wasm-release/mygame.wasm
 ```
 
 `web/index.html`:

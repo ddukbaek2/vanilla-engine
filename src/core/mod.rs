@@ -51,5 +51,8 @@ pub(crate) mod avifimage;
 pub(crate) mod maskgamma;
 pub(crate) mod analyticrasterizer;
 pub(crate) mod blurshadow;
+// 그림의 색 프로필과 JPEG 해독기. (데스크탑, 웹은 원본처럼 브라우저가 풀고 색 공간을 바꾼다)
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod colorprofile;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod jpegimage;

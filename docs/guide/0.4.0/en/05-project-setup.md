@@ -61,7 +61,7 @@ strip = false
 ```
 
 - `release` optimizes everything as one unit and strips debug symbols.
-- `wasm-release` is the same as `release` but keeps symbols so wasm-bindgen can read the wasm feature information. wasm-bindgen does the size reduction.
+- `wasm-release` is the same as `release` but keeps symbols so wasm-bindgen can read the wasm feature information. wasm-bindgen does the size reduction. (`--remove-name-section` drops the function name section and `--remove-producers-section` drops the producers section. To see function names in browser error stacks, build without these two flags)
 - Desktop AVIF images are decoded with rav1d. rav1d is slow at opt-level 0 (one 1600 x 1200 image takes 2.9 seconds in a dev build, 0.9 seconds with only rav1d at opt-level 3), so optimizing just rav1d is recommended even in dev builds.
 
 ```toml
@@ -199,7 +199,7 @@ You need the `wasm32-unknown-unknown` target and the wasm-bindgen command-line t
 ```bash
 rustup target add wasm32-unknown-unknown
 cargo build --profile wasm-release --target wasm32-unknown-unknown
-wasm-bindgen --target web --no-typescript --out-dir web target/wasm32-unknown-unknown/wasm-release/mygame.wasm
+wasm-bindgen --target web --no-typescript --remove-name-section --remove-producers-section --out-dir web target/wasm32-unknown-unknown/wasm-release/mygame.wasm
 ```
 
 `web/index.html`:

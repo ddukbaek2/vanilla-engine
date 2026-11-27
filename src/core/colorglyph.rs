@@ -337,6 +337,59 @@ pub fn read_bitmap_glyph_advance(face: &Face<'_>, glyph_index: u16, pixel_size: 
 }
 
 //==============================================================================
+/// 색 글리프의 PNG 그림을 곧은 알파 RGBA 로 풀기. (데스크탑은 image 크레이트, (픽셀, 폭, 높이), 못 풀면 None)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn decode_png_straight_pixels(png_bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+	let decoded_image = ::image::load_from_memory_with_format(png_bytes, ::image::ImageFormat::Png).ok()?.to_rgba8();
+	let (decoded_width, decoded_height) = decoded_image.dimensions();
+	Some((decoded_image.into_raw(), decoded_width, decoded_height))
+}
+
+//==============================================================================
+/// 색 글리프의 PNG 그림을 곧은 알파 RGBA 로 풀기. (웹, image 크레이트를 싣지 않고 그 밑의 png 크레이트로 같은 일을 한다. 8 비트로 펴고 RGBA 로 채운다)
+//==============================================================================
+#[cfg(target_arch = "wasm32")]
+fn decode_png_straight_pixels(png_bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+	let mut decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
+	decoder.set_transformations(png::Transformations::normalize_to_color8());
+	let mut reader = decoder.read_info().ok()?;
+	let mut buffer = vec![0u8; reader.output_buffer_size()?];
+	let frame_info = reader.next_frame(&mut buffer).ok()?;
+	let pixel_count = (frame_info.width as usize) * (frame_info.height as usize);
+	let source = &buffer[..frame_info.buffer_size()];
+	let mut pixels = Vec::with_capacity(pixel_count * 4);
+	match frame_info.color_type {
+		png::ColorType::Rgba => {
+			pixels.extend_from_slice(source);
+		}
+		png::ColorType::Rgb => {
+			for pixel in source.chunks_exact(3) {
+				pixels.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+			}
+		}
+		png::ColorType::GrayscaleAlpha => {
+			for pixel in source.chunks_exact(2) {
+				pixels.extend_from_slice(&[pixel[0], pixel[0], pixel[0], pixel[1]]);
+			}
+		}
+		png::ColorType::Grayscale => {
+			for gray in source.iter() {
+				pixels.extend_from_slice(&[*gray, *gray, *gray, 255]);
+			}
+		}
+		png::ColorType::Indexed => {
+			// normalize_to_color8 이 팔레트를 RGB(A) 로 펴서 오지 않는다.
+			return None;
+		}
+	}
+	if pixels.len() != pixel_count * 4 {
+		return None;
+	}
+	Some((pixels, frame_info.width, frame_info.height))
+}
+
+//==============================================================================
 /// 비트맵 색 글리프 래스터. (sbix, CBDT 의 그림을 풀어 글자 크기로)
 //==============================================================================
 fn rasterize_bitmap_color_glyph(face: &Face, glyph_index: u16, pixel_size: f32) -> Option<ColorGlyphRaster> {
@@ -344,9 +397,7 @@ fn rasterize_bitmap_color_glyph(face: &Face, glyph_index: u16, pixel_size: f32) 
 	let raster_image = read_raster_image(face, glyph_index, pixels_per_em)?;
 	let (source_pixels, source_width, source_height) = match raster_image.format {
 		RasterImageFormat::PNG => {
-			let decoded_image = ::image::load_from_memory_with_format(raster_image.data, ::image::ImageFormat::Png).ok()?.to_rgba8();
-			let (decoded_width, decoded_height) = decoded_image.dimensions();
-			let mut pixels = decoded_image.into_raw();
+			let (mut pixels, decoded_width, decoded_height) = decode_png_straight_pixels(raster_image.data)?;
 			for pixel in pixels.chunks_exact_mut(4) {
 				let alpha = pixel[3] as u32;
 				for channel_index in 0..3 {

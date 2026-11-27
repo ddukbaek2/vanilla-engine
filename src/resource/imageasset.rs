@@ -98,9 +98,22 @@ impl ImageAsset {
 	pub fn load_from_bytes(&mut self, asset_path: &str, bytes: Vec<u8>) -> AssetLoadHandle {
 		self.image = None;
 		self.is_decode_failed = false;
-		let load_handle = self.asset_base.load_from_bytes(asset_path, bytes);
-		load_handle.request_image_decode();
-		load_handle
+		// 웹: 원본처럼 브라우저가 형 없는 Blob 으로 풀 때까지 읽는 중이다. (풀면 바이트로 끝나고, 못 풀면 실패로 끝난다)
+		#[cfg(target_arch = "wasm32")]
+		{
+			let load_handle = crate::core::asset::AssetLoadHandle::create_pending(asset_path);
+			load_handle.request_image_decode();
+			self.asset_base.unload();
+			self.asset_base.load_from_handle(load_handle.clone());
+			crate::platform::web::request_image_bytes_decode(bytes, load_handle.clone());
+			return load_handle;
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			let load_handle = self.asset_base.load_from_bytes(asset_path, bytes);
+			load_handle.request_image_decode();
+			load_handle
+		}
 	}
 
 	//==============================================================================

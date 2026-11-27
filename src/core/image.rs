@@ -2,7 +2,9 @@
 //! 이미지. (원본 HTMLImageElement / ImageAsset 자리)
 //! - 형식: 원본은 브라우저가 푸는 형식을 모두 받는다. 데스크탑은 image 크레이트로 PNG, JPEG, WebP, GIF(첫 장), BMP, ICO, resvg 로 SVG,
 //!   HEIF 상자는 엔진이 읽고 AV1 은 rav1d 로 풀어 AVIF 를 받는다. (core/avifimage.rs)
-//!   웹은 애셋을 받을 때 브라우저(HTMLImageElement)가 먼저 풀어 손잡이에 둔다. (platform/web.rs, AVIF 와 애니메이션 PNG 의 첫 장 포함)
+//!   웹은 원본처럼 그림을 늘 브라우저(HTMLImageElement)가 푼다. 애셋을 받을 때(ImageAsset, AssetLoader)와 ImageAsset::load_from_bytes 때 풀어 손잡이에 둔다.
+//!   (platform/web.rs, AVIF 와 애니메이션 PNG 의 첫 장 포함) 웹의 이 길에는 image 크레이트와 엔진 JPEG 해독기를 싣지 않는다.
+//!   그래서 웹의 load_from_memory 와 load_from_memory_with_mime_type 은 바이트를 그 자리에서 풀지 않고 Err 를 돌려준다. (원본에도 그림 바이트를 그 자리에서 푸는 길이 없다)
 //! - 형(MIME)을 아는 바이트(data: 주소)는 load_from_memory_with_mime_type 으로 푼다. 브라우저처럼 형이 image/svg+xml 일 때만 SVG 이고, 그 밖은 내용으로 가린다.
 //!   형을 모르는 바이트(파일)는 load_from_memory 가 내용으로 SVG 까지 가린다. (데스크탑에는 응답의 형이 없다)
 //! - sniff_image_mime_type: WHATWG MIME 스니핑의 그림 표(ICO, CUR, BMP, GIF, WebP, PNG, JPEG)에 AVIF 를 더해 내용으로 형을 고른다. (데스크탑 Material 이 응답의 형 대신 쓴다)
@@ -79,8 +81,8 @@ impl Image {
 	}
 
 	//==============================================================================
-	/// 메모리에서 읽기. (PNG, JPEG, WebP, GIF 의 첫 장, BMP, ICO. 데스크탑은 SVG 와 AVIF 도)
-	/// - 웹은 애셋을 받을 때 브라우저가 먼저 풀어 손잡이에 둔다. (platform/web.rs, 브라우저가 푸는 형식 모두) 여기는 그 밖의 바이트를 푼다.
+	/// 메모리에서 읽기. (데스크탑, PNG, JPEG, WebP, GIF 의 첫 장, BMP, ICO, SVG, AVIF)
+	/// - 웹은 원본처럼 브라우저가 비동기로 푼다. (ImageAsset::load, ImageAsset::load_from_bytes, AssetLoader 가 풀어 손잡이에 둔다) 웹에서 여기를 부르면 Err 다.
 	///
 	/// # 인자
 	/// - `bytes`: 그림 파일의 바이트.
@@ -111,7 +113,7 @@ impl Image {
 
 	//==============================================================================
 	/// 형을 아는 바이트 읽기. (브라우저처럼 형이 image/svg+xml 이면 SVG, 그 밖은 내용으로 가린 래스터. data: 주소의 그림)
-	/// - 웹은 SVG 를 브라우저가 푼다. (여기서는 Err)
+	/// - 웹은 원본처럼 브라우저가 비동기로 푼다. (여기서는 Err, load_from_memory 와 같다)
 	///
 	/// # 인자
 	/// - `bytes`: 그림의 바이트.
@@ -136,14 +138,20 @@ impl Image {
 	}
 
 	//==============================================================================
-	/// 래스터 그림 읽기. (데스크탑 AVIF 와 image 크레이트의 형식, 내용으로 가린다)
+	/// 래스터 그림 읽기. (웹, 브라우저가 풀므로 그 자리에서는 풀지 않는다)
 	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	fn load_raster_from_memory(_bytes: &[u8]) -> Result<Rc<Image>, String> {
+		Err(String::from("브라우저가 풀지 못한 그림이다. (웹은 그림을 브라우저가 풀고 바이트를 그 자리에서 풀지 않는다, ImageAsset 이나 AssetLoader 로 읽는다)"))
+	}
+
+	//==============================================================================
+	/// 래스터 그림 읽기. (데스크탑 AVIF 와 엔진 JPEG 해독기, image 크레이트의 형식, 내용으로 가린다)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
 	fn load_raster_from_memory(bytes: &[u8]) -> Result<Rc<Image>, String> {
-		#[cfg(not(target_arch = "wasm32"))]
-		{
-			if is_avif_bytes(bytes) {
-				return crate::core::avifimage::decode_avif(bytes);
-			}
+		if is_avif_bytes(bytes) {
+			return crate::core::avifimage::decode_avif(bytes);
 		}
 		if sniff_image_mime_type(bytes) == Some("image/jpeg") {
 			let decoded = crate::core::jpegimage::decode_jpeg(bytes).map_err(|error| format!("이미지 해석 실패: {}", error))?;
@@ -392,8 +400,9 @@ pub fn sniff_image_mime_type(bytes: &[u8]) -> Option<&'static str> {
 }
 
 //==============================================================================
-/// 그림에 박힌 색 프로필. (크롬처럼 PNG 는 cICP, iCCP, sRGB, gAMA, cHRM, JPEG 는 APP2 ICC, WebP 는 ICCP, 그 밖과 없으면 None)
+/// 그림에 박힌 색 프로필. (크롬처럼 PNG 는 cICP, iCCP, sRGB, gAMA, cHRM, JPEG 는 APP2 ICC, WebP 는 ICCP, 그 밖과 없으면 None, 데스크탑)
 //==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
 fn read_embedded_color_profile(bytes: &[u8]) -> Option<crate::core::colorprofile::EmbeddedColorProfile> {
 	match sniff_image_mime_type(bytes) {
 		Some("image/png") => {
