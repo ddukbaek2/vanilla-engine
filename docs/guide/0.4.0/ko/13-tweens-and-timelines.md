@@ -157,7 +157,7 @@ impl Scene for TweenScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &Engine) {
+	fn load(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let box_id = node_tree.create_child(root_id, "Box");
@@ -180,8 +180,8 @@ impl Scene for TweenScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.start_next_pulse();
 	}
 }
@@ -203,7 +203,7 @@ fn main() {
 }
 ```
 
-`Scene::tick` 을 덮어쓰면 위처럼 `self.scene_base.tick(engine, time_delta)` 를 직접 불러야 노드와 트윈이 갱신됩니다.
+`Scene::tick` 을 덮어쓰면 위처럼 `self.scene_base.tick(time_delta)` 를 직접 불러야 노드와 트윈이 갱신됩니다.
 
 ## Animation 과 Frame
 
@@ -242,7 +242,7 @@ assert_eq!(animation.get_current_frame_index(), 3);
 assert!(!animation.is_playing());
 ```
 
-아래는 저장소의 `examples/assets/atlas/icons.png` 에서 아이콘 네 칸을 떼어 차례로 넘기는 씬입니다. 그림은 `create` 에서 요청해 씬에 맡기고, 다 읽힌 뒤 불리는 `initialize` 에서 프레임을 넣습니다.
+아래는 저장소의 `examples/assets/atlas/icons.png` 에서 아이콘 네 칸을 떼어 차례로 넘기는 씬입니다. 그림은 `load` 에서 요청해 씬에 맡기고, 다 읽힌 뒤 불리는 `initialize` 에서 프레임을 넣습니다.
 
 ```rust,no_run
 use vanilla::{Animation, Engine, EngineConfiguration, ImageAsset, NodeId, Rect, Scene, SceneBase, Sprite, Vector2};
@@ -263,7 +263,7 @@ impl Scene for AnimationScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
@@ -293,8 +293,8 @@ impl Scene for AnimationScene {
 		self.icon_id = Some(icon_id);
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.animation.tick(time_delta);
 		if let Some(icon_id) = self.icon_id {
 			let node_tree = self.scene_base.get_node_tree_mut();
@@ -350,7 +350,7 @@ impl Scene for AnimatorScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
@@ -381,7 +381,7 @@ impl Scene for AnimatorScene {
 		self.hero_id = Some(hero_id);
 	}
 
-	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, _view_input_position: Vector2) {
 		if let Some(hero_id) = self.hero_id {
 			let options = SpriteAnimatorPlayOptions {
 				on_complete: Some(Box::new(|sprite_animator: &mut SpriteAnimator| {
@@ -561,7 +561,7 @@ impl Scene for TimelineScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
@@ -588,8 +588,8 @@ impl Scene for TimelineScene {
 		self.timeline.play();
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
 	}
 }
@@ -737,7 +737,7 @@ impl Scene for StateScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
@@ -784,8 +784,8 @@ impl Scene for StateScene {
 		self.state_machine.change_state("idle", false);
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.state_machine.tick(time_delta);
 		if let (Some(hero_id), Some(state_name)) = (self.hero_id, self.state_machine.get_state_name()) {
 			let hero_node = &mut self.scene_base.get_node_tree_mut()[hero_id];
@@ -843,7 +843,7 @@ assert!(action.is_done());
 
 ## 주의할 점
 
-- `Animation`, `Timeline`, `FiniteStateMachine`, `Action` 은 스스로 시간이 가지 않습니다. 씬의 `tick` 에서 `tick(time_delta)` 나 `step` 을 불러 줍니다. 트윈은 `scene_base.start_tween` 으로 맡기면 `SceneBase::tick` 이 갱신하므로, `Scene::tick` 을 덮어쓸 때 `self.scene_base.tick(engine, time_delta)` 를 빼면 트윈이 멈춥니다.
+- `Animation`, `Timeline`, `FiniteStateMachine`, `Action` 은 스스로 시간이 가지 않습니다. 씬의 `tick` 에서 `tick(time_delta)` 나 `step` 을 불러 줍니다. 트윈은 `scene_base.start_tween` 으로 맡기면 `SceneBase::tick` 이 갱신하므로, `Scene::tick` 을 덮어쓸 때 `self.scene_base.tick(time_delta)` 를 빼면 트윈이 멈춥니다.
 - 트윈과 타임라인의 콜백은 원본처럼 노드 객체를 받지 않고 `&mut NodeTree` 를 받습니다. 붙잡아 둔 `NodeId` 로 `node_tree[node_id]` 를 꺼내 씁니다. 콜백 밖의 값을 바꾸려면 `Rc<Cell>` 이나 `Rc<RefCell>` 을 잡아 넣습니다.
 - 타임라인 처리기는 `Box::new` 로 감싸 `Some` 에 넣고, 위 예제처럼 클로저 인자의 꼴을 적어 줍니다.
 - `SpriteAnimator` 는 같은 노드의 `Sprite` 를 찾아 씁니다. `Sprite` 가 없으면 그림이 바뀌지 않습니다. 노드를 받는 `SpriteAnimator::play` 는 그 자리에서 첫 프레임을 넣고, 애니메이터만 받는 `play_clip` 은 다음 프레임 넣기에 넣습니다.

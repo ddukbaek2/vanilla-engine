@@ -60,8 +60,8 @@ impl Scene for NodeScene {
 		node_tree.add_child(panel_id, badge_id);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -571,7 +571,7 @@ assert_eq!(node_tree.get_child_count(enemies_id), 1);
 - `WorldNode::add_component` 는 `attach_to_tree` 를 부르지 않고, `NodeTree::add_component` 는 `require()` 를 붙이지 않습니다. 붙을 때 자식 노드를 만드는 컴포넌트는 `NodeTree::add_component` 로 붙입니다.
 - `NodeTree` 를 `&mut` 로 쥔 채 `node_tree[node_id]` 로 꺼낸 노드 참조를 들고 다른 노드를 만들 수는 없습니다. (빌림 검사) 위 예제처럼 노드 하나를 다 설정한 뒤 다음 노드를 만들거나, `NodeId` 를 들고 그때그때 꺼냅니다.
 - 노드가 터치를 받으려면 `set_interactable(true)` 를 켭니다. 씬의 기본 `tick` 이 눌린 자리 맨 위의 터치 받는 노드를 찾아 그 노드의 컴포넌트에 터치를 넘깁니다. ("입력" 장)
-- 루트 노드는 `NodeTree::new` 가 만들고, 엔진이 씬의 `create` 바로 뒤에 자리 (0, 0), 왼쪽 위 기준점, 내용 크기는 뷰 크기로 맞춥니다. 노드를 붙이는 일은 `create` 나 `initialize` 에서 합니다.
+- 루트 노드는 `NodeTree::new` 가 만들고, 엔진이 씬의 `create` 와 `load` 사이에 자리 (0, 0), 왼쪽 위 기준점, 내용 크기는 뷰 크기로 맞춥니다. 노드를 붙이는 일은 `load` 나 `initialize` 에서 합니다.
 
 ## 관련 타입
 

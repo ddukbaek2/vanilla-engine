@@ -1127,20 +1127,20 @@ fn register_loaded_model(asset_key: &str, model_result: Result<SkinnedModel, Str
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn create(&mut self, engine: &Engine) {
+/// 	fn load(&mut self, engine: &Engine) {
 /// 		let model_load_handle = SkinnedModel::load_from_url(engine, "fox.glb");
 /// 		self.scene_base.track_load_handle(model_load_handle.get_load_handle());
 /// 		self.model_load_handle = Some(model_load_handle);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-/// 		self.scene_base.tick(engine, time_delta);
+/// 	fn tick(&mut self, time_delta: f64) {
+/// 		self.scene_base.tick(time_delta);
 /// 		if let Some(skinned_model) = &mut self.skinned_model {
 /// 			skinned_model.update(time_delta);
 /// 		}
 /// 	}
 ///
-/// 	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+/// 	fn draw(&mut self, graphic: &mut Graphic) {
 /// 		let gl = graphic.get_gl();
 /// 		if self.skinned_model_renderer.is_none() {
 /// 			self.skinned_model_renderer = SkinnedModelRenderer::new(gl, None, None).ok();

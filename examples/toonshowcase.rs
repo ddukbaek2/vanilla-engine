@@ -164,21 +164,22 @@ impl Scene for ToonShowcaseScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.scene_base.set_scene_background_color("#14171e");
 		self.mannequin_asset.load(engine, "mannequin_female.glb");
 		self.scene_base.track_asset(&self.mannequin_asset);
 	}
 
-	fn tick(&mut self, _engine: &Engine, time_delta: f64) {
+	fn tick(&mut self, time_delta: f64) {
 		self.elapsed_seconds += time_delta;
 	}
 
 	//==============================================================================
 	// 3D 출력. (2D 묶음 내보내기 → 툰 패스 → 2D 상태 복구)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
+		self.scene_base.draw_scene_background(graphic);
 		graphic.flush_batch();
 		if self.renderer.is_none() {
 			if let Err(error) = self.create_resources(graphic.get_gl()) {

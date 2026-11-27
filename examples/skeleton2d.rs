@@ -163,7 +163,7 @@ impl Scene for Skeleton2DScene {
 	//==============================================================================
 	// 생성. (아틀라스와 JSON 둘을 씬이 기다리게 맡긴다)
 	//==============================================================================
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.scene_base.set_scene_background_color(BACKGROUND_COLOR);
 		self.sprite_atlas.load(engine, "skeleton2d/hero.atlas.json");
 		self.sprite_atlas.track_json_asset(&mut self.scene_base);
@@ -238,8 +238,9 @@ impl Scene for Skeleton2DScene {
 	//==============================================================================
 	// 주기적 갱신. (컴포넌트를 돌린 뒤 한 걸음)
 	//==============================================================================
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
+		self.scene_base.tick(time_delta);
 		self.apply_atlas(engine);
 		if self.character_id_list.is_empty() {
 			return;
@@ -260,8 +261,8 @@ impl Scene for Skeleton2DScene {
 	//==============================================================================
 	// 이전 출력. (배경을 칠하고 기준 해상도 좌표계를 건 뒤 바닥)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 		graphic.set_fill_color(BACKGROUND_COLOR);
 		graphic.draw_rect(Rect::create(0.0, 0.0, VIEW_WIDTH, VIEW_HEIGHT));
 		graphic.set_fill_color(GROUND_COLOR);
@@ -271,7 +272,7 @@ impl Scene for Skeleton2DScene {
 	//==============================================================================
 	// 이후 출력. (IK 목표 점)
 	//==============================================================================
-	fn post_draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn post_draw(&mut self, graphic: &mut Graphic) {
 		if self.character_id_list.is_empty() {
 			return;
 		}

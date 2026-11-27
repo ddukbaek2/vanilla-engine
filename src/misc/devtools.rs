@@ -55,22 +55,24 @@
 //! 		&mut self.scene_base
 //! 	}
 //!
-//! 	fn create(&mut self, _engine: &Engine) {
+//! 	fn load(&mut self, _engine: &Engine) {
 //! 		self.dev_tools.set_root_nodes(vec![self.scene_base.get_root_id()]);
 //! 	}
 //!
-//! 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
+//! 	fn tick(&mut self, time_delta: f64) {
+//! 		let engine = Engine::get_engine().unwrap();
 //! 		let is_capturing_input = self.dev_tools.is_visible() && self.dev_tools.is_pointer_inside_panel(engine);
 //! 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 //! 		if !is_capturing_input {
-//! 			self.scene_base.tick_touch(engine);
+//! 			self.scene_base.tick_touch(time_delta);
 //! 		}
 //! 		self.scene_base.tick_tweens(time_delta);
 //! 		let unscaled_time_delta = engine.get_time_manager().get_unscale_delta_time();
 //! 		self.dev_tools.tick(engine, self.scene_base.get_node_tree_mut(), unscaled_time_delta);
 //! 	}
 //!
-//! 	fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+//! 	fn post_draw(&mut self, graphic: &mut Graphic) {
+//! 		let engine = Engine::get_engine().unwrap();
 //! 		self.dev_tools.draw(engine, self.scene_base.get_node_tree(), graphic);
 //! 	}
 //! }

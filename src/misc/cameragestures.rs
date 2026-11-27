@@ -46,8 +46,9 @@ use crate::platform;
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-/// 		self.scene_base.tick(engine, time_delta);
+/// 	fn tick(&mut self, time_delta: f64) {
+/// 		let engine = Engine::get_engine().unwrap();
+/// 		self.scene_base.tick(time_delta);
 /// 		self.camera_gestures.update(&engine.get_input_manager(), &engine.get_view_manager());
 /// 		let pan = self.camera_gestures.take_pan();
 /// 		self.camera.pan_by_screen(pan.x, pan.y);

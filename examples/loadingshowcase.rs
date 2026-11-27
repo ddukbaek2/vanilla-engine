@@ -115,14 +115,14 @@ impl Scene for LoadingShowcaseScene {
 	//==============================================================================
 	// 생성. (로딩 화면을 바꾸고, 받을 것을 넣고, 받기를 시작한다)
 	//==============================================================================
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.game_scene_base.set_view_scale_mode(ViewScaleMode::StretchShort, None);
 		self.game_scene_base.set_loading_min_duration_ms(0.0);
 		self.game_scene_base.set_loading_colors("#16324a", "#0b1a27", ACCENT_COLOR);
 		self.game_scene_base.set_loading_outside_color("#05090d");
 		let loading_drawer = LoadingShowcaseScene::create_loading_drawer(self.asset_loader.clone());
 		self.game_scene_base.set_loading_drawer(Some(loading_drawer));
-		self.game_scene_base.create(engine);
+		self.game_scene_base.load(engine);
 
 		self.asset_loader.set_concurrency(3);
 		for image_name in IMAGE_NAME_LIST.iter() {
@@ -147,7 +147,7 @@ impl Scene for LoadingShowcaseScene {
 	//==============================================================================
 	// 로딩 화면 출력. (10 프레임마다 흉내 단계 하나를 끝낸다)
 	//==============================================================================
-	fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn draw_on_load(&mut self, graphic: &mut Graphic) {
 		self.loading_frame_count += 1;
 		let finished_stage_count = (self.loading_frame_count / STAGE_FRAME_INTERVAL) as usize;
 		for stage_handle in self.stage_handle_list.iter().take(finished_stage_count) {
@@ -155,7 +155,7 @@ impl Scene for LoadingShowcaseScene {
 				stage_handle.finish(Ok(Vec::new()));
 			}
 		}
-		self.game_scene_base.draw_on_load(engine, graphic);
+		self.game_scene_base.draw_on_load(graphic);
 	}
 
 	//==============================================================================
@@ -168,15 +168,15 @@ impl Scene for LoadingShowcaseScene {
 	//==============================================================================
 	// 화면 크기 변경됨.
 	//==============================================================================
-	fn resize(&mut self, engine: &Engine, canvas_native_size: Vector2) {
-		self.game_scene_base.resize(engine, canvas_native_size);
+	fn resize(&mut self, canvas_native_size: Vector2) {
+		self.game_scene_base.resize(canvas_native_size);
 	}
 
 	//==============================================================================
 	// 갱신. (공은 고정 걸음으로 움직인다. 벽에 닿으면 튕긴다)
 	//==============================================================================
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.game_scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.game_scene_base.tick(time_delta);
 		let ball_position_x = &mut self.ball_position_x;
 		let previous_ball_position_x = &mut self.previous_ball_position_x;
 		let ball_velocity_x = &mut self.ball_velocity_x;
@@ -193,14 +193,14 @@ impl Scene for LoadingShowcaseScene {
 	//==============================================================================
 	// 이전 출력. (배경)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.game_scene_base.pre_draw(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.game_scene_base.pre_draw(graphic);
 	}
 
 	//==============================================================================
 	// 출력. (받은 그림, 받은 수와 실패 목록, 고정 걸음 공)
 	//==============================================================================
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		graphic.set_fill_color("#16324a");
 		graphic.draw_rect(Rect::create(0.0, 0.0, VIEW_WIDTH, VIEW_HEIGHT));
 		graphic.set_font_string("24px default");

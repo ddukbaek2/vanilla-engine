@@ -4,7 +4,7 @@ This chapter covers loading images, text, JSON, binary data, fonts, and sounds f
 
 ## Loading in the scene's create
 
-Assets are held by the scene as members. There is no central resource manager. Request a load with `load(engine, path)` in the scene's `create` and hand the asset to the scene with `scene_base.track_asset`; once everything tracked has finished, the engine calls `initialize`. Build the nodes that use the assets in `initialize`.
+Assets are held by the scene as members. There is no central resource manager. Request a load with `load(engine, path)` in the scene's `load` and hand the asset to the scene with `scene_base.track_asset`; once everything tracked has finished, the engine calls `initialize`. Build the nodes that use the assets in `initialize`.
 
 ```rust,no_run
 use vanilla::{Engine, EngineConfiguration, Graphic, ImageAsset, Scene, SceneBase, Sprite, Vector2};
@@ -23,7 +23,7 @@ impl Scene for AssetScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.icon_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.icon_asset);
 	}
@@ -46,8 +46,8 @@ impl Scene for AssetScene {
 		icon_node.add_component(Sprite::create_with_image(icon_image));
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -67,15 +67,15 @@ fn main() {
 }
 ```
 
-- On desktop, `load` reads the file right where it is called. On the web, the load finishes some frames later, after `fetch` completes. That is why code that reads the loaded data goes in `initialize`, not in `create`.
-- Until everything tracked has finished, the engine calls `draw_on_load` every frame instead of the scene's `tick` and `draw`. When everything has finished, it waits 0.3 seconds more and then calls `initialize`. With nothing tracked, it is called 0.3 seconds after `create`.
+- On desktop, `load` reads the file right where it is called. On the web, the load finishes some frames later, after `fetch` completes. That is why code that reads the loaded data goes in `initialize`, not in `load`.
+- Until everything tracked has finished, the engine calls `draw_on_load` every frame instead of the scene's `tick` and `draw`. When everything has finished, it waits 0.3 seconds more and then calls `initialize`. With nothing tracked, it is called 0.3 seconds after `load`.
 - An asset that failed to load also counts as finished. The scene does not get stuck, and reading a failed asset gives `None`.
 - Calling `load` again on an asset that already has a request does not read again; it returns the first handle. This holds for failed assets too. To load again, call `unload` first or create a new asset.
 - There are four tracking functions: `track_asset(&asset)`, `track_load_handle(&load_handle)`, `track_audio_asset(&Rc<AudioAsset>)`, and `track_task(&task_handle)`. `get_tracked_asset_progress()` is the finished fraction of what was tracked (0 to 1, failures included, 1 when nothing is tracked).
 
 ## Loading with await
 
-The original `async load(engine) { await asset.load(path); }` becomes a scene task spawned in `create` and handed to the scene with `track_task`. The task runs right where it is spawned up to its first `await`, and it borrows the scene and the engine only inside the closure of `scene_context.with`. The load handle (`AssetLoadHandle`) returned by `load` does not borrow the asset, so it is awaited outside the closure with `.await`.
+The original `async load(engine) { await asset.load(path); }` becomes a scene task spawned in `load` and handed to the scene with `track_task`. The task runs right where it is spawned up to its first `await`, and it borrows the scene and the engine only inside the closure of `scene_context.with`. The load handle (`AssetLoadHandle`) returned by `load` does not borrow the asset, so it is awaited outside the closure with `.await`.
 
 ```rust,no_run
 use vanilla::{wait, Engine, EngineConfiguration, JsonAsset, Scene, SceneBase};
@@ -95,7 +95,7 @@ impl Scene for StageScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		let load_task = engine.spawn_scene_task(self, |mut scene_context| async move {
 			let load_result = scene_context.with(|scene, engine| scene.stage_asset.load(engine, "examples/assets/scenedocument.scene.json")).await;
 			if let Err(error_message) = load_result {
@@ -210,7 +210,7 @@ assert!(!blob_asset.is_loaded());
 
 ## Fonts
 
-`FontAsset` loads with `load_font(engine, family, path)`, not with `load`. When the bytes arrive, the engine adds the font to the glyph cache's font list under that name at the start of the next frame; from then on the name works in `Text.set_font_family(family)` and in font strings (`"32px family"`). The `load_font` functions take `&Engine`, so call them in `create`.
+`FontAsset` loads with `load_font(engine, family, path)`, not with `load`. When the bytes arrive, the engine adds the font to the glyph cache's font list under that name at the start of the next frame; from then on the name works in `Text.set_font_family(family)` and in font strings (`"32px family"`). The `load_font` functions take `&Engine`, so call them in `load`.
 
 | Method | Description |
 | --- | --- |
@@ -239,7 +239,7 @@ impl Scene for FontScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.regular_font_asset.load_font(engine, "GameFont", "fonts/GameFont-Regular.ttf");
 		let bold_descriptors = FontFaceDescriptors::create_from_css("700", "normal", "");
 		self.bold_font_asset.load_font_with_descriptors(engine, "GameFont", "fonts/GameFont-Bold.ttf", bold_descriptors);
@@ -259,8 +259,8 @@ impl Scene for FontScene {
 		title_text.set_bold(true);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -304,7 +304,7 @@ impl Scene for SoundScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		match engine.load_audio_asset("tests/assets/audio/wav_s16_stereo.wav") {
 			Ok(audio_asset) => {
 				self.scene_base.track_audio_asset(&audio_asset);
@@ -425,7 +425,7 @@ impl Scene for LoadingScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.asset_loader.set_concurrency(4);
 		self.icon_asset = Some(self.asset_loader.add_image("examples/assets/atlas/icons.png"));
 		self.atlas_json_asset = Some(self.asset_loader.add_json("examples/assets/atlas/icons.json"));
@@ -434,14 +434,15 @@ impl Scene for LoadingScene {
 		self.asset_loader.load(engine);
 	}
 
-	fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn draw_on_load(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		self.asset_loader.update(engine);
 		self.loading_progress.set_progress(self.asset_loader.get_progress());
 		let time_delta = engine.get_time_manager().get_unscale_delta_time();
 		self.loading_progress.update(time_delta);
 		let shown_progress = self.loading_progress.get_shown_progress();
 
-		self.scene_base.draw_scene_background(engine, graphic);
+		self.scene_base.draw_scene_background(graphic);
 		let view_size = engine.get_view_manager().get_view_size();
 		let bar_width = view_size.x * 0.6;
 		let bar_left = (view_size.x - bar_width) * 0.5;
@@ -569,7 +570,7 @@ impl Scene for AtlasScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		let load_task = engine.spawn_scene_task(self, |mut scene_context| async move {
 			scene_context.with(|scene, engine| scene.sprite_atlas.load(engine, "examples/assets/atlas/icons.json")).await;
 		});
@@ -643,7 +644,7 @@ assert!(SpriteAtlas::find_frame("right").is_none());
 - `read_frame(name)` returns `Option<&Frame>` (an image and an area in it). There are also `has_frame(name)`, `get_frame_names()`, `get_page_images()`, `get_page_count()`, and `is_loaded()`.
 - `apply_frame(&mut sprite, name)` sets the piece on a sprite. For an unknown name it clears the sprite's image and returns `false`.
 - The search list holds atlases as `Rc<RefCell<SpriteAtlas>>`. After adding them with `SpriteAtlas::add_search_atlas`, `SpriteAtlas::find_frame(name)` (a copy of the piece, `Option<Frame>`) and `SpriteAtlas::apply_search_frame(&mut sprite, name)` search in the order they were added (earlier wins). Remove them with `remove_search_atlas` and `clear_search_atlases`. There is one list per thread. To avoid the global list, use `SpriteAtlas::find_frame_in_order(&[&atlas], name)` and `SpriteAtlas::apply_frame_in_order(&[&atlas], &mut sprite, name)`.
-- Without await, call `load` in `create`, hand the JSON to the scene with `track_json_asset(&mut scene_base)`, and call `update(engine)` in `draw_on_load` or `tick` until `is_loaded()` is true. The page images are requested by `update` after the JSON arrives.
+- Without await, call `load` in `load`, hand the JSON to the scene with `track_json_asset(&mut scene_base)`, and call `update(engine)` in `draw_on_load` or `tick` until `is_loaded()` is true. The page images are requested by `update` after the JSON arrives.
 - While loading again, the previously loaded pieces stay in use, like the original.
 
 ## Things to watch

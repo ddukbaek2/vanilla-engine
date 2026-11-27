@@ -100,7 +100,7 @@ assert!(UIDocument::find_node_by_path(&node_tree, document_root_id, "/Missing").
 
 문서에는 그림 원본이 아니라 경로(`imagePath`)만 적힙니다. `Sprite`, `UIImageView`, `ShadowImage` 가 이 칸을 씁니다. 그림을 잇는 길은 둘입니다.
 
-- 애셋 폴더에서 읽기: `from_json_text` 앞에 `load_images(engine, json_text)` 를 부르면 문서의 `imagePath` 마다 `ImageAsset` 을 요청해 문서 안에 들고, 새로 요청한 읽기 손잡이 목록을 돌려줍니다. 씬이 `create` 에서 부르면 손잡이를 `track_load_handle` 로 맡겨 `initialize` 를 기다리게 할 수 있습니다. 데스크탑은 그 자리에서 읽히고, 웹처럼 나중에 읽히면 아직 읽히지 않은 그림은 문서가 맡아 두었다가 `bind_pending_images(node_tree)` 가 붙입니다. 남은 수가 0 이 될 때까지 씬의 `tick` 에서 부릅니다.
+- 애셋 폴더에서 읽기: `from_json_text` 앞에 `load_images(engine, json_text)` 를 부르면 문서의 `imagePath` 마다 `ImageAsset` 을 요청해 문서 안에 들고, 새로 요청한 읽기 손잡이 목록을 돌려줍니다. 씬이 `load` 에서 부르면 손잡이를 `track_load_handle` 로 맡겨 `initialize` 를 기다리게 할 수 있습니다. 데스크탑은 그 자리에서 읽히고, 웹처럼 나중에 읽히면 아직 읽히지 않은 그림은 문서가 맡아 두었다가 `bind_pending_images(node_tree)` 가 붙입니다. 남은 수가 0 이 될 때까지 씬의 `tick` 에서 부릅니다.
 - 해석기: `set_image_resolver(resolver)` 로 경로 → `Option<Rc<Image>>` 함수를 걸면 애셋 창고 대신 그것으로 찾습니다. 바로 돌려줘야 하므로 그림은 먼저 받아 둡니다.
 
 찾지 못한 그림은 경고를 찍고 버리고, 그 컴포넌트는 원본처럼 그림 없이 남습니다.
@@ -206,7 +206,7 @@ assert_eq!(node_tree[node_table["Emblem"]].get_local_position().x, 480.0);
 assert!(!timeline.is_playing());
 ```
 
-- 읽기: `Timeline::load_from_text(text)`(JSON 글에서, 실패하면 `Err`), `Timeline::create_from_json_asset(&mut json_asset)`(읽은 `JsonAsset` 에서, 서술을 복제해 씀, 안 읽혔으면 `None`), `Timeline::load_from_url(engine, url)`(원본 `loadFromUrl`, 엔진 작업 안에서 await 하면 `Result<Timeline, String>` 이 나오는 퓨처). 씬은 `create` 에서 `JsonAsset` 을 요청해 `track_asset` 으로 맡기고, `initialize` 에서 `create_from_json_asset` 으로 만드는 꼴이 가장 쉽습니다. `AssetLoader` 로 다른 애셋과 함께 받아도 됩니다.
+- 읽기: `Timeline::load_from_text(text)`(JSON 글에서, 실패하면 `Err`), `Timeline::create_from_json_asset(&mut json_asset)`(읽은 `JsonAsset` 에서, 서술을 복제해 씀, 안 읽혔으면 `None`), `Timeline::load_from_url(engine, url)`(원본 `loadFromUrl`, 엔진 작업 안에서 await 하면 `Result<Timeline, String>` 이 나오는 퓨처). 씬은 `load` 에서 `JsonAsset` 을 요청해 `track_asset` 으로 맡기고, `initialize` 에서 `create_from_json_asset` 으로 만드는 꼴이 가장 쉽습니다. `AssetLoader` 로 다른 애셋과 함께 받아도 됩니다.
 - 무대: `build_stage(node_tree, parent_id, image_resolver)` 는 문서의 무대 노드를 만들어 `parent_id` 아래에 붙이고, 이름 → `NodeId` 표(`HashMap`)를 돌려줍니다. 이미 지은 노드 트리에 트랙을 걸려면 `bind(node_tree, root_id)` 로 트랙의 대상 이름과 같은 이름의 노드를 찾아 붙입니다. 대상은 `TimelineTarget` 으로, 노드는 `Node(NodeId)`, 노드가 아닌 것(화면 효과 같은)은 `External` 이고, `set_target(name, target)` 이나 `set_target_resolver(resolver)` 로 겁니다.
 - 그림: 편집기에서 가져온 그림은 문서의 `image` 칸에 `data:` 주소로 들어가고, 런타임이 스스로 풉니다. (데스크탑은 그 자리에서, 웹은 브라우저가 풀면 겁니다) 이름으로 적힌 그림은 `image_resolver` 가 돌려줘야 합니다. 해석기는 `Some(&|image_name: &str| image_table.get(image_name).cloned())` 처럼 넘깁니다.
 - 재생: `play()`, `pause()`, `stop(node_tree)`(처음으로), `seek(node_tree, time)`(이벤트를 내지 않음)과, 매 프레임 `tick(node_tree, time_delta)` 를 부릅니다. 노드를 움직이는 함수는 `NodeTree` 를 같이 받습니다. `set_loop`, `set_speed` 로 반복과 빠르기를 바꿉니다.
@@ -311,7 +311,7 @@ Visual Editor 는 씬을 UI 문서와 같은 꼴로 저장합니다. 처음 저�
 
 ![Visual Editor 에 UI 쇼케이스의 컴포넌트 문서를 씬으로 연 화면: 왼쪽 하이어라키, 가운데 씬 뷰와 이동 핸들, 오른쪽 인스펙터](../images/tool-visual-editor.webp)
 
-아래 예제는 저장소의 `examples/assets/scenedocument.scene.json`(Visual Editor 저장 꼴로 만든 씬)을 읽습니다. 씬 파일은 `create` 에서 `TextAsset` 으로 요청해 맡기고, `initialize` 에서 그림을 요청한 뒤 트리를 짓고, `tick` 에서 늦게 읽힌 그림을 붙입니다. 단추 누름은 `set_clicked_event` 의 함수가 씬을 빌릴 수 없으므로 `Rc<Cell>` 로 알리고 `tick` 에서 받습니다. 이 씬 파일의 그림 몇 장은 저장소에 없어 경고를 찍고 그림 없이 남습니다.
+아래 예제는 저장소의 `examples/assets/scenedocument.scene.json`(Visual Editor 저장 꼴로 만든 씬)을 읽습니다. 씬 파일은 `load` 에서 `TextAsset` 으로 요청해 맡기고, `initialize` 에서 그림을 요청한 뒤 트리를 짓고, `tick` 에서 늦게 읽힌 그림을 붙입니다. 단추 누름은 `set_clicked_event` 의 함수가 씬을 빌릴 수 없으므로 `Rc<Cell>` 로 알리고 `tick` 에서 받습니다. 이 씬 파일의 그림 몇 장은 저장소에 없어 경고를 찍고 그림 없이 남습니다.
 
 ```rust,no_run
 use std::cell::Cell;
@@ -336,7 +336,7 @@ impl Scene for VisualScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.scene_asset.load(engine, "scenedocument.scene.json");
 		self.scene_base.track_asset(&self.scene_asset);
 	}
@@ -376,8 +376,8 @@ impl Scene for VisualScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		let node_tree = self.scene_base.get_node_tree_mut();
 		self.document.bind_pending_images(node_tree);
 		if self.is_button_clicked.replace(false) {
@@ -389,8 +389,8 @@ impl Scene for VisualScene {
 		}
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 

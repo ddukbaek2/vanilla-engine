@@ -280,8 +280,8 @@ impl Scene for ToonPostScene {
 	//==============================================================================
 	// 바탕을 칠하고 화면 배율을 건다. (3D 판은 노드가 그린다)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
 	fn initialize(&mut self, _engine: &Engine) {

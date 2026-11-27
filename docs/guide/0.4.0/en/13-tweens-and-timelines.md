@@ -157,7 +157,7 @@ impl Scene for TweenScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &Engine) {
+	fn load(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let box_id = node_tree.create_child(root_id, "Box");
@@ -180,8 +180,8 @@ impl Scene for TweenScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.start_next_pulse();
 	}
 }
@@ -203,7 +203,7 @@ fn main() {
 }
 ```
 
-If you override `Scene::tick`, call `self.scene_base.tick(engine, time_delta)` yourself as above, or nodes and tweens will not update.
+If you override `Scene::tick`, call `self.scene_base.tick(time_delta)` yourself as above, or nodes and tweens will not update.
 
 ## Animation and Frame
 
@@ -242,7 +242,7 @@ assert_eq!(animation.get_current_frame_index(), 3);
 assert!(!animation.is_playing());
 ```
 
-Below is a scene that cuts four icon cells from the repository's `examples/assets/atlas/icons.png` and flips through them. The image is requested in `create` and handed to the scene, and the frames are added in `initialize`, which is called once loading is done.
+Below is a scene that cuts four icon cells from the repository's `examples/assets/atlas/icons.png` and flips through them. The image is requested in `load` and handed to the scene, and the frames are added in `initialize`, which is called once loading is done.
 
 ```rust,no_run
 use vanilla::{Animation, Engine, EngineConfiguration, ImageAsset, NodeId, Rect, Scene, SceneBase, Sprite, Vector2};
@@ -263,7 +263,7 @@ impl Scene for AnimationScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
@@ -293,8 +293,8 @@ impl Scene for AnimationScene {
 		self.icon_id = Some(icon_id);
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.animation.tick(time_delta);
 		if let Some(icon_id) = self.icon_id {
 			let node_tree = self.scene_base.get_node_tree_mut();
@@ -350,7 +350,7 @@ impl Scene for AnimatorScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
@@ -381,7 +381,7 @@ impl Scene for AnimatorScene {
 		self.hero_id = Some(hero_id);
 	}
 
-	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, _view_input_position: Vector2) {
 		if let Some(hero_id) = self.hero_id {
 			let options = SpriteAnimatorPlayOptions {
 				on_complete: Some(Box::new(|sprite_animator: &mut SpriteAnimator| {
@@ -561,7 +561,7 @@ impl Scene for TimelineScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
@@ -588,8 +588,8 @@ impl Scene for TimelineScene {
 		self.timeline.play();
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
 	}
 }
@@ -737,7 +737,7 @@ impl Scene for StateScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
@@ -784,8 +784,8 @@ impl Scene for StateScene {
 		self.state_machine.change_state("idle", false);
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.state_machine.tick(time_delta);
 		if let (Some(hero_id), Some(state_name)) = (self.hero_id, self.state_machine.get_state_name()) {
 			let hero_node = &mut self.scene_base.get_node_tree_mut()[hero_id];
@@ -843,7 +843,7 @@ assert!(action.is_done());
 
 ## Things to watch out for
 
-- `Animation`, `Timeline`, `FiniteStateMachine` and `Action` do not advance time by themselves. Call `tick(time_delta)` or `step` from the scene's `tick`. Tweens handed over with `scene_base.start_tween` are updated by `SceneBase::tick`, so if you override `Scene::tick` and leave out `self.scene_base.tick(engine, time_delta)`, tweens stop.
+- `Animation`, `Timeline`, `FiniteStateMachine` and `Action` do not advance time by themselves. Call `tick(time_delta)` or `step` from the scene's `tick`. Tweens handed over with `scene_base.start_tween` are updated by `SceneBase::tick`, so if you override `Scene::tick` and leave out `self.scene_base.tick(time_delta)`, tweens stop.
 - Tween and timeline callbacks do not receive node objects as in the original; they receive `&mut NodeTree`. Look up `node_tree[node_id]` with a `NodeId` you captured. To change values outside the callback, capture an `Rc<Cell>` or `Rc<RefCell>`.
 - Wrap timeline handlers in `Box::new`, put them in `Some`, and write out the closure argument types as in the examples above.
 - `SpriteAnimator` looks up the `Sprite` on the same node. Without a `Sprite`, the image does not change. `SpriteAnimator::play`, which takes the node, puts the first frame in right away, and `play_clip`, which takes only the animator, puts it in at the next frame update.

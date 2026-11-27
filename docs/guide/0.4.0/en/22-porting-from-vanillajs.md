@@ -120,7 +120,8 @@ impl Scene for NodeScene {
 		badge_paint.set_round_size(32.0);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		engine.get_view_manager().apply_view_rect(graphic);
 	}
 }
@@ -141,11 +142,11 @@ fn main() {
 
 - `class NodeScene extends Scene` becomes a struct holding a `SceneBase` plus `impl Scene`. The two functions you must write are `get_scene_base` and `get_scene_base_mut`, which hand out the shared state.
 - Hooks receive `&Engine` as an argument, in place of the original `this.getEngine()`.
-- There are no superclass calls such as the original `super.initialize(engine)`, because the trait's default implementations are empty. However, the defaults of `tick` and `draw` update and draw the node tree, so when you override them, call `self.scene_base.tick(engine, time_delta)` and `self.scene_base.draw(graphic)` where the original called `super.tick` and `super.draw`.
+- There are no superclass calls such as the original `super.initialize(engine)`, because the trait's default implementations are empty. However, the defaults of `tick` and `draw` update and draw the node tree, so when you override them, call `self.scene_base.tick(time_delta)` and `self.scene_base.draw(graphic)` where the original called `super.tick` and `super.draw`.
 - `new WorldNode()` plus `root.addChild(panel)` is the single line `node_tree.create_child(root_id, "Panel")`. To create a node without a parent, use `create_node(name)` and then `add_child(parent, child)`.
 - `addComponent(Paint)` takes a class, while `add_component(Paint::new())` takes a value and returns a `&mut` to the attached component.
 - `engine.run` returns `Err(reason)` when it cannot create the window or GL.
-- The original scene `load` step becomes handing assets over in `create` (`async load` is covered in the "async/await" chapter).
+- The original scene `load(engine)` is also `load(engine)` in the Rust edition, where assets are requested and handed to the scene (`async load` is covered in the "async/await" chapter).
 
 ## Traits and Shared State Structs Instead of Class Inheritance
 
@@ -292,7 +293,8 @@ The original gets the engine from anywhere with `Engine.getEngine()` or `this.ge
 
 | Place | How it receives the engine |
 | --- | --- |
-| Scene hooks (`create`, `initialize`, `tick`, `pre_draw`, and so on) | The `engine: &Engine` argument |
+| Scene hooks that take the engine in the original (`load`, `initialize`, `finalize`, `unload`) | The `engine: &Engine` argument (like the original `load(engine)`) |
+| Other scene hooks (`create`, `tick`, `pre_draw`, `draw`, `touch_press`, `resize`, and so on) | `Engine::get_engine()` (as in the original, the arguments are only `time_delta`, `graphic`, `view_input_position` and the like) |
 | A component's `tick`, touch, wheel | `context.get_engine()` (`&Engine`) |
 | Callbacks (such as `UIButtonEvent`) | The `ComponentContext` the callback receives |
 | async tasks | `engine_context.with(\|engine\| ...)`, `scene_context.with(\|scene, engine\| ...)` |
@@ -303,7 +305,7 @@ The original `UIView.getEngine` is left out of the inspector's getter list (in t
 The original `engine.getGraphic()` is `engine.get_graphic()` (`get_graphic_mut()` to change it). You build GL resources in any of the places above that receive the engine. Two things differ.
 
 - The scene's drawing hooks (`pre_draw`, `draw`, `post_draw`, `draw_on_load`, `draw_gizmos`) receive `graphic: &mut Graphic` as an argument. It is the engine's graphic taken out for a moment and passed in, so inside them `engine.get_graphic()` is `None` and you use the `graphic` argument. To use the engine and the graphic together as `&mut` outside drawing, call `engine.with_graphic(|engine, graphic| ...)`.
-- A component's `attach`, which does not receive the engine, cannot reach the graphic either. Build GL resources where you create the component (the scene's `create`) or in the component's `tick`.
+- A component's `attach`, which does not receive the engine, cannot reach the graphic either. Build GL resources where you create the component (the scene's `load`) or in the component's `tick`.
 
 ## Callbacks and Rc<RefCell>
 

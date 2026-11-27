@@ -237,7 +237,7 @@ impl Scene for BatchClipScene {
 	//==============================================================================
 	// 생성.
 	//==============================================================================
-	fn create(&mut self, _engine: &Engine) {
+	fn load(&mut self, _engine: &Engine) {
 		match self.scene_kind {
 			SceneKind::Clip => {
 				self.create_clip_scene();
@@ -251,7 +251,8 @@ impl Scene for BatchClipScene {
 	//==============================================================================
 	// 출력. (씬이 그려진 다섯째 프레임을 찍고, 그다음 프레임에 끝낸다)
 	//==============================================================================
-	fn draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		if let Some(capture_frame_number) = self.capture_frame_number {
 			if engine.get_frame_number() > capture_frame_number {
 				println!("drawCalls={:?}", self.draw_call_count_list);

@@ -1210,7 +1210,7 @@ impl LayerReader<'_> {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn create(&mut self, engine: &Engine) {
+/// 	fn load(&mut self, engine: &Engine) {
 /// 		let fbx_load_handle = FbxLoader::load_from_url(engine, "anims/walk.fbx");
 /// 		self.scene_base.track_load_handle(fbx_load_handle.get_load_handle());
 /// 		self.fbx_load_handle = Some(fbx_load_handle);

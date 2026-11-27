@@ -33,11 +33,11 @@ impl Scene for MainScene {
 		&mut self.scene_base
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		graphic.set_fill_color(Colors::WHITE);
 		graphic.draw_rect(Rect::create(100.0, 100.0, 200.0, 120.0));
 	}
@@ -67,7 +67,7 @@ cargo run
 
 엔진 저장소 안에서는 같은 코드가 `examples/quickstart.rs` 에 있습니다. (`cargo run --example quickstart`, 창 제목만 다릅니다)
 
-- 씬은 `Scene` 트레이트를 구현합니다. 꼭 구현할 것은 씬 공통 상태(`SceneBase`)를 내주는 `get_scene_base`, `get_scene_base_mut` 둘이고, 나머지 훅(`create`, `initialize`, `tick`, `pre_draw`, `draw` 같은 것)은 필요한 것만 덮어씁니다.
+- 씬은 `Scene` 트레이트를 구현합니다. 꼭 구현할 것은 씬 공통 상태(`SceneBase`)를 내주는 `get_scene_base`, `get_scene_base_mut` 둘이고, 나머지 훅(`load`, `initialize`, `tick`, `pre_draw`, `draw` 같은 것)은 필요한 것만 덮어씁니다. 훅의 이름과 인자는 원본과 같습니다. (`load(engine)`, `tick(time_delta)`, `draw(graphic)`, 엔진을 받지 않는 훅에서는 `Engine::get_engine()`)
 - `pre_draw` 에서 부른 `SceneBase::draw_scene_background` 는 창 전체를 씬 배경색(처음 검정)으로 칠하고, 그다음 그리기를 뷰 좌표로 바꿉니다. 그래서 `draw` 의 `Rect::create(100.0, 100.0, 200.0, 120.0)` 은 기준 해상도 1280 x 720 안의 자리입니다.
 - 기본 `draw` 는 씬의 노드 트리를 그립니다. 이 예제는 노드가 없어 덮어쓴 `draw` 에서 사각형만 그립니다. 노드를 쓰는 씬은 덮어쓴 `draw` 에서 `self.scene_base.draw(graphic)` 을 함께 부릅니다.
 - `reference_resolution_size` 는 게임이 그리는 기준 해상도입니다. 창 크기가 달라도 뷰 스케일 모드(처음 `ViewScaleMode::StretchShort`)가 이 크기를 창에 맞춰 늘이고 줄입니다.

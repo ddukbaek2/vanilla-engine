@@ -133,7 +133,7 @@ class StageScene extends Scene {
 }
 ```
 
-러스트 판은 `create` 에서 불러오기 작업을 맡기고 `scene_base.track_task` 로 씬에 맡깁니다. 엔진은 맡긴 작업이 끝날 때까지 `draw_on_load` 만 부르고, 끝난 뒤 원본처럼 0.3 초를 더 기다려 `initialize` 를 부릅니다.
+러스트 판은 `load` 에서 불러오기 작업을 맡기고 `scene_base.track_task` 로 씬에 맡깁니다. 엔진은 맡긴 작업이 끝날 때까지 `draw_on_load` 만 부르고, 끝난 뒤 원본처럼 0.3 초를 더 기다려 `initialize` 를 부릅니다.
 
 ```rust,no_run
 use std::path::PathBuf;
@@ -153,7 +153,7 @@ impl Scene for StageScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 			let load_result = scene_context.with(|scene, engine| scene.stage_asset.load(engine, "scenedocument.scene.json")).await;
 			if let Err(reason) = load_result {

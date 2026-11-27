@@ -10,13 +10,13 @@
 //! - 원본 SceneManager.unloadScene(scene) 은 씬 객체로 가리킨다. 러스트 판은 엔진이 씬을 들고 있어 load_scene 이 돌려주는 SceneId 나
 //!   씬 공통 상태(&SceneBase, 원본처럼 씬으로)로 가리킨다. 씬 스스로는 get_scene_base().get_scene_id() 로 자기 핸들을 안다.
 //! - 내릴 때는 원본처럼 finalize 다음 unload 를 부르고, 러스트 판은 씬을 버리기 직전에 destroy 를 더 부른다.
-//! - 원본 async load(engine) 자리: create 에서 Engine::spawn_scene_task 로 불러오기 작업을 맡기고 track_task 로 씬에 맡긴다.
+//! - 원본 async load(engine) 자리: load 에서 Engine::spawn_scene_task 로 불러오기 작업을 맡기고 track_task 로 씬에 맡긴다.
 //!   작업 안에서는 원본처럼 await 로 애셋을 기다리고, SceneContext::with 안에서 씬과 엔진을 만진다. 맡긴 작업과 애셋이 모두 끝나야 initialize 를 부른다.
 //!   애셋 손잡이를 track_asset 으로 맡기는 동기 꼴도 그대로 된다. (둘을 섞어도 된다)
 //!   원본 await unload(engine) 자리: unload 에서 맡긴 작업(track_task)이 끝날 때까지 씬은 목록에 남아 tick, draw 를 받고, 끝나면 목록에서 빠진다.
 //!   그 뒤에도 그 씬의 작업이 남았으면 원본의 Promise 사슬처럼 다 끝날 때까지 씬 값이 살고(tick, draw 는 받지 않는다), 불러오는 도중에 내린 씬은
 //!   원본 SceneManager.loadScene 처럼 불러오기가 끝나면 initialize 까지 받는다. 다 끝나면 엔진이 destroy 를 부르고 버린다.
-//! - 원본 Scene.load 가 루트를 뷰 크기로 맞추는 것(자리 0, 왼쪽 위 피벗, 콘텐츠 크기는 뷰 크기)은 엔진이 create 바로 뒤에 한다.
+//! - 원본 Scene.load 가 루트를 뷰 크기로 맞추는 것(자리 0, 왼쪽 위 피벗, 콘텐츠 크기는 뷰 크기)은 엔진이 create 와 load 사이에 한다.
 //!   원본 SceneManager.loadScene 처럼 맡긴 애셋이 다 끝난 뒤에도 로딩 화면(draw_on_load)을 최소 0.3초 더 보이고 initialize 를 부른다.
 //! - 씬의 터치 훅(touch_press, touch_move, touch_release, touch_cancel, touch_wheel)은 원본 Scene.tickTouch 차례로 엔진이 tick 뒤에 부른다.
 //!   SceneBase.tick 은 씬 꼴과 상관없이 가장 앞의 누를 수 있는 노드에도 넘긴다. (원본 Scene.tickTouch 가 씬의 TouchRaycaster 로 넘기는 것과 같다)
@@ -138,6 +138,8 @@ pub struct SceneBase {
 	scene_background_color: Color,
 	pressed_node_id: Option<NodeId>,
 	tracked_load_list: Vec<TrackedLoad>,
+	/// 엔진 시계로 열리는 맡긴 손잡이. (GameSceneBase 의 로딩 문, 찍기 모드의 프레임 세우기에서 뺀다)
+	engine_clock_load_handle: Option<AssetLoadHandle>,
 	/// 내리기를 시작했는지. (그 뒤로 맡긴 것은 내리기 작업이다, 원본 await scene.unload 자리)
 	is_unload_started: bool,
 	tracked_unload_list: Vec<TrackedLoad>,
@@ -170,6 +172,7 @@ impl SceneBase {
 			scene_background_color: Color::black(),
 			pressed_node_id: None,
 			tracked_load_list: Vec::new(),
+			engine_clock_load_handle: None,
 			is_unload_started: false,
 			tracked_unload_list: Vec::new(),
 			has_ever_touched: false,
@@ -261,7 +264,7 @@ impl SceneBase {
 	}
 
 	//==============================================================================
-	/// 애셋 맡기기. (create 에서 load 를 요청한 애셋. 맡긴 것이 다 읽히면 엔진이 initialize 를 부른다)
+	/// 애셋 맡기기. (load 에서 읽기를 요청한 애셋. 맡긴 것이 다 읽히면 엔진이 initialize 를 부른다)
 	///
 	/// # 인자
 	/// - `asset`: load 를 요청한 애셋. (읽기 손잡이가 없는 애셋은 맡기지 않는다)
@@ -293,14 +296,14 @@ impl SceneBase {
 	}
 
 	//==============================================================================
-	/// 작업 맡기기. (원본 async load 자리, create 에서 spawn_scene_task 로 맡긴 불러오기 작업. 끝나야 엔진이 initialize 를 부른다)
+	/// 작업 맡기기. (원본 async load 자리, load 에서 spawn_scene_task 로 맡긴 불러오기 작업. 끝나야 엔진이 initialize 를 부른다)
 	/// - unload 에서 맡기면 원본 await scene.unload 처럼 끝나야 내리기가 끝난다. (그동안 씬은 목록에 남는다)
 	///
 	/// # 인자
 	/// - `task_handle`: 기다릴 작업의 손잡이. (spawn_scene_task, spawn_task 가 돌려준 것)
 	///
 	/// # 예제
-	/// 원본 async load 자리: create 에서 불러오기 작업을 맡기기
+	/// 원본 async load 자리: load 에서 불러오기 작업을 맡기기
 	/// ```rust,no_run
 	/// use vanilla::{Engine, Scene, SceneBase, SceneContext};
 	///
@@ -318,7 +321,7 @@ impl SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&mut self, engine: &Engine) {
+	/// 	fn load(&mut self, engine: &Engine) {
 	/// 		let task_handle = engine.spawn_scene_task(self, |mut scene_context: SceneContext<StageScene>| async move {
 	/// 			let load_handle = scene_context.with(|_scene, engine| engine.request_asset_bytes("examples/assets/scenedocument.scene.json"));
 	/// 			if let Ok(bytes) = load_handle.await {
@@ -383,6 +386,31 @@ impl SceneBase {
 		let scene_id = SceneId::from(&*self);
 		for load_resolver in std::mem::take(&mut self.load_resolver_list) {
 			load_resolver.resolve(scene_id);
+		}
+	}
+
+	//==============================================================================
+	/// 엔진 시계로 열리는 맡긴 손잡이 적기. (GameSceneBase 의 로딩 문. 찍기 모드의 프레임 세우기가 이것은 기다리지 않는다)
+	//==============================================================================
+	pub(crate) fn set_engine_clock_load_handle(&mut self, load_handle: &AssetLoadHandle) {
+		self.engine_clock_load_handle = Some(load_handle.clone());
+	}
+
+	//==============================================================================
+	/// 찍기 모드에서 엔진 프레임 번호와 시계를 세울지. (원본 Scene.isCaptureFrameHeld)
+	/// - 불러오는 중이고, 엔진 시계로 열리는 로딩 문을 뺀 맡긴 애셋과 작업(애셋 받기처럼 실제 시간이 드는 것)이 남았으면 참이다. 다 받은 뒤부터 센다.
+	//==============================================================================
+	pub(crate) fn is_capture_frame_held(&self) -> bool {
+		if self.is_loaded {
+			return false;
+		}
+		match self.engine_clock_load_handle.as_ref() {
+			Some(engine_clock_load_handle) => {
+				!self.are_tracked_assets_finished_except(engine_clock_load_handle)
+			}
+			None => {
+				!self.are_tracked_assets_finished()
+			}
 		}
 	}
 
@@ -519,7 +547,7 @@ impl SceneBase {
 	/// 루트 노드.
 	///
 	/// # 돌려줌
-	/// 루트 노드. (엔진이 create 뒤에 뷰 크기로 맞춘다)
+	/// 루트 노드. (엔진이 create 와 load 사이에 뷰 크기로 맞춘다)
 	//==============================================================================
 	pub fn get_root(&self) -> &WorldNode {
 		let root_id = self.node_tree.get_root_id();
@@ -601,12 +629,12 @@ impl SceneBase {
 	/// 기본 갱신. (루트 노드 → 터치 → 트윈)
 	///
 	/// # 인자
-	/// - `engine`: 엔진. (입력과 매니저를 읽는다)
 	/// - `time_delta`: 배율을 곱한 프레임 간격. (초)
 	//==============================================================================
-	pub fn tick(&mut self, engine: &Engine, time_delta: f64) {
+	pub fn tick(&mut self, time_delta: f64) {
+		let engine = crate::core::globalengine::expect_global_engine("SceneBase::tick");
 		self.node_tree.tick(engine, time_delta);
-		self.tick_touch(engine);
+		self.tick_touch(time_delta);
 		self.tick_tweens(time_delta);
 	}
 
@@ -715,9 +743,10 @@ impl SceneBase {
 	/// - 휠은 누름과 상관없이 그 자리의 가장 앞 스크롤 칸이나 누를 수 있는 노드부터 부모 쪽으로 넘긴다.
 	///
 	/// # 인자
-	/// - `engine`: 엔진. (입력 매니저의 뷰 입력 위치와 누름, 뗌, 휠을 읽는다)
+	/// - `_time_delta`: 배율을 곱한 프레임 간격. (초, 원본 tickTouch(timeDelta) 와 같은 인자. 입력은 엔진의 입력 매니저에서 읽는다)
 	//==============================================================================
-	pub fn tick_touch(&mut self, engine: &Engine) {
+	pub fn tick_touch(&mut self, _time_delta: f64) {
+		let engine = crate::core::globalengine::expect_global_engine("SceneBase::tick_touch");
 		// 입력 값은 먼저 읽어 두고 빌림을 놓는다. (아래에서 넘기는 노드의 컴포넌트가 입력 매니저를 고칠 수 있다)
 		let input_manager = engine.get_input_manager();
 		let view_input_position = input_manager.get_view_input_position();
@@ -789,7 +818,6 @@ impl SceneBase {
 	/// 캔버스 전체를 배경색으로 칠하고 뷰 좌표계를 건다. (원본 GameScene.preDraw)
 	///
 	/// # 인자
-	/// - `engine`: 엔진. (뷰 매니저의 캔버스 크기와 뷰 영역을 읽는다)
 	/// - `graphic`: 칠할 그래픽. (끝나면 뷰 좌표계가 걸려 있다)
 	///
 	/// # 예제
@@ -810,17 +838,18 @@ impl SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&mut self, _engine: &Engine) {
+	/// 	fn load(&mut self, _engine: &Engine) {
 	/// 		self.scene_base.set_scene_background_color("#203040");
 	/// 	}
 	///
-	/// 	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-	/// 		self.scene_base.draw_scene_background(engine, graphic);
+	/// 	fn pre_draw(&mut self, graphic: &mut Graphic) {
+	/// 		self.scene_base.draw_scene_background(graphic);
 	/// 	}
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn draw_scene_background(&self, engine: &Engine, graphic: &mut Graphic) {
+	pub fn draw_scene_background(&self, graphic: &mut Graphic) {
+		let engine = crate::core::globalengine::expect_global_engine("SceneBase::draw_scene_background");
 		let view_manager = engine.get_view_manager();
 		let canvas_native_size = view_manager.get_canvas_native_size();
 
@@ -911,11 +940,11 @@ impl<T: Scene + 'static> SceneAny for T {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-/// 		self.scene_base.draw_scene_background(engine, graphic);
+/// 	fn pre_draw(&mut self, graphic: &mut Graphic) {
+/// 		self.scene_base.draw_scene_background(graphic);
 /// 	}
 ///
-/// 	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+/// 	fn draw(&mut self, graphic: &mut Graphic) {
 /// 		graphic.set_fill_color(Colors::WHITE);
 /// 		graphic.draw_rect(Rect::create(100.0, 100.0, 200.0, 120.0));
 /// 	}
@@ -950,7 +979,7 @@ impl<T: Scene + 'static> SceneAny for T {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn touch_press(&mut self, _engine: &Engine, view_input_position: Vector2) {
+/// 	fn touch_press(&mut self, view_input_position: Vector2) {
 /// 		self.last_touch_position = view_input_position;
 /// 	}
 /// }
@@ -974,18 +1003,26 @@ pub trait Scene: SceneAny {
 	fn get_scene_base_mut(&mut self) -> &mut SceneBase;
 
 	//==============================================================================
-	/// 생성. (엔진이 씬을 불러올 때 한 번. 노드 트리와 애셋을 여기서 만든다)
-	/// - 원본 async load 자리: engine.spawn_scene_task(self, |mut scene_context| async move { ... }) 로 맡긴 작업을 get_scene_base_mut().track_task 로 맡긴다.
+	/// 생성. (엔진이 씬을 불러올 때 load 앞에 한 번, 원본 create)
+	/// - 씬 공통 상태는 SceneBase::new 가 이미 만들었다. 엔진이 필요 없는 칸 채우기를 여기서 한다. (엔진은 Engine::get_engine())
+	//==============================================================================
+	fn create(&mut self) {
+	}
+
+	//==============================================================================
+	/// 불러오기. (엔진이 씬을 불러올 때 create 뒤에 한 번, 원본 async load. 노드 트리와 애셋을 여기서 만든다)
+	/// - 원본 await 자리: engine.spawn_scene_task(self, |mut scene_context| async move { ... }) 로 맡긴 작업을 get_scene_base_mut().track_task 로 맡긴다.
+	///   맡긴 애셋과 작업이 다 끝나야 initialize 로 넘어간다. (원본 load 의 Promise 가 끝나는 때)
 	///
 	/// # 인자
 	/// - `_engine`: 엔진. (애셋 읽기, 작업 맡기기, 매니저)
 	//==============================================================================
-	fn create(&mut self, _engine: &Engine) {
+	fn load(&mut self, _engine: &Engine) {
 	}
 
 	//==============================================================================
-	/// 초기화. (create 에서 맡긴 애셋이 다 읽히고 0.3 초 뒤 한 번. 원본 initialize. 맡긴 것이 없어도 create 뒤 0.3 초를 기다린다)
-	/// - 웹은 애셋이 나중에 오므로, 애셋을 쓰는 노드는 여기서 만든다. 데스크탑은 create 에서 만들어도 된다.
+	/// 초기화. (load 에서 맡긴 애셋이 다 읽히고 0.3 초 뒤 한 번. 원본 initialize. 맡긴 것이 없어도 load 뒤 0.3 초를 기다린다)
+	/// - 웹은 애셋이 나중에 오므로, 애셋을 쓰는 노드는 여기서 만든다. 데스크탑은 load 에서 만들어도 된다.
 	///
 	/// # 인자
 	/// - `_engine`: 엔진.
@@ -997,10 +1034,9 @@ pub trait Scene: SceneAny {
 	/// 로딩 중 출력. (initialize 전까지 tick / draw 대신 불린다. 원본 drawOnLoad)
 	///
 	/// # 인자
-	/// - `_engine`: 엔진.
 	/// - `_graphic`: 로딩 화면을 그릴 그래픽.
 	//==============================================================================
-	fn draw_on_load(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
+	fn draw_on_load(&mut self, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -1023,114 +1059,97 @@ pub trait Scene: SceneAny {
 
 	//==============================================================================
 	/// 해제. (엔진이 씬을 내릴 때 unload 뒤, 씬을 버리기 직전에 한 번. 그 씬의 작업이 남았으면 다 끝난 뒤)
-	///
-	/// # 인자
-	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn destroy(&mut self, _engine: &Engine) {
+	fn destroy(&mut self) {
 	}
 
 	//==============================================================================
 	/// 터치 누름. (원본 Scene.touchPress, 엔진이 tick 뒤에 부른다)
 	///
 	/// # 인자
-	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 누른 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
 	/// 터치 이동. (누르고 있는 동안, 누른 프레임과 뗀 프레임에는 부르지 않는다)
 	///
 	/// # 인자
-	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 지금 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_move(&mut self, _engine: &Engine, _view_input_position: Vector2) {
+	fn touch_move(&mut self, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
 	/// 터치 뗌. (한 프레임 안에 눌렀다 떼면 누름 뒤에 바로)
 	///
 	/// # 인자
-	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 뗀 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_release(&mut self, _engine: &Engine, _view_input_position: Vector2) {
+	fn touch_release(&mut self, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
 	/// 터치 취소됨.
 	///
 	/// # 인자
-	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 취소된 때의 자리. (뷰 좌표)
 	//==============================================================================
-	fn touch_cancel(&mut self, _engine: &Engine, _view_input_position: Vector2) {
+	fn touch_cancel(&mut self, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
 	/// 마우스 휠. (이번 프레임에 쌓인 휠이 있을 때)
 	///
 	/// # 인자
-	/// - `_engine`: 엔진.
 	/// - `_view_input_position`: 마우스 자리. (뷰 좌표)
 	/// - `_wheel_delta`: 이번 프레임에 쌓인 휠 양. (x 가로, y 세로, 입력 매니저의 get_wheel_delta_x, get_wheel_delta_y)
 	//==============================================================================
-	fn touch_wheel(&mut self, _engine: &Engine, _view_input_position: Vector2, _wheel_delta: Vector2) {
+	fn touch_wheel(&mut self, _view_input_position: Vector2, _wheel_delta: Vector2) {
 	}
 
 	//==============================================================================
 	/// 페이지 프로세스 파기 뒤 복원. (Chromium 의 freeze 뒤 resume, bfcache 에서 돌아온 pageshow 등)
 	/// - 엔진이 소리를 다시 깨우고 입력 상태를 비운 뒤 불러온 모든 씬에 부른다.
-	///
-	/// # 인자
-	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn on_page_process_restored(&mut self, _engine: &Engine) {
+	fn on_page_process_restored(&mut self) {
 	}
 
 	//==============================================================================
 	/// 페이지 가시성 복원. (백그라운드 → 포어그라운드, 웹 visibilitychange 의 visible, 데스크탑 창 가림이 풀림)
 	/// - 엔진이 소리를 다시 깨우고 입력 상태를 비운 뒤 불러온 모든 씬에 부른다.
-	///
-	/// # 인자
-	/// - `_engine`: 엔진.
 	//==============================================================================
-	fn on_page_visibility_restored(&mut self, _engine: &Engine) {
+	fn on_page_visibility_restored(&mut self) {
 	}
 
 	//==============================================================================
 	/// 화면 영역 변경. (창 크기가 바뀌었을 때, 불러온 직후에도 한 번)
 	///
 	/// # 인자
-	/// - `_engine`: 엔진. (뷰 매니저에 새 뷰 영역이 셈해져 있다)
 	/// - `_canvas_native_size`: 창 안쪽 논리 크기. (뷰 매니저의 get_canvas_native_size)
 	//==============================================================================
-	fn resize(&mut self, _engine: &Engine, _canvas_native_size: Vector2) {
+	fn resize(&mut self, _canvas_native_size: Vector2) {
 	}
 
 	//==============================================================================
 	/// 주기적 갱신.
-	/// - 기본 구현은 씬 공통 상태의 tick 을 부른다. 덮어쓰면 get_scene_base_mut().tick(engine, time_delta) 를 직접 부른다.
+	/// - 기본 구현은 씬 공통 상태의 tick 을 부른다. 덮어쓰면 get_scene_base_mut().tick(time_delta) 를 직접 부른다.
 	///
 	/// # 인자
-	/// - `engine`: 엔진.
 	/// - `time_delta`: 배율을 곱한 프레임 간격. (초, 시간 관리자의 get_time_delta)
 	//==============================================================================
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.get_scene_base_mut().tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.get_scene_base_mut().tick(time_delta);
 	}
 
 	//==============================================================================
 	/// 이전 출력.
 	///
 	/// # 인자
-	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn pre_draw(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
+	fn pre_draw(&mut self, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -1138,10 +1157,9 @@ pub trait Scene: SceneAny {
 	/// - 기본 구현은 씬 공통 상태의 draw 로 노드 트리를 그린다.
 	///
 	/// # 인자
-	/// - `_engine`: 엔진.
 	/// - `graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.get_scene_base_mut().draw(graphic);
 	}
 
@@ -1149,10 +1167,9 @@ pub trait Scene: SceneAny {
 	/// 이후 출력.
 	///
 	/// # 인자
-	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn post_draw(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
+	fn post_draw(&mut self, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
@@ -1160,9 +1177,8 @@ pub trait Scene: SceneAny {
 	/// - 기즈모 표시(set_gizmo_visible)를 켠 씬에만 post_draw 뒤에 부른다.
 	///
 	/// # 인자
-	/// - `_engine`: 엔진.
 	/// - `_graphic`: 그릴 그래픽.
 	//==============================================================================
-	fn draw_gizmos(&mut self, _engine: &Engine, _graphic: &mut Graphic) {
+	fn draw_gizmos(&mut self, _graphic: &mut Graphic) {
 	}
 }

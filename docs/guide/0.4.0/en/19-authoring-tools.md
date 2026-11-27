@@ -100,7 +100,7 @@ assert!(UIDocument::find_node_by_path(&node_tree, document_root_id, "/Missing").
 
 Documents contain only image paths (`imagePath`), not the images themselves. `Sprite`, `UIImageView`, and `ShadowImage` use this field. There are two ways to connect images.
 
-- Reading from the asset folder: calling `load_images(engine, json_text)` before `from_json_text` requests an `ImageAsset` for every `imagePath` in the document, keeps them in the document, and returns the newly requested load handles. If a scene calls it in `create`, it can hand the handles to `track_load_handle` so that `initialize` waits for them. On the desktop they load on the spot. When they arrive later, as on the web, the document holds on to images that have not loaded yet and `bind_pending_images(node_tree)` attaches them. Call it from the scene's `tick` until the remaining count reaches 0.
+- Reading from the asset folder: calling `load_images(engine, json_text)` before `from_json_text` requests an `ImageAsset` for every `imagePath` in the document, keeps them in the document, and returns the newly requested load handles. If a scene calls it in `load`, it can hand the handles to `track_load_handle` so that `initialize` waits for them. On the desktop they load on the spot. When they arrive later, as on the web, the document holds on to images that have not loaded yet and `bind_pending_images(node_tree)` attaches them. Call it from the scene's `tick` until the remaining count reaches 0.
 - A resolver: registering a path to `Option<Rc<Image>>` function with `set_image_resolver(resolver)` makes lookups use it instead of the asset store. It must return right away, so load the images first.
 
 Images that cannot be found print a warning and are dropped, and the component stays without an image, as in the original.
@@ -206,7 +206,7 @@ assert_eq!(node_tree[node_table["Emblem"]].get_local_position().x, 480.0);
 assert!(!timeline.is_playing());
 ```
 
-- Reading: `Timeline::load_from_text(text)` (from JSON text, `Err` on failure), `Timeline::create_from_json_asset(&mut json_asset)` (from a loaded `JsonAsset`, clones the description, `None` if not loaded yet), and `Timeline::load_from_url(engine, url)` (the original `loadFromUrl`, a future that yields `Result<Timeline, String>` when awaited inside an engine task). The easiest pattern is for the scene to request a `JsonAsset` in `create`, hand it to `track_asset`, and build the timeline with `create_from_json_asset` in `initialize`. Loading it together with other assets through `AssetLoader` also works.
+- Reading: `Timeline::load_from_text(text)` (from JSON text, `Err` on failure), `Timeline::create_from_json_asset(&mut json_asset)` (from a loaded `JsonAsset`, clones the description, `None` if not loaded yet), and `Timeline::load_from_url(engine, url)` (the original `loadFromUrl`, a future that yields `Result<Timeline, String>` when awaited inside an engine task). The easiest pattern is for the scene to request a `JsonAsset` in `load`, hand it to `track_asset`, and build the timeline with `create_from_json_asset` in `initialize`. Loading it together with other assets through `AssetLoader` also works.
 - Stage: `build_stage(node_tree, parent_id, image_resolver)` creates the document's stage nodes, attaches them under `parent_id`, and returns a name to `NodeId` table (`HashMap`). To hook tracks onto a node tree you already built, `bind(node_tree, root_id)` finds and attaches the nodes whose names match the tracks' target names. Targets are `TimelineTarget`: nodes are `Node(NodeId)`, and things that are not nodes (such as screen effects) are `External`, set with `set_target(name, target)` or `set_target_resolver(resolver)`.
 - Images: images imported in the editor go into the document's `image` field as `data:` URLs, and the runtime decodes them itself (on the spot on the desktop, and when the browser finishes decoding on the web). Images referenced by name must be returned by `image_resolver`. Pass the resolver as in `Some(&|image_name: &str| image_table.get(image_name).cloned())`.
 - Playback: `play()`, `pause()`, `stop(node_tree)` (back to the start), `seek(node_tree, time)` (fires no events), and `tick(node_tree, time_delta)` every frame. Functions that move nodes also take the `NodeTree`. Change looping and speed with `set_loop` and `set_speed`.
@@ -311,7 +311,7 @@ The Visual Editor saves scenes in the same form as UI documents. The default sav
 
 ![Visual Editor with the UI Showcase components document open as a scene: hierarchy on the left, the scene view with move handles in the middle, the inspector on the right](../images/tool-visual-editor.webp)
 
-The example below reads `examples/assets/scenedocument.scene.json` from the repository (a scene made in the Visual Editor save format). The scene requests the scene file as a `TextAsset` in `create` and tracks it, requests the images and builds the tree in `initialize`, and attaches late images in `tick`. The function given to `set_clicked_event` cannot borrow the scene, so the button press is signaled through an `Rc<Cell>` and picked up in `tick`. Some images in this scene file are not in the repository, so they print a warning and stay without an image.
+The example below reads `examples/assets/scenedocument.scene.json` from the repository (a scene made in the Visual Editor save format). The scene requests the scene file as a `TextAsset` in `load` and tracks it, requests the images and builds the tree in `initialize`, and attaches late images in `tick`. The function given to `set_clicked_event` cannot borrow the scene, so the button press is signaled through an `Rc<Cell>` and picked up in `tick`. Some images in this scene file are not in the repository, so they print a warning and stay without an image.
 
 ```rust,no_run
 use std::cell::Cell;
@@ -336,7 +336,7 @@ impl Scene for VisualScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.scene_asset.load(engine, "scenedocument.scene.json");
 		self.scene_base.track_asset(&self.scene_asset);
 	}
@@ -376,8 +376,8 @@ impl Scene for VisualScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		let node_tree = self.scene_base.get_node_tree_mut();
 		self.document.bind_pending_images(node_tree);
 		if self.is_button_clicked.replace(false) {
@@ -389,8 +389,8 @@ impl Scene for VisualScene {
 		}
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 

@@ -71,11 +71,11 @@ impl Scene for MainScene {
 		&mut self.scene_base
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		graphic.set_fill_color(Colors::WHITE);
 		graphic.draw_rect(Rect::create(100.0, 100.0, 200.0, 120.0));
 	}
@@ -109,13 +109,16 @@ cargo run --example quickstart
 
 | 단계 | 하는 일 |
 | --- | --- |
-| `create` | 애셋 로딩을 요청하고 `scene_base.track_asset` 으로 등록합니다. 원본 `async load` 처럼 await 로 불러오려면 `engine.spawn_scene_task` 로 작업을 맡기고 `scene_base.track_task` 로 등록합니다 |
+| `create()` | 씬을 불러올 때 맨 먼저 한 번. 엔진이 필요 없는 칸을 채웁니다 (원본 `create`) |
+| `load(engine)` | 애셋 로딩을 요청하고 `scene_base.track_asset` 으로 등록합니다. 원본 `async load(engine)` 처럼 await 로 불러오려면 `engine.spawn_scene_task` 로 작업을 맡기고 `scene_base.track_task` 로 등록합니다 |
 | `draw_on_load` | 등록한 애셋과 작업이 끝날 때까지 매 프레임 호출됩니다. 로딩 화면을 그립니다 |
 | `initialize` | 로딩이 끝난 뒤 한 번 호출됩니다. 노드 트리를 만듭니다 |
-| `tick` | 매 프레임 업데이트. 기본 구현이 노드와 컴포넌트, 터치, 트윈을 업데이트합니다 |
+| `tick(time_delta)` | 매 프레임 업데이트. 기본 구현이 노드와 컴포넌트, 터치, 트윈을 업데이트합니다 |
 | `pre_draw`, `draw`, `post_draw` | 매 프레임 렌더링. 기본 `draw` 가 노드 트리를 그립니다 |
 | `unload` | 씬을 내릴 때 `finalize` 다음. 원본 `async unload` 처럼 여기서 `track_task` 로 맡긴 작업이 끝나야 내리기가 끝납니다 (그동안 씬은 목록에 남습니다) |
 | `destroy` | 씬 값을 버리기 직전. 그 씬의 작업이 남았으면 원본처럼 작업이 다 끝난 뒤입니다 |
+
+훅의 이름과 인자는 원본 vanilla.js 와 같습니다. 원본이 엔진을 받는 `load`, `initialize`, `finalize`, `unload` 만 `engine: &Engine` 을 받고, `tick(time_delta)`, `draw(graphic)`, `touch_press(view_input_position)` 같은 나머지 훅에서 엔진이 필요하면 `Engine::get_engine()` 으로 꺼냅니다.
 
 ### 노드와 컴포넌트
 
@@ -214,7 +217,7 @@ struct GameScene {
 impl Scene for GameScene {
 	// ...
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.logo_asset.load(engine, "images/logo.png");
 		self.scene_base.track_asset(&self.logo_asset);
 	}
@@ -237,7 +240,7 @@ vanilla.js 의 `async load(engine) { await this.logoAsset.load("images/logo.png"
 impl Scene for TitleScene {
 	// ...
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		let load_task = engine.spawn_scene_task(self, |mut scene_context| async move {
 			// 원본: await this.logoAsset.load("images/logo.png");
 			scene_context.with(|scene, engine| scene.logo_asset.load(engine, "images/logo.png")).await.ok();

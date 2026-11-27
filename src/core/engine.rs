@@ -10,7 +10,7 @@
 //! - 오디오 매니저를 원본처럼 생성할 때 만들어 든다. AudioContext(소리 장치)는 처음 쓸 때 만든다. 프레임마다 하는 오디오 일은 없다.
 //!   웹은 플랫폼이 click / touchstart / keydown 에서 resume_on_user_gesture, focus / visibilitychange 에서 resume 을 부른다.
 //! - 원본 SceneManager.getAllLoadedScenes 는 get_all_loaded_scenes 로, 씬 객체 대신 핸들(SceneId)을 돌려준다. (씬마다 &Engine 을 받아 도는 동안 다른 씬을 빌릴 수 없다)
-//! - 원본처럼 씬을 불러오면 루트를 뷰 크기로 맞추고(create 바로 뒤), 맡긴 애셋이 다 끝난 뒤에도 로딩 화면을 0.3초 더 보이고 initialize 를 부른다.
+//! - 원본처럼 씬을 불러오면 루트를 뷰 크기로 맞추고(create 와 load 사이), 맡긴 애셋이 다 끝난 뒤에도 로딩 화면을 0.3초 더 보이고 initialize 를 부른다.
 //! - 글자 입력칸 포커스(is_text_input_focused)는 원본처럼 문서의 초점을 보고, 문서가 없는 데스크탑은 엔진 입력 필드의 포커스를 본다.
 //! - 씬 하나만 내리기(unload_scene)는 원본 SceneManager.unloadScene 자리다. 원본은 씬 객체로, 러스트 판은 load_scene 이 돌려준 SceneId 로 가리키고,
 //!   unload_all_scenes 처럼 이번 프레임이 끝난 뒤 내린다. 아직 create 전인(같은 프레임에 불러온) 씬이면 create 도 destroy 도 부르지 않고 뺀다.
@@ -412,7 +412,7 @@ impl Engine {
 	//==============================================================================
 	/// 전역 엔진. (원본 static Engine.getEngine(), 마지막으로 만든 엔진)
 	/// - 엔진은 처음 한 번 만들고 지우지 않는다. Engine::new 가 프로그램 끝까지 사는 자리에 두므로 &'static Engine 을 준다. (언리얼 GEngine, 고도 Engine 싱글톤과 같은 꼴)
-	/// - Engine::new 직후부터 어디서나 꺼낸다: 씬 함수(create, tick, draw 같은), 컴포넌트 tick 과 draw, 위젯 콜백, 페이지 이벤트 리스너, async 작업 안.
+	/// - Engine::new 직후부터 어디서나 꺼낸다: 씬 함수(load, tick, draw 같은), 컴포넌트 tick 과 draw, 위젯 콜백, 페이지 이벤트 리스너, async 작업 안.
 	///   씬 함수가 받은 engine 인자와 같은 엔진이다.
 	/// - 엔진의 공개 함수는 모두 &self 다. (고치는 칸은 안쪽 가변성) 매니저의 get_x_mut 으로 받은 것을 쥔 채 같은 매니저를 또 빌리면 함수 이름을 적은 패닉으로 멈춘다.
 	/// - 엔진을 만든 스레드가 아닌 스레드에서 부르면 Err(OtherThread), 엔진을 만든 적이 없으면 Err(NotCreated) 다.
@@ -678,7 +678,7 @@ impl Engine {
 
 	//==============================================================================
 	/// 씬 불러오기. (이번 프레임이 끝난 뒤 목록에 더한다. unload_scene 에 넘길 핸들을 돌려준다)
-	/// - 목록에 더할 때 create 를 부르고 루트를 뷰 크기로 맞춘다. 맡긴 애셋과 작업이 다 끝나고 0.3 초 뒤 initialize 를 부른다.
+	/// - 목록에 더할 때 create 를 부르고 루트를 뷰 크기로 맞춘 뒤 load 를 부른다. 맡긴 애셋과 작업이 다 끝나고 0.3 초 뒤 initialize 를 부른다.
 	///
 	/// # 인자
 	/// - `scene`: 불러올 씬. (엔진이 소유한다)
@@ -720,7 +720,8 @@ impl Engine {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn touch_release(&mut self, engine: &Engine, _view_input_position: Vector2) {
+	/// 	fn touch_release(&mut self, _view_input_position: Vector2) {
+	/// 		let engine = Engine::get_engine().unwrap();
 	/// 		engine.unload_scene(&self.scene_base);
 	/// 	}
 	/// }
@@ -838,7 +839,7 @@ impl Engine {
 	/// - 원본 async 함수 안에서 this 를 쓰는 자리다. 원본처럼 이 자리에서 첫 await 까지 돌고, 남은 것은 깨어날 때마다 프레임의 폴링 차례에 돈다.
 	///   (첫 구간의 with_graphic 도 엔진의 그래픽을 준다. 그리기 함수 안에서 맡기면 그 함수가 인자로 그래픽을 쥐고 있어 None 이다)
 	/// - 씬을 내려도 원본처럼 이어 돈다. (씬 값은 작업이 다 끝날 때까지 산다) load_scene 전의 씬이면 첫 구간만 돌고 버린다.
-	/// - 불러오기 작업이면 create 에서 씬의 track_task 로 맡겨 끝날 때까지 initialize 를 미룬다. (unload 에서 맡기면 내리기 끝을 미룬다)
+	/// - 불러오기 작업이면 load 에서 씬의 track_task 로 맡겨 끝날 때까지 initialize 를 미룬다. (unload 에서 맡기면 내리기 끝을 미룬다)
 	///
 	/// # 인자
 	/// - `scene`: 작업을 맡기는 씬. (보통 훅 안의 self)
@@ -866,7 +867,7 @@ impl Engine {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&mut self, engine: &Engine) {
+	/// 	fn load(&mut self, engine: &Engine) {
 	/// 		let task_handle = engine.spawn_scene_task(self, |mut scene_context: SceneContext<StageScene>| async move {
 	/// 			let load_handle = scene_context.with(|_scene, engine| engine.request_asset_bytes("examples/assets/scenedocument.scene.json"));
 	/// 			let stage_bytes = load_handle.await.map(|bytes| bytes.to_vec()).unwrap_or_default();
@@ -1389,7 +1390,7 @@ impl Engine {
 	}
 
 	//==============================================================================
-	/// 그래픽. (원본 getGraphic, 씬의 create, initialize, tick 이나 컴포넌트의 tick 에서 GL 자원(텍스처, 렌더 타겟, 셰이더 프로그램, 툰 렌더러 같은)을 짓는다)
+	/// 그래픽. (원본 getGraphic, 씬의 load, initialize, tick 이나 컴포넌트의 tick 에서 GL 자원(텍스처, 렌더 타겟, 셰이더 프로그램, 툰 렌더러 같은)을 짓는다)
 	/// - 원본 생성자처럼 데스크탑은 Engine::new 가 주 스레드에서 숨긴 창과 GL 컨텍스트를 지어 바로 있다. (run 은 그 창을 보인다)
 	///   GL 을 지을 수 없는 기계(화면 없는 CI 같은)나 주 스레드가 아닌 곳(단위 시험)에서는 run 이 창을 열 때까지 None 이다. 웹은 run 이 캔버스를 잡을 때까지 None 이다.
 	/// - 그리기 함수(pre_draw, draw, post_draw, draw_on_load, draw_gizmos)와 with_graphic 의 클로저 안에서는 그래픽을 인자로 내어 주어 None 이다. (그 자리에서는 인자로 받은 graphic 이 이 그래픽이다)
@@ -1431,7 +1432,7 @@ impl Engine {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&mut self, engine: &Engine) {
+	/// 	fn load(&mut self, engine: &Engine) {
 	/// 		if let Some(graphic) = engine.get_graphic() {
 	/// 			self.shader_program = ShaderProgram::new(graphic.get_gl(), VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE).ok();
 	/// 		}
@@ -1480,8 +1481,9 @@ impl Engine {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-	/// 		self.scene_base.tick(engine, time_delta);
+	/// 	fn tick(&mut self, time_delta: f64) {
+	/// 		let engine = Engine::get_engine().unwrap();
+	/// 		self.scene_base.tick(time_delta);
 	/// 		let is_key_g = engine.get_input_manager().is_key_pressed(KeyCode::G);
 	/// 		if let Some(mut graphic) = engine.get_graphic_mut() {
 	/// 			graphic.set_force_gizmos_visible(is_key_g);
@@ -1978,7 +1980,7 @@ impl Engine {
 /// - VANILLA_CAPTURE_SHOW_WINDOW: 1 이면 창을 보인다. (찍기 모드의 데스크탑 창은 기본으로 숨긴다)
 /// - 찍기 모드는 표준 오류에 프레임마다 "Engine: 찍기 진행 프레임 <번호> / <마지막 번호>, <지난 초> 초" 를, 데스크탑은 처음에 GL 렌더러와 판을 남긴다.
 /// - 찍기 모드는 결정적으로 찍게 TimeManager 의 시간이 실제 시각 대신 프레임마다 1/60 초씩 간다. (프레임 번호 x 1000 / 60 밀리초 x 0.001, 원본 ?capture 찍기 모드와 같은 셈)
-///   씬의 로딩 뒤 0.3 초 기다림은 원본 setTimeout 처럼 실제 시각이다.
+///   씬의 로딩 뒤 0.3 초 기다림도 엔진 시계로 센다. (맡긴 애셋을 다 받은 뒤부터, 원본 ?capture 찍기 모드와 같다. 실제 시각으로 세면 씬이 처음 그려지는 프레임이 실행마다 밀린다)
 /// - 웹: ?capture=120,240 (번호, 빈 값이면 120), captureName=파일 이름("{frame}" 은 번호, 기본 capture_{frame}.png), captureExit=1. 내려받기로 저장한다.
 //==============================================================================
 struct CaptureRequest {
@@ -2172,7 +2174,7 @@ impl EngineRunner {
 		let canvas_native_size = self.engine.view_manager.borrow().get_canvas_native_size();
 		let mut scene_list = std::mem::take(&mut self.scene_list);
 		for scene in scene_list.iter_mut() {
-			scene.resize(self.engine, canvas_native_size);
+			scene.resize(canvas_native_size);
 		}
 		self.scene_list = scene_list;
 	}
@@ -2290,7 +2292,7 @@ impl EngineRunner {
 		self.recover_engine_state();
 		let mut scene_list = std::mem::take(&mut self.scene_list);
 		for scene in scene_list.iter_mut() {
-			scene.on_page_visibility_restored(self.engine);
+			scene.on_page_visibility_restored();
 		}
 		scene_list.append(&mut self.scene_list);
 		self.scene_list = scene_list;
@@ -2303,7 +2305,7 @@ impl EngineRunner {
 		self.recover_engine_state();
 		let mut scene_list = std::mem::take(&mut self.scene_list);
 		for scene in scene_list.iter_mut() {
-			scene.on_page_process_restored(self.engine);
+			scene.on_page_process_restored();
 		}
 		scene_list.append(&mut self.scene_list);
 		self.scene_list = scene_list;
@@ -2397,12 +2399,27 @@ impl EngineRunner {
 				if let Some(scene_id) = scene.get_scene_base().get_scene_id() {
 					self.engine.loaded_scene_id_list.borrow_mut().push(scene_id);
 				}
-				scene.create(self.engine);
+				scene.create();
 				apply_scene_root_to_view_size(&self.engine, scene.as_mut());
-				let current_time = self.start_instant.elapsed().as_secs_f64();
+				scene.load(self.engine);
+				let current_time = self.read_scene_load_seconds();
 				initialize_scene_if_ready(self.engine, scene.as_mut(), current_time);
 				self.scene_list.push(scene);
 			}
+		}
+	}
+
+	//==============================================================================
+	/// 씬 불러오기 뒤 0.3 초를 세는 시계 읽기. (초)
+	/// - 찍기 모드는 엔진 시계(프레임 번호 x 1/60 초, 지난 갱신의 시각)다. 같은 예제를 두 번 찍으면 씬이 같은 프레임에 initialize 된다. (원본 찍기 모드와 같다)
+	/// - 그 밖에는 엔진 시작 뒤 실제 초다. (원본 setTimeout 300 처럼)
+	//==============================================================================
+	fn read_scene_load_seconds(&self) -> f64 {
+		if self.capture_request.is_some() {
+			self.engine.time_manager.borrow().get_realtime_since_startup()
+		}
+		else {
+			self.start_instant.elapsed().as_secs_f64()
 		}
 	}
 
@@ -2435,6 +2452,13 @@ impl EngineRunner {
 		};
 		self.engine.time_manager.borrow_mut().update(engine_seconds_since_startup);
 		let time_delta = self.engine.time_manager.borrow().get_time_delta();
+		// 씬 불러오기 뒤 0.3 초를 세는 시계. (찍기 모드는 엔진 시계, 맡긴 애셋을 다 받은 뒤부터 센다. 실제 시각으로 세면 씬이 처음 그려지는 프레임이 실행마다 밀린다)
+		let scene_load_seconds = if self.capture_request.is_some() {
+			engine_seconds_since_startup
+		}
+		else {
+			seconds_since_startup
+		};
 
 		// 입력 처리.
 		self.engine.input_manager.borrow_mut().tick(time_delta);
@@ -2454,7 +2478,7 @@ impl EngineRunner {
 			task::begin_poll_frame(self.engine);
 			loop {
 				task::poll_woken_tasks(self.engine, &mut self.scene_list, &mut self.detached_scene_list);
-				finish_scene_unloads(self.engine, &mut self.scene_list, &mut self.unloading_scene_id_list, &mut self.detached_scene_list, &mut self.unload_waiting_list, seconds_since_startup);
+				finish_scene_unloads(self.engine, &mut self.scene_list, &mut self.unloading_scene_id_list, &mut self.detached_scene_list, &mut self.unload_waiting_list, scene_load_seconds);
 				if !self.engine.task_executor.has_woken_tasks() {
 					break;
 				}
@@ -2474,32 +2498,32 @@ impl EngineRunner {
 		for scene in scene_list.iter_mut() {
 			// 맡긴 애셋을 기다리는 씬은 로딩 화면만. (다 읽혔으면 이번 프레임부터 돈다, 원본처럼 내리는 중이어도 불러오기가 끝나면 initialize 한다)
 			if !scene.get_scene_base().is_loaded() {
-				initialize_scene_if_ready(self.engine, scene.as_mut(), seconds_since_startup);
+				initialize_scene_if_ready(self.engine, scene.as_mut(), scene_load_seconds);
 			}
 			if !scene.get_scene_base().is_loaded() {
 				self.engine.with_graphic(|engine, graphic| {
 					engine.view_manager.borrow_mut().apply_view_rect(graphic);
-					scene.draw_on_load(engine, graphic);
+					scene.draw_on_load(graphic);
 				});
 				continue;
 			}
 
 			// 갱신. (씬의 터치 훅은 원본 Scene.tickTouch 처럼 tick 안의 터치 다음, 질문 창이 떠 있던 프레임은 건너뛴다)
 			if !is_modal_dialog_open {
-				scene.tick(self.engine, time_delta);
+				scene.tick(time_delta);
 				dispatch_scene_touch(self.engine, scene.as_mut());
 			}
 
 			// 출력.
 			self.engine.with_graphic(|engine, graphic| {
 				engine.view_manager.borrow_mut().apply_view_rect(graphic);
-				scene.pre_draw(engine, graphic);
-				scene.draw(engine, graphic);
-				scene.post_draw(engine, graphic);
+				scene.pre_draw(graphic);
+				scene.draw(graphic);
+				scene.post_draw(graphic);
 
 				let is_gizmo_visible = scene.get_scene_base().is_gizmo_visible();
 				if is_gizmo_visible {
-					scene.draw_gizmos(engine, graphic);
+					scene.draw_gizmos(graphic);
 				}
 			});
 		}
@@ -2542,7 +2566,11 @@ impl EngineRunner {
 			graphic.end_frame();
 		}
 		self.capture_frame_if_requested();
-		self.engine.frame_number.set(self.engine.frame_number.get() + 1);
+		// 찍기 모드에서 실제 시간이 드는 불러오기(애셋 받기) 중인 씬이 있으면 프레임 번호를 올리지 않는다. (시계도 서고, 다 받은 뒤부터 센다. 원본 찍기 모드와 같다)
+		let is_capture_frame_held = self.capture_request.is_some() && self.scene_list.iter().any(|scene| scene.get_scene_base().is_capture_frame_held());
+		if !is_capture_frame_held {
+			self.engine.frame_number.set(self.engine.frame_number.get() + 1);
+		}
 
 		// 씬 목록 바꾸기.
 		self.apply_pending_scenes();
@@ -2699,7 +2727,7 @@ fn finish_scene_unloads(engine: &Engine, scene_list: &mut Vec<Box<dyn Scene>>, u
 			detached_scene_list.push(scene);
 		}
 		else {
-			scene.destroy(engine);
+			scene.destroy();
 		}
 	}
 	for (waiting_scene_id_list, unload_resolver) in std::mem::take(unload_waiting_list) {
@@ -2735,24 +2763,24 @@ fn dispatch_scene_touch(engine: &Engine, scene: &mut dyn Scene) {
 	let has_wheel_delta = input_manager.has_wheel_delta();
 	drop(input_manager);
 	if is_touch_pressed {
-		scene.touch_press(engine, view_input_position);
+		scene.touch_press(view_input_position);
 	}
 	if is_touch_released {
-		scene.touch_release(engine, view_input_position);
+		scene.touch_release(view_input_position);
 	}
 	else if is_touch_moved && !is_touch_pressed {
-		scene.touch_move(engine, view_input_position);
+		scene.touch_move(view_input_position);
 	}
 	else if is_touch_cancelled {
-		scene.touch_cancel(engine, view_input_position);
+		scene.touch_cancel(view_input_position);
 	}
 	if has_wheel_delta {
-		scene.touch_wheel(engine, view_input_position, wheel_delta);
+		scene.touch_wheel(view_input_position, wheel_delta);
 	}
 }
 
 //==============================================================================
-/// 씬의 루트를 뷰 크기로 맞추기. (원본 Scene.load: 자리 0, 왼쪽 위 피벗, 콘텐츠 크기는 뷰 크기. create 바로 뒤에 부른다)
+/// 씬의 루트를 뷰 크기로 맞추기. (원본 Scene.load: 자리 0, 왼쪽 위 피벗, 콘텐츠 크기는 뷰 크기. create 와 load 사이에 부른다)
 //==============================================================================
 fn apply_scene_root_to_view_size(engine: &Engine, scene: &mut dyn Scene) {
 	let view_size = engine.view_manager.borrow().get_view_size();
@@ -2764,7 +2792,7 @@ fn apply_scene_root_to_view_size(engine: &Engine, scene: &mut dyn Scene) {
 
 //==============================================================================
 /// 씬이 맡긴 애셋과 작업이 다 끝났으면 initialize 하고 불러온 것으로 친다. (원본 load 다음 0.3초 더 기다리고 set_loaded, initialize, 그리고 loadScene 의 Promise 를 푼다)
-/// - current_time 은 엔진 시작 뒤 지금까지의 실제 초다. (첫 프레임 전에도 맞는 시각이어야 해서 시간 관리자의 지난 값을 쓰지 않는다)
+/// - current_time 은 엔진 시작 뒤 지금까지의 실제 초다. (첫 프레임 전에도 맞는 시각이어야 해서 시간 관리자의 지난 값을 쓰지 않는다. 찍기 모드는 엔진 시계, read_scene_load_seconds)
 //==============================================================================
 fn initialize_scene_if_ready(engine: &Engine, scene: &mut dyn Scene, current_time: f64) {
 	if scene.get_scene_base().is_loaded() || !scene.get_scene_base().are_tracked_assets_finished() {
@@ -2778,7 +2806,7 @@ fn initialize_scene_if_ready(engine: &Engine, scene: &mut dyn Scene, current_tim
 	scene.initialize(engine);
 	scene.get_scene_base_mut().set_loaded(true);
 	let canvas_native_size = engine.view_manager.borrow().get_canvas_native_size();
-	scene.resize(engine, canvas_native_size);
+	scene.resize(canvas_native_size);
 	scene.get_scene_base_mut().resolve_load_resolvers();
 }
 
@@ -2830,28 +2858,28 @@ mod tests {
 		//==============================================================================
 		/// 생성. (create 수를 센다)
 		//==============================================================================
-		fn create(&mut self, _engine: &Engine) {
+		fn load(&mut self, _engine: &Engine) {
 			self.create_count.set(self.create_count.get() + 1);
 		}
 
 		//==============================================================================
 		/// 해제. (destroy 수를 센다)
 		//==============================================================================
-		fn destroy(&mut self, _engine: &Engine) {
+		fn destroy(&mut self) {
 			self.destroy_count.set(self.destroy_count.get() + 1);
 		}
 
 		//==============================================================================
 		/// 페이지 프로세스 복원. (복원 수에 100 을 더한다)
 		//==============================================================================
-		fn on_page_process_restored(&mut self, _engine: &Engine) {
+		fn on_page_process_restored(&mut self) {
 			self.restore_count.set(self.restore_count.get() + 100);
 		}
 
 		//==============================================================================
 		/// 페이지 가시성 복원. (복원 수에 1 을 더한다)
 		//==============================================================================
-		fn on_page_visibility_restored(&mut self, _engine: &Engine) {
+		fn on_page_visibility_restored(&mut self) {
 			self.restore_count.set(self.restore_count.get() + 1);
 		}
 	}
@@ -3022,35 +3050,35 @@ mod tests {
 		//==============================================================================
 		/// 해제. (destroy 를 적는다)
 		//==============================================================================
-		fn destroy(&mut self, _engine: &Engine) {
+		fn destroy(&mut self) {
 			self.record_list.borrow_mut().push("destroy");
 		}
 
 		//==============================================================================
 		/// 터치 누름. (press 를 적는다)
 		//==============================================================================
-		fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
+		fn touch_press(&mut self, _view_input_position: Vector2) {
 			self.record_list.borrow_mut().push("press");
 		}
 
 		//==============================================================================
 		/// 터치 이동. (move 를 적는다)
 		//==============================================================================
-		fn touch_move(&mut self, _engine: &Engine, _view_input_position: Vector2) {
+		fn touch_move(&mut self, _view_input_position: Vector2) {
 			self.record_list.borrow_mut().push("move");
 		}
 
 		//==============================================================================
 		/// 터치 뗌. (release 를 적는다)
 		//==============================================================================
-		fn touch_release(&mut self, _engine: &Engine, _view_input_position: Vector2) {
+		fn touch_release(&mut self, _view_input_position: Vector2) {
 			self.record_list.borrow_mut().push("release");
 		}
 
 		//==============================================================================
 		/// 마우스 휠. (wheel 을 적는다)
 		//==============================================================================
-		fn touch_wheel(&mut self, _engine: &Engine, _view_input_position: Vector2, _wheel_delta: Vector2) {
+		fn touch_wheel(&mut self, _view_input_position: Vector2, _wheel_delta: Vector2) {
 			self.record_list.borrow_mut().push("wheel");
 		}
 	}
@@ -3077,7 +3105,7 @@ mod tests {
 		drop(input_manager);
 		dispatch_scene_touch(engine, &mut scene);
 		begin_scene_instance_unload(engine, &mut scene);
-		scene.destroy(engine);
+		scene.destroy();
 		assert_eq!(*record_list.borrow(), vec!["press", "move", "release", "wheel", "finalize", "unload", "destroy"]);
 	}
 
@@ -3112,7 +3140,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 시험용 씬. (원본 async load 처럼 create 에서 불러오기 작업을 맡기고, initialize 에서 오래 도는 작업을 맡기고, unload 에서 내리기 작업을 맡긴다)
+	/// 시험용 씬. (원본 async load 처럼 load 에서 불러오기 작업을 맡기고, initialize 에서 오래 도는 작업을 맡기고, unload 에서 내리기 작업을 맡긴다)
 	//==============================================================================
 	struct AsyncLoadScene {
 		scene_base: SceneBase,
@@ -3143,7 +3171,7 @@ mod tests {
 		//==============================================================================
 		/// 생성. (불러오기 작업을 맡겨 첫 구간에서 한 단계, 다음 프레임에 한 단계 센다)
 		//==============================================================================
-		fn create(&mut self, engine: &Engine) {
+		fn load(&mut self, engine: &Engine) {
 			let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 				let load_handle = AssetLoadHandle::create_pending("stage.json");
 				let task_load_handle = load_handle.clone();
@@ -3190,7 +3218,7 @@ mod tests {
 		//==============================================================================
 		/// 해제. (destroy 수를 센다)
 		//==============================================================================
-		fn destroy(&mut self, _engine: &Engine) {
+		fn destroy(&mut self) {
 			self.destroy_count.set(self.destroy_count.get() + 1);
 		}
 	}
@@ -3212,7 +3240,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 씬의 async 불러오기: create 의 작업은 그 자리에서 첫 await 까지 돌고, 끝난 뒤 0.3초에 initialize 한다.
+	/// 씬의 async 불러오기: load 의 작업은 그 자리에서 첫 await 까지 돌고, 끝난 뒤 0.3초에 initialize 한다.
 	/// 씬을 내려도 원본처럼 작업은 이어 돌고 씬 값은 작업이 끝날 때까지 산다. (목록에서는 빠지고 with 는 그 씬을 준다) 끝나면 destroy 하고 버린다.
 	//==============================================================================
 	#[test]

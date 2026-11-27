@@ -51,7 +51,8 @@ const DELAY_PRESS_SECONDS: f64 = 0.15;
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
+/// 	fn tick(&mut self, time_delta: f64) {
+/// 		let engine = Engine::get_engine().unwrap();
 /// 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 /// 		self.touch_recognizer.tick_touch(self.scene_base.get_node_tree_mut(), engine);
 /// 		self.scene_base.tick_tweens(time_delta);

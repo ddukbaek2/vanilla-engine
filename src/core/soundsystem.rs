@@ -386,7 +386,7 @@ impl SoundMuteState {
 /// 		&mut self.scene_base
 /// 	}
 ///
-/// 	fn create(&mut self, engine: &Engine) {
+/// 	fn load(&mut self, engine: &Engine) {
 /// 		let sound_table = vec![
 /// 			SoundRow::create_effect("hit", &["tests/assets/audio/wav_s16_stereo.wav"], 0.8),
 /// 			SoundRow::create_music("field", "tests/assets/audio/vorbis_stereo.ogg", 0.6),
@@ -397,14 +397,14 @@ impl SoundMuteState {
 /// 		self.sound_system = Some(sound_system);
 /// 	}
 ///
-/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-/// 		self.scene_base.tick(engine, time_delta);
+/// 	fn tick(&mut self, time_delta: f64) {
+/// 		self.scene_base.tick(time_delta);
 /// 		if let Some(sound_system) = &mut self.sound_system {
 /// 			sound_system.update();
 /// 		}
 /// 	}
 ///
-/// 	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
+/// 	fn touch_press(&mut self, _view_input_position: Vector2) {
 /// 		if let Some(sound_system) = &mut self.sound_system {
 /// 			sound_system.play_effect("hit", 1.0, 0.0);
 /// 		}

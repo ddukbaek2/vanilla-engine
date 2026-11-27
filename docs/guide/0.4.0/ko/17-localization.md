@@ -159,8 +159,9 @@ impl Scene for MenuScene {
 		self.refresh_texts();
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
+		self.scene_base.tick(time_delta);
 		if engine.get_input_manager().is_touch_pressed() {
 			let next_language = if Localization::get_language() == "en" {
 				"fr"
@@ -174,8 +175,8 @@ impl Scene for MenuScene {
 		}
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -318,7 +319,7 @@ assert_eq!(languagepack::read_languages().len(), 2);
 
 `read_languages()` 는 목록의 언어들(언어 창을 만들 때), `read_language()` 는 지금 언어의 한 줄(아직 없으면 `None`), `find_language(code)` 는 코드로 찾은 한 줄(대소문자 가리지 않음), `read_all_texts()` 는 지금 언어의 글을 모두 이은 글입니다. 돌려주는 줄은 모두 복사본입니다.
 
-파일에서 불러오는 씬은 `create` 에서 불러오기를 씬 작업으로 맡기고 `track_task` 로 기다리게 합니다. 엔진은 맡긴 작업이 끝난 뒤 `initialize` 를 부르므로, `initialize` 에서는 이미 글을 꺼낼 수 있습니다.
+파일에서 불러오는 씬은 `load` 에서 불러오기를 씬 작업으로 맡기고 `track_task` 로 기다리게 합니다. 엔진은 맡긴 작업이 끝난 뒤 `initialize` 를 부르므로, `initialize` 에서는 이미 글을 꺼낼 수 있습니다.
 
 ```rust,no_run
 use std::path::PathBuf;
@@ -337,7 +338,7 @@ impl Scene for TitleScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 			scene_context.with(|_scene, engine| languagepack::apply_language_setting(engine, "")).await;
 		});
@@ -354,8 +355,8 @@ impl Scene for TitleScene {
 		title_node.add_component(Text::create_with_text(&languagepack::translate("game.title"), 48.0));
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -426,7 +427,7 @@ assert_eq!(uifont::build_ui_font_string(700, 24.0), "700 24px \"GameUI\", sans-s
 assert!(uifont::read_ui_font_face().is_none());
 ```
 
-`languagepack` 과 함께 쓸 때는 불러온 뒤 함수에서 글꼴을 불러옵니다. async 로 걸면 `apply_language_setting` 의 손잡이가 글꼴의 처음 글자까지 기다립니다. 씬은 위 "languagepack 으로 언어 파일 쓰기" 의 예제처럼 `create` 에서 `apply_language_setting` 을 맡기고, `tick` 에서 `uifont::update(engine)` 를 부르고, 글 노드의 `Text` 에 `read_ui_font_face()` 의 이름을 줍니다.
+`languagepack` 과 함께 쓸 때는 불러온 뒤 함수에서 글꼴을 불러옵니다. async 로 걸면 `apply_language_setting` 의 손잡이가 글꼴의 처음 글자까지 기다립니다. 씬은 위 "languagepack 으로 언어 파일 쓰기" 의 예제처럼 `load` 에서 `apply_language_setting` 을 맡기고, `tick` 에서 `uifont::update(engine)` 를 부르고, 글 노드의 `Text` 에 `read_ui_font_face()` 의 이름을 줍니다.
 
 ```rust,no_run
 use vanilla::{languagepack, uifont, Engine, EngineConfiguration, LanguageEntry, UiFontOptions};
@@ -485,16 +486,16 @@ impl Scene for ScoreScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.score += (time_delta * 1000.0) as u64;
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		let score_text = format!("SCORE {}", self.score);
 		let text_width = self.dynamic_font.measure_text(&score_text);

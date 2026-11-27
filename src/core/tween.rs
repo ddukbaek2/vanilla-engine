@@ -2017,7 +2017,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn scene_base_ticks_tweens_after_nodes_and_removes_finished() {
-		let engine = Engine::new(EngineConfiguration::new());
+		let _engine = Engine::new(EngineConfiguration::new());
 		let mut scene_base = SceneBase::new();
 		let root_id = scene_base.get_root_id();
 		let node_id = scene_base.get_node_tree_mut().create_child(root_id, "pinned");
@@ -2030,19 +2030,19 @@ mod tests {
 		assert_eq!(scene_base.get_tween_count(), 1);
 		assert!(scene_base.get_tween(tween_id).is_some());
 
-		scene_base.tick(&engine, 0.5);
+		scene_base.tick(0.5);
 		let halfway_position = scene_base.get_node_tree()[node_id].get_local_position();
 		assert_near_vector(halfway_position, Vector2::create(5.0, 0.0));
 		assert_eq!(scene_base.get_tween_count(), 1);
 
-		scene_base.tick(&engine, 0.5);
+		scene_base.tick(0.5);
 		let final_position = scene_base.get_node_tree()[node_id].get_local_position();
 		assert_near_vector(final_position, Vector2::create(10.0, 0.0));
 		assert_eq!(scene_base.get_tween_count(), 0);
 		assert!(scene_base.get_tween(tween_id).is_none());
 
 		// 트윈이 빠진 뒤에는 컴포넌트 값이 남는다.
-		scene_base.tick(&engine, 0.5);
+		scene_base.tick(0.5);
 		let pinned_position = scene_base.get_node_tree()[node_id].get_local_position();
 		assert_near_vector(pinned_position, Vector2::create(999.0, 999.0));
 	}
@@ -2052,7 +2052,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn scene_base_stop_tween_skips_complete() {
-		let engine = Engine::new(EngineConfiguration::new());
+		let _engine = Engine::new(EngineConfiguration::new());
 		let mut scene_base = SceneBase::new();
 		let complete_counter = create_counter();
 		let complete_counter_in_callback = complete_counter.clone();
@@ -2062,11 +2062,11 @@ mod tests {
 				increase_counter(&complete_counter_in_callback);
 			});
 		let tween_id = scene_base.start_tween(tween);
-		scene_base.tick(&engine, 0.25);
+		scene_base.tick(0.25);
 		scene_base.stop_tween(tween_id);
 		assert_eq!(scene_base.get_tween_count(), 0);
 		scene_base.stop_tween(tween_id);
-		scene_base.tick(&engine, 2.0);
+		scene_base.tick(2.0);
 		assert_eq!(complete_counter.get(), 0);
 
 		for _ in 0..3 {
@@ -2083,7 +2083,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn scene_base_earlier_tween_wins_on_same_property() {
-		let engine = Engine::new(EngineConfiguration::new());
+		let _engine = Engine::new(EngineConfiguration::new());
 		let mut scene_base = SceneBase::new();
 		let root_id = scene_base.get_root_id();
 		let node_id = scene_base.get_node_tree_mut().create_child(root_id, "contested");
@@ -2091,7 +2091,7 @@ mod tests {
 		let second_tween = Tween::create_node_tween(node_id, TweenProperty::LocalRotation, 200.0, 200.0, 1.0);
 		scene_base.start_tween(first_tween);
 		scene_base.start_tween(second_tween);
-		scene_base.tick(&engine, 0.5);
+		scene_base.tick(0.5);
 		let contested_rotation = scene_base.get_node_tree()[node_id].get_local_rotation();
 		assert_near(contested_rotation, 100.0);
 	}
@@ -2101,15 +2101,15 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn scene_base_drops_tween_of_destroyed_node() {
-		let engine = Engine::new(EngineConfiguration::new());
+		let _engine = Engine::new(EngineConfiguration::new());
 		let mut scene_base = SceneBase::new();
 		let root_id = scene_base.get_root_id();
 		let node_id = scene_base.get_node_tree_mut().create_child(root_id, "doomed");
 		let tween = Tween::create_node_tween(node_id, TweenProperty::LocalOpacity, 1.0, 0.0, 1.0);
 		let tween_id = scene_base.start_tween(tween);
-		scene_base.tick(&engine, 0.25);
+		scene_base.tick(0.25);
 		scene_base.get_node_tree_mut().destroy_node(node_id);
-		scene_base.tick(&engine, 0.25);
+		scene_base.tick(0.25);
 		assert_eq!(scene_base.get_tween_count(), 0);
 		assert!(scene_base.get_tween(tween_id).is_none());
 	}

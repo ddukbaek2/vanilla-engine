@@ -60,8 +60,8 @@ impl Scene for NodeScene {
 		node_tree.add_child(panel_id, badge_id);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -571,7 +571,7 @@ assert_eq!(node_tree.get_child_count(enemies_id), 1);
 - `WorldNode::add_component` does not call `attach_to_tree`, and `NodeTree::add_component` does not attach `require()`. Attach components that create child nodes with `NodeTree::add_component`.
 - While you hold a node reference taken with `node_tree[node_id]` from a `&mut NodeTree`, you cannot create another node (the borrow checker). Finish setting up one node before creating the next, as in the examples above, or keep the `NodeId` and take the node out when needed.
 - For a node to receive touches, turn on `set_interactable(true)`. The scene's default `tick` finds the topmost touch receiving node under the press and passes the touch to that node's components. (the "Input" chapter)
-- The root node is created by `NodeTree::new`, and right after the scene's `create` the engine sets it to position (0, 0), a top left pivot and the view size as its content size. Attach nodes in `create` or `initialize`.
+- The root node is created by `NodeTree::new`, and between the scene's `create` and `load` the engine sets it to position (0, 0), a top left pivot and the view size as its content size. Attach nodes in `load` or `initialize`.
 
 ## Related types
 

@@ -253,7 +253,7 @@ impl Scene for MainScene {
 	//==============================================================================
 	// 생성. (아틀라스 JSON 을 씬이 기다리게 맡긴다)
 	//==============================================================================
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.scene_base.set_scene_background_color(BACKGROUND_COLOR);
 		self.sprite_atlas.load(engine, "atlas/icons.json");
 		self.sprite_atlas.track_json_asset(&mut self.scene_base);
@@ -280,7 +280,8 @@ impl Scene for MainScene {
 	//==============================================================================
 	// 주기적 갱신.
 	//==============================================================================
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
 		self.elapsed_seconds += time_delta;
 		self.apply_atlas_frames(engine);
 		let pulse_scale = 1.0 + 0.15 * (self.elapsed_seconds * 2.0).sin().max(0.0);
@@ -304,15 +305,15 @@ impl Scene for MainScene {
 				label_text.set_text(&label);
 			}
 		}
-		self.scene_base.tick(engine, time_delta);
+		self.scene_base.tick(time_delta);
 	}
 
 	//==============================================================================
 	// 이전 출력. (글을 1:1 로 굽게 굽기 배율 단계를 0 으로 두고, 배경을 칠하고 기준 해상도 좌표계를 건다, 게임들과 같다)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
 		graphic.set_text_bake_scale_step(0.0);
-		self.scene_base.draw_scene_background(engine, graphic);
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 

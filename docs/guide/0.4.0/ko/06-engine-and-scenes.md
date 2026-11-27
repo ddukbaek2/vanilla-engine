@@ -106,12 +106,12 @@ assert_eq!(engine.get_engine_configuration().maximum_frame_per_second, 30.0);
 
 씬은 `Scene` 트레이트를 구현하고, 씬 공통 상태(노드 트리, 트윈, 맡긴 애셋, 배경색)를 든 `SceneBase` 를 필드로 품습니다. 꼭 구현할 것은 `get_scene_base`, `get_scene_base_mut` 둘이고, 나머지 훅은 필요한 것만 덮어씁니다. 불리는 차례는 이렇습니다.
 
-1. 씬 값을 만듭니다. `SceneBase::new()` 가 이름이 "root" 인 루트 노드를 함께 만듭니다. (원본은 루트를 `create` 에서 만듭니다)
-2. `Engine::load_scene` 이나 `Engine::run` 으로 넘기면 씬 핸들(`SceneId`)이 매겨지고, 그 프레임이 끝날 때 `create(engine)` 를 부릅니다. 바로 뒤에 엔진이 루트를 뷰 크기로 맞춥니다. (자리 0, 왼쪽 위 피벗, 콘텐츠 크기는 뷰 크기)
-3. `create` 에서 맡긴 애셋과 작업(`track_asset`, `track_load_handle`, `track_audio_asset`, `track_task`)이 모두 끝나고 0.3 초가 더 지나면 `initialize(engine)` 를 부르고, 이어서 `resize(engine, canvas_native_size)` 를 한 번 부릅니다. 맡긴 것이 없으면 `create` 뒤 0.3 초입니다.
-4. `initialize` 전까지 엔진은 매 프레임 `draw_on_load(engine, graphic)` 만 부릅니다. (로딩 화면)
-5. 그 뒤로 매 프레임 `tick(engine, time_delta)`, 씬의 터치 훅(`touch_press`, `touch_move`, `touch_release`, `touch_cancel`, `touch_wheel`), `pre_draw`, `draw`, `post_draw` 차례로 부릅니다. `SceneBase::set_gizmo_visible(true)` 면 그 뒤에 `draw_gizmos` 도 부릅니다.
-6. 창 크기가 바뀌면 `resize(engine, canvas_native_size)` 를 부릅니다.
+1. 씬 값을 만듭니다. `SceneBase::new()` 가 이름이 "root" 인 루트 노드를 함께 만듭니다. (원본은 루트를 `load` 에서 만듭니다)
+2. `Engine::load_scene` 이나 `Engine::run` 으로 넘기면 씬 핸들(`SceneId`)이 매겨지고, 그 프레임이 끝날 때 `create()` 를 부르고, 엔진이 루트를 뷰 크기로 맞춘 뒤(자리 0, 왼쪽 위 피벗, 콘텐츠 크기는 뷰 크기) `load(engine)` 를 부릅니다. (원본 create, async load 와 같은 이름과 인자)
+3. `load` 에서 맡긴 애셋과 작업(`track_asset`, `track_load_handle`, `track_audio_asset`, `track_task`)이 모두 끝나고 0.3 초가 더 지나면 `initialize(engine)` 를 부르고, 이어서 `resize(canvas_native_size)` 를 한 번 부릅니다. 맡긴 것이 없으면 `load` 뒤 0.3 초입니다.
+4. `initialize` 전까지 엔진은 매 프레임 `draw_on_load(graphic)` 만 부릅니다. (로딩 화면)
+5. 그 뒤로 매 프레임 `tick(time_delta)`, 씬의 터치 훅(`touch_press`, `touch_move`, `touch_release`, `touch_cancel`, `touch_wheel`), `pre_draw`, `draw`, `post_draw` 차례로 부릅니다. `SceneBase::set_gizmo_visible(true)` 면 그 뒤에 `draw_gizmos` 도 부릅니다.
+6. 창 크기가 바뀌면 `resize(canvas_native_size)` 를 부릅니다.
 7. 내릴 때는 그 프레임이 끝날 때 `finalize(engine)`, 그다음 `unload(engine)` 를 부릅니다. `unload` 에서 `track_task` 로 맡긴 작업이 끝나면 목록에서 빠지고, 그 씬의 async 작업이 모두 끝난 뒤 `destroy(engine)` 를 부르고 씬 값을 버립니다.
 
 기본 `tick` 은 `SceneBase::tick` 으로 노드 트리 갱신, 터치 넘기기(누른 자리 맨 위의 누를 수 있는 노드), 트윈 갱신을 차례로 합니다. 기본 `draw` 는 `SceneBase::draw` 로 노드 트리를 그립니다. 원본의 `super.tick()`, `super.draw()` 자리는 이 둘을 직접 부르는 것입니다.
@@ -133,32 +133,32 @@ impl Scene for LifecycleScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &Engine) {
+	fn load(&mut self, _engine: &Engine) {
 		let root_name = self.scene_base.get_root().get_name().to_string();
 		println!("create {}", root_name);
 	}
 
-	fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn draw_on_load(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
 	fn initialize(&mut self, _engine: &Engine) {
 		println!("initialize");
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		self.tick_count += 1;
 		if self.tick_count == 1 {
 			println!("first tick {}", time_delta);
 		}
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 	}
 
-	fn resize(&mut self, _engine: &Engine, canvas_native_size: Vector2) {
+	fn resize(&mut self, canvas_native_size: Vector2) {
 		println!("resize {} {}", canvas_native_size.x, canvas_native_size.y);
 	}
 
@@ -170,7 +170,7 @@ impl Scene for LifecycleScene {
 		println!("unload");
 	}
 
-	fn destroy(&mut self, _engine: &Engine) {
+	fn destroy(&mut self) {
 		println!("destroy");
 	}
 }
@@ -204,7 +204,7 @@ assert_eq!(scene_base.get_root().get_name(), "root");
 
 ### 애셋과 작업 기다리기 (원본 async load 자리)
 
-원본은 `async load(engine)` 안에서 애셋을 await 합니다. 러스트 판은 `create` 에서 불러오기 작업을 `Engine::spawn_scene_task` 로 맡기고 `SceneBase::track_task` 로 씬에 맡깁니다. 작업은 맡기는 자리에서 첫 await 까지 돌고, 작업 안에서는 `SceneContext::with` 안에서만 씬과 엔진을 만집니다. 엔진은 맡긴 작업이 끝나야 `initialize` 를 부릅니다.
+원본은 `async load(engine)` 안에서 애셋을 await 합니다. 러스트 판은 `load` 에서 불러오기 작업을 `Engine::spawn_scene_task` 로 맡기고 `SceneBase::track_task` 로 씬에 맡깁니다. 작업은 맡기는 자리에서 첫 await 까지 돌고, 작업 안에서는 `SceneContext::with` 안에서만 씬과 엔진을 만집니다. 엔진은 맡긴 작업이 끝나야 `initialize` 를 부릅니다.
 
 ```rust,no_run
 use vanilla::{Engine, Graphic, Scene, SceneBase, SceneContext};
@@ -223,7 +223,7 @@ impl Scene for StageScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		let load_task = engine.spawn_scene_task(self, |mut scene_context: SceneContext<StageScene>| async move {
 			let load_handle = scene_context.with(|_scene, engine| engine.request_asset_bytes("examples/assets/scenedocument.scene.json"));
 			if let Ok(bytes) = load_handle.await {
@@ -235,8 +235,8 @@ impl Scene for StageScene {
 		self.scene_base.track_task(&load_task);
 	}
 
-	fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn draw_on_load(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
 	fn initialize(&mut self, _engine: &Engine) {
@@ -249,7 +249,7 @@ await 없이 애셋의 읽기 손잡이를 `track_asset` 으로 맡기는 꼴도
 
 ## 한 프레임
 
-엔진 쪽에서 본 한 프레임은 이렇습니다. 글꼴 올리기, `Graphic` 상태 되돌리기와 화면 비우기, `TimeManager` 갱신, `InputManager` 갱신(게임패드, 입력 동작), 깨어난 async 작업 폴링, 불러온 씬마다 위의 4 번(불러오는 중)이나 5 번, 정보창(켰을 때), 마우스 커서, 한 프레임짜리 입력 표시 지우기, 남은 묶음 그리기, 검증용 화면 저장(요청했을 때), 프레임 번호 올리기, 그리고 씬 목록 바꾸기(내릴 씬의 `finalize` 와 `unload`, 새 씬의 `create`).
+엔진 쪽에서 본 한 프레임은 이렇습니다. 글꼴 올리기, `Graphic` 상태 되돌리기와 화면 비우기, `TimeManager` 갱신, `InputManager` 갱신(게임패드, 입력 동작), 깨어난 async 작업 폴링, 불러온 씬마다 위의 4 번(불러오는 중)이나 5 번, 정보창(켰을 때), 마우스 커서, 한 프레임짜리 입력 표시 지우기, 남은 묶음 그리기, 검증용 화면 저장(요청했을 때), 프레임 번호 올리기, 그리고 씬 목록 바꾸기(내릴 씬의 `finalize` 와 `unload`, 새 씬의 `create` 와 `load`).
 
 씬에서 난 패닉은 엔진이 잡지 않습니다. (원본은 씬마다 예외를 잡아 찍고 루프를 이어 갑니다)
 
@@ -317,11 +317,11 @@ impl Scene for MainScene {
 		&mut self.scene_base
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		graphic.set_fill_color("#3399ff");
 		graphic.draw_rect(Rect::create(100.0, 100.0, 300.0, 200.0));
@@ -343,8 +343,9 @@ impl Scene for SplashScene {
 		&mut self.scene_base
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
+		self.scene_base.tick(time_delta);
 		self.elapsed_seconds += time_delta;
 		if self.is_leaving || self.elapsed_seconds < 0.5 {
 			return;
@@ -367,11 +368,11 @@ impl Scene for SplashScene {
 		});
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		graphic.set_fill_color("#ffffff");
 		graphic.draw_rect(Rect::create(540.0, 320.0, 200.0, 80.0));
@@ -392,12 +393,12 @@ fn main() {
 ```
 
 - 같은 프레임에 불러온 씬(아직 `create` 전)을 내리면 `create` 도 `destroy` 도 부르지 않고 뺍니다. 그 씬의 `load_scene_async` 의 `Promise` 는 풀리지 않습니다.
-- `create` 뒤 불러오는 도중에 내린 씬은 원본처럼 불러오기가 끝나면 `initialize` 까지 받은 뒤 버려집니다. (`load_scene_async` 의 `Promise` 도 그때 풀립니다)
+- `load` 뒤 불러오는 도중에 내린 씬은 원본처럼 불러오기가 끝나면 `initialize` 까지 받은 뒤 버려집니다. (`load_scene_async` 의 `Promise` 도 그때 풀립니다)
 - `unload_scene_async` 의 `Promise` 는 없는 핸들이어도 풀립니다.
 
 ## 시간 (TimeManager)
 
-`tick(engine, time_delta)` 의 `time_delta` 는 지난 프레임부터 흐른 초에 시간 배율을 곱한 값입니다. 한 프레임 간격은 0 에서 상한(처음 0.25 초) 사이로 자릅니다. 창이 가려졌다 돌아오거나 오래 멈춘 뒤의 첫 프레임이 크게 뛰지 않게 하려는 것입니다. 씬에서는 `engine.get_time_manager()` 로 읽고 `engine.get_time_manager_mut()` 로 배율과 상한을 바꿉니다.
+`tick(time_delta)` 의 `time_delta` 는 지난 프레임부터 흐른 초에 시간 배율을 곱한 값입니다. 한 프레임 간격은 0 에서 상한(처음 0.25 초) 사이로 자릅니다. 창이 가려졌다 돌아오거나 오래 멈춘 뒤의 첫 프레임이 크게 뛰지 않게 하려는 것입니다. 씬에서는 `engine.get_time_manager()` 로 읽고 `engine.get_time_manager_mut()` 로 배율과 상한을 바꿉니다.
 
 | 함수 | 내용 |
 | --- | --- |
@@ -453,8 +454,9 @@ impl Scene for TimeScene {
 		time_manager.set_maximum_time_delta(0.1);
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
+		self.scene_base.tick(time_delta);
 		let time_manager = engine.get_time_manager();
 		let frame_per_second = time_manager.get_frame_per_second();
 		let time = time_manager.get_time();
@@ -519,7 +521,7 @@ assert_eq!(view_manager.get_view_scale_mode(), ViewScaleMode::StretchWidthExpand
 
 - `view_manager.apply_canvas_native_rect(graphic)`: 캔버스 전체를 논리 픽셀로. 바탕을 캔버스 끝까지 칠할 때 씁니다.
 - `view_manager.apply_view_rect(graphic)`: 뷰 좌표로. (0, 0) 이 뷰의 왼쪽 위이고 오른쪽 아래가 `get_view_size()` 입니다. 씬이 받는 터치 좌표도 이 좌표입니다.
-- `scene_base.draw_scene_background(engine, graphic)`: 앞의 둘을 이어 부릅니다. 캔버스 전체를 씬 배경색으로 칠하고 뷰 좌표를 겁니다. (원본 `GameScene.preDraw` 자리)
+- `scene_base.draw_scene_background(graphic)`: 앞의 둘을 이어 부릅니다. 캔버스 전체를 씬 배경색으로 칠하고 뷰 좌표를 겁니다. (원본 `GameScene.preDraw` 자리)
 
 ```rust,no_run
 use vanilla::{Color, Engine, EngineConfiguration, Graphic, Rect, Scene, SceneBase, Vector2, ViewScaleMode};
@@ -537,15 +539,16 @@ impl Scene for LetterboxScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &Engine) {
+	fn load(&mut self, _engine: &Engine) {
 		self.scene_base.set_scene_background_color("#202028");
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 
-	fn draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		self.scene_base.draw(graphic);
 		let view_size = engine.get_view_manager().get_view_size();
 		graphic.set_fill_color(Color::create(0.15, 0.3, 0.5, 1.0));
@@ -656,8 +659,8 @@ impl Scene for PausingScene {
 		println!("hidden at start {}", engine.is_page_hidden());
 	}
 
-	fn tick(&mut self, engine: &Engine, time_delta: f64) {
-		self.scene_base.tick(engine, time_delta);
+	fn tick(&mut self, time_delta: f64) {
+		self.scene_base.tick(time_delta);
 		if self.is_paused.get() {
 			return;
 		}
@@ -670,7 +673,7 @@ impl Scene for PausingScene {
 		}
 	}
 
-	fn on_page_visibility_restored(&mut self, _engine: &Engine) {
+	fn on_page_visibility_restored(&mut self) {
 		println!("page visible again");
 	}
 }
@@ -708,7 +711,7 @@ impl GameScene for TitleScene {
 		&mut self.game_scene_base
 	}
 
-	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, graphic: &mut Graphic) {
 		graphic.set_fill_color("#ffffff");
 		graphic.draw_rect(Rect::create(540.0, 320.0, 200.0, 80.0));
 	}
@@ -734,10 +737,10 @@ fn main() {
 
 ## 주의할 점
 
-- 루트 노드는 `SceneBase::new()` 가 만듭니다. (원본은 `create()` 에서 만듭니다) 루트를 뷰 크기로 맞추는 것은 엔진이 `create` 바로 뒤에 합니다.
-- 맡긴 애셋과 작업이 끝나도 0.3 초 뒤에야 `initialize` 와 `tick` 이 시작됩니다. 데스크탑은 애셋을 그 자리에서 읽으므로 맡긴 작업이 없으면 `create` 뒤 0.3 초입니다.
+- 루트 노드는 `SceneBase::new()` 가 만듭니다. (원본은 `create()` 에서 만듭니다) 루트를 뷰 크기로 맞추는 것은 엔진이 `create` 와 `load` 사이에 합니다. (원본 Scene.load 의 앞부분)
+- 맡긴 애셋과 작업이 끝나도 0.3 초 뒤에야 `initialize` 와 `tick` 이 시작됩니다. 데스크탑은 애셋을 그 자리에서 읽으므로 맡긴 작업이 없으면 `load` 뒤 0.3 초입니다.
 - 웹은 애셋이 나중에 오므로, 애셋을 쓰는 노드는 `initialize` 에서 만듭니다.
-- `tick` 이나 `draw` 를 덮어쓰면 기본 구현이 하던 일(노드 트리 갱신과 그리기, 터치 넘기기, 트윈)이 빠집니다. 필요하면 `self.scene_base.tick(engine, time_delta)`, `self.scene_base.draw(graphic)` 를 직접 부릅니다.
+- `tick` 이나 `draw` 를 덮어쓰면 기본 구현이 하던 일(노드 트리 갱신과 그리기, 터치 넘기기, 트윈)이 빠집니다. 필요하면 `self.scene_base.tick(time_delta)`, `self.scene_base.draw(graphic)` 를 직접 부릅니다.
 - `GameSceneBase` 와 `UISceneBase` 의 뷰 스케일 모드는 처음 `ViewScaleMode::None` 이고, `initialize` 에서 뷰 매니저에 겁니다. `EngineConfiguration::view_scale_mode` 를 정해 두어도 이 씬들은 자기 모드로 바꾸므로, 기준 해상도로 그리려면 `set_view_scale_mode` 로 정합니다.
 - `ViewScaleMode::None` 이 아닌 모드는 기준 해상도로 나눕니다. 기준 해상도를 0 으로 두면 뷰를 셀 수 없습니다.
 - 씬을 내리지 않고 다음 씬을 올리면 두 씬이 함께 돌고 함께 그려집니다.

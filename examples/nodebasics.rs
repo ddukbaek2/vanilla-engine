@@ -93,8 +93,8 @@ impl Scene for MainScene {
 	//==============================================================================
 	// 이전 출력. (배경을 칠하고 기준 해상도 좌표계를 건다)
 	//==============================================================================
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 

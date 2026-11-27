@@ -4,7 +4,7 @@
 
 ## 씬의 create 에서 불러오기
 
-애셋은 씬이 멤버로 듭니다. 중앙 리소스 매니저는 없습니다. 씬의 `create` 에서 `load(engine, 경로)` 로 읽기를 요청하고 `scene_base.track_asset` 으로 씬에 맡기면, 맡긴 것이 다 끝난 뒤 엔진이 `initialize` 를 부릅니다. 애셋을 쓰는 노드는 `initialize` 에서 만듭니다.
+애셋은 씬이 멤버로 듭니다. 중앙 리소스 매니저는 없습니다. 씬의 `load` 에서 `load(engine, 경로)` 로 읽기를 요청하고 `scene_base.track_asset` 으로 씬에 맡기면, 맡긴 것이 다 끝난 뒤 엔진이 `initialize` 를 부릅니다. 애셋을 쓰는 노드는 `initialize` 에서 만듭니다.
 
 ```rust,no_run
 use vanilla::{Engine, EngineConfiguration, Graphic, ImageAsset, Scene, SceneBase, Sprite, Vector2};
@@ -23,7 +23,7 @@ impl Scene for AssetScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.icon_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.icon_asset);
 	}
@@ -46,8 +46,8 @@ impl Scene for AssetScene {
 		icon_node.add_component(Sprite::create_with_image(icon_image));
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -67,15 +67,15 @@ fn main() {
 }
 ```
 
-- 데스크탑은 `load` 를 부른 자리에서 파일을 읽어 끝냅니다. 웹은 `fetch` 가 끝난 뒤 다음 프레임들 사이에 끝납니다. 그래서 받은 것을 읽는 코드는 `create` 가 아니라 `initialize` 에 둡니다.
-- 맡긴 것이 다 끝날 때까지 엔진은 씬의 `tick`, `draw` 대신 `draw_on_load` 를 매 프레임 부릅니다. 다 끝나면 0.3 초를 더 기다린 뒤 `initialize` 를 부릅니다. 맡긴 것이 없으면 `create` 뒤 0.3 초에 불립니다.
+- 데스크탑은 `load` 를 부른 자리에서 파일을 읽어 끝냅니다. 웹은 `fetch` 가 끝난 뒤 다음 프레임들 사이에 끝납니다. 그래서 받은 것을 읽는 코드는 `load` 가 아니라 `initialize` 에 둡니다.
+- 맡긴 것이 다 끝날 때까지 엔진은 씬의 `tick`, `draw` 대신 `draw_on_load` 를 매 프레임 부릅니다. 다 끝나면 0.3 초를 더 기다린 뒤 `initialize` 를 부릅니다. 맡긴 것이 없으면 `load` 뒤 0.3 초에 불립니다.
 - 받기에 실패한 애셋도 끝난 것으로 칩니다. 씬은 멈추지 않고, 실패한 애셋은 읽어도 `None` 입니다.
 - 이미 요청한 애셋에 `load` 를 다시 부르면 다시 읽지 않고 처음 손잡이를 돌려줍니다. 실패한 애셋도 같습니다. 다시 받으려면 `unload` 뒤에 부르거나 새 애셋을 만듭니다.
 - 씬에 맡기는 함수는 넷입니다. `track_asset(&애셋)`, `track_load_handle(&읽기 손잡이)`, `track_audio_asset(&Rc<AudioAsset>)`, `track_task(&작업 손잡이)`. `get_tracked_asset_progress()` 는 맡긴 것 가운데 끝난 비율(0 ~ 1, 실패 포함, 맡긴 것이 없으면 1)입니다.
 
 ## await 로 불러오기
 
-원본의 `async load(engine) { await asset.load(경로); }` 는 `create` 에서 씬 작업을 맡기고 `track_task` 로 씬에 맡기는 꼴로 옮깁니다. 작업은 맡긴 자리에서 첫 `await` 까지 돌고, 씬과 엔진은 `scene_context.with` 의 클로저 안에서만 빌립니다. `load` 가 돌려준 읽기 손잡이(`AssetLoadHandle`)는 애셋을 빌리지 않으므로 클로저 밖에서 `.await` 합니다.
+원본의 `async load(engine) { await asset.load(경로); }` 는 `load` 에서 씬 작업을 맡기고 `track_task` 로 씬에 맡기는 꼴로 옮깁니다. 작업은 맡긴 자리에서 첫 `await` 까지 돌고, 씬과 엔진은 `scene_context.with` 의 클로저 안에서만 빌립니다. `load` 가 돌려준 읽기 손잡이(`AssetLoadHandle`)는 애셋을 빌리지 않으므로 클로저 밖에서 `.await` 합니다.
 
 ```rust,no_run
 use vanilla::{wait, Engine, EngineConfiguration, JsonAsset, Scene, SceneBase};
@@ -95,7 +95,7 @@ impl Scene for StageScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		let load_task = engine.spawn_scene_task(self, |mut scene_context| async move {
 			let load_result = scene_context.with(|scene, engine| scene.stage_asset.load(engine, "examples/assets/scenedocument.scene.json")).await;
 			if let Err(error_message) = load_result {
@@ -210,7 +210,7 @@ assert!(!blob_asset.is_loaded());
 
 ## 글꼴
 
-`FontAsset` 은 `load` 가 아니라 `load_font(engine, 글꼴 이름, 경로)` 로 받습니다. 바이트가 오면 엔진이 다음 프레임 시작에 글자 캐시의 글꼴 목록에 그 이름으로 올리고, 그 뒤로 `Text.set_font_family(글꼴 이름)` 이나 폰트 문자열(`"32px 글꼴 이름"`)에서 그 이름을 씁니다. `load_font` 들은 `&Engine` 을 받으므로 `create` 에서 부릅니다.
+`FontAsset` 은 `load` 가 아니라 `load_font(engine, 글꼴 이름, 경로)` 로 받습니다. 바이트가 오면 엔진이 다음 프레임 시작에 글자 캐시의 글꼴 목록에 그 이름으로 올리고, 그 뒤로 `Text.set_font_family(글꼴 이름)` 이나 폰트 문자열(`"32px 글꼴 이름"`)에서 그 이름을 씁니다. `load_font` 들은 `&Engine` 을 받으므로 `load` 에서 부릅니다.
 
 | 메서드 | 내용 |
 | --- | --- |
@@ -239,7 +239,7 @@ impl Scene for FontScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.regular_font_asset.load_font(engine, "GameFont", "fonts/GameFont-Regular.ttf");
 		let bold_descriptors = FontFaceDescriptors::create_from_css("700", "normal", "");
 		self.bold_font_asset.load_font_with_descriptors(engine, "GameFont", "fonts/GameFont-Bold.ttf", bold_descriptors);
@@ -259,8 +259,8 @@ impl Scene for FontScene {
 		title_text.set_bold(true);
 	}
 
-	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
-		self.scene_base.draw_scene_background(engine, graphic);
+	fn pre_draw(&mut self, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(graphic);
 	}
 }
 
@@ -304,7 +304,7 @@ impl Scene for SoundScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		match engine.load_audio_asset("tests/assets/audio/wav_s16_stereo.wav") {
 			Ok(audio_asset) => {
 				self.scene_base.track_audio_asset(&audio_asset);
@@ -425,7 +425,7 @@ impl Scene for LoadingScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		self.asset_loader.set_concurrency(4);
 		self.icon_asset = Some(self.asset_loader.add_image("examples/assets/atlas/icons.png"));
 		self.atlas_json_asset = Some(self.asset_loader.add_json("examples/assets/atlas/icons.json"));
@@ -434,14 +434,15 @@ impl Scene for LoadingScene {
 		self.asset_loader.load(engine);
 	}
 
-	fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
+	fn draw_on_load(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
 		self.asset_loader.update(engine);
 		self.loading_progress.set_progress(self.asset_loader.get_progress());
 		let time_delta = engine.get_time_manager().get_unscale_delta_time();
 		self.loading_progress.update(time_delta);
 		let shown_progress = self.loading_progress.get_shown_progress();
 
-		self.scene_base.draw_scene_background(engine, graphic);
+		self.scene_base.draw_scene_background(graphic);
 		let view_size = engine.get_view_manager().get_view_size();
 		let bar_width = view_size.x * 0.6;
 		let bar_left = (view_size.x - bar_width) * 0.5;
@@ -569,7 +570,7 @@ impl Scene for AtlasScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &Engine) {
+	fn load(&mut self, engine: &Engine) {
 		let load_task = engine.spawn_scene_task(self, |mut scene_context| async move {
 			scene_context.with(|scene, engine| scene.sprite_atlas.load(engine, "examples/assets/atlas/icons.json")).await;
 		});
@@ -643,7 +644,7 @@ assert!(SpriteAtlas::find_frame("right").is_none());
 - `read_frame(name)` 은 `Option<&Frame>`(그림과 그 안의 영역)을 돌려줍니다. `has_frame(name)`, `get_frame_names()`, `get_page_images()`, `get_page_count()`, `is_loaded()` 도 있습니다.
 - `apply_frame(&mut sprite, name)` 은 스프라이트에 조각을 겁니다. 없는 이름이면 스프라이트 그림을 비우고 `false` 를 돌려줍니다.
 - 찾을 아틀라스 목록은 `Rc<RefCell<SpriteAtlas>>` 로 넣습니다. `SpriteAtlas::add_search_atlas` 로 넣어 두면 `SpriteAtlas::find_frame(name)`(조각의 복사, `Option<Frame>`), `SpriteAtlas::apply_search_frame(&mut sprite, name)` 이 넣은 차례로 찾습니다(앞의 것이 이깁니다). `remove_search_atlas`, `clear_search_atlases` 로 뺍니다. 목록은 스레드 하나에 하나입니다. 전역 목록을 쓰지 않으려면 `SpriteAtlas::find_frame_in_order(&[&atlas], name)`, `SpriteAtlas::apply_frame_in_order(&[&atlas], &mut sprite, name)` 을 씁니다.
-- `await` 없이 쓰려면 `create` 에서 `load` 한 뒤 `track_json_asset(&mut scene_base)` 로 JSON 을 씬에 맡기고, `is_loaded()` 가 참이 될 때까지 `draw_on_load` 나 `tick` 에서 `update(engine)` 를 부릅니다. 쪽 그림은 JSON 이 온 뒤 `update` 가 청합니다.
+- `await` 없이 쓰려면 `load` 에서 `load` 한 뒤 `track_json_asset(&mut scene_base)` 로 JSON 을 씬에 맡기고, `is_loaded()` 가 참이 될 때까지 `draw_on_load` 나 `tick` 에서 `update(engine)` 를 부릅니다. 쪽 그림은 JSON 이 온 뒤 `update` 가 청합니다.
 - 다시 `load` 하는 동안은 원본처럼 앞서 다 읽힌 조각을 그대로 씁니다.
 
 ## 주의할 점
