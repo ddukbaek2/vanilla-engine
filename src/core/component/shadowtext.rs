@@ -497,16 +497,16 @@ impl ShadowText {
 	#[cfg(target_arch = "wasm32")]
 	fn bake_with_browser(&self, font_string: &str, fit_width: f64, bake_scale: f64) -> Option<BakedText> {
 		let font_description = crate::core::textstringtexturecache::parse_font_string(font_string);
-		let browser_bake = crate::platform::web::systemfont::bake_shadow_text(&self.text, &font_description, (bake_scale as f32) as f64, self.resolve_shaping_text_direction().to_shaping_direction(), self.text_color, self.shadow_color, (self.shadow_offset as f32) as f64, (self.shadow_blur as f32) as f64, self.is_underline, self.is_strikethrough)?;
+		let browser_bake = crate::platform::web::systemfont::bake_shadow_text(&self.text, &font_description, bake_scale, self.resolve_shaping_text_direction().to_shaping_direction(), self.text_color, self.shadow_color, self.shadow_offset, self.shadow_blur, self.is_underline, self.is_strikethrough)?;
 		Some(BakedText {
 			image: Image::create_from_pixels(browser_bake.bitmap.width, browser_bake.bitmap.height, browser_bake.bitmap.pixels),
 			scale: bake_scale,
 			content_width: fit_width,
-			pen_offset_x: (browser_bake.pen_x / (bake_scale as f32) as f64) as f64,
-			baseline_offset_y: (browser_bake.baseline_y / (bake_scale as f32) as f64) as f64,
-			advance_width: (browser_bake.advance_width / (bake_scale as f32) as f64) as f64,
-			font_ascent: (browser_bake.font_ascent / (bake_scale as f32) as f64) as f64,
-			font_descent: (browser_bake.font_descent / (bake_scale as f32) as f64) as f64,
+			pen_offset_x: browser_bake.pen_x / bake_scale,
+			baseline_offset_y: browser_bake.baseline_y / bake_scale,
+			advance_width: browser_bake.advance_width / bake_scale,
+			font_ascent: browser_bake.font_ascent / bake_scale,
+			font_descent: browser_bake.font_descent / bake_scale,
 		})
 	}
 

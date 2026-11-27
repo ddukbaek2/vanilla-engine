@@ -251,13 +251,14 @@ pub fn bake_shadow_text(text: &str, font_description: &FontDescription, bake_sca
 	let scaled_baseline_y = bake_padding + scaled_font_ascent.ceil();
 	let bake_width = scaled_pen_x + actual_right + bake_padding;
 	// 밑줄은 기준선 아래로 내려가므로 그만큼 여유를 더 둔다.
-	let font_size = font_description.font_size;
-	let scaled_decoration_line_width = (font_size / 16.0).max(1.0) * bake_scale as f32;
+	// 원본처럼 장식 선 굵기와 밑줄 자리를 double 로 셈한다.
+	let font_size = f64::from(font_description.font_size);
+	let scaled_decoration_line_width = (font_size / 16.0).max(1.0) * bake_scale;
 	let scaled_middle_y = scaled_baseline_y - (scaled_font_ascent - scaled_font_descent) * 0.5;
-	let scaled_underline_y = scaled_middle_y + ((font_size * 0.5 + 2.0) * bake_scale as f32) as f64;
+	let scaled_underline_y = scaled_middle_y + (font_size * 0.5 + 2.0) * bake_scale;
 	let mut bake_height = scaled_baseline_y + (scaled_font_descent + scaled_shadow_offset).ceil() + bake_padding;
 	if is_underline {
-		bake_height = bake_height.max((scaled_underline_y + (scaled_decoration_line_width * 0.5) as f64 + scaled_shadow_offset).ceil() + bake_padding);
+		bake_height = bake_height.max((scaled_underline_y + scaled_decoration_line_width * 0.5 + scaled_shadow_offset).ceil() + bake_padding);
 	}
 	if bake_width <= 0.0 || bake_height <= 0.0 {
 		return None;
@@ -277,10 +278,10 @@ pub fn bake_shadow_text(text: &str, font_description: &FontDescription, bake_sca
 	context.fill_text(text, scaled_pen_x as f64, scaled_baseline_y as f64).ok()?;
 	// 밑줄과 취소선도 같은 그림자로 칠한다. (길이는 전진폭, Text 의 가운데 기준선과 같은 자리)
 	if is_underline {
-		context.fill_rect(scaled_pen_x as f64, (scaled_underline_y - (scaled_decoration_line_width * 0.5) as f64) as f64, advance_width as f64, scaled_decoration_line_width as f64);
+		context.fill_rect(scaled_pen_x, scaled_underline_y - scaled_decoration_line_width * 0.5, advance_width, scaled_decoration_line_width);
 	}
 	if is_strikethrough {
-		context.fill_rect(scaled_pen_x as f64, (scaled_middle_y - (scaled_decoration_line_width * 0.5) as f64) as f64, advance_width as f64, scaled_decoration_line_width as f64);
+		context.fill_rect(scaled_pen_x, scaled_middle_y - scaled_decoration_line_width * 0.5, advance_width, scaled_decoration_line_width);
 	}
 	let image_data = context.get_image_data(0.0, 0.0, width as f64, height as f64).ok()?;
 	Some(BrowserShadowTextBake {
@@ -655,7 +656,8 @@ fn build_css_font_string(font_description: &FontDescription, bake_scale: f64) ->
 	else {
 		String::new()
 	};
-	let pixel_size = font_description.font_size * bake_scale as f32;
+	// 원본 buildScaledFontString 처럼 글 크기와 배율을 double 로 곱해 글꼴 글을 짓는다.
+	let pixel_size = f64::from(font_description.font_size) * bake_scale;
 	let mut family_text_list: Vec<String> = Vec::new();
 	for family_name in &font_description.family_name_list {
 		let family_name = family_name.trim();

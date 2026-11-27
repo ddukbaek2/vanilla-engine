@@ -1352,7 +1352,8 @@ impl MeshBuilder {
 				let start = combined.vertex_data.len();
 				combined.vertex_data.extend_from_slice(vertex);
 				for axis in 0..3.min(vertex.len()) {
-					combined.vertex_data[start + axis] += (offset[axis]) as f32;
+					// 원본 Float32Array 칸 += 수: double 로 더한 뒤 한 번만 f32 로 줄인다.
+					combined.vertex_data[start + axis] = (combined.vertex_data[start + axis] as f64 + offset[axis]) as f32;
 				}
 			}
 			combined.index_data.extend(arrays.index_data.iter().map(|index| index + start_vertex));
@@ -1372,8 +1373,8 @@ impl MeshBuilder {
 			let outline_base_data = if arrays.outline_base_data.len() == arrays.outline_vertex_data.len() { &arrays.outline_base_data } else { &arrays.outline_vertex_data };
 			for (point_index, point) in arrays.outline_vertex_data.chunks(3).enumerate() {
 				for axis in 0..point.len() {
-					combined.outline_vertex_data.push(point[axis] + (offset[axis]) as f32);
-					combined.outline_base_data.push(outline_base_data[point_index * 3 + axis] + (offset[axis]) as f32);
+					combined.outline_vertex_data.push((point[axis] as f64 + offset[axis]) as f32);
+					combined.outline_base_data.push((outline_base_data[point_index * 3 + axis] as f64 + offset[axis]) as f32);
 				}
 			}
 			combined.outline_index_data.extend(arrays.outline_index_data.iter().map(|index| index + start_outline_vertex));

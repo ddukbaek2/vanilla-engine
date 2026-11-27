@@ -1604,12 +1604,12 @@ pub fn read_frame_camera(matrix: &Matrix4) -> ToonFrameCamera {
 pub fn read_view_rotation(view_projection_matrix: &Matrix4, forward: [f64; 3]) -> [f64; 9] {
 	let elements = view_projection_matrix.read_elements();
 	let row_x = [elements[0], elements[4], elements[8]];
-	let along = row_x[0] * ((forward[0]) as f32) as f64 + row_x[1] * ((forward[1]) as f32) as f64 + row_x[2] * ((forward[2]) as f32) as f64;
-	let mut right = [row_x[0] - ((forward[0] * along) as f32) as f64, row_x[1] - ((forward[1] * along) as f32) as f64, row_x[2] - ((forward[2] * along) as f32) as f64];
-	let right_length = (right[0] * right[0] + right[1] * right[1] + right[2] * right[2]).sqrt();
+	let along = row_x[0] * forward[0] + row_x[1] * forward[1] + row_x[2] * forward[2];
+	let mut right = [row_x[0] - forward[0] * along, row_x[1] - forward[1] * along, row_x[2] - forward[2] * along];
+	let right_length = crate::base::trigonometry::hypot_list(&right);
 	right = if right_length > 0.000001 { [right[0] / right_length, right[1] / right_length, right[2] / right_length] } else { [1.0, 0.0, 0.0] };
-	let up = [right[1] * ((forward[2]) as f32) as f64 - right[2] * ((forward[1]) as f32) as f64, right[2] * ((forward[0]) as f32) as f64 - right[0] * ((forward[2]) as f32) as f64, right[0] * ((forward[1]) as f32) as f64 - right[1] * ((forward[0]) as f32) as f64];
-	[(right[0]), (up[0]), -forward[0], (right[1]), (up[1]), -forward[1], (right[2]), (up[2]), -forward[2]]
+	let up = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]];
+	[right[0], up[0], -forward[0], right[1], up[1], -forward[1], right[2], up[2], -forward[2]]
 }
 
 //==============================================================================
@@ -1772,23 +1772,24 @@ fn read_bounding_sphere(positions: &[f32], stride: usize) -> ([f64; 3], f64) {
 			continue;
 		}
 		for axis in 0..3 {
-			minimum[axis] = minimum[axis].min((point[axis]) as f64);
-			maximum[axis] = maximum[axis].max((point[axis]) as f64);
+			minimum[axis] = minimum[axis].min(point[axis] as f64);
+			maximum[axis] = maximum[axis].max(point[axis] as f64);
 		}
 	}
 	if minimum[0] > maximum[0] {
 		return ([0.0; 3], 0.0);
 	}
 	let center = [(minimum[0] + maximum[0]) * 0.5, (minimum[1] + maximum[1]) * 0.5, (minimum[2] + maximum[2]) * 0.5];
-	let mut radius_squared: f64 = 0.0;
+	// 원본처럼 double 로 빼고 Math.hypot 으로 잰다.
+	let mut radius: f64 = 0.0;
 	for point in positions.chunks(stride) {
 		if point.len() < 3 {
 			continue;
 		}
-		let delta = [point[0] - (center[0]) as f32, point[1] - (center[1]) as f32, point[2] - (center[2]) as f32];
-		radius_squared = radius_squared.max((delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]) as f64);
+		let delta = [point[0] as f64 - center[0], point[1] as f64 - center[1], point[2] as f64 - center[2]];
+		radius = radius.max(crate::base::trigonometry::hypot_list(&delta));
 	}
-	(center, radius_squared.sqrt())
+	(center, radius)
 }
 
 //==============================================================================
