@@ -449,6 +449,12 @@ const VERTEX_CAPACITY: usize = 4096;
 
 /// 묶어 그리기 버퍼 용량. (버텍스 수, 넘으면 내보내고 다시 모은다)
 const BATCH_VERTEX_CAPACITY: usize = 6 * 8192;
+/// 묶음 CPU 배열을 처음 지을 때의 정점 수. (사각형 512 개, 모자라면 BATCH_VERTEX_CAPACITY 까지 두 배씩 늘린다, 원본 BATCH_INITIAL_VERTEX_CAPACITY)
+const BATCH_INITIAL_VERTEX_CAPACITY: usize = 6 * 512;
+/// 남긴 묶음에서 바뀐 범위 사이가 이 정점 수 이하면 한 범위로 합쳐 올린다. (원본 BATCH_RETAINED_MERGE_GAP_VERTEX_COUNT)
+const BATCH_RETAINED_MERGE_GAP_VERTEX_COUNT: usize = 256;
+/// 남긴 묶음 하나를 고쳐 올리는 buffer_sub_data 수 한도. (넘으면 첫 범위부터 끝 범위까지 한 번에 올린다, 원본 BATCH_RETAINED_RANGE_LIMIT)
+const BATCH_RETAINED_RANGE_LIMIT: usize = 4;
 
 /// 묶음을 GPU 버퍼에 남겨 두는 프레임당 그리기 차례 수. (넘는 차례는 남기지 않고 늘 올린다, 원본 BATCH_RETAINED_FLUSH_CAPACITY)
 const BATCH_RETAINED_FLUSH_CAPACITY: usize = 32;
@@ -1520,10 +1526,27 @@ impl std::fmt::Debug for GeometryCacheSlot {
 struct RetainedFlush {
 	vertex_array: Option<GlVertexArray>,
 	vertex_buffer: Option<GlBuffer>,
-	version_list: Vec<u64>,
-	segment_count: usize,
-	vertex_count: usize,
+	/// GPU 버퍼에 든 지난 조각 목록. (정점 수, 판, 판 0 은 바로 쓴 구간)
+	previous_segment_list: Vec<(usize, u64)>,
+	/// 지난 프레임 바로 쓴 구간의 정점을 이어 붙여 떠 둔 것. (이번 프레임에 같은 자리의 구간과 값을 견준다)
+	previous_direct_data: Vec<f32>,
+	/// 조각마다 previous_direct_data 안의 시작 자리. (float 수)
+	previous_direct_offset_list: Vec<usize>,
+	/// GPU 버퍼 저장소의 정점 수.
+	buffer_vertex_count: usize,
 	is_valid: bool,
+}
+
+//==============================================================================
+/// 지금 묶음에 적은 조각 하나. (캐시 조각이거나 캐시 없이 바로 쓴 구간)
+//==============================================================================
+struct BatchSegment {
+	/// 조각의 정점 수.
+	vertex_count: usize,
+	/// 캐시 조각의 판. (0 이면 바로 쓴 구간, 판은 1 부터 올라간다)
+	version: u64,
+	/// 묶음 배열에 옮기지 않고 미룬 정점. (캐시를 적으며 이미 쓴 조각과 바로 쓴 구간은 None)
+	deferred_vertex_data: Option<Rc<Vec<f32>>>,
 }
 
 //==============================================================================
@@ -1756,11 +1779,16 @@ pub struct Graphic {
 	batch_retained_flush_list: Vec<RetainedFlush>,
 	/// 지금 묶음이 쓰는 남김 칸 번호. (None 이면 남기지 않는 묶음)
 	batch_retained_flush: Option<usize>,
-	/// 지금 묶음의 조각. (정점 수, 미뤄 둔 정점)
-	batch_segment_list: Vec<(usize, Option<Rc<Vec<f32>>>)>,
+	/// 지금 묶음의 조각. (캐시 조각과 바로 쓴 구간)
+	batch_segment_list: Vec<BatchSegment>,
 	batch_deferred_segment_count: usize,
-	/// 미뤄 둔 조각이 남김 칸의 지난 조각과 차례까지 모두 같은지.
-	is_batch_segment_matching: bool,
+	/// 남긴 묶음에서 고쳐 올릴 정점 범위. ((시작, 끝), 묶음을 그릴 때마다 다시 쓴다)
+	batch_dirty_range_list: Vec<(usize, usize)>,
+	/// 이번 묶음 바로 쓴 구간의 정점을 이어 붙인 것과 조각마다의 시작 자리. (그린 뒤 남김 칸의 지난 값과 맞바꾼다)
+	batch_direct_data: Vec<f32>,
+	batch_direct_offset_list: Vec<usize>,
+	/// 묶음 GPU 버퍼로 올린 바이트의 누적. (시험이 프레임 앞뒤 차이로 읽는다)
+	batch_upload_byte_count: u64,
 	/// 캐시 조각의 정점을 묶음 배열에 옮기지 않고 미루는지. (지난 프레임 같은 차례가 조각만으로 찼을 때만)
 	is_batch_segment_deferring: bool,
 	retained_batch_count: u32,
@@ -1947,7 +1975,7 @@ impl Graphic {
 			round_rect_unit_table: build_round_rect_unit_table(),
 			is_batching_enabled: true,
 			batch_suspend_depth: 0,
-			batch_vertex_data: vec![0.0; BATCH_VERTEX_CAPACITY * BATCH_FLOATS_PER_VERTEX],
+			batch_vertex_data: vec![0.0; BATCH_INITIAL_VERTEX_CAPACITY * BATCH_FLOATS_PER_VERTEX],
 			batch_vertex_count: 0,
 			batch_texture_list: [None; BATCH_TEXTURE_SLOT_LIMIT],
 			batch_texture_count: 0,
@@ -1979,7 +2007,10 @@ impl Graphic {
 			batch_retained_flush: None,
 			batch_segment_list: Vec::new(),
 			batch_deferred_segment_count: 0,
-			is_batch_segment_matching: false,
+			batch_dirty_range_list: Vec::new(),
+			batch_direct_data: Vec::new(),
+			batch_direct_offset_list: Vec::new(),
+			batch_upload_byte_count: 0,
 			is_batch_segment_deferring: false,
 			retained_batch_count: 0,
 			last_frame_retained_batch_count: 0,
@@ -3220,15 +3251,10 @@ impl Graphic {
 		let clip_slot_index = self.shader_clip_slot;
 		let texture_slot = texture_slot_index as f32;
 		let clip_slot = clip_slot_index as f32;
-		// 기하 캐시를 적는 쓰기는 떠 둔 조각과 같으므로 묶음을 남길 수 있다. 그 밖의 바로 쓰기가 끼면 남기지 않는다.
+		// 기하 캐시를 적는 쓰기는 조각으로, 그 밖의 바로 쓰기는 바로 쓴 구간으로 적는다. (바로 쓰기가 껴도 묶음의 나머지는 남긴다)
 		let is_capturing = self.geometry_active_cache.is_some();
-		if is_capturing {
-			if self.batch_vertex_count == 0 {
-				self.begin_batch_segments();
-			}
-		}
-		else if self.batch_retained_flush.is_some() {
-			self.end_batch_segments();
+		if self.batch_vertex_count == 0 {
+			self.begin_batch_segments();
 		}
 		let matrix = self.transform_matrix;
 		let color_alpha = color.alpha * self.global_alpha;
@@ -3266,6 +3292,9 @@ impl Graphic {
 		if is_capturing {
 			self.capture_geometry_append(vertex_count, texture, color, texture_slot_index, clip_slot_index);
 		}
+		else if self.batch_retained_flush.is_some() {
+			self.add_batch_direct_span(vertex_count);
+		}
 		self.batch_vertex_count += vertex_count;
 	}
 
@@ -3284,6 +3313,7 @@ impl Graphic {
 			self.flush_batch();
 			texture_slot = None;
 		}
+		self.ensure_batch_vertex_capacity(self.batch_vertex_count + vertex_count);
 		let texture_slot = match texture_slot {
 			Some(texture_slot) => {
 				texture_slot
@@ -3338,8 +3368,11 @@ impl Graphic {
 	fn append_batch_colored_quads(&mut self, vertex_count: usize, texture: GlTexture) {
 		let texture_slot = self.prepare_batch(vertex_count, texture) as f32;
 		let clip_slot = self.shader_clip_slot as f32;
+		if self.batch_vertex_count == 0 {
+			self.begin_batch_segments();
+		}
 		if self.batch_retained_flush.is_some() {
-			self.end_batch_segments();
+			self.add_batch_direct_span(vertex_count);
 		}
 		let global_alpha = self.global_alpha as f32;
 		let matrix = self.transform_matrix;
@@ -3398,16 +3431,16 @@ impl Graphic {
 			self.batch_retained_flush_list.push(RetainedFlush {
 				vertex_array: None,
 				vertex_buffer: None,
-				version_list: Vec::new(),
-				segment_count: 0,
-				vertex_count: 0,
+				previous_segment_list: Vec::new(),
+				previous_direct_data: Vec::new(),
+				previous_direct_offset_list: Vec::new(),
+				buffer_vertex_count: 0,
 				is_valid: false,
 			});
 		}
 		let is_valid = self.batch_retained_flush_list[flush_index].is_valid;
 		self.batch_retained_flush = Some(flush_index);
-		self.is_batch_segment_matching = is_valid;
-		// 지난 프레임 같은 차례가 바로 쓰기로 끝났으면(스크롤 등) 이번에도 그럴 것이라 미루지 않고 옮기며 조각만 적는다.
+		// 지난 프레임 같은 차례를 남기지 못했으면(GPU 버퍼에 쓸 것이 없다) 미루지 않고 옮기며 조각만 적는다.
 		self.is_batch_segment_deferring = is_valid;
 	}
 
@@ -3420,30 +3453,146 @@ impl Graphic {
 	/// - `deferred_vertex_data`: 묶음 배열에 옮기지 않고 미룬 정점. (캐시를 적으며 이미 쓴 조각은 None)
 	//==============================================================================
 	fn add_batch_segment(&mut self, version: u64, vertex_count: usize, deferred_vertex_data: Option<Rc<Vec<f32>>>) {
-		let retained_index = match self.batch_retained_flush {
-			Some(retained_index) => {
-				retained_index
-			}
-			None => {
-				return;
-			}
-		};
-		let segment_index = self.batch_segment_list.len();
+		if self.batch_retained_flush.is_none() {
+			return;
+		}
 		if deferred_vertex_data.is_some() {
 			self.batch_deferred_segment_count += 1;
 		}
-		self.batch_segment_list.push((vertex_count, deferred_vertex_data));
-		let retained_flush = &mut self.batch_retained_flush_list[retained_index];
-		if segment_index < retained_flush.version_list.len() {
-			if retained_flush.version_list[segment_index] != version {
-				retained_flush.version_list[segment_index] = version;
-				self.is_batch_segment_matching = false;
+		self.batch_segment_list.push(BatchSegment {
+			vertex_count,
+			version,
+			deferred_vertex_data,
+		});
+	}
+
+	//==============================================================================
+	/// 지금 묶음에 캐시 없이 바로 쓴 정점 적기. (바로 앞 조각도 바로 쓴 구간이면 그 구간을 늘린다, 그릴 때 지난 프레임 같은 자리의 값과 견준다, 원본 addBatchDirectSpan)
+	//==============================================================================
+	fn add_batch_direct_span(&mut self, vertex_count: usize) {
+		if self.batch_retained_flush.is_none() {
+			return;
+		}
+		if let Some(last_segment) = self.batch_segment_list.last_mut() {
+			if last_segment.version == 0 {
+				last_segment.vertex_count += vertex_count;
+				return;
 			}
 		}
-		else {
-			retained_flush.version_list.push(version);
-			self.is_batch_segment_matching = false;
+		self.batch_segment_list.push(BatchSegment {
+			vertex_count,
+			version: 0,
+			deferred_vertex_data: None,
+		});
+	}
+
+	//==============================================================================
+	/// 묶음 CPU 배열이 정점 수만큼 들 수 있게 늘리기. (두 배씩, BATCH_VERTEX_CAPACITY 까지, 쌓인 정점은 그대로 둔다, 원본 ensureBatchVertexCapacity)
+	//==============================================================================
+	fn ensure_batch_vertex_capacity(&mut self, vertex_count: usize) {
+		let current_vertex_capacity = self.batch_vertex_data.len() / BATCH_FLOATS_PER_VERTEX;
+		if vertex_count <= current_vertex_capacity {
+			return;
 		}
+		let mut vertex_capacity = current_vertex_capacity;
+		while vertex_capacity < vertex_count {
+			vertex_capacity *= 2;
+		}
+		vertex_capacity = vertex_capacity.min(BATCH_VERTEX_CAPACITY);
+		self.batch_vertex_data.resize(vertex_capacity * BATCH_FLOATS_PER_VERTEX, 0.0);
+	}
+
+	//==============================================================================
+	/// 남긴 묶음에서 지난번과 달라 고쳐 올릴 정점 범위 모으기. (batch_dirty_range_list 에 적고 범위 수를 돌려준다, None 이면 지난번과 견주지 않고 모두 올린다, 원본 collectBatchDirtyRanges)
+	/// - 같은 자리에 같은 판의 캐시 조각(같은 정점 수)이 있으면 GPU 버퍼에 이미 있다. 바로 쓴 구간은 지난 프레임 같은 자리의 바로 쓴 구간과 정점 값을 견준다.
+	///   앞 조각의 정점 수가 달라 자리가 밀린 뒤로는 모두 바뀐 것이다.
+	/// - 바로 쓴 구간의 정점은 다음 프레임에 견주게 떠 두고 조각 목록과 함께 남김 칸의 지난 값으로 넘긴다.
+	/// - 사이가 BATCH_RETAINED_MERGE_GAP_VERTEX_COUNT 이하인 범위는 합치고, 범위가 BATCH_RETAINED_RANGE_LIMIT 개를 넘으면 첫 범위부터 끝 범위까지 하나로 합친다.
+	//==============================================================================
+	fn collect_batch_dirty_ranges(&mut self, retained_index: usize, is_comparable: bool) -> Option<usize> {
+		self.batch_dirty_range_list.clear();
+		self.batch_direct_data.clear();
+		self.batch_direct_offset_list.clear();
+		let retained_flush = &mut self.batch_retained_flush_list[retained_index];
+		let mut is_layout_same = is_comparable;
+		let mut start_vertex = 0;
+		for (segment_index, segment) in self.batch_segment_list.iter().enumerate() {
+			let vertex_count = segment.vertex_count;
+			if is_layout_same {
+				match retained_flush.previous_segment_list.get(segment_index) {
+					Some((previous_count, _)) if *previous_count == vertex_count => {}
+					_ => {
+						is_layout_same = false;
+					}
+				}
+			}
+			let mut is_dirty = !is_layout_same || retained_flush.previous_segment_list[segment_index].1 != segment.version;
+			let float_start = start_vertex * BATCH_FLOATS_PER_VERTEX;
+			let float_count = vertex_count * BATCH_FLOATS_PER_VERTEX;
+			let direct_offset = self.batch_direct_data.len();
+			if segment.version == 0 {
+				if !is_dirty {
+					let previous_offset = retained_flush.previous_direct_offset_list[segment_index];
+					is_dirty = self.batch_vertex_data[float_start..float_start + float_count] != retained_flush.previous_direct_data[previous_offset..previous_offset + float_count];
+				}
+				self.batch_direct_data.extend_from_slice(&self.batch_vertex_data[float_start..float_start + float_count]);
+			}
+			self.batch_direct_offset_list.push(direct_offset);
+			let end_vertex = start_vertex + vertex_count;
+			if is_dirty && is_comparable {
+				match self.batch_dirty_range_list.last_mut() {
+					Some(last_range) if start_vertex - last_range.1 <= BATCH_RETAINED_MERGE_GAP_VERTEX_COUNT => {
+						last_range.1 = end_vertex;
+					}
+					_ => {
+						self.batch_dirty_range_list.push((start_vertex, end_vertex));
+					}
+				}
+			}
+			start_vertex = end_vertex;
+		}
+		retained_flush.previous_segment_list.clear();
+		retained_flush.previous_segment_list.extend(self.batch_segment_list.iter().map(|segment| (segment.vertex_count, segment.version)));
+		std::mem::swap(&mut retained_flush.previous_direct_data, &mut self.batch_direct_data);
+		std::mem::swap(&mut retained_flush.previous_direct_offset_list, &mut self.batch_direct_offset_list);
+		if !is_comparable {
+			return None;
+		}
+		if self.batch_dirty_range_list.len() > BATCH_RETAINED_RANGE_LIMIT {
+			let last_end = self.batch_dirty_range_list[self.batch_dirty_range_list.len() - 1].1;
+			self.batch_dirty_range_list[0].1 = last_end;
+			self.batch_dirty_range_list.truncate(1);
+		}
+		Some(self.batch_dirty_range_list.len())
+	}
+
+	//==============================================================================
+	/// 고쳐 올릴 범위에 드는 미룬 조각의 정점만 묶음 배열의 제자리에 옮겨 쓰기. (범위 밖의 미룬 조각은 GPU 버퍼에 이미 있어 옮기지 않는다, 원본 writeBatchSegmentsInRanges)
+	//==============================================================================
+	fn write_batch_segments_in_ranges(&mut self) {
+		if self.batch_deferred_segment_count == 0 {
+			return;
+		}
+		let mut range_index = 0;
+		let mut start_vertex = 0;
+		for segment in self.batch_segment_list.iter_mut() {
+			if range_index >= self.batch_dirty_range_list.len() {
+				break;
+			}
+			// 범위는 조각 경계로 지었으므로 조각은 범위 안에 통째로 들거나 밖에 있다.
+			while range_index < self.batch_dirty_range_list.len() && self.batch_dirty_range_list[range_index].1 <= start_vertex {
+				range_index += 1;
+			}
+			if range_index < self.batch_dirty_range_list.len() && start_vertex >= self.batch_dirty_range_list[range_index].0 {
+				if let Some(world_vertex_data) = segment.deferred_vertex_data.take() {
+					let float_start = start_vertex * BATCH_FLOATS_PER_VERTEX;
+					let float_count = segment.vertex_count * BATCH_FLOATS_PER_VERTEX;
+					self.batch_vertex_data[float_start..float_start + float_count].copy_from_slice(&world_vertex_data[..float_count]);
+				}
+			}
+			start_vertex += segment.vertex_count;
+		}
+		self.batch_deferred_segment_count = 0;
 	}
 
 	//==============================================================================
@@ -3454,9 +3603,9 @@ impl Graphic {
 			return;
 		}
 		let mut target_offset = 0;
-		for (vertex_count, deferred_vertex_data) in self.batch_segment_list.iter_mut() {
-			let float_count = *vertex_count * BATCH_FLOATS_PER_VERTEX;
-			if let Some(world_vertex_data) = deferred_vertex_data.take() {
+		for segment in self.batch_segment_list.iter_mut() {
+			let float_count = segment.vertex_count * BATCH_FLOATS_PER_VERTEX;
+			if let Some(world_vertex_data) = segment.deferred_vertex_data.take() {
 				self.batch_vertex_data[target_offset..target_offset + float_count].copy_from_slice(&world_vertex_data[..float_count]);
 			}
 			target_offset += float_count;
@@ -4021,8 +4170,11 @@ impl Graphic {
 		}
 		let texture_slot = self.prepare_batch(vertex_count, texture) as f32;
 		let clip_slot = self.shader_clip_slot as f32;
+		if self.batch_vertex_count == 0 {
+			self.begin_batch_segments();
+		}
 		if self.batch_retained_flush.is_some() {
-			self.end_batch_segments();
+			self.add_batch_direct_span(vertex_count);
 		}
 
 		// append_batch_vertices 와 같은 색 셈.
@@ -4078,23 +4230,33 @@ impl Graphic {
 		self.batch_clip_rect_count = 1;
 		self.batch_generation += 1;
 
-		// 캐시 조각만으로 찬 묶음은 이 차례의 남김 칸 버퍼로 그린다. 조각과 그 정점 판이 지난번과 모두 같으면 옮기지도 올리지도 않는다.
+		// 조각을 적은 묶음은 이 차례의 남김 칸 버퍼로 그린다. 지난번과 같은 자리의 같은 조각은 올리지 않고 바뀐 범위만 고쳐 올린다.
 		let flush_index = self.batch_flush_index;
 		self.batch_flush_index += 1;
 		let retained_index = self.batch_retained_flush.take();
-		let mut is_retained_same = false;
+		// 남긴 묶음의 올리기 계획. (None 이면 모두 올린다, Some(0) 이면 바뀐 것이 없다, 그 밖에는 batch_dirty_range_list 의 범위만 올린다)
+		let mut dirty_range_count: Option<usize> = None;
+		let mut is_full_upload = true;
 		match retained_index {
 			Some(retained_index) => {
-				let segment_count = self.batch_segment_list.len();
 				let retained_flush = &self.batch_retained_flush_list[retained_index];
-				is_retained_same = self.is_batch_segment_matching && retained_flush.is_valid && retained_flush.segment_count == segment_count && retained_flush.vertex_count == vertex_count && retained_flush.vertex_array.is_some();
-				if !is_retained_same {
+				let is_partial_uploadable = retained_flush.is_valid && retained_flush.buffer_vertex_count >= vertex_count && retained_flush.vertex_array.is_some() && retained_flush.vertex_buffer.is_some();
+				dirty_range_count = self.collect_batch_dirty_ranges(retained_index, is_partial_uploadable);
+				is_full_upload = match dirty_range_count {
+					None => {
+						true
+					}
+					Some(range_count) => {
+						range_count == 1 && self.batch_dirty_range_list[0] == (0, vertex_count)
+					}
+				};
+				if is_full_upload {
 					self.write_batch_segments();
 				}
-				let retained_flush = &mut self.batch_retained_flush_list[retained_index];
-				retained_flush.segment_count = segment_count;
-				retained_flush.vertex_count = vertex_count;
-				retained_flush.is_valid = false;
+				else if dirty_range_count != Some(0) {
+					self.write_batch_segments_in_ranges();
+				}
+				self.batch_retained_flush_list[retained_index].is_valid = false;
 			}
 			None => {
 				// 정점을 바로 쓴 묶음은 남기지 않는다. (이 차례의 남김 칸은 다음 프레임에 다시 올리게 한다)
@@ -4148,12 +4310,25 @@ impl Graphic {
 					let retained_flush = &mut self.batch_retained_flush_list[retained_index];
 					retained_flush.vertex_array = vertex_array;
 					retained_flush.vertex_buffer = vertex_buffer;
-					if is_retained_same {
+					if dirty_range_count == Some(0) {
 						self.retained_batch_count += 1;
 					}
-					else {
+					else if is_full_upload {
+						// 처음이거나, 지난번보다 정점이 많거나, 모두 바뀌었으면 새 저장소를 잡으며 모두 올린다.
 						crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, vertex_buffer);
 						self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
+						retained_flush.buffer_vertex_count = vertex_count;
+						self.batch_upload_byte_count += vertex_bytes.len() as u64;
+					}
+					else {
+						// 바뀐 범위만 buffer_sub_data 로 고쳐 올린다.
+						crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, vertex_buffer);
+						let stride_bytes = BATCH_FLOATS_PER_VERTEX * 4;
+						for (start_vertex, end_vertex) in self.batch_dirty_range_list.iter() {
+							let range_bytes = &vertex_bytes[start_vertex * stride_bytes..end_vertex * stride_bytes];
+							self.gl.buffer_sub_data_u8_slice(glow::ARRAY_BUFFER, (start_vertex * stride_bytes) as i32, range_bytes);
+							self.batch_upload_byte_count += range_bytes.len() as u64;
+						}
 					}
 					self.batch_retained_flush_list[retained_index].is_valid = vertex_array.is_some() && vertex_buffer.is_some();
 				}
@@ -4161,6 +4336,7 @@ impl Graphic {
 					crate::core::glstatecache::bind_vertex_array(&self.gl, self.batch_vertex_array);
 					crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, self.batch_vertex_buffer);
 					self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
+					self.batch_upload_byte_count += vertex_bytes.len() as u64;
 				}
 			}
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
@@ -7815,7 +7991,8 @@ mod tests {
 		}
 
 		/// 기하 캐시 시험의 한 프레임. (프레임 통계를 넘겨 (화소, 남긴 묶음, 드로 콜, 캐시로 그린 수, 다시 적은 수) 를 돌려준다)
-		fn render_geometry_cache_frame(graphic: &mut Graphic, panel_list: &mut [GeometryCachePanel], size: i32, scroll_y: f64) -> (Vec<u8>, u32, u32, u32, u32) {
+		fn render_geometry_cache_frame(graphic: &mut Graphic, panel_list: &mut [GeometryCachePanel], size: i32, scroll_y: f64) -> (Vec<u8>, u32, u32, u32, u32, u64) {
+			let upload_byte_count_before = graphic.batch_upload_byte_count;
 			unsafe {
 				graphic.get_gl().clear_color(0.1, 0.1, 0.12, 1.0);
 				graphic.get_gl().clear(glow::COLOR_BUFFER_BIT | glow::STENCIL_BUFFER_BIT);
@@ -7833,7 +8010,7 @@ mod tests {
 			graphic.flush_batch();
 			let (_, _, pixel_list) = graphic.read_framebuffer_pixels();
 			graphic.begin_frame_statistics();
-			(pixel_list, graphic.get_last_frame_retained_batch_count(), graphic.get_last_frame_draw_call_count(), graphic.get_last_frame_geometry_cache_hit_count(), graphic.get_last_frame_geometry_rebuild_count())
+			(pixel_list, graphic.get_last_frame_retained_batch_count(), graphic.get_last_frame_draw_call_count(), graphic.get_last_frame_geometry_cache_hit_count(), graphic.get_last_frame_geometry_rebuild_count(), graphic.batch_upload_byte_count - upload_byte_count_before)
 		}
 
 		/// 기하 캐시 켬과 끔의 화면이 프레임마다 같고, 멈춘 프레임은 남긴 묶음으로만 그리며, 스크롤은 다시 적지 않는다. (원본 uigeometrycachechrome 과 같은 내용)
@@ -7878,7 +8055,7 @@ mod tests {
 
 			// 프레임 차례: 0 ~ 9 멈춤, 10 ~ 19 스크롤, 20 ~ 29 멈춤, 30 에 글 하나 바꿈, 31 ~ 39 멈춤.
 			let scroll_list: Vec<f64> = (0..40).map(|frame_index| if frame_index < 10 { 0.0 } else if frame_index < 20 { (frame_index - 9) as f64 * 3.0 } else { 30.0 }).collect();
-			let mut frame_list_by_mode: Vec<Vec<(Vec<u8>, u32, u32, u32, u32)>> = Vec::new();
+			let mut frame_list_by_mode: Vec<Vec<(Vec<u8>, u32, u32, u32, u32, u64)>> = Vec::new();
 			for is_enabled in [true, false] {
 				graphic.set_geometry_caching_enabled(is_enabled);
 				graphic.begin_frame_statistics();
@@ -7895,16 +8072,23 @@ mod tests {
 			let (cached_frame_list, plain_frame_list) = (&frame_list_by_mode[0], &frame_list_by_mode[1]);
 			let mut failure_list = Vec::new();
 			for frame_index in 0..scroll_list.len() {
-				let (cached_pixel_list, retained_count, draw_call_count, hit_count, rebuild_count) = &cached_frame_list[frame_index];
-				let (plain_pixel_list, plain_retained_count, _, plain_hit_count, _) = &plain_frame_list[frame_index];
+				let (cached_pixel_list, retained_count, draw_call_count, hit_count, rebuild_count, _) = &cached_frame_list[frame_index];
+				let (plain_pixel_list, plain_retained_count, plain_draw_call_count, plain_hit_count, _, plain_upload_byte_count) = &plain_frame_list[frame_index];
 				if cached_pixel_list != plain_pixel_list {
 					let different_count = cached_pixel_list.iter().zip(plain_pixel_list.iter()).filter(|(cached, plain)| cached != plain).count();
 					failure_list.push(format!("프레임 {} 켬과 끔 화소 다름 {} 칸", frame_index, different_count));
 				}
-				if *plain_retained_count != 0 || *plain_hit_count != 0 {
-					failure_list.push(format!("프레임 {} 끈 길에 남김 {} 캐시 {}", frame_index, plain_retained_count, plain_hit_count));
+				if *plain_hit_count != 0 {
+					failure_list.push(format!("프레임 {} 끈 길이 캐시로 그림 {}", frame_index, plain_hit_count));
 				}
 				let is_still = (2..10).contains(&frame_index) || (22..30).contains(&frame_index) || (32..40).contains(&frame_index);
+				// 캐시를 꺼도 바로 쓴 정점이 지난 프레임과 같으면 다시 올리지 않고(남긴 묶음, 올린 바이트 0), 바꾼 프레임은 다시 올린다.
+				if is_still && (*plain_draw_call_count == 0 || plain_retained_count != plain_draw_call_count || *plain_upload_byte_count != 0) {
+					failure_list.push(format!("프레임 {} 끈 길의 멈춘 프레임인데 남긴 묶음 {} 드로 콜 {} 올린 바이트 {}", frame_index, plain_retained_count, plain_draw_call_count, plain_upload_byte_count));
+				}
+				if frame_index == 30 && (*plain_retained_count >= *plain_draw_call_count || *plain_upload_byte_count == 0) {
+					failure_list.push(format!("프레임 30 끈 길의 바꾼 프레임은 다시 올려야 함: 남김 {} 드로 콜 {} 올린 바이트 {}", plain_retained_count, plain_draw_call_count, plain_upload_byte_count));
+				}
 				if is_still && (*draw_call_count == 0 || retained_count != draw_call_count) {
 					failure_list.push(format!("프레임 {} 멈춤인데 남긴 묶음 {} 드로 콜 {}", frame_index, retained_count, draw_call_count));
 				}
@@ -7917,9 +8101,37 @@ mod tests {
 				}
 			}
 			// 글이 실제로 그려졌는지. (흰 글 화소)
+			// 캐시를 켠 채 칸 하나의 색만 바꾸면(정점 수 그대로) 그 조각만 다시 적고 바뀐 범위만 올려, 처음 올린 바이트보다 적고 0 보다 많다.
+			graphic.set_geometry_caching_enabled(true);
+			let mut panel_list = create_geometry_cache_panels();
+			let first_upload_byte_count = render_geometry_cache_frame(&mut graphic, &mut panel_list, SIZE, 0.0).5;
+			let still_upload_byte_count = render_geometry_cache_frame(&mut graphic, &mut panel_list, SIZE, 0.0).5;
+			let still_upload_byte_count_again = render_geometry_cache_frame(&mut graphic, &mut panel_list, SIZE, 0.0).5;
+			panel_list[20].paint.set_color(Color::create_from_bytes(250, 20, 20, 255));
+			let changed_upload_byte_count = render_geometry_cache_frame(&mut graphic, &mut panel_list, SIZE, 0.0).5;
+			assert!(still_upload_byte_count_again == 0, "멈춘 프레임이 올렸다: {} (처음 {}, 둘째 {})", still_upload_byte_count_again, first_upload_byte_count, still_upload_byte_count);
+			assert!(changed_upload_byte_count > 0 && changed_upload_byte_count < first_upload_byte_count, "색만 바꾼 프레임이 바뀐 범위만 올리지 않았다: 처음 {} 바꾼 프레임 {}", first_upload_byte_count, changed_upload_byte_count);
 			let text_pixel_count = cached_frame_list[0].0.chunks(4).filter(|pixel| pixel[0] > 200 && pixel[1] > 200 && pixel[2] > 200).count();
 			assert!(text_pixel_count > 100, "글이 그려지지 않았다: 흰 화소 {}", text_pixel_count);
 			assert!(failure_list.is_empty(), "기하 캐시가 틀렸다: {:?}", failure_list);
+		}
+
+		/// 묶음 CPU 배열은 사각형 512 개로 시작해 모자라면 한도(8192)까지 두 배씩 늘고, 늘려도 쌓인 정점은 그대로다. (원본 ensureBatchVertexCapacity 와 같은 내용)
+		#[test]
+		fn batch_vertex_array_starts_small_and_doubles_to_limit() {
+			let Some(mut graphic) = create_test_graphic() else {
+				eprintln!("graphic: 창 없는 GL 컨텍스트를 짓지 못해 건너뜀");
+				return;
+			};
+			assert_eq!(graphic.batch_vertex_data.len(), 6 * 512 * BATCH_FLOATS_PER_VERTEX);
+			graphic.batch_vertex_data[7] = 3.5;
+			graphic.ensure_batch_vertex_capacity(6 * 512 + 1);
+			assert_eq!(graphic.batch_vertex_data.len(), 6 * 1024 * BATCH_FLOATS_PER_VERTEX);
+			assert_eq!(graphic.batch_vertex_data[7], 3.5);
+			graphic.ensure_batch_vertex_capacity(6 * 3000);
+			assert_eq!(graphic.batch_vertex_data.len(), 6 * 4096 * BATCH_FLOATS_PER_VERTEX);
+			graphic.ensure_batch_vertex_capacity(BATCH_VERTEX_CAPACITY);
+			assert_eq!(graphic.batch_vertex_data.len(), BATCH_VERTEX_CAPACITY * BATCH_FLOATS_PER_VERTEX);
 		}
 
 		#[test]
