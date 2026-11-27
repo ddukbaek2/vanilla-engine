@@ -494,7 +494,7 @@ impl<'a> ToonDrawQueue<'a> {
 			}
 		}
 
-		// 바뀔 때만. (드리우개를 담은 차례로 견준다)
+		// 바뀔 때만. (드리우개를 담은 차례로 견준다, 정렬 차례는 재질 블록 같은 깊이에 닿지 않는 값으로도 바뀌어 그 차례로 견주면 바뀌지 않은 드리우개도 다르게 보인다)
 		let mut static_index_list: Vec<usize> = Vec::new();
 		let mut dynamic_index_list: Vec<usize> = Vec::new();
 		let (is_light_changed, is_cache_stale) = {
@@ -509,12 +509,17 @@ impl<'a> ToonDrawQueue<'a> {
 				is_cache_stale = is_cache_stale || record_list[caster_index_list.len()..].iter().any(|record| record.is_static);
 				record_list.truncate(caster_index_list.len());
 			}
-			for (caster_position, &item_index) in caster_index_list.iter().enumerate() {
-				let item = &self.item_list[item_index];
+			let mut is_static_caster_list = vec![false; self.item_list.len()];
+			let mut caster_position = 0;
+			for (item_index, item) in self.item_list.iter().enumerate() {
+				if item.is_transparent || !item.options.casts_shadow {
+					continue;
+				}
 				if caster_position >= record_list.len() {
 					record_list.push(ShadowCasterRecord::default());
 				}
 				let record = &mut record_list[caster_position];
+				caster_position += 1;
 				let is_vertex_animated = item.options.material.is_some_and(|material| !material.get_vertex_chunk().is_empty());
 				if write_caster_record(record, item) || is_vertex_animated {
 					is_cache_stale = is_cache_stale || record.is_static;
@@ -528,7 +533,11 @@ impl<'a> ToonDrawQueue<'a> {
 						is_cache_stale = true;
 					}
 				}
-				if record.is_static {
+				is_static_caster_list[item_index] = record.is_static;
+			}
+			// 굽는 것과 덧그리는 것은 정렬 차례로 나눈다. (자동 인스턴싱으로 이어진 같은 것을 묶는다)
+			for &item_index in caster_index_list.iter() {
+				if is_static_caster_list[item_index] {
 					static_index_list.push(item_index);
 				}
 				else {
@@ -690,6 +699,7 @@ impl<'a> ToonDrawQueue<'a> {
 			if *pass_stage != stage {
 				continue;
 			}
+			renderer.select_first_unit(gl);
 			callback(gl, renderer);
 			is_run = true;
 		}
@@ -828,5 +838,128 @@ mod tests {
 		assert!(is_transparent_options(&ToonDrawOptions { alpha: 0.5, ..ToonDrawOptions::default() }));
 		assert!(is_transparent_options(&ToonDrawOptions { tint_color: [1.0, 1.0, 1.0, 0.9], ..ToonDrawOptions::default() }));
 		assert!(is_transparent_options(&ToonDrawOptions { blend_mode: ToonBlendMode::Additive, ..ToonDrawOptions::default() }));
+	}
+
+	//==============================================================================
+	/// 툰 그리기의 텍스처 유닛 고르기. (원본 tests/graphics3d/toontextureunitchrome.test.mjs 와 같은 장면, 진짜 GL, 맥 CGL)
+	/// - 모형 넷과 바탕색 텍스처 둘을 엇갈려 쓰는 상자 여덟을 해 그림자와 함께 그리기 줄로 그린다. 정렬한 차례에서 바탕색 텍스처가 그리기마다 바뀐다. (유닛 4 만 바뀐다)
+	/// - 그리기마다 고른 유닛을 0 으로 되돌리지 않으므로 같은 유닛만 바꾸는 그리기는 active_texture 없이 bind_texture 하나다.
+	/// - 단계 콜백과 몸 그리기의 on_before_draw 에는 유닛 0 을 고른 채 넘기고, 프레임이 끝나면 앞서 고른 유닛(3)과 유닛 0 의 텍스처를 돌려놓는지 GL 에 바로 물어 본다.
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	#[test]
+	fn draw_does_not_reset_texture_unit_each_draw() {
+		use crate::graphics3d::toon::toonrenderer::{ToonProgramKind, ToonTextureOptions};
+		use crate::graphics3d::shadowmap::{ShadowMap, ShadowUpdateMode};
+		use crate::{create_box_geometry, create_octahedron_geometry, create_sphere_geometry, create_cylinder_geometry, Camera3D, MeshBuilder, ToonPartOptions, Vector3};
+		use glow::HasContext;
+		let Some(glow_context) = crate::core::glstatecache::tests::create_surfaceless_context() else {
+			eprintln!("toondrawqueue: 창 없는 GL 컨텍스트를 짓지 못해 건너뜀");
+			return;
+		};
+		let _ = crate::core::glstatecache::attach(&glow_context);
+		let gl: &GlContext = GlContext::from_context(&glow_context);
+		let raw: &glow::Context = gl.get_glow_context_unchecked();
+		let read_parameter = |name: u32| unsafe { raw.get_parameter_i32(name) };
+		let (width, height) = (160i32, 120i32);
+		let framebuffer = unsafe {
+			let color_texture = crate::core::glstatecache::create_texture(gl).unwrap();
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(color_texture));
+			raw.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, width, height, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None));
+			let depth = raw.create_renderbuffer().unwrap();
+			raw.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
+			raw.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH_COMPONENT24, width, height);
+			let framebuffer = crate::core::glstatecache::create_framebuffer(gl).unwrap();
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(framebuffer));
+			raw.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(color_texture), 0);
+			raw.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::RENDERBUFFER, Some(depth));
+			assert_eq!(raw.check_framebuffer_status(glow::FRAMEBUFFER), glow::FRAMEBUFFER_COMPLETE);
+			framebuffer
+		};
+		let mut renderer = ToonRenderer::new(gl).expect("툰 렌더러");
+		let create_mesh = |geometry: &crate::ToonGeometry| {
+			let mut builder = MeshBuilder::new();
+			builder.add_part(geometry, &Matrix4::create_identity(), "#ffffff", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
+			renderer.create_mesh(gl, &builder.read_arrays()).expect("모형")
+		};
+		let ground_mesh = create_mesh(&create_box_geometry(8.0, 0.2, 8.0));
+		let mesh_list = [create_mesh(&create_box_geometry(0.6, 0.8, 0.6)), create_mesh(&create_sphere_geometry(0.35, 12, 8, std::f64::consts::PI)), create_mesh(&create_octahedron_geometry(0.35)), create_mesh(&create_cylinder_geometry(0.3, 0.3, 0.8, 12))];
+		let create_pattern = |first: [u8; 4], second: [u8; 4]| {
+			let pixels: Vec<u8> = (0..64).flat_map(|index| if index % 8 < 4 && index < 32 { second } else { first }).collect();
+			renderer.create_texture(gl, 8, 8, &pixels, ToonTextureOptions { is_mipmapped: false, ..ToonTextureOptions::default() }).expect("텍스처")
+		};
+		let texture_list = [create_pattern([224, 160, 112, 255], [96, 48, 32, 255]), create_pattern([112, 160, 224, 255], [32, 48, 96, 255])];
+		let mut camera = Camera3D::new();
+		camera.set_perspective(0.9, 0.1, 50.0);
+		camera.set_aspect_ratio(width as f64 / height as f64);
+		camera.look_at(Vector3::create(0.0, 4.0, 5.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
+		let mut shadow_map = ShadowMap::new(gl, 512).expect("그림자 판");
+		shadow_map.set_update_mode(ShadowUpdateMode::OnChange, 1);
+		shadow_map.update_light_matrix(Vector3::create(0.0, 0.0, 0.0), Vector3::create(-0.5, -1.0, -0.4), 4.0, 0.1, 20.0);
+		renderer.set_shadow(Some(&shadow_map), 0.7);
+		let outside_texture = unsafe { crate::core::glstatecache::create_texture(gl) }.unwrap();
+		let callback_unit_list: RefCell<Vec<i32>> = RefCell::new(Vec::new());
+		let mut frame_list: Vec<(u32, u32, i32, bool, u32)> = Vec::new();
+		for _frame in 0..6 {
+			// 게임이 유닛 0 에 제 텍스처를 두고 유닛 3 을 고른 채 3D 를 그린다.
+			unsafe {
+				crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
+				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(outside_texture));
+				crate::core::glstatecache::active_texture(gl, glow::TEXTURE3);
+			}
+			let before_count = crate::core::glstatecache::read_texture_call_count();
+			let on_before_draw = |_program: &crate::core::shaderprogram::ShaderProgram, _gl: &GlContext, kind: ToonProgramKind| {
+				if kind == ToonProgramKind::Solid {
+					callback_unit_list.borrow_mut().push(read_parameter(glow::ACTIVE_TEXTURE) - glow::TEXTURE0 as i32);
+				}
+			};
+			let mut queue = ToonDrawQueue::new();
+			queue.add_mesh(&ground_mesh, &Matrix4::create_translation(0.0, -0.1, 0.0), ToonDrawOptions::default());
+			for index in 0..8usize {
+				let mut options = ToonDrawOptions { base_color_texture: Some(texture_list[index % 2]), ..ToonDrawOptions::default() };
+				if index == 5 {
+					// 몸 그리기의 콜백만 본다. (그림자 깊이 패스는 텍스처를 묶지 않아 고른 유닛이 그대로다)
+					options.on_before_draw = Some(&on_before_draw);
+				}
+				queue.add_mesh(&mesh_list[index / 2], &Matrix4::create_translation(-2.1 + index as f64 * 0.6, 0.4, 0.0), options);
+			}
+			let callback_ref = &callback_unit_list;
+			queue.add_pass(ToonDrawStage::AfterOpaque, move |_gl: &GlContext, _renderer: &mut ToonRenderer| {
+				callback_ref.borrow_mut().push(read_parameter(glow::ACTIVE_TEXTURE) - glow::TEXTURE0 as i32);
+			});
+			queue.draw_shadows(gl, &mut renderer, &shadow_map);
+			unsafe {
+				crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(framebuffer));
+				crate::core::glstatecache::viewport(gl, 0, 0, width, height);
+				raw.clear_color(0.1, 0.1, 0.1, 1.0);
+				raw.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+			}
+			queue.draw(gl, &mut renderer, &camera);
+			let after_count = crate::core::glstatecache::read_texture_call_count();
+			let active_unit = read_parameter(glow::ACTIVE_TEXTURE) - glow::TEXTURE0 as i32;
+			unsafe {
+				crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
+			}
+			let first_unit_texture = read_parameter(glow::TEXTURE_BINDING_2D) as u32;
+			let error = unsafe { raw.get_error() };
+			let is_restored = first_unit_texture == outside_texture.0.get();
+			frame_list.push((after_count.0 - before_count.0, after_count.1 - before_count.1, active_unit, is_restored, error));
+		}
+		eprintln!("toondrawqueue: 프레임마다 (active_texture, bind_texture, 고른 유닛, 유닛 0 돌아옴, 오류) {:?}", frame_list);
+		for (frame, result) in frame_list.iter().enumerate() {
+			assert_eq!(result.4, 0, "{} 프레임 GL 오류", frame);
+			assert_eq!(result.2, 3, "{} 프레임 뒤 고른 유닛이 3 으로 돌아옴", frame);
+			assert!(result.3, "{} 프레임 뒤 유닛 0 의 텍스처가 돌아옴", frame);
+		}
+		// 같은 차례로 그리는 프레임(2 부터)은 바탕색 유닛만 바뀐다. 그리기마다 유닛을 0 으로 되돌리지 않는다. (고치기 전 스물여섯)
+		for (frame, result) in frame_list.iter().enumerate().skip(2) {
+			assert!(result.0 <= 12, "{} 프레임 active_texture 가 열둘 이하 ({})", frame, result.0);
+			assert!(result.1 >= 8, "{} 프레임 바탕색 텍스처는 그리기마다 묶음 ({})", frame, result.1);
+		}
+		// 단계 콜백과 on_before_draw 는 유닛 0 을 고른 채 부른다.
+		assert_eq!(callback_unit_list.borrow().len(), 12, "콜백을 프레임마다 둘 부름");
+		for unit in callback_unit_list.borrow().iter() {
+			assert_eq!(*unit, 0, "콜백이 유닛 0 을 고른 채 불림");
+		}
 	}
 }
