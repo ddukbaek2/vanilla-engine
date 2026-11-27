@@ -13,7 +13,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use vanilla::{Engine, EngineConfiguration, Promise};
 
-let mut engine = Engine::new(EngineConfiguration::new());
+let engine = Engine::new(EngineConfiguration::new());
 let (start_promise, start_resolver) = Promise::<u32>::create();
 let received_value = Rc::new(Cell::new(0));
 let task_received_value = received_value.clone();
@@ -37,8 +37,8 @@ assert_eq!(received_value.get(), 0);
 
 | Function | Takes | First runs |
 | --- | --- | --- |
-| `engine.spawn_task(task_function)` | `&mut Engine`; the task function receives an `EngineContext` | Where it is spawned, up to the first `await` |
-| `engine.spawn_scene_task(scene, task_function)` | `&mut Engine` and `&mut scene`; the task function receives a `SceneContext<SceneType>` | Where it is spawned, up to the first `await` |
+| `engine.spawn_task(task_function)` | `&Engine`; the task function receives an `EngineContext` | Where it is spawned, up to the first `await` |
+| `engine.spawn_scene_task(scene, task_function)` | `&Engine` and `&mut scene`; the task function receives a `SceneContext<SceneType>` | Where it is spawned, up to the first `await` |
 | `engine.spawn_deferred_task(task_function)` | Places that only have `&Engine` (such as a component context) | In the next polling turn |
 | `engine.spawn_deferred_scene_task(scene, task_function)` | Places that only have `&Engine` and `&scene` | In the next polling turn |
 
@@ -65,7 +65,7 @@ impl Scene for TitleScene {
 	}
 }
 
-let mut engine = Engine::new(EngineConfiguration::new());
+let engine = Engine::new(EngineConfiguration::new());
 let mut title_scene = TitleScene {
 	scene_base: SceneBase::new(),
 	greeting_asset: TextAsset::new(),
@@ -84,7 +84,7 @@ assert!(task_handle.is_finished());
 assert_eq!(title_scene.greeting, "hello");
 ```
 
-- `SceneContext<S>::with` gives the scene as its own type (`&mut S`) and the engine as `&mut Engine`. `EngineContext::with` gives only the engine.
+- `SceneContext<S>::with` gives the scene as its own type (`&mut S`) and the engine as `&Engine`. `EngineContext::with` gives only the engine.
 - The `with` closure is synchronous, so you cannot `await` inside it. References the closure receives cannot be put into its return value (their lifetime is new for each closure), so they cannot leak out.
 - That is why the `load` functions that returned a Promise in the original return handles that do not borrow the asset or the scene. Call `load` inside the closure and `await` the returned handle outside it. The original `await this.atlas.load(path)` becomes the single line `scene_context.with(|scene, engine| scene.atlas.load(engine, path)).await`.
 - On desktop, assets are read on the spot, so the handle is already finished. That is also why the example above runs to the end in the first poll at the spawn site. On the web, frames keep running while the data arrives, and the task continues when it does. The game code is the same.
@@ -153,7 +153,7 @@ impl Scene for StageScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 			let load_result = scene_context.with(|scene, engine| scene.stage_asset.load(engine, "scenedocument.scene.json")).await;
 			if let Err(reason) = load_result {
@@ -164,7 +164,7 @@ impl Scene for StageScene {
 		self.scene_base.track_task(&load_task_handle);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		if let Some(stage_data) = self.stage_asset.get_data() {
 			println!("{}", stage_data["version"]);
 		}
@@ -194,7 +194,7 @@ fn main() {
 ```rust,no_run
 use vanilla::{Engine, Scene, SceneId};
 
-fn change_scene(engine: &mut Engine, current_scene_id: SceneId, next_scene: Box<dyn Scene>) {
+fn change_scene(engine: &Engine, current_scene_id: SceneId, next_scene: Box<dyn Scene>) {
 	engine.spawn_task(move |mut engine_context| async move {
 		let next_scene_id = engine_context.with(|engine| engine.load_scene_async(next_scene)).await;
 		engine_context.with(|engine| engine.unload_scene_async(current_scene_id)).await;
@@ -212,7 +212,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use vanilla::{Engine, EngineConfiguration, Promise};
 
-let mut engine = Engine::new(EngineConfiguration::new());
+let engine = Engine::new(EngineConfiguration::new());
 let (score_promise, score_resolver) = Promise::<Result<u32, String>>::create();
 score_resolver.reject(String::from("timeout"));
 
@@ -267,7 +267,7 @@ impl GameScene for StoryScene {
 		&mut self.game_scene_base
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		self.fade_screen_async(|mut scene_context| async move {
 			scene_context.with(|scene, _engine| {
 				scene.chapter += 1;
@@ -293,7 +293,7 @@ vanilla::game_scene!(StoryScene);
 
 ## Differences from the Original and Cautions
 
-- Instead of using `this` right on the line after `await`, touch it inside `with`. The reason is the same as for pointing at nodes with `NodeId`. Tasks are polled while the engine is held as `&mut`, so `Engine::get_engine()` is `Err(MutablyBorrowed)` outside `with` too.
+- Instead of using `this` right on the line after `await`, touch it inside `with`. The reason is the same as for pointing at nodes with `NodeId`. The engine can also be taken with `Engine::get_engine()` outside `with` (the same engine).
 - The original `reject` and `try`/`catch` become `Result`. Awaiting a handle that can fail ends in a `Result`, so tell the cases apart with `match` or `if let`.
 - When a scene is unloaded, its tasks keep running, like the original Promise chains. The engine keeps the scene value alive until all of them finish (it leaves the list and receives no `tick` or `draw`), and `with` keeps giving that scene. When they all finish, `destroy` is called and the scene is dropped. A `loop` task that never ends keeps running after its scene is unloaded, so give it an exit condition.
 - A scene unloaded while loading still receives `initialize` when loading finishes, like the original `loadScene`.

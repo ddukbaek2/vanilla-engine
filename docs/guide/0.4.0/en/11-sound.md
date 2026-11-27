@@ -46,7 +46,7 @@ impl Scene for MainScene {
 		&mut self.scene_base
 	}
 
-	fn touch_press(&mut self, engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, engine: &Engine, _view_input_position: Vector2) {
 		let audio_manager = engine.get_audio_manager();
 		println!("{} {}", audio_manager.has_user_gesture(), audio_manager.get_context_time());
 	}
@@ -91,7 +91,7 @@ impl Scene for SoundScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		match engine.load_audio_asset("tests/assets/audio/vorbis_stereo.ogg") {
 			Ok(audio_asset) => {
 				self.scene_base.track_audio_asset(&audio_asset);
@@ -103,7 +103,7 @@ impl Scene for SoundScene {
 		}
 	}
 
-	fn touch_press(&mut self, engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, engine: &Engine, _view_input_position: Vector2) {
 		if self.audio_player.is_none() {
 			if let Some(audio_asset) = &self.audio_asset {
 				let mut audio_player = engine.get_audio_manager().create_audio_player();
@@ -166,14 +166,14 @@ impl Scene for BusScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		if let Ok(audio_asset) = engine.load_audio_asset("tests/assets/audio/wav_s16_stereo.wav") {
 			self.scene_base.track_audio_asset(&audio_asset);
 			self.audio_asset = Some(audio_asset);
 		}
 	}
 
-	fn touch_press(&mut self, engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, engine: &Engine, _view_input_position: Vector2) {
 		if self.effect_bus.is_none() {
 			let effect_bus = engine.get_audio_manager().create_audio_bus();
 			effect_bus.set_volume(0.5);
@@ -273,7 +273,7 @@ impl Scene for MusicScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		let mut sound_system = SoundSystem::new(engine, create_sound_table());
 		sound_system.set_music_volume(0.8);
 		sound_system.set_sound_effect_volume(1.0);
@@ -285,20 +285,20 @@ impl Scene for MusicScene {
 		self.scene_base.track_task(&task_handle);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		if let Some(sound_system) = read_sound_system() {
 			sound_system.borrow_mut().play_music("music", 1.0, false);
 		}
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		if let Some(sound_system) = read_sound_system() {
 			sound_system.borrow_mut().update();
 		}
 	}
 
-	fn touch_press(&mut self, engine: &mut Engine, view_input_position: Vector2) {
+	fn touch_press(&mut self, engine: &Engine, view_input_position: Vector2) {
 		let view_size = engine.get_view_manager().get_view_size();
 		let pan = (view_input_position.x / view_size.x) * 2.0 - 1.0;
 		if let Some(sound_system) = read_sound_system() {
@@ -357,7 +357,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use vanilla::{Engine, EngineConfiguration, PageEvent, SoundRow, SoundSystem};
 
-let mut engine = Engine::new(EngineConfiguration::new());
+let engine = Engine::new(EngineConfiguration::new());
 let sound_table = vec![SoundRow::create_effect("click", &["tests/assets/audio/wav_s16_stereo.wav"], 1.0)];
 let mut sound_system = SoundSystem::new(&engine, sound_table);
 let is_ad_showing = Rc::new(Cell::new(false));
@@ -414,16 +414,16 @@ impl Scene for PoolScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		if let Ok(audio_asset) = engine.load_audio_asset("tests/assets/audio/wav_s16_stereo.wav") {
 			self.scene_base.track_audio_asset(&audio_asset);
 			self.audio_asset = Some(audio_asset);
 		}
 	}
 
-	fn touch_press(&mut self, engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, engine: &Engine, _view_input_position: Vector2) {
 		if self.sound_effect_pool.is_none() {
-			let mut sound_effect_pool = SoundEffectPool::new(engine.get_audio_manager(), 6);
+			let mut sound_effect_pool = SoundEffectPool::new(&engine.get_audio_manager(), 6);
 			sound_effect_pool.set_volume(0.8);
 			self.sound_effect_pool = Some(sound_effect_pool);
 		}
@@ -501,11 +501,11 @@ impl Scene for BeepScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
-		self.beep_player = Some(BeepPlayer::new(engine.get_audio_manager(), 0.3));
+	fn create(&mut self, engine: &Engine) {
+		self.beep_player = Some(BeepPlayer::new(&engine.get_audio_manager(), 0.3));
 	}
 
-	fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 		if let Some(beep_player) = &self.beep_player {
 			beep_player.play_preset("confirm");
 			beep_player.play_sequence(&[

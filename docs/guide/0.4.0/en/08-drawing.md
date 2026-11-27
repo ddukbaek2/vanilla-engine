@@ -33,11 +33,11 @@ impl Scene for ShapeScene {
 		&mut self.scene_base
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		graphic.set_fill_color("#2a3550");
 		graphic.draw_round_rect(Rect::create(40.0, 40.0, 360.0, 220.0), 24.0);
@@ -120,12 +120,12 @@ impl Scene for SpriteScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let image = match self.image_asset.get_image() {
 			Some(image) => {
 				image
@@ -163,7 +163,7 @@ impl Scene for SpriteScene {
 		tiled_sprite.set_sprite_draw_mode(SpriteDrawMode::Tiled);
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 }
@@ -235,7 +235,7 @@ impl Scene for TextScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 
@@ -274,7 +274,7 @@ impl Scene for TextScene {
 		button_text.set_fit_width(180.0, 0.55);
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 }
@@ -405,11 +405,11 @@ impl Scene for BlendScene {
 		&mut self.scene_base
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		let blend_modes = [BlendMode::Normal, BlendMode::Lighter, BlendMode::Multiply, BlendMode::Screen, BlendMode::Difference];
 		for (index, blend_mode) in blend_modes.iter().enumerate() {
@@ -469,7 +469,7 @@ impl Scene for DecorationScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 
@@ -505,7 +505,7 @@ impl Scene for DecorationScene {
 		shadow_text.set_shadow("#000000", 0.8, 4.0, 6.0);
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 		graphic.set_fill_color("#5a6b7a");
 		graphic.draw_rect(Rect::create(700.0, 0.0, 580.0, 720.0));
@@ -597,13 +597,13 @@ impl Scene for CameraScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		self.camera.set_world_bounds(Some(Rect::create(0.0, 0.0, 2400.0, 1600.0)));
 		self.camera.set_position(Vector2::create(400.0, 400.0));
 		self.camera.set_zoom(1.5);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.elapsed_seconds += time_delta;
 		let view_size = engine.get_view_manager().get_view_size();
@@ -614,11 +614,11 @@ impl Scene for CameraScene {
 		self.camera.tick(time_delta);
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.camera.begin(graphic);
 		for row in 0..16 {
 			for column in 0..24 {

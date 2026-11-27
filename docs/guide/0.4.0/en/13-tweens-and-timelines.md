@@ -157,7 +157,7 @@ impl Scene for TweenScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let box_id = node_tree.create_child(root_id, "Box");
@@ -169,7 +169,7 @@ impl Scene for TweenScene {
 		self.box_id = Some(box_id);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		if let Some(box_id) = self.box_id {
 			let move_tween = Tween::new(TweenValues::new().with("localPosition", Vector2::create(160.0, 360.0)).with("localOpacity", 0.0))
 				.to(TweenValues::new().with("localPosition", Vector2::create(1120.0, 360.0)).with("localOpacity", 1.0), 1.5)
@@ -180,7 +180,7 @@ impl Scene for TweenScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.start_next_pulse();
 	}
@@ -263,12 +263,12 @@ impl Scene for AnimationScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let image = match self.image_asset.get_image() {
 			Some(image) => {
 				image
@@ -293,7 +293,7 @@ impl Scene for AnimationScene {
 		self.icon_id = Some(icon_id);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.animation.tick(time_delta);
 		if let Some(icon_id) = self.icon_id {
@@ -350,12 +350,12 @@ impl Scene for AnimatorScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let image = match self.image_asset.get_image() {
 			Some(image) => {
 				image
@@ -381,7 +381,7 @@ impl Scene for AnimatorScene {
 		self.hero_id = Some(hero_id);
 	}
 
-	fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 		if let Some(hero_id) = self.hero_id {
 			let options = SpriteAnimatorPlayOptions {
 				on_complete: Some(Box::new(|sprite_animator: &mut SpriteAnimator| {
@@ -561,12 +561,12 @@ impl Scene for TimelineScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let icons_image = self.image_asset.get_image();
 		let image_resolver = |image_name: &str| -> Option<Rc<Image>> {
 			if image_name == "icons.png" {
@@ -588,7 +588,7 @@ impl Scene for TimelineScene {
 		self.timeline.play();
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
 	}
@@ -737,12 +737,12 @@ impl Scene for StateScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let image = match self.image_asset.get_image() {
 			Some(image) => {
 				image
@@ -784,7 +784,7 @@ impl Scene for StateScene {
 		self.state_machine.change_state("idle", false);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.state_machine.tick(time_delta);
 		if let (Some(hero_id), Some(state_name)) = (self.hero_id, self.state_machine.get_state_name()) {

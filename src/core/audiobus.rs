@@ -40,7 +40,7 @@ struct AudioBusState {
 /// use vanilla::{AudioManager, Engine};
 ///
 /// fn play_effect(engine: &Engine) {
-/// 	let audio_manager: &AudioManager = engine.get_audio_manager();
+/// 	let audio_manager: &AudioManager = &engine.get_audio_manager();
 /// 	let effect_bus = audio_manager.create_audio_bus();
 /// 	effect_bus.set_volume(0.5);
 /// 	let mut effect_player = effect_bus.create_audio_player();

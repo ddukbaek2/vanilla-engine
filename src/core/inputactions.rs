@@ -164,14 +164,16 @@ struct ActionState {
 /// 	}
 ///
 /// 	fn create(&mut self, engine: &Engine) {
-/// 		let mut input_actions = engine.get_input_manager_mut().get_input_actions_mut();
+/// 		let mut input_manager = engine.get_input_manager_mut();
+/// 		let mut input_actions = input_manager.get_input_actions_mut();
 /// 		input_actions.bind_key("confirm", KeyCode::ENTER);
 /// 		input_actions.bind_gamepad_button("confirm", GamepadButtonCode::A_CROSS);
 /// 	}
 ///
 /// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 /// 		self.scene_base.tick(engine, time_delta);
-/// 		let input_actions = engine.get_input_manager().get_input_actions();
+/// 		let input_manager = engine.get_input_manager();
+/// 		let input_actions = input_manager.get_input_actions();
 /// 		if input_actions.is_just_pressed("confirm") {
 /// 			println!("confirm");
 /// 		}

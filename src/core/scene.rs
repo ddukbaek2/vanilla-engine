@@ -20,7 +20,7 @@
 //!   원본 SceneManager.loadScene 처럼 맡긴 애셋이 다 끝난 뒤에도 로딩 화면(draw_on_load)을 최소 0.3초 더 보이고 initialize 를 부른다.
 //! - 씬의 터치 훅(touch_press, touch_move, touch_release, touch_cancel, touch_wheel)은 원본 Scene.tickTouch 차례로 엔진이 tick 뒤에 부른다.
 //!   SceneBase.tick 은 씬 꼴과 상관없이 가장 앞의 누를 수 있는 노드에도 넘긴다. (원본 Scene.tickTouch 가 씬의 TouchRaycaster 로 넘기는 것과 같다)
-//! - 페이지 복원 훅과 터치 훅은 원본과 달리 엔진을 받는다. (씬 함수는 엔진이 &mut 로 빌려 준 자리라 전역 엔진을 꺼낼 수 없다)
+//! - 씬 훅은 원본과 달리 엔진(&Engine)을 받는다. (전역 엔진 Engine::get_engine 과 같은 엔진이다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;
@@ -486,8 +486,7 @@ impl SceneBase {
 
 	//==============================================================================
 	/// 엔진 반환. (원본 Scene.getEngine, 이 씬을 불러온 엔진. 러스트 판은 엔진이 하나라 전역 엔진을 준다)
-	/// - Engine::get_engine 과 같다. 씬 함수 안은 엔진이 &mut 로 빌려 준 자리라 Err(MutablyBorrowed) 이고, 씬 함수의 engine 인자를 쓴다.
-	///   씬 tick 이 부른 노드 tick 안(컴포넌트, 위젯 콜백)에서는 꺼낸다.
+	/// - Engine::get_engine 과 같다. 씬 함수, 컴포넌트, async 작업 어디서나 씬 함수의 engine 인자와 같은 엔진을 준다.
 	///
 	/// # 돌려줌
 	/// 전역 엔진, 못 꺼내면 그 까닭.

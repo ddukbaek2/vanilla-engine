@@ -26,7 +26,7 @@ impl Scene for FireScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let fire_id = node_tree.create_child(root_id, "Fire");
@@ -154,7 +154,7 @@ impl Scene for BurstScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 
@@ -186,7 +186,7 @@ impl Scene for BurstScene {
 		self.burst_id = Some(burst_id);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.elapsed_seconds += time_delta;
 		if let Some(emitter_id) = self.emitter_id {
@@ -196,7 +196,7 @@ impl Scene for BurstScene {
 		}
 	}
 
-	fn touch_press(&mut self, _engine: &mut Engine, view_input_position: Vector2) {
+	fn touch_press(&mut self, _engine: &Engine, view_input_position: Vector2) {
 		if let Some(burst_id) = self.burst_id {
 			let node_tree = self.scene_base.get_node_tree_mut();
 			node_tree[burst_id].set_local_position(view_input_position);
@@ -340,7 +340,7 @@ impl Scene for TrailScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let comet_id = node_tree.create_child(root_id, "Comet");
@@ -357,7 +357,7 @@ impl Scene for TrailScene {
 		self.comet_id = Some(comet_id);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.elapsed_seconds += time_delta;
 		if let Some(comet_id) = self.comet_id {
@@ -458,12 +458,12 @@ impl Scene for DissolveScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.image_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.image_asset);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let image = match self.image_asset.get_image() {
 			Some(image) => {
 				image
@@ -486,7 +486,7 @@ impl Scene for DissolveScene {
 		self.start_dissolve(sprite_id);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		if let (Some(sprite_id), Some(dissolve_tween_id)) = (self.sprite_id, self.dissolve_tween_id) {
 			if self.scene_base.get_tween(dissolve_tween_id).is_none() {
@@ -570,7 +570,7 @@ impl Scene for ScreenEffectScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 		self.screen_effect.set_enabled(ScreenEffectType::Vignette, true);
 		self.screen_effect.set_color(ScreenEffectType::Vignette, Color::create(0.0, 0.0, 0.0, 1.0));
 
@@ -586,7 +586,7 @@ impl Scene for ScreenEffectScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.screen_effect.tick(time_delta);
 		if let Some(shockwave_seconds) = self.shockwave_seconds {
@@ -603,16 +603,16 @@ impl Scene for ScreenEffectScene {
 		}
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.screen_effect.begin(graphic);
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn post_draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn post_draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.screen_effect.end(graphic);
 	}
 
-	fn touch_press(&mut self, engine: &mut Engine, view_input_position: Vector2) {
+	fn touch_press(&mut self, engine: &Engine, view_input_position: Vector2) {
 		let view_size = engine.get_view_manager().get_view_size();
 		self.screen_effect.set_enabled(ScreenEffectType::Shockwave, true);
 		self.screen_effect.set_parameter(ScreenEffectType::Shockwave, "centerX", view_input_position.x / view_size.x);
@@ -660,7 +660,7 @@ impl Scene for HeatHazeScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 		for index in 0..6 {

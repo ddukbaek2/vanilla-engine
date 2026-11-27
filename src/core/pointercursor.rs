@@ -19,6 +19,7 @@
 //! let mut pointer_cursor = engine.get_pointer_cursor_mut();
 //! pointer_cursor.set_enabled(true);
 //! pointer_cursor.set_screen_cursor("crosshair");
+//! drop(pointer_cursor);
 //! assert_eq!(engine.get_pointer_cursor().get_screen_cursor(), "crosshair");
 //! ```
 //==============================================================================

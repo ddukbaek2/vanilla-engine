@@ -23,12 +23,12 @@ impl Scene for AssetScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.icon_asset.load(engine, "examples/assets/atlas/icons.png");
 		self.scene_base.track_asset(&self.icon_asset);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let icon_image = match self.icon_asset.get_image() {
 			Some(icon_image) => {
 				icon_image
@@ -46,7 +46,7 @@ impl Scene for AssetScene {
 		icon_node.add_component(Sprite::create_with_image(icon_image));
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 }
@@ -95,7 +95,7 @@ impl Scene for StageScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		let load_task = engine.spawn_scene_task(self, |mut scene_context| async move {
 			let load_result = scene_context.with(|scene, engine| scene.stage_asset.load(engine, "examples/assets/scenedocument.scene.json")).await;
 			if let Err(error_message) = load_result {
@@ -109,7 +109,7 @@ impl Scene for StageScene {
 		self.scene_base.track_task(&load_task);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		if let Some(stage_data) = self.stage_asset.get_data() {
 			println!("{} {}", stage_data["version"], self.is_stage_ready);
 		}
@@ -210,7 +210,7 @@ assert!(!blob_asset.is_loaded());
 
 ## Fonts
 
-`FontAsset` loads with `load_font(engine, family, path)`, not with `load`. When the bytes arrive, the engine adds the font to the glyph cache's font list under that name at the start of the next frame; from then on the name works in `Text.set_font_family(family)` and in font strings (`"32px family"`). The `load_font` functions take `&mut Engine`, so call them in `create`.
+`FontAsset` loads with `load_font(engine, family, path)`, not with `load`. When the bytes arrive, the engine adds the font to the glyph cache's font list under that name at the start of the next frame; from then on the name works in `Text.set_font_family(family)` and in font strings (`"32px family"`). The `load_font` functions take `&Engine`, so call them in `create`.
 
 | Method | Description |
 | --- | --- |
@@ -239,7 +239,7 @@ impl Scene for FontScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.regular_font_asset.load_font(engine, "GameFont", "fonts/GameFont-Regular.ttf");
 		let bold_descriptors = FontFaceDescriptors::create_from_css("700", "normal", "");
 		self.bold_font_asset.load_font_with_descriptors(engine, "GameFont", "fonts/GameFont-Bold.ttf", bold_descriptors);
@@ -247,7 +247,7 @@ impl Scene for FontScene {
 		self.scene_base.track_asset(&self.bold_font_asset);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let title_id = node_tree.create_child(root_id, "title");
@@ -259,7 +259,7 @@ impl Scene for FontScene {
 		title_text.set_bold(true);
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 }
@@ -304,7 +304,7 @@ impl Scene for SoundScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		match engine.load_audio_asset("tests/assets/audio/wav_s16_stereo.wav") {
 			Ok(audio_asset) => {
 				self.scene_base.track_audio_asset(&audio_asset);
@@ -316,7 +316,7 @@ impl Scene for SoundScene {
 		}
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		if let Some(hit_sound) = &self.hit_sound {
 			println!("{}", hit_sound.get_duration());
 		}
@@ -425,7 +425,7 @@ impl Scene for LoadingScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.asset_loader.set_concurrency(4);
 		self.icon_asset = Some(self.asset_loader.add_image("examples/assets/atlas/icons.png"));
 		self.atlas_json_asset = Some(self.asset_loader.add_json("examples/assets/atlas/icons.json"));
@@ -434,7 +434,7 @@ impl Scene for LoadingScene {
 		self.asset_loader.load(engine);
 	}
 
-	fn draw_on_load(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.asset_loader.update(engine);
 		self.loading_progress.set_progress(self.asset_loader.get_progress());
 		let time_delta = engine.get_time_manager().get_unscale_delta_time();
@@ -452,7 +452,7 @@ impl Scene for LoadingScene {
 		graphic.draw_rect(Rect::create(bar_left, bar_top, bar_width * shown_progress, 12.0));
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		for failure in self.asset_loader.get_failed_list() {
 			eprintln!("{} {}", failure.path, failure.error_message);
 		}
@@ -569,14 +569,14 @@ impl Scene for AtlasScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		let load_task = engine.spawn_scene_task(self, |mut scene_context| async move {
 			scene_context.with(|scene, engine| scene.sprite_atlas.load(engine, "examples/assets/atlas/icons.json")).await;
 		});
 		self.scene_base.track_task(&load_task);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let frame_names = ["star", "heart", "leaf", "gem", "coin"];

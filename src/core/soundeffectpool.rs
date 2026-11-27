@@ -5,7 +5,7 @@
 //! - 백엔드를 직접 부르지 않는다. AudioPlayer 위에서 차례와 음량만 센다.
 //! - 사용:
 //!   ```text
-//!     let mut sound_effect_pool = SoundEffectPool::new(engine.get_audio_manager(), 6);
+//!     let mut sound_effect_pool = SoundEffectPool::new(&engine.get_audio_manager(), 6);
 //!     sound_effect_pool.play(&hitAudioAsset, 1.0);
 //!     sound_effect_pool.play(&hitAudioAsset, 0.5);   // 이 재생만 절반 음량.
 //!     sound_effect_pool.set_volume(0.8);              // 풀 전체의 음량. (재생 중인 것에도 곱해진다)
@@ -33,7 +33,7 @@ pub const DEFAULT_VOICE_COUNT: usize = 6;
 ///
 /// let engine = Engine::new(EngineConfiguration::new());
 /// let hit_audio_asset = engine.load_audio_asset("tests/assets/audio/wav_s16_stereo.wav").unwrap();
-/// let mut sound_effect_pool = SoundEffectPool::new(engine.get_audio_manager(), 6);
+/// let mut sound_effect_pool = SoundEffectPool::new(&engine.get_audio_manager(), 6);
 /// sound_effect_pool.play(&hit_audio_asset, 1.0);
 /// sound_effect_pool.play(&hit_audio_asset, 0.5);
 /// sound_effect_pool.set_volume(0.8);

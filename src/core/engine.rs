@@ -362,7 +362,7 @@ impl Engine {
 	/// - `engine_configuration`: 엔진 설정. (엔진이 소유한다, get_engine_configuration 으로 읽는다)
 	///
 	/// # 돌려줌
-	/// 새 엔진. (프레임 번호 1, 씬 없음)
+	/// 새 엔진. (프레임 번호 1, 씬 없음. 프로그램 끝까지 사는 자리에 두어 &'static 으로 주고, 전역 엔진이 된다)
 	//==============================================================================
 	pub fn new(engine_configuration: EngineConfiguration) -> &'static Engine {
 		let reference_resolution_size = engine_configuration.reference_resolution_size;
@@ -443,14 +443,14 @@ impl Engine {
 	/// # 	fn get_component_base(&self) -> &ComponentBase {
 	/// # 		&self.component_base
 	/// # 	}
-	/// # 	fn get_component_base_mut(&self) -> &mut ComponentBase {
+	/// # 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 	/// # 		&mut self.component_base
 	/// # 	}
 	/// # 	fn get_component_type(&self) -> &'static str {
 	/// # 		"FrameReader"
 	/// # 	}
-	/// 	fn tick(&self, _context: &mut ComponentContext, _time_delta: f64) {
-	/// 		self.frame_number.set(read_frame_number());
+	/// 	fn tick(&mut self, _context: &mut ComponentContext, _time_delta: f64) {
+	/// 		self.frame_number = read_frame_number();
 	/// 	}
 	/// }
 	///
@@ -716,11 +716,11 @@ impl Engine {
 	/// 		&self.scene_base
 	/// 	}
 	///
-	/// 	fn get_scene_base_mut(&self) -> &mut SceneBase {
+	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn touch_release(&self, engine: &Engine, _view_input_position: Vector2) {
+	/// 	fn touch_release(&mut self, engine: &Engine, _view_input_position: Vector2) {
 	/// 		engine.unload_scene(&self.scene_base);
 	/// 	}
 	/// }
@@ -862,11 +862,11 @@ impl Engine {
 	/// 		&self.scene_base
 	/// 	}
 	///
-	/// 	fn get_scene_base_mut(&self) -> &mut SceneBase {
+	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&self, engine: &Engine) {
+	/// 	fn create(&mut self, engine: &Engine) {
 	/// 		let task_handle = engine.spawn_scene_task(self, |mut scene_context: SceneContext<StageScene>| async move {
 	/// 			let load_handle = scene_context.with(|_scene, engine| engine.request_asset_bytes("examples/assets/scenedocument.scene.json"));
 	/// 			let stage_bytes = load_handle.await.map(|bytes| bytes.to_vec()).unwrap_or_default();
@@ -1427,11 +1427,11 @@ impl Engine {
 	/// 		&self.scene_base
 	/// 	}
 	///
-	/// 	fn get_scene_base_mut(&self) -> &mut SceneBase {
+	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn create(&self, engine: &Engine) {
+	/// 	fn create(&mut self, engine: &Engine) {
 	/// 		if let Some(graphic) = engine.get_graphic() {
 	/// 			self.shader_program = ShaderProgram::new(graphic.get_gl(), VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE).ok();
 	/// 		}
@@ -1476,14 +1476,14 @@ impl Engine {
 	/// 		&self.scene_base
 	/// 	}
 	///
-	/// 	fn get_scene_base_mut(&self) -> &mut SceneBase {
+	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn tick(&self, engine: &Engine, time_delta: f64) {
+	/// 	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 	/// 		self.scene_base.tick(engine, time_delta);
 	/// 		let is_key_g = engine.get_input_manager().is_key_pressed(KeyCode::G);
-	/// 		if let Some(graphic) = engine.get_graphic_mut() {
+	/// 		if let Some(mut graphic) = engine.get_graphic_mut() {
 	/// 			graphic.set_force_gizmos_visible(is_key_g);
 	/// 		}
 	/// 	}
@@ -1530,11 +1530,11 @@ impl Engine {
 	/// 		&self.scene_base
 	/// 	}
 	///
-	/// 	fn get_scene_base_mut(&self) -> &mut SceneBase {
+	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
 	/// 		&mut self.scene_base
 	/// 	}
 	///
-	/// 	fn initialize(&self, engine: &Engine) {
+	/// 	fn initialize(&mut self, engine: &Engine) {
 	/// 		engine.with_graphic(|engine, graphic| {
 	/// 			engine.get_time_manager_mut().set_time_scale(1.0);
 	/// 			graphic.set_force_gizmos_visible(false);
@@ -2039,7 +2039,7 @@ impl CaptureRequest {
 /// 		&self.scene_base
 /// 	}
 ///
-/// 	fn get_scene_base_mut(&self) -> &mut SceneBase {
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
 /// 		&mut self.scene_base
 /// 	}
 /// }

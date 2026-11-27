@@ -26,7 +26,7 @@ impl GameScene for DebugScene {
 		&mut self.game_scene_base
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let scene_base = self.game_scene_base.get_scene_base_mut();
 		let root_id = scene_base.get_root_id();
 		let node_tree = scene_base.get_node_tree_mut();
@@ -109,11 +109,11 @@ impl Scene for MainScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 		self.dev_tools.set_root_nodes(vec![self.scene_base.get_root_id()]);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		let is_capturing_input = self.dev_tools.is_visible() && self.dev_tools.is_pointer_inside_panel(engine);
 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 		if !is_capturing_input {
@@ -124,11 +124,11 @@ impl Scene for MainScene {
 		self.dev_tools.tick(engine, self.scene_base.get_node_tree_mut(), unscaled_time_delta);
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn post_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.dev_tools.draw(engine, self.scene_base.get_node_tree(), graphic);
 	}
 }
@@ -150,7 +150,7 @@ fn main() {
 ```rust
 use vanilla::{DevTools, Engine, EngineConfiguration, NodeTree};
 
-let mut engine = Engine::new(EngineConfiguration::new());
+let engine = Engine::new(EngineConfiguration::new());
 engine.get_view_manager_mut().calculate_view_rect(1280, 720, 1.0);
 let mut node_tree = NodeTree::new();
 let root_id = node_tree.get_root_id();
@@ -242,7 +242,7 @@ impl Scene for GizmoScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let enemy_id = node_tree.create_child(root_id, "Enemy");
@@ -259,11 +259,11 @@ impl Scene for GizmoScene {
 		self.scene_base.set_gizmo_visible(true);
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn draw_gizmos(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw_gizmos(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		let view_manager = engine.get_view_manager();
 		view_manager.apply_view_rect(graphic);
 		let view_size = view_manager.get_view_size();
@@ -313,7 +313,7 @@ impl Scene for ProfileScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 		for index in 0..100 {
@@ -325,16 +325,16 @@ impl Scene for ProfileScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.elapsed_seconds += time_delta;
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn post_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		if self.elapsed_seconds < 0.5 {
 			return;
 		}
@@ -381,7 +381,7 @@ impl Scene for CaptureScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, engine: &mut Engine) {
+	fn initialize(&mut self, engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let box_id = node_tree.create_child(root_id, "Box");
@@ -395,7 +395,7 @@ impl Scene for CaptureScene {
 		}));
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 }
@@ -502,7 +502,7 @@ assert_eq!(view_manager.get_max_render_pixel_ratio(), 1.5);
 assert!(!governor.apply_render_pixel_ratio(&mut view_manager));
 ```
 
-씬에서는 `initialize` 에서 `apply_render_pixel_ratio(engine.get_view_manager_mut())` 를 한 번 부르고, `tick` 에서 `update` 가 `true` 를 돌려준 프레임에 다시 부릅니다.
+씬에서는 `initialize` 에서 `apply_render_pixel_ratio(&mut engine.get_view_manager_mut())` 를 한 번 부르고, `tick` 에서 `update` 가 `true` 를 돌려준 프레임에 다시 부릅니다.
 
 ## 빌드 정보
 

@@ -336,12 +336,12 @@ impl Scene for VisualScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		self.scene_asset.load(engine, "scenedocument.scene.json");
 		self.scene_base.track_asset(&self.scene_asset);
 	}
 
-	fn initialize(&mut self, engine: &mut Engine) {
+	fn initialize(&mut self, engine: &Engine) {
 		let scene_text = match self.scene_asset.get_text() {
 			Some(scene_text) => {
 				scene_text.to_string()
@@ -376,7 +376,7 @@ impl Scene for VisualScene {
 		}
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		let node_tree = self.scene_base.get_node_tree_mut();
 		self.document.bind_pending_images(node_tree);
@@ -389,7 +389,7 @@ impl Scene for VisualScene {
 		}
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 }

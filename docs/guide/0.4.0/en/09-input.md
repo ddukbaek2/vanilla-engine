@@ -36,32 +36,32 @@ impl Scene for DragScene {
 		&mut self.scene_base
 	}
 
-	fn touch_press(&mut self, _engine: &mut Engine, view_input_position: Vector2) {
+	fn touch_press(&mut self, _engine: &Engine, view_input_position: Vector2) {
 		let offset = self.ball_position.subtract(view_input_position);
 		if offset.length() <= 60.0 {
 			self.grab_offset = Some(offset);
 		}
 	}
 
-	fn touch_move(&mut self, _engine: &mut Engine, view_input_position: Vector2) {
+	fn touch_move(&mut self, _engine: &Engine, view_input_position: Vector2) {
 		if let Some(grab_offset) = self.grab_offset {
 			self.ball_position = view_input_position.add(grab_offset);
 		}
 	}
 
-	fn touch_release(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_release(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 		self.grab_offset = None;
 	}
 
-	fn touch_cancel(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_cancel(&mut self, _engine: &Engine, _view_input_position: Vector2) {
 		self.grab_offset = None;
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		if self.grab_offset.is_some() {
 			graphic.set_fill_color(Color::create(1.0, 0.6, 0.2, 1.0));
@@ -154,7 +154,7 @@ impl Component for PressHighlight {
 	}
 }
 
-let mut engine = Engine::new(EngineConfiguration::new());
+let engine = Engine::new(EngineConfiguration::new());
 let mut scene_base = SceneBase::new();
 let root_id = scene_base.get_root_id();
 let node_tree = scene_base.get_node_tree_mut();
@@ -166,16 +166,18 @@ button_node.set_interactable(true);
 button_node.add_component(PressHighlight::default());
 assert!(button_node.has_component::<Paint>());
 
-let input_manager = engine.get_input_manager_mut();
+let mut input_manager = engine.get_input_manager_mut();
 input_manager.set_view_input_position(Vector2::create(150.0, 120.0));
 input_manager.set_touch_pressed(true);
+drop(input_manager);
 scene_base.tick(&engine, 1.0 / 60.0);
 let button_node = &scene_base.get_node_tree()[button_id];
 assert_eq!(button_node.get_component::<Paint>().expect("paint").get_color(), Color::create(1.0, 0.8, 0.2, 1.0));
 
-let input_manager = engine.get_input_manager_mut();
+let mut input_manager = engine.get_input_manager_mut();
 input_manager.set_touch_pressed(false);
 input_manager.set_touch_released(true);
+drop(input_manager);
 scene_base.tick(&engine, 1.0 / 60.0);
 let button_node = &scene_base.get_node_tree()[button_id];
 assert_eq!(button_node.get_component::<PressHighlight>().expect("highlight").click_count, 1);
@@ -285,11 +287,11 @@ impl Scene for KeyboardScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		engine.get_input_manager_mut().set_prevented_keys(&[KeyCode::SPACE, KeyCode::UP, KeyCode::DOWN]);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		let input_manager = engine.get_input_manager();
 		let speed = 400.0 * time_delta;
@@ -310,11 +312,11 @@ impl Scene for KeyboardScene {
 		}
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		graphic.set_fill_color("#66ddaa");
 		graphic.draw_rect(Rect::create(self.position.x - 40.0, self.position.y - 40.0, 80.0, 80.0));
@@ -411,8 +413,9 @@ impl Scene for ActionScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
-		let input_actions = engine.get_input_manager_mut().get_input_actions_mut();
+	fn create(&mut self, engine: &Engine) {
+		let mut input_manager = engine.get_input_manager_mut();
+		let mut input_actions = input_manager.get_input_actions_mut();
 		input_actions.bind_key("confirm", KeyCode::ENTER);
 		input_actions.bind_key("confirm", KeyCode::SPACE);
 		input_actions.bind_gamepad_button("confirm", GamepadButtonCode::A_CROSS);
@@ -422,9 +425,10 @@ impl Scene for ActionScene {
 		input_actions.set_repeat("next", 0.4, 0.12);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
-		let input_actions = engine.get_input_manager().get_input_actions();
+		let input_manager = engine.get_input_manager();
+		let input_actions = input_manager.get_input_actions();
 		let move_axis = input_actions.read_move_axis();
 		self.position = self.position.add(move_axis.multiply_scalar(400.0 * time_delta));
 		if input_actions.is_just_pressed("next") {
@@ -435,11 +439,11 @@ impl Scene for ActionScene {
 		}
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		for index in 0..4 {
 			if index == self.selected_index {
@@ -532,9 +536,10 @@ impl Scene for GamepadScene {
 		&mut self.scene_base
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
-		let gamepad_manager = engine.get_input_manager_mut().get_gamepad_manager_mut();
+		let mut input_manager = engine.get_input_manager_mut();
+		let mut gamepad_manager = input_manager.get_gamepad_manager_mut();
 		let mut is_confirm_pressed = false;
 		// The list is a copy read in place when called (like the original navigator.getGamepads()).
 		let gamepad_list: Vec<Gamepad> = gamepad_manager.get_all_connected_gamepads();
@@ -593,12 +598,13 @@ The engine holds one `PointerCursor`; take it out with `engine.get_pointer_curso
 ```rust
 use vanilla::{Engine, EngineConfiguration};
 
-let mut engine = Engine::new(EngineConfiguration::new());
-let pointer_cursor = engine.get_pointer_cursor_mut();
+let engine = Engine::new(EngineConfiguration::new());
+let mut pointer_cursor = engine.get_pointer_cursor_mut();
 assert!(!pointer_cursor.is_enabled());
 pointer_cursor.set_enabled(true);
 pointer_cursor.set_cursor_names("pointer", "default");
 pointer_cursor.set_screen_cursor("grab");
+drop(pointer_cursor);
 assert_eq!(engine.get_pointer_cursor().get_screen_cursor(), "grab");
 assert_eq!(engine.get_pointer_cursor().get_button_cursor_name(), "pointer");
 ```
@@ -619,18 +625,18 @@ impl Scene for CursorScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, engine: &mut Engine) {
-		let pointer_cursor = engine.get_pointer_cursor_mut();
+	fn initialize(&mut self, engine: &Engine) {
+		let mut pointer_cursor = engine.get_pointer_cursor_mut();
 		pointer_cursor.set_enabled(true);
 		pointer_cursor.set_cursor_names("pointer", "default");
 		pointer_cursor.set_screen_cursor("grab");
 	}
 
-	fn touch_press(&mut self, engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_press(&mut self, engine: &Engine, _view_input_position: Vector2) {
 		engine.get_pointer_cursor_mut().set_screen_cursor("grabbing");
 	}
 
-	fn touch_release(&mut self, engine: &mut Engine, _view_input_position: Vector2) {
+	fn touch_release(&mut self, engine: &Engine, _view_input_position: Vector2) {
 		engine.get_pointer_cursor_mut().set_screen_cursor("grab");
 	}
 }

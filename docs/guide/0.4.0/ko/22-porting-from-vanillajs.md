@@ -99,7 +99,7 @@ impl Scene for NodeScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 
@@ -120,7 +120,7 @@ impl Scene for NodeScene {
 		badge_paint.set_round_size(32.0);
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		engine.get_view_manager().apply_view_rect(graphic);
 	}
 }
@@ -140,7 +140,7 @@ fn main() {
 ```
 
 - `class NodeScene extends Scene` 은 `SceneBase` 를 품은 구조체와 `impl Scene` 입니다. 반드시 쓰는 것은 공통 상태를 내주는 `get_scene_base`, `get_scene_base_mut` 둘입니다.
-- 훅은 `&mut Engine` 을 인자로 받습니다. 원본 `this.getEngine()` 자리입니다.
+- 훅은 `&Engine` 을 인자로 받습니다. 원본 `this.getEngine()` 자리입니다.
 - 원본 `super.initialize(engine)` 같은 상위 호출은 없습니다. 트레이트의 기본 구현이 비어 있기 때문입니다. 다만 `tick` 과 `draw` 는 기본 구현이 노드 트리를 갱신하고 그리므로, 덮어쓸 때는 원본 `super.tick`, `super.draw` 자리에 `self.scene_base.tick(engine, time_delta)`, `self.scene_base.draw(graphic)` 을 부릅니다.
 - `new WorldNode()` 와 `root.addChild(panel)` 은 `node_tree.create_child(root_id, "Panel")` 한 줄입니다. 부모 없이 만들려면 `create_node(이름)` 뒤에 `add_child(부모, 자식)` 입니다.
 - `addComponent(Paint)` 는 클래스를 받지만 `add_component(Paint::new())` 는 값을 받고, 붙인 컴포넌트의 `&mut` 를 돌려줍니다.
@@ -288,14 +288,15 @@ assert!(node_tree.get_node(label_id).is_some());
 
 ## 전역 엔진과 인자로 받는 엔진
 
-원본은 `Engine.getEngine()`, `this.getEngine()` 으로 어디서든 엔진을 꺼냅니다. 바닐라엔진도 `Engine::get_engine()`(원본 `Engine.getEngine()`), `SceneBase::get_engine()`(원본 `Scene.getEngine()`), `UIView::get_engine()` 으로 전역 엔진을 꺼냅니다. 꺼낸 것은 `&Engine` 이라서 엔진이 `&Engine` 으로 빌려 준 동안(컴포넌트의 `tick`, 터치, 휠과 그 안에서 부른 함수, 콜백, 페이지 이벤트 리스너)에만 꺼내고, 엔진이 `&mut` 로 빌려 준 동안(씬의 훅과 그 안의 컴포넌트 `draw`, `with_graphic`, async 작업)은 `Err(EngineAccessError::MutablyBorrowed)` 입니다. 그 자리는 아래 길로 받습니다. 둘 다 같은 엔진입니다. 꺼낸 `EngineRef` 는 그 자리 안에서만 쓰고 필드나 `await` 너머로 들고 가지 않습니다.
+원본은 `Engine.getEngine()`, `this.getEngine()` 으로 어디서든 엔진을 꺼냅니다. 바닐라엔진도 `Engine::get_engine()`(원본 `Engine.getEngine()`), `SceneBase::get_engine()`(원본 `Scene.getEngine()`), `UIView::get_engine()` 으로 전역 엔진을 꺼냅니다. `Engine::new` 직후부터 씬의 훅, 컴포넌트의 `tick` 과 `draw`, 콜백, async 작업 안 어디서나 꺼내고, 늘 같은 `&'static Engine` 입니다. 엔진 함수는 모두 `&self` 라서 꺼낸 엔진으로 바로 고칩니다. 매니저는 `get_input_manager()` 가 `Ref`, `get_input_manager_mut()` 이 `RefMut` 을 줍니다. 한 문장 안에서 쓰고, `let` 으로 쥔 채 같은 매니저를 또 빌리면 함수 이름을 적은 패닉으로 멈춥니다. 아래 길로도 받습니다. 모두 같은 엔진입니다.
 
 | 자리 | 엔진을 받는 길 |
 | --- | --- |
-| 씬의 훅 (`create`, `initialize`, `tick`, `pre_draw` 같은 것) | 인자 `engine: &mut Engine` |
+| 씬의 훅 (`create`, `initialize`, `tick`, `pre_draw` 같은 것) | 인자 `engine: &Engine` |
 | 컴포넌트의 `tick`, 터치, 휠 | `context.get_engine()` (`&Engine`) |
 | 콜백 (`UIButtonEvent` 같은 것) | 콜백이 받는 `ComponentContext` |
 | async 작업 | `engine_context.with(\|engine\| ...)`, `scene_context.with(\|scene, engine\| ...)` |
+| 컴포넌트의 `draw`, 엔진을 받지 않는 함수 | `Engine::get_engine()` |
 
 인스펙터의 게터 목록에서 원본 `UIView.getEngine` 은 뺍니다(원본은 `setEngine` 으로 준 값, 러스트는 전역 엔진을 꺼내는 함수). 반사 속성 목록에도 `Engine` 이 없습니다.
 

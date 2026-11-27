@@ -13,7 +13,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use vanilla::{Engine, EngineConfiguration, Promise};
 
-let mut engine = Engine::new(EngineConfiguration::new());
+let engine = Engine::new(EngineConfiguration::new());
 let (start_promise, start_resolver) = Promise::<u32>::create();
 let received_value = Rc::new(Cell::new(0));
 let task_received_value = received_value.clone();
@@ -37,8 +37,8 @@ assert_eq!(received_value.get(), 0);
 
 | 함수 | 받는 것 | 처음 도는 때 |
 | --- | --- | --- |
-| `engine.spawn_task(작업 함수)` | `&mut Engine`, 작업 함수는 `EngineContext` 를 받음 | 맡기는 자리에서 첫 `await` 까지 |
-| `engine.spawn_scene_task(씬, 작업 함수)` | `&mut Engine` 과 `&mut 씬`, 작업 함수는 `SceneContext<씬 타입>` 을 받음 | 맡기는 자리에서 첫 `await` 까지 |
+| `engine.spawn_task(작업 함수)` | `&Engine`, 작업 함수는 `EngineContext` 를 받음 | 맡기는 자리에서 첫 `await` 까지 |
+| `engine.spawn_scene_task(씬, 작업 함수)` | `&Engine` 과 `&mut 씬`, 작업 함수는 `SceneContext<씬 타입>` 을 받음 | 맡기는 자리에서 첫 `await` 까지 |
 | `engine.spawn_deferred_task(작업 함수)` | `&Engine` 만 있는 자리 (컴포넌트 문맥 같은 곳) | 다음 폴링 차례 |
 | `engine.spawn_deferred_scene_task(씬, 작업 함수)` | `&Engine` 과 `&씬` 만 있는 자리 | 다음 폴링 차례 |
 
@@ -65,7 +65,7 @@ impl Scene for TitleScene {
 	}
 }
 
-let mut engine = Engine::new(EngineConfiguration::new());
+let engine = Engine::new(EngineConfiguration::new());
 let mut title_scene = TitleScene {
 	scene_base: SceneBase::new(),
 	greeting_asset: TextAsset::new(),
@@ -84,7 +84,7 @@ assert!(task_handle.is_finished());
 assert_eq!(title_scene.greeting, "hello");
 ```
 
-- `SceneContext<S>::with` 는 그 씬을 제 타입(`&mut S`)으로, 엔진을 `&mut Engine` 으로 줍니다. `EngineContext::with` 는 엔진만 줍니다.
+- `SceneContext<S>::with` 는 그 씬을 제 타입(`&mut S`)으로, 엔진을 `&Engine` 으로 줍니다. `EngineContext::with` 는 엔진만 줍니다.
 - `with` 의 클로저는 동기라 안에서 `await` 할 수 없습니다. 클로저가 받은 참조는 돌려주는 값에 담을 수 없어(수명이 클로저마다 새로 매겨집니다) 밖으로 새지 않습니다.
 - 그래서 원본에서 Promise 를 돌려주던 `load` 들은 애셋이나 씬을 빌리지 않는 손잡이를 돌려줍니다. 클로저 안에서 `load` 를 부르고, 돌려받은 손잡이를 클로저 밖에서 `await` 합니다. 원본 `await this.atlas.load(경로)` 가 `scene_context.with(|scene, engine| scene.atlas.load(engine, 경로)).await` 한 줄입니다.
 - 데스크탑은 애셋을 그 자리에서 읽어 손잡이가 이미 끝나 있습니다. 위 예제가 맡기는 자리의 첫 폴링에서 끝까지 도는 것도 그래서입니다. 웹은 받는 동안 프레임이 돌고, 받으면 이어 갑니다. 게임 코드는 같습니다.
@@ -153,7 +153,7 @@ impl Scene for StageScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 			let load_result = scene_context.with(|scene, engine| scene.stage_asset.load(engine, "scenedocument.scene.json")).await;
 			if let Err(reason) = load_result {
@@ -164,7 +164,7 @@ impl Scene for StageScene {
 		self.scene_base.track_task(&load_task_handle);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		if let Some(stage_data) = self.stage_asset.get_data() {
 			println!("{}", stage_data["version"]);
 		}
@@ -194,7 +194,7 @@ fn main() {
 ```rust,no_run
 use vanilla::{Engine, Scene, SceneId};
 
-fn change_scene(engine: &mut Engine, current_scene_id: SceneId, next_scene: Box<dyn Scene>) {
+fn change_scene(engine: &Engine, current_scene_id: SceneId, next_scene: Box<dyn Scene>) {
 	engine.spawn_task(move |mut engine_context| async move {
 		let next_scene_id = engine_context.with(|engine| engine.load_scene_async(next_scene)).await;
 		engine_context.with(|engine| engine.unload_scene_async(current_scene_id)).await;
@@ -212,7 +212,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use vanilla::{Engine, EngineConfiguration, Promise};
 
-let mut engine = Engine::new(EngineConfiguration::new());
+let engine = Engine::new(EngineConfiguration::new());
 let (score_promise, score_resolver) = Promise::<Result<u32, String>>::create();
 score_resolver.reject(String::from("timeout"));
 
@@ -267,7 +267,7 @@ impl GameScene for StoryScene {
 		&mut self.game_scene_base
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		self.fade_screen_async(|mut scene_context| async move {
 			scene_context.with(|scene, _engine| {
 				scene.chapter += 1;
@@ -293,7 +293,7 @@ vanilla::game_scene!(StoryScene);
 
 ## 원본과 다른 점과 주의할 점
 
-- `await` 다음 줄에서 `this` 를 바로 쓰지 않고 `with` 안에서 만집니다. 노드를 `NodeId` 로 가리키는 것과 같은 까닭입니다. 작업은 엔진이 `&mut` 로 쥔 채 폴링해서 `with` 바깥에서도 `Engine::get_engine()` 은 `Err(MutablyBorrowed)` 입니다.
+- `await` 다음 줄에서 `this` 를 바로 쓰지 않고 `with` 안에서 만집니다. 노드를 `NodeId` 로 가리키는 것과 같은 까닭입니다. 엔진은 `with` 바깥에서도 `Engine::get_engine()` 으로 꺼냅니다(같은 엔진).
 - 원본 `reject` 와 `try`/`catch` 자리는 `Result` 입니다. 실패할 수 있는 손잡이의 `await` 는 `Result` 로 끝나니 `match` 나 `if let` 으로 가립니다.
 - 씬을 내려도 그 씬의 작업은 원본의 Promise 사슬처럼 이어 돕니다. 엔진은 작업이 다 끝날 때까지 씬 값을 살려 두고(목록에서는 빠져 `tick`, `draw` 를 받지 않습니다) `with` 는 그 씬을 계속 줍니다. 다 끝나면 `destroy` 를 부르고 버립니다. 끝나지 않는 `loop` 작업은 씬을 내린 뒤에도 돌므로 끝낼 조건을 둡니다.
 - 불러오는 도중에 내린 씬은 원본 `loadScene` 처럼 불러오기가 끝나면 `initialize` 까지 받습니다.

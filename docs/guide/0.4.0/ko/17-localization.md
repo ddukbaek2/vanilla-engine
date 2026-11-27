@@ -143,7 +143,7 @@ impl Scene for MenuScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let saved_language = self.settings_store.get()["language"].as_str().unwrap_or("").to_string();
 		let language_code = if saved_language.is_empty() {
 			Localization::detect_language(&["en", "fr"], "en")
@@ -159,7 +159,7 @@ impl Scene for MenuScene {
 		self.refresh_texts();
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		if engine.get_input_manager().is_touch_pressed() {
 			let next_language = if Localization::get_language() == "en" {
@@ -174,7 +174,7 @@ impl Scene for MenuScene {
 		}
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 }
@@ -337,14 +337,14 @@ impl Scene for TitleScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 			scene_context.with(|_scene, engine| languagepack::apply_language_setting(engine, "")).await;
 		});
 		self.scene_base.track_task(&load_task_handle);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let title_id = node_tree.create_child(root_id, "Title");
@@ -354,7 +354,7 @@ impl Scene for TitleScene {
 		title_node.add_component(Text::create_with_text(&languagepack::translate("game.title"), 48.0));
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 }
@@ -440,7 +440,7 @@ uifont::configure_ui_font(UiFontOptions {
 	directory_path: Some(String::from("fonts/")),
 	..UiFontOptions::default()
 });
-languagepack::set_language_loaded_async_handler(Some(Box::new(|engine: &mut Engine, language: &LanguageEntry, all_texts: &str| {
+languagepack::set_language_loaded_async_handler(Some(Box::new(|engine: &Engine, language: &LanguageEntry, all_texts: &str| {
 	let font_load_handle = uifont::load_ui_font(engine, &language.font_group, all_texts);
 	Box::pin(async move {
 		font_load_handle.await;
@@ -479,22 +479,22 @@ impl Scene for ScoreScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, engine: &mut Engine) {
-		if let Some(graphic) = engine.get_graphic_mut() {
-			self.dynamic_font.build_atlas(graphic, "0123456789SCORE ");
+	fn initialize(&mut self, engine: &Engine) {
+		if let Some(mut graphic) = engine.get_graphic_mut() {
+			self.dynamic_font.build_atlas(&mut graphic, "0123456789SCORE ");
 		}
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.score += (time_delta * 1000.0) as u64;
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		let score_text = format!("SCORE {}", self.score);
 		let text_width = self.dynamic_font.measure_text(&score_text);

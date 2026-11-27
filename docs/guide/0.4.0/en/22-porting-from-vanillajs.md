@@ -99,7 +99,7 @@ impl Scene for NodeScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		let root_id = self.scene_base.get_root_id();
 		let node_tree = self.scene_base.get_node_tree_mut();
 
@@ -120,7 +120,7 @@ impl Scene for NodeScene {
 		badge_paint.set_round_size(32.0);
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		engine.get_view_manager().apply_view_rect(graphic);
 	}
 }
@@ -140,7 +140,7 @@ fn main() {
 ```
 
 - `class NodeScene extends Scene` becomes a struct holding a `SceneBase` plus `impl Scene`. The two functions you must write are `get_scene_base` and `get_scene_base_mut`, which hand out the shared state.
-- Hooks receive `&mut Engine` as an argument, in place of the original `this.getEngine()`.
+- Hooks receive `&Engine` as an argument, in place of the original `this.getEngine()`.
 - There are no superclass calls such as the original `super.initialize(engine)`, because the trait's default implementations are empty. However, the defaults of `tick` and `draw` update and draw the node tree, so when you override them, call `self.scene_base.tick(engine, time_delta)` and `self.scene_base.draw(graphic)` where the original called `super.tick` and `super.draw`.
 - `new WorldNode()` plus `root.addChild(panel)` is the single line `node_tree.create_child(root_id, "Panel")`. To create a node without a parent, use `create_node(name)` and then `add_child(parent, child)`.
 - `addComponent(Paint)` takes a class, while `add_component(Paint::new())` takes a value and returns a `&mut` to the attached component.
@@ -288,14 +288,15 @@ assert!(node_tree.get_node(label_id).is_some());
 
 ## The Global Engine and the Engine as an Argument
 
-The original gets the engine from anywhere with `Engine.getEngine()` or `this.getEngine()`. Vanilla Engine also takes the global engine with `Engine::get_engine()` (the original `Engine.getEngine()`), `SceneBase::get_engine()` (the original `Scene.getEngine()`) and `UIView::get_engine()`. What it gives is `&Engine`, so it is taken only while the engine is lent as `&Engine` (a component's `tick`, touch and wheel and the functions called inside them, callbacks, page event listeners), and while the engine is lent as `&mut` (scene hooks and the component `draw` inside them, `with_graphic`, async tasks) it is `Err(EngineAccessError::MutablyBorrowed)`. Those places receive it through the ways below. Both are the same engine. Use a taken `EngineRef` only inside that place, and do not carry it in a field or across an `await`.
+The original gets the engine from anywhere with `Engine.getEngine()` or `this.getEngine()`. Vanilla Engine also takes the global engine with `Engine::get_engine()` (the original `Engine.getEngine()`), `SceneBase::get_engine()` (the original `Scene.getEngine()`) and `UIView::get_engine()`. It can be taken anywhere right after `Engine::new`: scene hooks, a component's `tick` and `draw`, callbacks, inside async tasks, and it is always the same `&'static Engine`. All engine functions are `&self`, so you change things directly through the engine you took. Managers come as `Ref` from `get_input_manager()` and `RefMut` from `get_input_manager_mut()`. Use them within one statement; holding one with `let` and borrowing the same manager again stops with a panic that names the function. It is also received through the ways below. All are the same engine.
 
 | Place | How it receives the engine |
 | --- | --- |
-| Scene hooks (`create`, `initialize`, `tick`, `pre_draw`, and so on) | The `engine: &mut Engine` argument |
+| Scene hooks (`create`, `initialize`, `tick`, `pre_draw`, and so on) | The `engine: &Engine` argument |
 | A component's `tick`, touch, wheel | `context.get_engine()` (`&Engine`) |
 | Callbacks (such as `UIButtonEvent`) | The `ComponentContext` the callback receives |
 | async tasks | `engine_context.with(\|engine\| ...)`, `scene_context.with(\|scene, engine\| ...)` |
+| A component's `draw`, functions that do not receive the engine | `Engine::get_engine()` |
 
 The original `UIView.getEngine` is left out of the inspector's getter list (in the original it is the value given with `setEngine`, in Rust a function that takes the global engine). `Engine` is not in the reflected property list either.
 

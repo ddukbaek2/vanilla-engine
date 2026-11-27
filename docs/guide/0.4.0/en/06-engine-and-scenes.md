@@ -84,7 +84,7 @@ let mut engine_configuration = EngineConfiguration::new();
 engine_configuration.reference_resolution_size = Vector2::create(1920.0, 1080.0);
 engine_configuration.view_scale_mode = ViewScaleMode::StretchShortExpandLong;
 engine_configuration.asset_directory_paths = vec![PathBuf::from("assets")];
-let mut engine = Engine::new(engine_configuration);
+let engine = Engine::new(engine_configuration);
 assert_eq!(engine.get_frame_number(), 1);
 assert_eq!(engine.get_canvas().is_some(), engine.get_graphic().is_some());
 let view_manager = engine.get_view_manager();
@@ -100,7 +100,7 @@ assert_eq!(engine.get_engine_configuration().maximum_frame_per_second, 30.0);
 - If the platform fails, for example when it cannot create the window or GL context, it returns `Err(reason)`.
 - `run` takes the engine, so call it only once. Later scenes are loaded with `load_scene` on the engine a scene hook receives.
 
-What the engine holds is reached through `get_time_manager`, `get_view_manager`, `get_input_manager`, `get_audio_manager`, `get_pointer_cursor` and their `_mut` versions, `get_platform`, `get_canvas` (the window on desktop, the canvas on the web), `get_graphic` (like the original constructor, on desktop it is there right after `Engine::new`; on machines without a display, off the main thread and on the web it is `None` until `run` takes the window or canvas) and `get_engine_configuration`. Scene hooks receive `&mut Engine` as an argument. The global engine `Engine::get_engine()`, in place of the original `Engine.getEngine()`, is taken while the engine is lent as `&Engine` (component `tick`, touch and wheel and the functions called inside them); inside scene hooks the engine is lent as `&mut`, so it is `Err(MutablyBorrowed)` and you use the argument. The drawing hooks also receive `Graphic` as an argument. It is the engine's graphic taken out for a moment and passed in, so inside them `engine.get_graphic()` is `None` and you use the `graphic` argument.
+What the engine holds is reached through `get_time_manager`, `get_view_manager`, `get_input_manager`, `get_audio_manager`, `get_pointer_cursor` and their `_mut` versions, `get_platform`, `get_canvas` (the window on desktop, the canvas on the web), `get_graphic` (like the original constructor, on desktop it is there right after `Engine::new`; on machines without a display, off the main thread and on the web it is `None` until `run` takes the window or canvas) and `get_engine_configuration`. Scene hooks receive `&Engine` as an argument. The global engine `Engine::get_engine()`, in place of the original `Engine.getEngine()`, gives the same engine as the argument anywhere right after `Engine::new` (scene hooks, a component's `tick` and `draw`, callbacks, inside async tasks). `Engine::new` puts the engine in a place that lives until the program ends and returns `&'static Engine`. All engine functions are `&self`, and managers come as `Ref` from `get_x` and `RefMut` from `get_x_mut`. Use them within one statement; borrowing the same manager again while it is being changed stops with a panic that names the function. The drawing hooks also receive `Graphic` as an argument. It is the engine's graphic taken out for a moment and passed in, so inside them `engine.get_graphic()` is `None` and you use the `graphic` argument.
 
 ## Scene Lifecycle
 
@@ -133,20 +133,20 @@ impl Scene for LifecycleScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 		let root_name = self.scene_base.get_root().get_name().to_string();
 		println!("create {}", root_name);
 	}
 
-	fn draw_on_load(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		println!("initialize");
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.tick_count += 1;
 		if self.tick_count == 1 {
@@ -154,23 +154,23 @@ impl Scene for LifecycleScene {
 		}
 	}
 
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 	}
 
-	fn resize(&mut self, _engine: &mut Engine, canvas_native_size: Vector2) {
+	fn resize(&mut self, _engine: &Engine, canvas_native_size: Vector2) {
 		println!("resize {} {}", canvas_native_size.x, canvas_native_size.y);
 	}
 
-	fn finalize(&mut self, _engine: &mut Engine) {
+	fn finalize(&mut self, _engine: &Engine) {
 		println!("finalize");
 	}
 
-	fn unload(&mut self, _engine: &mut Engine) {
+	fn unload(&mut self, _engine: &Engine) {
 		println!("unload");
 	}
 
-	fn destroy(&mut self, _engine: &mut Engine) {
+	fn destroy(&mut self, _engine: &Engine) {
 		println!("destroy");
 	}
 }
@@ -223,7 +223,7 @@ impl Scene for StageScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, engine: &mut Engine) {
+	fn create(&mut self, engine: &Engine) {
 		let load_task = engine.spawn_scene_task(self, |mut scene_context: SceneContext<StageScene>| async move {
 			let load_handle = scene_context.with(|_scene, engine| engine.request_asset_bytes("examples/assets/scenedocument.scene.json"));
 			if let Ok(bytes) = load_handle.await {
@@ -235,11 +235,11 @@ impl Scene for StageScene {
 		self.scene_base.track_task(&load_task);
 	}
 
-	fn draw_on_load(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw_on_load(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn initialize(&mut self, _engine: &mut Engine) {
+	fn initialize(&mut self, _engine: &Engine) {
 		println!("{}", self.stage_byte_count);
 	}
 }
@@ -285,7 +285,7 @@ impl Scene for EmptyScene {
 	}
 }
 
-let mut engine = Engine::new(EngineConfiguration::new());
+let engine = Engine::new(EngineConfiguration::new());
 let first_scene_id: SceneId = engine.load_scene(Box::new(EmptyScene {
 	scene_base: SceneBase::new(),
 }));
@@ -317,11 +317,11 @@ impl Scene for MainScene {
 		&mut self.scene_base
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		graphic.set_fill_color("#3399ff");
 		graphic.draw_rect(Rect::create(100.0, 100.0, 300.0, 200.0));
@@ -343,7 +343,7 @@ impl Scene for SplashScene {
 		&mut self.scene_base
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		self.elapsed_seconds += time_delta;
 		if self.is_leaving || self.elapsed_seconds < 0.5 {
@@ -367,11 +367,11 @@ impl Scene for SplashScene {
 		});
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		graphic.set_fill_color("#ffffff");
 		graphic.draw_rect(Rect::create(540.0, 320.0, 200.0, 80.0));
@@ -447,13 +447,13 @@ impl Scene for TimeScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, engine: &mut Engine) {
-		let time_manager = engine.get_time_manager_mut();
+	fn initialize(&mut self, engine: &Engine) {
+		let mut time_manager = engine.get_time_manager_mut();
 		time_manager.set_time_scale(0.5);
 		time_manager.set_maximum_time_delta(0.1);
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		let time_manager = engine.get_time_manager();
 		let frame_per_second = time_manager.get_frame_per_second();
@@ -537,15 +537,15 @@ impl Scene for LetterboxScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &mut Engine) {
+	fn create(&mut self, _engine: &Engine) {
 		self.scene_base.set_scene_background_color("#202028");
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
 		let view_size = engine.get_view_manager().get_view_size();
 		graphic.set_fill_color(Color::create(0.15, 0.3, 0.5, 1.0));
@@ -598,7 +598,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use vanilla::{Engine, EngineConfiguration, PageEvent, PageEventListener};
 
-let mut engine = Engine::new(EngineConfiguration::new());
+let engine = Engine::new(EngineConfiguration::new());
 let received_list: Rc<RefCell<Vec<PageEvent>>> = Rc::new(RefCell::new(Vec::new()));
 let listener_received_list = received_list.clone();
 let page_event_listener: PageEventListener = Rc::new(RefCell::new(move |page_event: PageEvent| {
@@ -637,7 +637,7 @@ impl Scene for PausingScene {
 		&mut self.scene_base
 	}
 
-	fn initialize(&mut self, engine: &mut Engine) {
+	fn initialize(&mut self, engine: &Engine) {
 		let is_paused = self.is_paused.clone();
 		let page_event_listener: PageEventListener = Rc::new(RefCell::new(move |page_event: PageEvent| {
 			match page_event {
@@ -656,7 +656,7 @@ impl Scene for PausingScene {
 		println!("hidden at start {}", engine.is_page_hidden());
 	}
 
-	fn tick(&mut self, engine: &mut Engine, time_delta: f64) {
+	fn tick(&mut self, engine: &Engine, time_delta: f64) {
 		self.scene_base.tick(engine, time_delta);
 		if self.is_paused.get() {
 			return;
@@ -664,13 +664,13 @@ impl Scene for PausingScene {
 		self.play_seconds += time_delta;
 	}
 
-	fn finalize(&mut self, engine: &mut Engine) {
+	fn finalize(&mut self, engine: &Engine) {
 		if let Some(page_event_listener) = self.page_event_listener.take() {
 			engine.remove_page_event_listener(&page_event_listener);
 		}
 	}
 
-	fn on_page_visibility_restored(&mut self, _engine: &mut Engine) {
+	fn on_page_visibility_restored(&mut self, _engine: &Engine) {
 		println!("page visible again");
 	}
 }
@@ -708,7 +708,7 @@ impl GameScene for TitleScene {
 		&mut self.game_scene_base
 	}
 
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		graphic.set_fill_color("#ffffff");
 		graphic.draw_rect(Rect::create(540.0, 320.0, 200.0, 80.0));
 	}

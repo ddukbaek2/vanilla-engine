@@ -1054,7 +1054,7 @@ impl WebApplication {
 	/// 화면(client) 좌표를 캔버스 논리 좌표로. (캔버스의 실제 자리를 읽는다)
 	//==============================================================================
 	fn read_canvas_native_position(&self, client_x: f64, client_y: f64) -> Option<Vector2> {
-		let canvas = self.engine_runner.engine.platform_window.borrow().as_ref()?;
+		let canvas = self.engine_runner.engine.get_canvas()?;
 		let canvas_rect = canvas.get_bounding_client_rect();
 		Some(Vector2::create((client_x - canvas_rect.left()) as f64, (client_y - canvas_rect.top()) as f64))
 	}

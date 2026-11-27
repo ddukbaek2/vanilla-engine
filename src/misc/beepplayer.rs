@@ -6,7 +6,7 @@
 //!   임의 톤 시퀀스 재생(play_sequence)을 제공한다.
 //! - 사용:
 //!   ```text
-//!     let beep_player = BeepPlayer::new(engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
+//!     let beep_player = BeepPlayer::new(&engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
 //!     beep_player.play_preset("confirm");
 //!   ```
 //! - 소리를 내는 곳:
@@ -21,7 +21,7 @@
 //! use vanilla::{BeepPlayer, Engine};
 //!
 //! fn play_confirm(engine: &Engine) {
-//! 	let beep_player = BeepPlayer::new(engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
+//! 	let beep_player = BeepPlayer::new(&engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
 //! 	beep_player.play_preset("confirm");
 //! }
 //! ```
@@ -207,7 +207,7 @@ pub(crate) struct BeepSchedule {
 /// 	}
 ///
 /// 	fn create(&mut self, engine: &Engine) {
-/// 		self.beep_player = Some(BeepPlayer::new(engine.get_audio_manager(), 0.3));
+/// 		self.beep_player = Some(BeepPlayer::new(&engine.get_audio_manager(), 0.3));
 /// 	}
 ///
 /// 	fn touch_press(&mut self, _engine: &Engine, _view_input_position: Vector2) {
@@ -254,7 +254,7 @@ impl BeepPlayer {
 	/// 생성. (volume: 0 ~ 1. 원본처럼 매니저를 참조로 든다)
 	///
 	/// # 인자
-	/// - `audio_manager`: 소리를 낼 오디오 매니저. (engine.get_audio_manager(), 상태를 같이 든다)
+	/// - `audio_manager`: 소리를 낼 오디오 매니저. (&engine.get_audio_manager(), 상태를 같이 든다)
 	/// - `volume`: 기본 음량. (0 ~ 1, 여기서는 자르지 않고 그대로 둔다, 원본 기본값 DEFAULT_VOLUME)
 	///
 	/// # 돌려줌
@@ -288,7 +288,7 @@ impl BeepPlayer {
 	/// use vanilla::{BeepPlayer, BeepWaveform, Engine};
 	///
 	/// fn play_low_buzz(engine: &Engine) {
-	/// 	let beep_player = BeepPlayer::new(engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
+	/// 	let beep_player = BeepPlayer::new(&engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
 	/// 	beep_player.play_tone(220.0, 0.1, BeepWaveform::Square, 0.2, 0.7);
 	/// }
 	/// ```
@@ -319,7 +319,7 @@ impl BeepPlayer {
 	/// use vanilla::{BeepPlayer, BeepTone, Engine};
 	///
 	/// fn play_chord_arpeggio(engine: &Engine) {
-	/// 	let beep_player = BeepPlayer::new(engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
+	/// 	let beep_player = BeepPlayer::new(&engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
 	/// 	beep_player.play_sequence(&[BeepTone::create(523.0, 0.1), BeepTone::create(659.0, 0.1), BeepTone::create(784.0, 0.2)]);
 	/// }
 	/// ```

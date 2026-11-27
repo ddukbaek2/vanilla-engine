@@ -33,11 +33,11 @@ impl Scene for MainScene {
 		&mut self.scene_base
 	}
 
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+	fn pre_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
-	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+	fn draw(&mut self, _engine: &Engine, graphic: &mut Graphic) {
 		graphic.set_fill_color(Colors::WHITE);
 		graphic.draw_rect(Rect::create(100.0, 100.0, 200.0, 120.0));
 	}

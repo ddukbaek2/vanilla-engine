@@ -109,3 +109,190 @@ pub(crate) fn borrow_engine_field_mut<'a, T: ?Sized>(field_cell: &'a RefCell<T>,
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::core::component::{Component, ComponentBase};
+	use crate::core::engine::{EngineConfiguration, EngineRunner, PageEvent, PageEventListener};
+	use crate::core::node::nodetree::{ComponentContext, NodeTree};
+	use crate::core::scene::{Scene, SceneBase};
+	use crate::core::task::{self, Promise};
+	use std::rc::Rc;
+
+	/// 엔진을 받지 않는 함수. (어디서나 꺼내는 자리)
+	fn read_global_engine_address() -> Result<usize, EngineAccessError> {
+		let engine = Engine::get_engine()?;
+		Ok(engine as *const Engine as usize)
+	}
+
+	fn get_engine_address(engine: &Engine) -> usize {
+		engine as *const Engine as usize
+	}
+
+	struct GlobalReader {
+		component_base: ComponentBase,
+		read_list: Rc<RefCell<Vec<Result<usize, EngineAccessError>>>>,
+	}
+
+	#[crate::reflect]
+	impl GlobalReader {}
+
+	#[crate::reflect]
+	impl Component for GlobalReader {
+		fn get_component_base(&self) -> &ComponentBase {
+			&self.component_base
+		}
+
+		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+			&mut self.component_base
+		}
+
+		fn get_component_type(&self) -> &'static str {
+			"GlobalReader"
+		}
+
+		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
+			let read = read_global_engine_address();
+			// 문맥의 엔진과 전역 엔진은 같은 엔진이다.
+			assert_eq!(read, Ok(get_engine_address(context.get_engine())));
+			// 꺼낸 엔진으로 고치는 함수도 부른다. (엔진 함수는 모두 &self)
+			Engine::get_engine().unwrap().get_time_manager_mut().set_time_scale(1.0);
+			self.read_list.borrow_mut().push(read);
+		}
+	}
+
+	#[test]
+	fn get_engine_right_after_new() {
+		let engine = Engine::new(EngineConfiguration::new());
+		assert!(std::ptr::eq(Engine::get_engine().unwrap(), engine));
+		// 마지막으로 만든 엔진을 준다. (원본 System.vanillaEngine)
+		let second_engine = Engine::new(EngineConfiguration::new());
+		assert!(std::ptr::eq(Engine::get_engine().unwrap(), second_engine));
+	}
+
+	#[test]
+	fn get_engine_inside_component_tick_from_function_without_context() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let read_list = Rc::new(RefCell::new(Vec::new()));
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let reader_id = node_tree.create_child(root_id, "reader");
+		node_tree[reader_id].add_component(GlobalReader {
+			component_base: ComponentBase::new(),
+			read_list: Rc::clone(&read_list),
+		});
+		node_tree.tick(engine, 0.016);
+		node_tree.tick(engine, 0.016);
+		let engine_address = get_engine_address(engine);
+		assert_eq!(*read_list.borrow(), vec![Ok(engine_address), Ok(engine_address)]);
+		// 빌려 준 자리가 따로 없다. 바깥에서도 꺼낸다.
+		assert_eq!(read_global_engine_address(), Ok(engine_address));
+	}
+
+	struct RecordingScene {
+		scene_base: SceneBase,
+		read_list: Rc<RefCell<Vec<(&'static str, Result<usize, EngineAccessError>)>>>,
+		promise: Option<Promise<()>>,
+	}
+
+	impl Scene for RecordingScene {
+		fn get_scene_base(&self) -> &SceneBase {
+			&self.scene_base
+		}
+
+		fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+			&mut self.scene_base
+		}
+
+		fn create(&mut self, engine: &Engine) {
+			// 씬 함수의 engine 인자와 전역 엔진은 같은 엔진이다. 둘을 같이 써도 된다.
+			self.read_list.borrow_mut().push(("create", read_global_engine_address()));
+			assert_eq!(self.scene_base.get_engine().map(get_engine_address), Ok(get_engine_address(engine)));
+			engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
+			let read_list = Rc::clone(&self.read_list);
+			let promise = self.promise.take().unwrap();
+			engine.spawn_task(move |mut context| async move {
+				read_list.borrow_mut().push(("task", read_global_engine_address()));
+				promise.await;
+				read_list.borrow_mut().push(("task after await", read_global_engine_address()));
+				let inner_read = context.with(|_engine| read_global_engine_address());
+				read_list.borrow_mut().push(("task with", inner_read));
+			});
+		}
+
+		fn tick(&mut self, engine: &Engine, _time_delta: f64) {
+			self.read_list.borrow_mut().push(("tick", read_global_engine_address()));
+			assert!(std::ptr::eq(Engine::get_engine().unwrap(), engine));
+		}
+	}
+
+	#[test]
+	fn get_engine_inside_scene_functions_and_task() {
+		let read_list = Rc::new(RefCell::new(Vec::new()));
+		let (promise, promise_resolver) = Promise::create();
+		let scene = RecordingScene {
+			scene_base: SceneBase::new(),
+			read_list: Rc::clone(&read_list),
+			promise: Some(promise),
+		};
+		let engine = Engine::new(EngineConfiguration::new());
+		let engine_address = get_engine_address(engine);
+		let mut engine_runner = EngineRunner::new(engine, Box::new(scene));
+		engine_runner.apply_pending_scenes();
+		let mut scene = RecordingScene {
+			scene_base: SceneBase::new(),
+			read_list: Rc::clone(&read_list),
+			promise: None,
+		};
+		scene.tick(engine, 0.016);
+		promise_resolver.resolve(());
+		task::poll_tasks(engine, &mut [], &mut []);
+		let expected: Vec<(&'static str, Result<usize, EngineAccessError>)> = ["create", "task", "tick", "task after await", "task with"].iter().map(|name| (*name, Ok(engine_address))).collect();
+		assert_eq!(*read_list.borrow(), expected);
+	}
+
+	#[test]
+	#[should_panic(expected = "Engine::get_view_manager: 엔진의 뷰 매니저 칸을 이미 고치는 중이라 빌릴 수 없습니다")]
+	fn overlapping_manager_borrow_panics_with_name() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let _view_manager = engine.get_view_manager_mut();
+		let _ = Engine::get_engine().unwrap().get_view_manager().get_view_size();
+	}
+
+	#[test]
+	fn page_event_listener_gets_engine() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let engine_address = get_engine_address(engine);
+		let read = Rc::new(std::cell::Cell::new(None));
+		let listener_read = Rc::clone(&read);
+		let page_event_listener: PageEventListener = Rc::new(RefCell::new(move |_page_event: PageEvent| {
+			listener_read.set(Some(read_global_engine_address()));
+		}));
+		engine.add_page_event_listener(&page_event_listener);
+		engine.dispatch_page_event(PageEvent::Focused);
+		assert_eq!(read.get(), Some(Ok(engine_address)));
+	}
+
+	#[test]
+	fn other_thread_gets_other_thread_error() {
+		let _engine = Engine::new(EngineConfiguration::new());
+		let result = std::thread::spawn(|| Engine::get_engine().map(|_| ())).join().unwrap();
+		assert_eq!(result, Err(EngineAccessError::OtherThread));
+	}
+
+	#[test]
+	fn counterpart_names_match_original() {
+		let counterpart_text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/counterpart.0.4.0.json")).unwrap();
+		let counterpart: serde_json::Value = serde_json::from_str(&counterpart_text).unwrap();
+		let item_list = counterpart["items"].as_array().unwrap();
+		let has_pair = |rust_class: &str, original_class: &str| {
+			item_list.iter().any(|item| {
+				item["vanilla-engine"]["class"] == rust_class && item["vanilla-engine"]["name"] == "get_engine" && item["vanilla.js"]["class"] == original_class && item["vanilla.js"]["name"] == "getEngine"
+			})
+		};
+		assert!(has_pair("Engine", "Engine"));
+		assert!(has_pair("SceneBase", "Scene"));
+		assert!(has_pair("UIView", "UIView"));
+	}
+}
