@@ -761,6 +761,35 @@ mod tests {
 	}
 
 	//==============================================================================
+	/// set_template_node 로 지은 항목은 템플릿의 그림을 그대로 쓴다. (해석기와 load_images 없이, 원본 setTemplateNode)
+	//==============================================================================
+	#[test]
+	fn template_items_keep_template_images() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let icon_image = crate::core::image::Image::create_from_pixels(1, 1, vec![255, 255, 0, 255]);
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let list_id = node_tree.create_child(root_id, "list");
+		node_tree[list_id].set_pivot(Pivot::TOP_LEFT);
+		node_tree[list_id].set_content_size(Vector2::create(200.0, 100.0));
+		let template_id = node_tree.create_child(root_id, "template");
+		node_tree[template_id].set_pivot(Pivot::TOP_LEFT);
+		node_tree[template_id].set_content_size(Vector2::create(200.0, 30.0));
+		let sprite = node_tree[template_id].add_component(crate::core::component::sprite::Sprite::new());
+		sprite.set_image_path("icon.png");
+		sprite.set_image(Some(icon_image.clone()));
+		node_tree.add_component(list_id, UIListView::new()).expect("list view");
+		node_tree.with_component_mut::<UIListView, _>(list_id, |list_view, tree| {
+			list_view.set_template_node(tree, template_id);
+			list_view.set_item_count(3);
+		});
+		node_tree.tick(&engine, 0.016);
+		let item_id = get_list_view(&mut node_tree, list_id).get_item_node(0).expect("item 0");
+		let item_sprite = node_tree[item_id].get_component::<crate::core::component::sprite::Sprite>().expect("sprite");
+		assert!(item_sprite.get_image().is_some_and(|image| Rc::ptr_eq(image, &icon_image)));
+	}
+
+	//==============================================================================
 	/// 스크롤하면 벗어난 항목을 회수해 다시 쓴다. (노드 수는 화면 분량에 머문다)
 	//==============================================================================
 	#[test]

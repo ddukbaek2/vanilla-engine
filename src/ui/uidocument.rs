@@ -105,6 +105,7 @@ use crate::ui::uiwindow::{UIWindow, UIWindowDefaultBehavior};
 use crate::ui::uiwindowlayer::UIWindowLayer;
 use serde_json::{Map, Value};
 use std::any::TypeId;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
@@ -174,6 +175,8 @@ type LoadComponentFunction = Box<dyn Fn(&mut dyn Component, &Map<String, Value>,
 type ReadContentFunction = Box<dyn Fn(&dyn Component) -> Option<NodeId>>;
 /// 찾은 그림을 컴포넌트에 넣는 함수.
 type ApplyImageFunction = Box<dyn Fn(&mut dyn Component, Rc<Image>)>;
+/// 맡긴 뒤로 컴포넌트의 그림 자리가 그대로인지 보는 함수. (경로가 맡길 때와 같고 그림이 비었으면 참)
+type IsImageUnchangedFunction = Box<dyn Fn(&dyn Component, &str) -> bool>;
 /// 찾은 노드를 컴포넌트에 넣는 함수.
 type ApplyNodeFunction = Box<dyn Fn(&mut dyn Component, NodeId)>;
 /// &mut 갈래로 미리 읽어 둔 반사 속성 값. ((노드, 컴포넌트 차례) → (키, 값) 목록, to_json_text, serialize_node)
@@ -419,12 +422,36 @@ pub trait UIDocumentNode {
 }
 
 //==============================================================================
+/// 문서 경고 내기. (표준 에러에 찍는다. 시험에서는 경고 목록에도 쌓아 take_warning_list 로 읽는다)
+//==============================================================================
+fn report_warning(message: String) {
+	eprintln!("{}", message);
+	#[cfg(test)]
+	WARNING_LIST.with(|warning_list| warning_list.borrow_mut().push(message));
+}
+
+#[cfg(test)]
+thread_local! {
+	/// 시험에서 낸 문서 경고. (스레드마다 따로)
+	static WARNING_LIST: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+//==============================================================================
+/// 시험에서 낸 문서 경고를 꺼내고 비우기.
+//==============================================================================
+#[cfg(test)]
+fn take_warning_list() -> Vec<String> {
+	WARNING_LIST.with(|warning_list| std::mem::take(&mut *warning_list.borrow_mut()))
+}
+
+//==============================================================================
 /// 아직 붙이지 못한 그림 하나. (노드, 그 노드의 컴포넌트 차례, 그림 경로)
 //==============================================================================
 struct PendingImage {
 	node_id: NodeId,
 	component_index: usize,
 	image_path: String,
+	is_image_unchanged: IsImageUnchangedFunction,
 	apply_image: ApplyImageFunction,
 }
 
@@ -517,6 +544,8 @@ pub struct UIDocumentSaveContext<'a> {
 	node_id: NodeId,
 	component_index: usize,
 	prefetched_value_map: Option<&'a PrefetchedValueMap>,
+	/// 적은 그림을 기억할 곳. (UIDocument 의 serialized_image_map)
+	serialized_image_map: &'a RefCell<HashMap<String, Rc<Image>>>,
 }
 
 impl<'a> UIDocumentSaveContext<'a> {
@@ -558,6 +587,7 @@ impl<'a> UIDocumentSaveContext<'a> {
 			node_id: self.node_id,
 			component_index,
 			prefetched_value_map: self.prefetched_value_map,
+			serialized_image_map: self.serialized_image_map,
 		}
 	}
 
@@ -578,9 +608,30 @@ impl<'a> UIDocumentSaveContext<'a> {
 			}
 		};
 		if let Some(reference_path) = UIDocument::find_node_path(self.node_tree, self.root_id, node_id) {
+			// 경로는 이름으로만 적는다. 이름이 같은 앞 형제가 있으면 다시 읽을 때 그 앞 형제에 이어진다. (원본 #findReferencePath)
+			if UIDocument::find_node_by_path(self.node_tree, self.root_id, &reference_path) != Some(node_id) {
+				report_warning(format!("UIDocument: 노드 참조 {} 는 이름이 같은 앞 형제가 있어 다시 읽으면 앞 형제에 이어집니다 (형제 이름을 다르게 지으세요)", reference_path));
+			}
 			let mut reference_data = Map::new();
 			reference_data.insert(String::from(NODE_REFERENCE_KEY), Value::from(reference_path));
 			component_data.insert(String::from(property_name), Value::Object(reference_data));
+		}
+	}
+
+	//==============================================================================
+	/// 그림 경로 적기. ("imagePath" 에 경로를 적고, 경로가 비지 않았고 그림이 있으면 그 그림을 경로로 기억한다. 원본 serializeNode 의 #rememberSerializedImage)
+	/// - 기억한 그림은 같은 문서로 다시 읽을 때 해석기나 load_images 가 찾지 못하면 넣는다. (UIListView::set_template_node 처럼 같은 문서로 적고 읽어 복제하면 본의 그림을 그대로 쓴다)
+	/// # 인자
+	/// - `component_data`: 값을 넣을 컴포넌트 문서 값.
+	/// - `image_path`: 그림 경로. (빈 글도 적는다)
+	/// - `image`: 컴포넌트에 든 그림. (None 이면 기억하지 않는다)
+	//==============================================================================
+	pub fn write_image_path(&self, component_data: &mut Map<String, Value>, image_path: &str, image: Option<&Rc<Image>>) {
+		write_value(component_data, "imagePath", Value::from(image_path));
+		if let Some(image) = image {
+			if !image_path.is_empty() {
+				self.serialized_image_map.borrow_mut().insert(String::from(image_path), image.clone());
+			}
 		}
 	}
 }
@@ -681,11 +732,14 @@ impl<'a> UIDocumentLoadContext<'a> {
 	//==============================================================================
 	/// 그림 맡기기. (경로의 그림을 찾으면 apply_image 로 이 컴포넌트에 넣는다. 원본 UIDocument.resolveImage + setImage)
 	/// - 지금 찾을 수 있는 그림은 트리를 다 지은 자리에서, 아직 읽히는 그림은 bind_pending_images 에서 넣는다.
+	/// - 넣기 전에 read_image_path, read_image 로 그 자리를 본다. 그사이 게임이 그림을 넣었거나 경로를 바꿨으면 넣지 않고 버린다. (원본 bindPendingImages)
 	/// # 인자
 	/// - `image_path`: 그림 경로. (빈 글이면 맡기지 않는다)
+	/// - `read_image_path`: 컴포넌트의 지금 그림 경로를 읽는 함수. (예: Sprite::get_image_path)
+	/// - `read_image`: 컴포넌트의 지금 그림을 읽는 함수. (예: Sprite::get_image)
 	/// - `apply_image`: 찾은 그림을 컴포넌트에 넣는 함수. (그 자리의 컴포넌트가 T 가 아니면 부르지 않는다)
 	//==============================================================================
-	pub fn bind_image<T: Component + 'static>(&mut self, image_path: &str, apply_image: fn(&mut T, Rc<Image>)) {
+	pub fn bind_image<T: Component + 'static>(&mut self, image_path: &str, read_image_path: fn(&T) -> &str, read_image: fn(&T) -> Option<&Rc<Image>>, apply_image: fn(&mut T, Rc<Image>)) {
 		if image_path.is_empty() {
 			return;
 		}
@@ -693,6 +747,16 @@ impl<'a> UIDocumentLoadContext<'a> {
 			node_id: self.node_id,
 			component_index: self.component_index,
 			image_path: String::from(image_path),
+			is_image_unchanged: Box::new(move |component: &dyn Component, bound_image_path: &str| {
+				match component.as_any().downcast_ref::<T>() {
+					Some(typed_component) => {
+						read_image_path(typed_component) == bound_image_path && read_image(typed_component).is_none()
+					}
+					None => {
+						false
+					}
+				}
+			}),
 			apply_image: Box::new(move |component: &mut dyn Component, image: Rc<Image>| {
 				if let Some(typed_component) = component.as_any_mut().downcast_mut::<T>() {
 					apply_image(typed_component, image);
@@ -787,6 +851,8 @@ pub struct UIDocument {
 	node_type_list: Vec<UIDocumentNodeType>,
 	image_resolver: Option<Box<dyn FnMut(&str) -> Option<Rc<Image>>>>,
 	image_asset_map: HashMap<String, ImageAsset>,
+	/// 이 문서로 적은 그림. (경로 → 그림, 적은 노드를 이 문서로 다시 읽으면 같은 그림을 넣는다. 적기는 &self 라 RefCell, 원본 #serializedImageMap)
+	serialized_image_map: RefCell<HashMap<String, Rc<Image>>>,
 	pending_image_list: Vec<PendingImage>,
 }
 
@@ -802,6 +868,7 @@ impl UIDocument {
 			node_type_list: Vec::new(),
 			image_resolver: None,
 			image_asset_map: HashMap::new(),
+			serialized_image_map: RefCell::new(HashMap::new()),
 			pending_image_list: Vec::new(),
 		};
 		document.register_engine_component_types();
@@ -1466,16 +1533,25 @@ impl UIDocument {
 	}
 
 	//==============================================================================
-	/// 그림 찾기. (해석기가 있으면 해석기, 없으면 load_images 로 요청한 애셋)
+	/// 그림 찾기. (해석기가 있으면 해석기, 없으면 load_images 로 요청한 애셋, 둘 다 못 찾으면 이 문서로 적은 그림. 원본 #findImage)
+	/// - 적은 그림은 쓰기가 그 경로의 컴포넌트에 든 그림을 기억한 것이다. 노드를 같은 문서로 적고 읽어 복제하면(UIListView 템플릿) 해석기나 load_images 없이도 본의 그림을 쓴다.
 	//==============================================================================
 	fn find_image(&mut self, image_path: &str) -> ImageLookup {
+		let fallback_lookup = match self.serialized_image_map.borrow().get(image_path) {
+			Some(image) => {
+				ImageLookup::Found(image.clone())
+			}
+			None => {
+				ImageLookup::Missing
+			}
+		};
 		if let Some(image_resolver) = self.image_resolver.as_mut() {
 			return match image_resolver(image_path) {
 				Some(image) => {
 					ImageLookup::Found(image)
 				}
 				None => {
-					ImageLookup::Missing
+					fallback_lookup
 				}
 			};
 		}
@@ -1484,7 +1560,7 @@ impl UIDocument {
 				image_asset
 			}
 			None => {
-				return ImageLookup::Missing;
+				return fallback_lookup;
 			}
 		};
 		if let Some(image) = image_asset.get_image() {
@@ -1492,7 +1568,7 @@ impl UIDocument {
 		}
 		let is_load_finished = image_asset.get_asset_base().get_load_handle().is_none_or(|load_handle| load_handle.is_finished());
 		if is_load_finished {
-			ImageLookup::Missing
+			fallback_lookup
 		}
 		else {
 			ImageLookup::Waiting
@@ -1500,7 +1576,15 @@ impl UIDocument {
 	}
 
 	//==============================================================================
-	/// 문서의 그림 읽기 요청. (imagePath 마다 ImageAsset 을 요청해 창고에 든다. 이미 요청한 경로는 건너뛴다)
+	/// 읽지 못한 그림 애셋인지. (읽기가 끝났는데 그림이 없다. 받지 못했거나 풀지 못했다)
+	//==============================================================================
+	fn is_image_asset_failed(image_asset: &mut ImageAsset) -> bool {
+		let is_load_finished = image_asset.get_asset_base().get_load_handle().is_none_or(|load_handle| load_handle.is_finished());
+		is_load_finished && image_asset.get_image().is_none()
+	}
+
+	//==============================================================================
+	/// 문서의 그림 읽기 요청. (imagePath 마다 ImageAsset 을 요청해 창고에 든다. 이미 요청한 경로는 건너뛰고, 읽지 못한 경로는 다시 요청한다)
 	/// - 새로 요청한 애셋의 읽기 손잡이를 돌려준다. 씬이 load 에서 부르면 track_load_handle 로 맡겨 initialize 를 기다리게 할 수 있다.
 	/// - 데스크탑은 그 자리에서 읽히고, 웹은 나중에 읽힌다. 읽히기 전에 지은 노드의 그림은 bind_pending_images 가 붙인다.
 	/// # 인자
@@ -1543,8 +1627,11 @@ impl UIDocument {
 		collect_image_paths(&document_data, &mut image_path_list);
 		let mut load_handle_list: Vec<AssetLoadHandle> = Vec::new();
 		for image_path in image_path_list {
-			if self.image_asset_map.contains_key(&image_path) {
-				continue;
+			// 이미 요청한 경로는 건너뛴다. 읽지 못한 경로는 다시 요청한다. (원본은 실패한 항목을 표에서 뺀다)
+			if let Some(requested_image_asset) = self.image_asset_map.get_mut(&image_path) {
+				if !UIDocument::is_image_asset_failed(requested_image_asset) {
+					continue;
+				}
 			}
 			let mut image_asset = ImageAsset::new();
 			image_asset.load(engine, &image_path);
@@ -1560,6 +1647,7 @@ impl UIDocument {
 	/// 맡아 둔 그림 붙이기. (찾은 그림은 넣고, 아직 읽히는 그림은 남긴다. 남은 수를 돌려준다)
 	/// - from_json_text, deserialize_node 가 끝에 한 번 부른다. 웹처럼 그림이 나중에 읽히면 씬의 tick 에서 남은 수가 0 이 될 때까지 부른다.
 	/// - 찾지 못한 그림(해석기가 None, 애셋이 없거나 실패)은 경고를 내고 버린다. 그 컴포넌트는 원본처럼 그림 없이 남는다.
+	/// - 그사이 게임이 그림을 넣었거나(그림이 None 이 아님) 경로를 바꾼 컴포넌트는 건드리지 않고 버린다.
 	/// # 인자
 	/// - `node_tree`: 그림을 넣을 노드 트리. (맡긴 노드가 지워졌으면 그 그림은 버린다)
 	///
@@ -1570,6 +1658,11 @@ impl UIDocument {
 		let pending_image_list = std::mem::take(&mut self.pending_image_list);
 		for pending_image in pending_image_list {
 			if !node_tree.contains(pending_image.node_id) {
+				continue;
+			}
+			// 그사이 게임이 그림이나 경로를 바꾼 컴포넌트는 그대로 둔다.
+			let is_image_unchanged = node_tree.get_node(pending_image.node_id).and_then(|node| node.components.get(pending_image.component_index)).is_some_and(|component| (pending_image.is_image_unchanged)(component.as_ref(), &pending_image.image_path));
+			if !is_image_unchanged {
 				continue;
 			}
 			match self.find_image(&pending_image.image_path) {
@@ -1592,6 +1685,9 @@ impl UIDocument {
 	//==============================================================================
 	/// 노드 트리 → 문서 데이터. (원본 serializeNode, 노드 참조는 이 노드 기준 경로로 적는다)
 	/// - &mut self 게터가 있는 컴포넌트도 읽는다. (원본 게터에는 &self, &mut self 구별이 없어 한 함수로 둔다. 그래서 트리를 가변으로 받는다)
+	/// - imagePath 를 적은 컴포넌트에 그림이 들었으면 그 그림을 경로로 기억한다. 같은 문서로 다시 읽으면 해석기나 load_images 없이도 그 그림을 넣는다.
+	/// - 노드 참조가 이름이 같은 앞 형제가 있는 노드를 가리키면 경고를 낸다. (경로는 이름으로만 적어 다시 읽으면 앞 형제에 이어진다)
+	/// - 숨긴 노드(set_visible(false))는 visible: false 를 적는다. (보이면 적지 않는다. 보임을 active 로 쓰는 노드 종류는 active 로만 적는다)
 	/// # 인자
 	/// - `node_tree`: 노드가 든 트리. (&mut 게터를 부르려고 가변으로 받는다)
 	/// - `node_id`: 문서 값으로 쓸 노드. (자손까지)
@@ -1676,6 +1772,7 @@ impl UIDocument {
 			node_id,
 			component_index: 0,
 			prefetched_value_map,
+			serialized_image_map: &self.serialized_image_map,
 		};
 		let component_list = node.get_all_components();
 
@@ -1683,12 +1780,16 @@ impl UIDocument {
 		let node_type_entry = component_list.iter().enumerate().find_map(|(component_index, component)| {
 			self.find_node_type(component.as_ref()).map(|node_type| (component_index, node_type))
 		});
-		let (node_type_name, is_document_active) = match node_type_entry {
+		// 보임을 active 로 쓰는 노드 종류(UIToast)는 보임을 active 로만 적는다. (convert_document_active 가 보임을 정한다)
+		let (node_type_name, is_document_active, is_visible_owned_by_active) = match node_type_entry {
 			Some((component_index, node_type)) => {
-				(node_type.type_name.as_str(), (node_type.read_document_active)(component_list[component_index].as_ref(), node.is_active(), node.is_visible()))
+				let node_component = component_list[component_index].as_ref();
+				let is_document_active = (node_type.read_document_active)(node_component, node.is_active(), node.is_visible());
+				let (_, converted_visible) = (node_type.convert_document_active)(node_component, is_document_active);
+				(node_type.type_name.as_str(), is_document_active, converted_visible.is_some())
 			}
 			None => {
-				(NODE_TYPE_NAME, node.is_active())
+				(NODE_TYPE_NAME, node.is_active(), false)
 			}
 		};
 		let mut node_data = Map::new();
@@ -1703,6 +1804,10 @@ impl UIDocument {
 		write_value(&mut node_data, "anchor", UIDocument::vector2_to_array(node.get_anchor()));
 		write_value(&mut node_data, "contentSize", UIDocument::vector2_to_array(node.get_content_size()));
 		write_value(&mut node_data, "interactable", Value::from(node.is_interactable()));
+		// 보이기 플래그는 숨겼을 때만 적는다. (기본이 보임이라 지금까지 적은 문서와 0.3.x 문서는 그대로 보인다, 원본과 같다)
+		if !node.is_visible() && !is_visible_owned_by_active {
+			write_value(&mut node_data, "visible", Value::Bool(false));
+		}
 
 		// 노드 종류 컴포넌트가 스스로 그리는 원본 생성자 몫은 컴포넌트와 자식 목록 앞에 둔다. (원본 생성자는 사용자가 붙이는 것보다 먼저 만든다)
 		// 원본 생성자처럼 자식과 컴포넌트를 실제로 짓는 종류는 그것들이 그대로 적힌다.
@@ -1821,6 +1926,7 @@ impl UIDocument {
 			node_id: root_id,
 			component_index: 0,
 			prefetched_value_map: None,
+			serialized_image_map: &self.serialized_image_map,
 		};
 		match self.find_component_type(component) {
 			Some(component_type) => {
@@ -2069,6 +2175,10 @@ impl UIDocument {
 			}
 			if let Some(is_interactable) = read_bool(node_object, "interactable") {
 				node.set_interactable(is_interactable);
+			}
+			// 보이기 플래그. (적히지 않았으면 그대로, 보임을 active 로 쓰는 노드 종류는 아래 active 바꾸기가 보임을 정한다)
+			if let Some(is_visible) = read_bool(node_object, "visible") {
+				node.set_visible(is_visible);
 			}
 		}
 		let component_data_list: &[Value] = node_object.get("components").and_then(|value| value.as_array()).map(|values| values.as_slice()).unwrap_or(&[]);
@@ -2675,12 +2785,12 @@ fn load_paint(paint: &mut Paint, component_data: &Map<String, Value>, _load_cont
 //==============================================================================
 /// Sprite 쓰기. (그림은 경로만 적는다. nineSlice 는 원본처럼 Rect 의 left, top, right, bottom)
 //==============================================================================
-fn save_sprite(sprite: &Sprite, _save_context: &UIDocumentSaveContext) -> Map<String, Value> {
+fn save_sprite(sprite: &Sprite, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
 	let nine_slice = sprite.get_nine_slice();
 	let mut component_data = Map::new();
 	write_value(&mut component_data, "color", UIDocument::color_to_array(sprite.get_color()));
 	write_value(&mut component_data, "roundSize", UIDocument::number_to_value(sprite.get_round_size()));
-	write_value(&mut component_data, "imagePath", Value::from(sprite.get_image_path()));
+	save_context.write_image_path(&mut component_data, sprite.get_image_path(), sprite.get_image());
 	write_value(&mut component_data, "nineSlice", Value::Array(vec![
 		UIDocument::number_to_value(nine_slice.position.x),
 		UIDocument::number_to_value(nine_slice.position.y),
@@ -2697,7 +2807,7 @@ fn save_sprite(sprite: &Sprite, _save_context: &UIDocumentSaveContext) -> Map<St
 //==============================================================================
 fn load_sprite(sprite: &mut Sprite, component_data: &Map<String, Value>, load_context: &mut UIDocumentLoadContext) {
 	if let Some(image_path) = load_sprite_fields(sprite, component_data) {
-		load_context.bind_image::<Sprite>(&image_path, |sprite, image| sprite.set_image(Some(image)));
+		load_context.bind_image::<Sprite>(&image_path, Sprite::get_image_path, Sprite::get_image, |sprite, image| sprite.set_image(Some(image)));
 	}
 }
 
@@ -2824,7 +2934,7 @@ fn load_mask(_mask: &mut Mask, _component_data: &Map<String, Value>, _load_conte
 //==============================================================================
 fn save_shadow_image(shadow_image: &ShadowImage, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
 	let mut component_data = Map::new();
-	write_value(&mut component_data, "imagePath", Value::from(shadow_image.get_image_path()));
+	save_context.write_image_path(&mut component_data, shadow_image.get_image_path(), shadow_image.get_image());
 	for (property_name, property_value) in UIDocument::save_by_reflection(shadow_image, save_context) {
 		component_data.insert(property_name, property_value);
 	}
@@ -2838,7 +2948,7 @@ fn load_shadow_image(shadow_image: &mut ShadowImage, component_data: &Map<String
 	if let Some(image_path) = read_string(component_data, "imagePath") {
 		if !image_path.is_empty() {
 			shadow_image.set_image_path(image_path);
-			load_context.bind_image::<ShadowImage>(image_path, |shadow_image, image| shadow_image.set_image(Some(image), None));
+			load_context.bind_image::<ShadowImage>(image_path, ShadowImage::get_image_path, ShadowImage::get_image, |shadow_image, image| shadow_image.set_image(Some(image), None));
 		}
 	}
 	UIDocument::load_by_reflection(shadow_image, component_data, load_context);
@@ -2885,9 +2995,9 @@ fn load_label(label: &mut UILabel, component_data: &Map<String, Value>, _load_co
 //==============================================================================
 /// UIImageView 쓰기. (그림 경로만)
 //==============================================================================
-fn save_image_view(image_view: &UIImageView, _save_context: &UIDocumentSaveContext) -> Map<String, Value> {
+fn save_image_view(image_view: &UIImageView, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
 	let mut component_data = Map::new();
-	write_value(&mut component_data, "imagePath", Value::from(image_view.get_image_path()));
+	save_context.write_image_path(&mut component_data, image_view.get_image_path(), image_view.get_image());
 	component_data
 }
 
@@ -2898,7 +3008,7 @@ fn load_image_view(image_view: &mut UIImageView, component_data: &Map<String, Va
 	if let Some(image_path) = read_string(component_data, "imagePath") {
 		if !image_path.is_empty() {
 			image_view.set_image_path(image_path);
-			load_context.bind_image::<UIImageView>(image_path, |image_view, image| image_view.set_image(Some(image)));
+			load_context.bind_image::<UIImageView>(image_path, UIImageView::get_image_path, UIImageView::get_image, |image_view, image| image_view.set_image(Some(image)));
 		}
 	}
 }
@@ -2925,7 +3035,7 @@ fn load_image_view_companions(image_view: &mut UIImageView, following_component_
 		}
 	};
 	if let Some(image_path) = load_sprite_fields(image_view.get_sprite_mut(), sprite_data) {
-		load_context.bind_image::<UIImageView>(&image_path, |image_view, image| image_view.get_sprite_mut().set_image(Some(image)));
+		load_context.bind_image::<UIImageView>(&image_path, |image_view| image_view.get_sprite().get_image_path(), |image_view| image_view.get_sprite().get_image(), |image_view, image| image_view.get_sprite_mut().set_image(Some(image)));
 	}
 	1
 }
@@ -3579,6 +3689,200 @@ mod tests {
 		assert_eq!(UIDocument::find_node_by_path(&node_tree, root_id, "/panel/button"), Some(button_id));
 		assert_eq!(UIDocument::find_node_by_path(&node_tree, root_id, "/"), Some(root_id));
 		assert_eq!(UIDocument::find_node_by_path(&node_tree, root_id, "/panel/missing"), None);
+	}
+
+	//==============================================================================
+	/// 같은 문서로 적고 읽은 복제본은 본의 그림을 그대로 쓴다. (해석기와 load_images 없이, UIListView::set_template_node 의 길, 원본 serializedImageMap)
+	//==============================================================================
+	#[test]
+	fn same_document_clone_keeps_template_images() {
+		let sprite_image = Image::create_from_pixels(1, 1, vec![255, 0, 0, 255]);
+		let image_view_image = Image::create_from_pixels(1, 1, vec![0, 255, 0, 255]);
+		let shadow_image_image = Image::create_from_pixels(1, 1, vec![0, 0, 255, 255]);
+		let mut node_tree = NodeTree::new();
+		let template_id = node_tree.create_node("template");
+		let sprite = node_tree[template_id].add_component(Sprite::new());
+		sprite.set_image_path("icon.png");
+		sprite.set_image(Some(sprite_image.clone()));
+		let frame_id = node_tree.create_child(template_id, "frame");
+		let image_view = node_tree[frame_id].add_component(UIImageView::new());
+		image_view.set_image_path("frame.png");
+		image_view.set_image(Some(image_view_image.clone()));
+		let shadow_id = node_tree.create_child(template_id, "shadow");
+		let shadow_image = node_tree[shadow_id].add_component(ShadowImage::new());
+		shadow_image.set_image_path("shadow.png");
+		shadow_image.set_image(Some(shadow_image_image.clone()), None);
+
+		let mut document = UIDocument::new();
+		let template_data = document.serialize_node(&mut node_tree, template_id);
+		let clone_id = document.deserialize_node(&mut node_tree, &template_data);
+		let clone_sprite = node_tree[clone_id].get_component::<Sprite>().expect("sprite");
+		assert!(clone_sprite.get_image().is_some_and(|image| Rc::ptr_eq(image, &sprite_image)), "Sprite 그림");
+		let clone_frame_id = node_tree.find_child_by_name(clone_id, "frame").expect("frame");
+		assert!(node_tree[clone_frame_id].get_component::<UIImageView>().expect("image view").get_image().is_some_and(|image| Rc::ptr_eq(image, &image_view_image)), "UIImageView 그림");
+		let clone_shadow_id = node_tree.find_child_by_name(clone_id, "shadow").expect("shadow");
+		assert!(node_tree[clone_shadow_id].get_component::<ShadowImage>().expect("shadow image").get_image().is_some_and(|image| Rc::ptr_eq(image, &shadow_image_image)), "ShadowImage 그림");
+
+		// 적지 않은 문서는 그림을 모른다.
+		let other_clone_id = UIDocument::new().deserialize_node(&mut node_tree, &template_data);
+		assert!(node_tree[other_clone_id].get_component::<Sprite>().expect("sprite").get_image().is_none());
+	}
+
+	//==============================================================================
+	/// 읽히는 중이던 그림은 그사이 게임이 그림을 넣었거나 경로를 바꾼 컴포넌트를 덮지 않는다. (원본 bindPendingImages)
+	//==============================================================================
+	#[test]
+	fn bind_pending_images_keeps_game_images() {
+		let png_bytes = std::fs::read("examples/assets/atlas/icons.png").expect("png file");
+		let load_handle = AssetLoadHandle::create_pending("star.png");
+		let mut image_asset = ImageAsset::new();
+		image_asset.get_asset_base_mut().load_from_handle(load_handle.clone());
+		let mut document = UIDocument::new();
+		document.image_asset_map.insert(String::from("star.png"), image_asset);
+		let json_text = r#"{"version":1,"root":{"name":"root","children":[
+			{"name":"game","components":[{"imagePath":"star.png","type":"Sprite"}]},
+			{"name":"moved","components":[{"imagePath":"star.png","type":"Sprite"}]},
+			{"name":"plain","components":[{"imagePath":"star.png","type":"Sprite"}]}
+		]}}"#;
+		let mut node_tree = NodeTree::new();
+		let root_id = document.from_json_text(&mut node_tree, json_text).expect("document");
+		assert_eq!(document.bind_pending_images(&mut node_tree), 3);
+
+		let game_image = Image::create_from_pixels(1, 1, vec![9, 9, 9, 255]);
+		let game_id = node_tree.find_child_by_name(root_id, "game").expect("game");
+		node_tree[game_id].get_component_mut::<Sprite>().expect("sprite").set_image(Some(game_image.clone()));
+		let moved_id = node_tree.find_child_by_name(root_id, "moved").expect("moved");
+		node_tree[moved_id].get_component_mut::<Sprite>().expect("sprite").set_image_path("other.png");
+		load_handle.finish(Ok(png_bytes));
+		assert_eq!(document.bind_pending_images(&mut node_tree), 0);
+
+		assert!(node_tree[game_id].get_component::<Sprite>().expect("sprite").get_image().is_some_and(|image| Rc::ptr_eq(image, &game_image)), "게임이 넣은 그림");
+		assert!(node_tree[moved_id].get_component::<Sprite>().expect("sprite").get_image().is_none(), "경로를 바꾼 컴포넌트");
+		let plain_id = node_tree.find_child_by_name(root_id, "plain").expect("plain");
+		assert_eq!(node_tree[plain_id].get_component::<Sprite>().expect("sprite").get_image().map(|image| image.get_width()), Some(128), "그대로인 컴포넌트");
+	}
+
+	//==============================================================================
+	/// load_images 가 읽지 못한 경로는 다음 load_images 가 다시 요청한다. (원본 loadImages)
+	//==============================================================================
+	#[test]
+	fn load_images_requests_failed_path_again() {
+		let asset_directory_path = std::env::temp_dir().join(format!("vanilla_uidocument_reload_{}", std::process::id()));
+		let _ = std::fs::remove_dir_all(&asset_directory_path);
+		std::fs::create_dir_all(&asset_directory_path).expect("asset directory");
+		let mut engine_configuration = crate::core::engine::EngineConfiguration::new();
+		engine_configuration.asset_directory_paths = vec![asset_directory_path.clone()];
+		let engine = Engine::new(engine_configuration);
+		let json_text = r#"{"version":1,"root":{"name":"late","components":[{"imagePath":"late.png","type":"Sprite"}]}}"#;
+
+		let mut document = UIDocument::new();
+		let first_handle_list = document.load_images(&engine, json_text);
+		assert_eq!(first_handle_list.len(), 1);
+		assert!(first_handle_list[0].is_failed());
+		std::fs::copy("examples/assets/atlas/icons.png", asset_directory_path.join("late.png")).expect("copy png");
+		let second_handle_list = document.load_images(&engine, json_text);
+		assert_eq!(second_handle_list.len(), 1, "읽지 못한 경로를 다시 요청");
+		let mut node_tree = NodeTree::new();
+		let late_id = document.from_json_text(&mut node_tree, json_text).expect("document");
+		assert!(node_tree[late_id].get_component::<Sprite>().expect("sprite").get_image().is_some());
+		assert_eq!(document.load_images(&engine, json_text).len(), 0, "읽은 경로는 건너뛴다");
+		let _ = std::fs::remove_dir_all(&asset_directory_path);
+	}
+
+	//==============================================================================
+	/// 시험용 노드 참조 컴포넌트. (전용 핸들러로 target 을 노드 참조로 적는다)
+	//==============================================================================
+	struct NodePointer {
+		component_base: crate::core::component::ComponentBase,
+		target: Option<NodeId>,
+	}
+
+	#[vanilla::reflect]
+	impl NodePointer {}
+
+	#[vanilla::reflect]
+	impl Component for NodePointer {
+		fn get_component_base(&self) -> &crate::core::component::ComponentBase {
+			&self.component_base
+		}
+
+		fn get_component_base_mut(&mut self) -> &mut crate::core::component::ComponentBase {
+			&mut self.component_base
+		}
+
+		fn get_component_type(&self) -> &'static str {
+			"NodePointer"
+		}
+	}
+
+	fn create_node_pointer() -> NodePointer {
+		NodePointer { component_base: crate::core::component::ComponentBase::new(), target: None }
+	}
+
+	fn save_node_pointer(node_pointer: &NodePointer, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
+		let mut component_data = Map::new();
+		save_context.write_node_reference(&mut component_data, "target", node_pointer.target);
+		component_data
+	}
+
+	fn load_node_pointer(_node_pointer: &mut NodePointer, component_data: &Map<String, Value>, load_context: &mut UIDocumentLoadContext) {
+		load_context.bind_node_reference::<NodePointer>(component_data.get("target"), |node_pointer, node_id| node_pointer.target = Some(node_id));
+	}
+
+	//==============================================================================
+	/// 노드 참조가 이름이 같은 앞 형제가 있는 노드를 가리키면 적을 때 경고한다. (경로는 이름으로만 적어 다시 읽으면 앞 형제에 이어진다, 원본과 같다)
+	//==============================================================================
+	#[test]
+	fn sibling_name_node_reference_warns() {
+		let mut document = UIDocument::new();
+		document.register_component_type_with_handler("NodePointer", create_node_pointer, save_node_pointer, load_node_pointer);
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.create_node("Root");
+		let first_slot_id = node_tree.create_child(root_id, "Slot");
+		let second_slot_id = node_tree.create_child(root_id, "Slot");
+		let pointer_id = node_tree.create_child(root_id, "Pointer");
+		node_tree[pointer_id].add_component(create_node_pointer()).target = Some(first_slot_id);
+		take_warning_list();
+		document.to_json_text(&mut node_tree, root_id, false);
+		assert_eq!(take_warning_list().len(), 0, "앞 형제를 가리키는 노드 참조는 경고 없음");
+		node_tree[pointer_id].get_component_mut::<NodePointer>().expect("pointer").target = Some(second_slot_id);
+		document.to_json_text(&mut node_tree, root_id, false);
+		let warning_list = take_warning_list();
+		assert_eq!(warning_list.len(), 1, "이름 같은 뒤 형제를 가리키는 노드 참조는 경고");
+		assert!(warning_list[0].contains("/Slot"), "경고에 참조 경로: {}", warning_list[0]);
+	}
+
+	//==============================================================================
+	/// 숨긴 노드(set_visible(false))는 visible: false 를 적고 되살린다. 보이는 노드는 적지 않는다. (원본과 같은 자리)
+	/// - 보임을 active 로 쓰는 노드 종류(UIToast)는 보임을 active 로만 적는다.
+	//==============================================================================
+	#[test]
+	fn hidden_node_writes_visible_false() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.create_node("Root");
+		let hidden_id = node_tree.create_child(root_id, "Hidden");
+		node_tree[hidden_id].set_visible(false);
+		let mut document = UIDocument::new();
+		let visible_data = document.serialize_node(&mut node_tree, root_id);
+		assert!(visible_data.get("visible").is_none(), "보이는 노드는 visible 을 적지 않는다");
+		assert_eq!(visible_data["children"][0]["visible"], Value::Bool(false), "숨긴 노드는 visible: false");
+		let key_list: Vec<&str> = visible_data["children"][0].as_object().expect("node").keys().map(|key| key.as_str()).collect();
+		assert_eq!(key_list.join(","), "type,name,active,position,scale,rotation,opacity,pivot,anchor,contentSize,interactable,visible,components,children", "visible 칸 자리");
+		let loaded_root_id = document.deserialize_node(&mut node_tree, &visible_data);
+		assert!(node_tree[loaded_root_id].is_visible(), "되살린 보이는 노드");
+		let loaded_hidden_id = node_tree.find_child_by_name(loaded_root_id, "Hidden").expect("hidden");
+		assert!(!node_tree[loaded_hidden_id].is_visible(), "되살린 숨긴 노드");
+
+		// 숨은 UIToast 는 active: false 로만 적고, 다시 읽으면 숨은 채 켜져 있다.
+		document.register_editor_types();
+		let toast_id = node_tree.create_child(root_id, "Toast");
+		node_tree[toast_id].add_component(UIToast::new());
+		node_tree[toast_id].set_visible(false);
+		let toast_data = document.serialize_node(&mut node_tree, toast_id);
+		assert_eq!(toast_data["active"], Value::Bool(false));
+		assert!(toast_data.get("visible").is_none(), "UIToast 는 보임을 active 로 적는다");
+		let loaded_toast_id = document.deserialize_node(&mut node_tree, &toast_data);
+		assert!(node_tree[loaded_toast_id].is_active() && !node_tree[loaded_toast_id].is_visible());
 	}
 
 	//==============================================================================
@@ -4272,6 +4576,7 @@ mod tests {
 				node_id,
 				component_index,
 				prefetched_value_map: None,
+				serialized_image_map: &document.serialized_image_map,
 			};
 			let mut saved_data = Value::Object(UIDocument::save_by_reflection(component, &save_context));
 			let mut expected_saved_data = expected_entry["save"].clone();
