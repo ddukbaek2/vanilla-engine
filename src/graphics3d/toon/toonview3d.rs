@@ -85,13 +85,13 @@ impl Drop for RenderScaleTargetGuard<'_> {
 		let gl = self.gl;
 		self.target.resolve(gl);
 		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, self.output_framebuffer);
-			gl.color_mask(self.color_write_mask[0], self.color_write_mask[1], self.color_write_mask[2], self.color_write_mask[3]);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, self.output_framebuffer);
+			crate::core::glstatecache::color_mask(gl, self.color_write_mask[0], self.color_write_mask[1], self.color_write_mask[2], self.color_write_mask[3]);
 			if self.is_stencil_test_enabled {
-				gl.enable(glow::STENCIL_TEST);
+				crate::core::glstatecache::enable(gl, glow::STENCIL_TEST);
 			}
 			if self.is_scissor_test_enabled {
-				gl.enable(glow::SCISSOR_TEST);
+				crate::core::glstatecache::enable(gl, glow::SCISSOR_TEST);
 			}
 		}
 	}
@@ -350,7 +350,7 @@ impl ToonView3D {
 			return self.renderer.clone();
 		}
 		graphic.flush_batch();
-		match ToonRenderer::new(graphic.get_gl()) {
+		match ToonRenderer::new(graphic.get_tracked_gl()) {
 			Ok(renderer) => {
 				self.renderer = Some(Rc::new(RefCell::new(renderer)));
 			}
@@ -501,7 +501,7 @@ impl ToonView3D {
 		let target_width = ((screen_rect.size.x * render_scale).round() as i32).max(1);
 		let target_height = ((screen_rect.size.y * render_scale).round() as i32).max(1);
 		let sample_count = if graphic.is_framebuffer_multisampled() { RENDER_SCALE_SAMPLE_COUNT } else { 0 };
-		if let Some(gl_context) = crate::core::imagetexturecache::find_gl_context_handle(graphic.get_gl()) {
+		if let Some(gl_context) = crate::core::imagetexturecache::find_gl_context_handle(graphic.get_tracked_gl()) {
 			self.gl_context = gl_context;
 		}
 		let camera = &self.camera;
@@ -520,8 +520,8 @@ impl ToonView3D {
 			// 2D 자르기의 스텐실과 가위는 화면 것이라 판에는 걸지 않는다. (얹을 때 2D 길이 자른다)
 			let (is_stencil_test_enabled, is_scissor_test_enabled, clear_color, color_write_mask) = unsafe {
 				let mut clear_color = [0.0f32; 4];
-				gl.get_parameter_f32_slice(glow::COLOR_CLEAR_VALUE, &mut clear_color);
-				(gl.is_enabled(glow::STENCIL_TEST), gl.is_enabled(glow::SCISSOR_TEST), clear_color, gl.get_parameter_bool_array::<4>(glow::COLOR_WRITEMASK))
+				crate::core::glstatecache::get_parameter_f32_slice(gl, glow::COLOR_CLEAR_VALUE, &mut clear_color);
+				(crate::core::glstatecache::is_enabled(gl, glow::STENCIL_TEST), crate::core::glstatecache::is_enabled(gl, glow::SCISSOR_TEST), clear_color, crate::core::glstatecache::get_parameter_bool_array::<4>(gl, glow::COLOR_WRITEMASK))
 			};
 			let _target_guard = RenderScaleTargetGuard {
 				gl,
@@ -532,14 +532,14 @@ impl ToonView3D {
 				is_scissor_test_enabled,
 			};
 			unsafe {
-				gl.disable(glow::STENCIL_TEST);
-				gl.disable(glow::SCISSOR_TEST);
+				crate::core::glstatecache::disable(gl, glow::STENCIL_TEST);
+				crate::core::glstatecache::disable(gl, glow::SCISSOR_TEST);
 				target.bind(gl);
-				gl.color_mask(true, true, true, true);
-				gl.depth_mask(true);
-				gl.clear_color(0.0, 0.0, 0.0, 0.0);
+				crate::core::glstatecache::color_mask(gl, true, true, true, true);
+				crate::core::glstatecache::depth_mask(gl, true);
+				crate::core::glstatecache::clear_color(gl, 0.0, 0.0, 0.0, 0.0);
 				gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
-				gl.clear_color(clear_color[0], clear_color[1], clear_color[2], clear_color[3]);
+				crate::core::glstatecache::clear_color(gl, clear_color[0], clear_color[1], clear_color[2], clear_color[3]);
 			}
 			let output = read_output(gl, 0.0, 0.0, target_width as f64, target_height as f64);
 			let target_rect = Rect::create(0.0, 0.0, target_width as f64, target_height as f64);
@@ -602,7 +602,7 @@ impl Drop for ToonView3D {
 fn read_output(gl: &glow::Context, x: f64, y: f64, width: f64, height: f64) -> ToonViewOutput {
 	let mut viewport = [0i32; 4];
 	unsafe {
-		gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+		crate::core::glstatecache::get_parameter_i32_slice(gl, glow::VIEWPORT, &mut viewport);
 	}
 	let output_width = (width.round() as i32).max(1);
 	let output_height = (height.round() as i32).max(1);

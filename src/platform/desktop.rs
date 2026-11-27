@@ -1295,7 +1295,7 @@ impl DesktopApplication {
 			return;
 		}
 		let canvas_pixel_size = self.engine_runner.engine.get_view_manager().get_canvas_pixel_size();
-		let gl = graphic.get_gl();
+		let gl = graphic.get_tracked_gl();
 		if self.preserved_drawing_buffer.is_none() {
 			match preserveddrawingbuffer::PreservedDrawingBuffer::new(gl) {
 				Ok(preserved_drawing_buffer) => {
@@ -1326,7 +1326,7 @@ impl DesktopApplication {
 			}
 		};
 		if let Some(preserved_drawing_buffer) = &mut self.preserved_drawing_buffer {
-			preserved_drawing_buffer.save(graphic.get_gl(), canvas_pixel_size.x as i32, canvas_pixel_size.y as i32);
+			preserved_drawing_buffer.save(graphic.get_tracked_gl(), canvas_pixel_size.x as i32, canvas_pixel_size.y as i32);
 		}
 	}
 
@@ -1361,7 +1361,7 @@ impl DesktopApplication {
 				return;
 			}
 		};
-		let gl = graphic.get_gl();
+		let gl = graphic.get_tracked_gl();
 		if self.render_scaler.is_none() {
 			match renderscaler::RenderScaler::new(gl) {
 				Ok(render_scaler) => {

@@ -154,9 +154,9 @@ impl BloomEffect {
 	//==============================================================================
 	pub fn render(&self, gl: &glow::Context, scene_color_texture: Option<GlTexture>) {
 		unsafe {
-			gl.disable(glow::DEPTH_TEST);
-			gl.disable(glow::BLEND);
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::disable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::disable(gl, glow::BLEND);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 		}
 
 		// 1. 밝은 영역 추출. (씬 → 핑)
@@ -170,7 +170,7 @@ impl BloomEffect {
 		unsafe {
 			gl.uniform_1_i32(bright_scene_texture_location.as_ref(), 0);
 			gl.uniform_2_f64(bright_threshold_range_location.as_ref(), self.threshold_start, self.threshold_end);
-			gl.bind_texture(glow::TEXTURE_2D, scene_color_texture);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, scene_color_texture);
 		}
 		bright_pass.draw(gl);
 
@@ -188,7 +188,7 @@ impl BloomEffect {
 			let ping_width = ping_render_target.get_width() as f64;
 			unsafe {
 				gl.uniform_2_f64(blur_direction_location.as_ref(), 1.0 / ping_width, 0.0);
-				gl.bind_texture(glow::TEXTURE_2D, ping_render_target.get_color_texture(0));
+				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, ping_render_target.get_color_texture(0));
 			}
 			blur_pass.draw(gl);
 
@@ -197,7 +197,7 @@ impl BloomEffect {
 			let pong_height = pong_render_target.get_height() as f64;
 			unsafe {
 				gl.uniform_2_f64(blur_direction_location.as_ref(), 0.0, 1.0 / pong_height);
-				gl.bind_texture(glow::TEXTURE_2D, pong_render_target.get_color_texture(0));
+				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, pong_render_target.get_color_texture(0));
 			}
 			blur_pass.draw(gl);
 		}

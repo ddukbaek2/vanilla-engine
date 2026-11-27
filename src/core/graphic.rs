@@ -1261,6 +1261,8 @@ impl Drop for ExternalPassGuard<'_> {
 	/// 2D 상태 되돌리기.
 	//==============================================================================
 	fn drop(&mut self) {
+		// pass 는 glow 로 상태를 바로 바꿀 수 있어(상태 캐시를 거치지 않음) 기억을 잊고 되돌린다. (되돌리기가 다시 건 값은 다시 기억한다)
+		crate::core::glstatecache::reset(&self.graphic.gl);
 		self.graphic.restore_render_state();
 		if self.shader_clip_count > 0 {
 			self.graphic.write_shader_clips_to_stencil(false);
@@ -1283,15 +1285,17 @@ impl Graphic {
 		// 그림 텍스처를 되읽는 쪽(Canvas2D 의 drawImage)도 같은 컨텍스트를 쓴다.
 		let gl = Rc::new(gl);
 		crate::core::imagetexturecache::register_pixel_read_context(&gl);
+		// 상태 캐시. (원본 WebGLStateCache.attach, 엔진의 상태 함수가 이것을 거쳐 부르고, 그리는 중 상태 읽기는 기억한 값으로 답한다)
+		crate::core::glstatecache::attach(&gl);
 		// 셰이더 프로그램.
 		let shader_program = ShaderProgram::new(&gl, VERTEXSHADER_SOURCE, FRAGMENTSHADER_SOURCE)?;
 
 		// 버텍스 어레이 / 버텍스 버퍼. (스트리밍, 인터리브 x/y/u/v)
 		let vertex_data = vec![0.0f32; VERTEX_CAPACITY * FLOATS_PER_VERTEX];
 		let (vertex_array, vertex_buffer, white_texture) = unsafe {
-			let vertex_array = gl.create_vertex_array()?;
+			let vertex_array = crate::core::glstatecache::create_vertex_array(&gl)?;
 			let vertex_buffer = gl.create_buffer()?;
-			gl.bind_vertex_array(Some(vertex_array));
+			crate::core::glstatecache::bind_vertex_array(&gl, Some(vertex_array));
 			gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
 			gl.buffer_data_size(glow::ARRAY_BUFFER, (vertex_data.len() * 4) as i32, glow::DYNAMIC_DRAW);
 			let stride_bytes = (FLOATS_PER_VERTEX * 4) as i32;
@@ -1305,21 +1309,21 @@ impl Graphic {
 				gl.enable_vertex_attrib_array(vertex_texture_coordinate_location);
 				gl.vertex_attrib_pointer_f32(vertex_texture_coordinate_location, 2, glow::FLOAT, false, stride_bytes, 8);
 			}
-			gl.bind_vertex_array(None);
+			crate::core::glstatecache::bind_vertex_array(&gl, None);
 
 			// 단색 도형용 1x1 흰색 텍스처.
-			let white_texture = gl.create_texture()?;
-			gl.bind_texture(glow::TEXTURE_2D, Some(white_texture));
+			let white_texture = crate::core::glstatecache::create_texture(&gl)?;
+			crate::core::glstatecache::bind_texture(&gl, glow::TEXTURE_2D, Some(white_texture));
 			let white_pixel: [u8; 4] = [255, 255, 255, 255];
 			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, 1, 1, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&white_pixel)));
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
 
 			// 고정 렌더 상태.
-			gl.enable(glow::BLEND);
-			gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
-			gl.disable(glow::DEPTH_TEST);
-			gl.disable(glow::CULL_FACE);
+			crate::core::glstatecache::enable(&gl, glow::BLEND);
+			crate::core::glstatecache::blend_func(&gl, glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+			crate::core::glstatecache::disable(&gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::disable(&gl, glow::CULL_FACE);
 
 			(vertex_array, vertex_buffer, white_texture)
 		};
@@ -1331,7 +1335,7 @@ impl Graphic {
 		unsafe {
 			gl.uniform_1_i32(main_texture_location.as_ref(), 0);
 			gl.uniform_1_f64(texture_lod_bias_location.as_ref(), 0.0);
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::active_texture(&gl, glow::TEXTURE0);
 		}
 
 		Ok(Graphic {
@@ -1461,7 +1465,7 @@ impl Graphic {
 		// 뷰포트/프로젝션 갱신.
 		if drawing_buffer_width != self.applied_viewport_width || drawing_buffer_height != self.applied_viewport_height {
 			unsafe {
-				self.gl.viewport(0, 0, drawing_buffer_width, drawing_buffer_height);
+				crate::core::glstatecache::viewport(&self.gl, 0, 0, drawing_buffer_width, drawing_buffer_height);
 			}
 			let safe_width = drawing_buffer_width.max(1) as f64;
 			let safe_height = drawing_buffer_height.max(1) as f64;
@@ -1475,7 +1479,7 @@ impl Graphic {
 		self.use_shader_program(&self.shader_program);
 		let projection_matrix_location = self.shader_program.get_uniform_location(&self.gl, "projectionMatrix");
 		unsafe {
-			self.gl.bind_vertex_array(Some(self.vertex_array));
+			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 		}
@@ -1508,22 +1512,22 @@ impl Graphic {
 		unsafe {
 			if !self.clip_stack.is_empty() {
 				self.clip_stack.clear();
-				self.gl.disable(glow::STENCIL_TEST);
+				crate::core::glstatecache::disable(&self.gl, glow::STENCIL_TEST);
 			}
 			self.stencil_clip_depth = 0;
 			self.is_shader_clip_active = false;
 			self.shader_clip_slot = 0;
 			if self.is_clip_scissor_enabled {
-				self.gl.disable(glow::SCISSOR_TEST);
+				crate::core::glstatecache::disable(&self.gl, glow::SCISSOR_TEST);
 				self.is_clip_scissor_enabled = false;
 			}
-			self.gl.color_mask(true, true, true, true);
+			crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
 			self.gl.clear_stencil(0);
 			if self.is_drawing_buffer_preserved {
 				self.gl.clear(glow::STENCIL_BUFFER_BIT);
 			}
 			else {
-				self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
+				crate::core::glstatecache::clear_color(&self.gl, 0.0, 0.0, 0.0, 1.0);
 				self.gl.clear(glow::COLOR_BUFFER_BIT | glow::STENCIL_BUFFER_BIT);
 			}
 		}
@@ -1560,7 +1564,7 @@ impl Graphic {
 			return;
 		}
 		unsafe {
-			self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+			crate::core::glstatecache::bind_texture(&self.gl, glow::TEXTURE_2D, Some(texture));
 		}
 		self.bound_texture.set(Some(texture));
 	}
@@ -1579,7 +1583,7 @@ impl Graphic {
 		// 밖의 GL 코드는 모든 채널을 쓰는 마스크를 기대하므로 되돌린다.
 		if self.is_color_mask_known.get() {
 			unsafe {
-				self.gl.color_mask(true, true, true, true);
+				crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
 			}
 			self.is_color_mask_known.set(false);
 		}
@@ -1599,7 +1603,7 @@ impl Graphic {
 		}
 		let is_default_framebuffer = read_framebuffer_binding(&self.gl).is_none();
 		unsafe {
-			self.gl.color_mask(true, true, true, !is_default_framebuffer);
+			crate::core::glstatecache::color_mask(&self.gl, true, true, true, !is_default_framebuffer);
 		}
 		self.is_color_mask_known.set(true);
 	}
@@ -1620,7 +1624,7 @@ impl Graphic {
 	pub fn clear_depth_buffer(&mut self) {
 		self.flush_batch();
 		unsafe {
-			self.gl.depth_mask(true);
+			crate::core::glstatecache::depth_mask(&self.gl, true);
 			self.gl.clear(glow::DEPTH_BUFFER_BIT);
 		}
 	}
@@ -1979,7 +1983,7 @@ impl Graphic {
 		self.blend_mode = blend_mode;
 		self.shader_blend_mode_index = blend_mode.get_shader_blend_mode_index();
 		unsafe {
-			self.gl.blend_func(source_factor, destination_factor);
+			crate::core::glstatecache::blend_func(&self.gl, source_factor, destination_factor);
 		}
 	}
 
@@ -2024,7 +2028,7 @@ impl Graphic {
 		};
 		if let Some((source_factor, destination_factor)) = blend_function {
 			unsafe {
-				self.gl.blend_func(source_factor, destination_factor);
+				crate::core::glstatecache::blend_func(&self.gl, source_factor, destination_factor);
 			}
 		}
 	}
@@ -2323,20 +2327,20 @@ impl Graphic {
 			}
 		};
 		unsafe {
-			self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(layer_target.framebuffer));
-			self.gl.color_mask(true, true, true, true);
+			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, Some(layer_target.framebuffer));
+			crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
 			self.is_color_mask_known.set(false);
-			self.gl.enable(glow::SCISSOR_TEST);
-			self.gl.scissor(backdrop_rect.x, backdrop_rect.y, backdrop_rect.width, backdrop_rect.height);
+			crate::core::glstatecache::enable(&self.gl, glow::SCISSOR_TEST);
+			crate::core::glstatecache::scissor(&self.gl, backdrop_rect.x, backdrop_rect.y, backdrop_rect.width, backdrop_rect.height);
 			self.gl.clear_buffer_f32_slice(glow::COLOR, 0, &[0.0, 0.0, 0.0, 0.0]);
-			self.gl.disable(glow::SCISSOR_TEST);
+			crate::core::glstatecache::disable(&self.gl, glow::SCISSOR_TEST);
 		}
 		self.use_shader_program(self.get_shader_program());
 		self.upload_draw_uniforms(color, false);
 		self.bind_main_texture(texture);
 		unsafe {
 			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
-			self.gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer);
+			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, framebuffer);
 		}
 		self.is_color_mask_known.set(false);
 		self.draw_call_count += 1;
@@ -2412,14 +2416,14 @@ impl Graphic {
 		let right_x = backdrop_rect.x + backdrop_rect.width;
 		let top_y = backdrop_rect.y + backdrop_rect.height;
 		unsafe {
-			self.gl.bind_framebuffer(glow::READ_FRAMEBUFFER, framebuffer);
-			self.gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(backdrop_target.framebuffer));
+			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::READ_FRAMEBUFFER, framebuffer);
+			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::DRAW_FRAMEBUFFER, Some(backdrop_target.framebuffer));
 			self.gl.blit_framebuffer(left_x, bottom_y, right_x, top_y, left_x, bottom_y, right_x, top_y, glow::COLOR_BUFFER_BIT, glow::NEAREST);
-			self.gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer);
+			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, framebuffer);
 			if self.bound_backdrop_texture.get() != Some(backdrop_target.texture) {
-				self.gl.active_texture(glow::TEXTURE1);
-				self.gl.bind_texture(glow::TEXTURE_2D, Some(backdrop_target.texture));
-				self.gl.active_texture(glow::TEXTURE0);
+				crate::core::glstatecache::active_texture(&self.gl, glow::TEXTURE1);
+				crate::core::glstatecache::bind_texture(&self.gl, glow::TEXTURE_2D, Some(backdrop_target.texture));
+				crate::core::glstatecache::active_texture(&self.gl, glow::TEXTURE0);
 				self.bound_backdrop_texture.set(Some(backdrop_target.texture));
 				self.batch_bound_texture_list[1].set(None);
 			}
@@ -2521,17 +2525,17 @@ impl Graphic {
 	fn create_offscreen_target(&self, framebuffer: Option<GlFramebuffer>, offscreen_format: OffscreenFormat, width: i32, height: i32) -> Result<OffscreenTarget, String> {
 		let (internal_format, pixel_format, pixel_type) = offscreen_format.get_texture_format();
 		unsafe {
-			let texture = self.gl.create_texture()?;
+			let texture = crate::core::glstatecache::create_texture(&self.gl)?;
 			self.bind_main_texture(texture);
 			self.gl.tex_image_2d(glow::TEXTURE_2D, 0, internal_format as i32, width, height, 0, pixel_format, pixel_type, glow::PixelUnpackData::Slice(None));
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
-			let target_framebuffer = self.gl.create_framebuffer()?;
-			self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target_framebuffer));
+			let target_framebuffer = crate::core::glstatecache::create_framebuffer(&self.gl)?;
+			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, Some(target_framebuffer));
 			self.gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
-			self.gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer);
+			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, framebuffer);
 			Ok(OffscreenTarget {
 				texture,
 				framebuffer: target_framebuffer,
@@ -2565,8 +2569,8 @@ impl Graphic {
 	fn destroy_offscreen_target(&self, offscreen_target: OffscreenTarget) {
 		self.forget_bound_texture(offscreen_target.texture);
 		unsafe {
-			self.gl.delete_framebuffer(offscreen_target.framebuffer);
-			self.gl.delete_texture(offscreen_target.texture);
+			crate::core::glstatecache::delete_framebuffer(&self.gl, offscreen_target.framebuffer);
+			crate::core::glstatecache::delete_texture(&self.gl, offscreen_target.texture);
 		}
 	}
 
@@ -2804,7 +2808,7 @@ impl Graphic {
 		let clip_rect_list_location = batch_shader_program.get_uniform_location(&self.gl, "clipRectList");
 		let vertex_bytes = float_slice_to_bytes(&self.batch_vertex_data[..vertex_count * BATCH_FLOATS_PER_VERTEX]);
 		unsafe {
-			self.gl.bind_vertex_array(self.batch_vertex_array);
+			crate::core::glstatecache::bind_vertex_array(&self.gl, self.batch_vertex_array);
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, self.batch_vertex_buffer);
 			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
@@ -2829,8 +2833,8 @@ impl Graphic {
 				continue;
 			}
 			unsafe {
-				self.gl.active_texture(glow::TEXTURE0 + slot_index as u32);
-				self.gl.bind_texture(glow::TEXTURE_2D, texture);
+				crate::core::glstatecache::active_texture(&self.gl, glow::TEXTURE0 + slot_index as u32);
+				crate::core::glstatecache::bind_texture(&self.gl, glow::TEXTURE_2D, texture);
 			}
 			self.batch_bound_texture_list[slot_index].set(texture);
 			is_texture_unit_changed = true;
@@ -2840,7 +2844,7 @@ impl Graphic {
 		}
 		if is_texture_unit_changed {
 			unsafe {
-				self.gl.active_texture(glow::TEXTURE0);
+				crate::core::glstatecache::active_texture(&self.gl, glow::TEXTURE0);
 			}
 		}
 		self.apply_color_mask();
@@ -2848,7 +2852,7 @@ impl Graphic {
 			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
 
 			// 기본 버텍스 어레이로 복귀. (프로그램은 다음에 낱장으로 그릴 때 건다)
-			self.gl.bind_vertex_array(Some(self.vertex_array));
+			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 		}
 		self.draw_call_count += 1;
@@ -3019,7 +3023,7 @@ impl Graphic {
 		if self.batch_shader_program.is_some() {
 			return Ok(());
 		}
-		let maximum_texture_unit_count = unsafe { self.gl.get_parameter_i32(glow::MAX_TEXTURE_IMAGE_UNITS) };
+		let maximum_texture_unit_count = unsafe { crate::core::glstatecache::get_parameter_i32(&self.gl, glow::MAX_TEXTURE_IMAGE_UNITS) };
 		let texture_slot_count = (maximum_texture_unit_count.max(1) as usize).min(BATCH_TEXTURE_SLOT_LIMIT);
 		let batch_shader_program = ShaderProgram::new(&self.gl, BATCH_VERTEXSHADER_SOURCE, &create_batch_fragment_shader_source(texture_slot_count))?;
 		self.batch_texture_slot_count = texture_slot_count;
@@ -3027,9 +3031,9 @@ impl Graphic {
 		self.batch_clip_rect_data = create_batch_clip_rect_data();
 		self.batch_clip_rect_count = 1;
 		unsafe {
-			let batch_vertex_array = self.gl.create_vertex_array()?;
+			let batch_vertex_array = crate::core::glstatecache::create_vertex_array(&self.gl)?;
 			let batch_vertex_buffer = self.gl.create_buffer()?;
-			self.gl.bind_vertex_array(Some(batch_vertex_array));
+			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(batch_vertex_array));
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(batch_vertex_buffer));
 			let stride_bytes = (BATCH_FLOATS_PER_VERTEX * 4) as i32;
 			let attribute_layout: [(&str, i32, i32); 5] = [("vertexPosition", 2, 0), ("vertexTextureCoordinate", 2, 8), ("vertexColor", 4, 16), ("vertexTintColor", 4, 32), ("vertexSlot", 2, 48)];
@@ -3040,7 +3044,7 @@ impl Graphic {
 					self.gl.vertex_attrib_pointer_f32(attribute_location, component_count, glow::FLOAT, false, stride_bytes, byte_offset);
 				}
 			}
-			self.gl.bind_vertex_array(Some(self.vertex_array));
+			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 			self.batch_vertex_array = Some(batch_vertex_array);
 			self.batch_vertex_buffer = Some(batch_vertex_buffer);
@@ -3065,9 +3069,9 @@ impl Graphic {
 		}
 		let particle_shader_program = ShaderProgram::new(&self.gl, PARTICLE_VERTEXSHADER_SOURCE, PARTICLE_FRAGMENTSHADER_SOURCE)?;
 		unsafe {
-			let particle_vertex_array = self.gl.create_vertex_array()?;
+			let particle_vertex_array = crate::core::glstatecache::create_vertex_array(&self.gl)?;
 			let particle_vertex_buffer = self.gl.create_buffer()?;
-			self.gl.bind_vertex_array(Some(particle_vertex_array));
+			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(particle_vertex_array));
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(particle_vertex_buffer));
 			self.gl.buffer_data_size(glow::ARRAY_BUFFER, (PARTICLE_VERTEX_CAPACITY * PARTICLE_FLOATS_PER_VERTEX * 4) as i32, glow::DYNAMIC_DRAW);
 			let stride_bytes = (PARTICLE_FLOATS_PER_VERTEX * 4) as i32;
@@ -3079,7 +3083,7 @@ impl Graphic {
 					self.gl.vertex_attrib_pointer_f32(attribute_location, component_count, glow::FLOAT, false, stride_bytes, byte_offset);
 				}
 			}
-			self.gl.bind_vertex_array(Some(self.vertex_array));
+			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 			self.particle_vertex_array = Some(particle_vertex_array);
 			self.particle_vertex_buffer = Some(particle_vertex_buffer);
@@ -3193,7 +3197,7 @@ impl Graphic {
 		let blend_mode_index_location = particle_shader_program.get_uniform_location(&self.gl, "blendModeIndex");
 		let vertex_bytes = float_slice_to_bytes(&self.particle_vertex_data[..vertex_count * PARTICLE_FLOATS_PER_VERTEX]);
 		unsafe {
-			self.gl.bind_vertex_array(self.particle_vertex_array);
+			crate::core::glstatecache::bind_vertex_array(&self.gl, self.particle_vertex_array);
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, self.particle_vertex_buffer);
 			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
@@ -3220,7 +3224,7 @@ impl Graphic {
 
 		// 기본 버텍스 어레이로 복귀. (프로그램은 다음에 낱장으로 그릴 때 건다)
 		unsafe {
-			self.gl.bind_vertex_array(Some(self.vertex_array));
+			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 		}
 		self.release_clip_scissor();
@@ -3331,8 +3335,8 @@ impl Graphic {
 			}
 		}
 		let soft_disc_texture = unsafe {
-			let texture = self.gl.create_texture().expect("soft disc texture");
-			self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+			let texture = crate::core::glstatecache::create_texture(&self.gl).expect("soft disc texture");
+			crate::core::glstatecache::bind_texture(&self.gl, glow::TEXTURE_2D, Some(texture));
 			self.gl.tex_image_2d(
 				glow::TEXTURE_2D,
 				0,
@@ -4599,11 +4603,11 @@ impl Graphic {
 		self.stencil_clip_depth += 1;
 		unsafe {
 			if previous_stencil_clip_depth == 0 {
-				self.gl.enable(glow::STENCIL_TEST);
+				crate::core::glstatecache::enable(&self.gl, glow::STENCIL_TEST);
 			}
 
 			// 스텐실에 클립 영역 기록. (색상 출력 없이 INCR)
-			self.gl.color_mask(false, false, false, false);
+			crate::core::glstatecache::color_mask(&self.gl, false, false, false, false);
 			self.gl.stencil_func(glow::ALWAYS, 0, 0xFF);
 			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::INCR);
 		}
@@ -4617,7 +4621,7 @@ impl Graphic {
 		self.batch_suspend_depth -= 1;
 		self.is_color_mask_known.set(false);
 		unsafe {
-			self.gl.color_mask(true, true, true, true);
+			crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
 			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
 			self.gl.stencil_func(glow::EQUAL, self.stencil_clip_depth, 0xFF);
 		}
@@ -4664,8 +4668,8 @@ impl Graphic {
 		if let Some(target) = &target {
 			let clip_depth = self.stencil_clip_depth;
 			unsafe {
-				self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
-				self.gl.color_mask(true, true, true, true);
+				crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, Some(target.framebuffer));
+				crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
 				self.gl.stencil_mask(0xFF);
 				self.gl.clear_buffer_f32_slice(glow::COLOR, 0, &[0.0, 0.0, 0.0, 0.0]);
 				self.gl.clear_buffer_i32_slice(glow::STENCIL, 0, &[clip_depth]);
@@ -4703,7 +4707,7 @@ impl Graphic {
 			}
 		};
 		unsafe {
-			self.gl.bind_framebuffer(glow::FRAMEBUFFER, opacity_layer.previous_framebuffer);
+			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, opacity_layer.previous_framebuffer);
 		}
 
 		// 층 칸을 단위 행렬, 흰색, 틴트 없이 source-over 로 얹는다. (칸은 화면과 같은 크기라 디바이스 픽셀 그대로 짚는다, 텍스처는 아래가 0 행)
@@ -4739,7 +4743,7 @@ impl Graphic {
 			self.destroy_opacity_layer_target(target);
 		}
 		unsafe {
-			let texture = self.gl.create_texture()?;
+			let texture = crate::core::glstatecache::create_texture(&self.gl)?;
 			self.bind_main_texture(texture);
 			self.gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, viewport_width, viewport_height, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None));
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
@@ -4750,12 +4754,12 @@ impl Graphic {
 			self.gl.bind_renderbuffer(glow::RENDERBUFFER, Some(stencil_renderbuffer));
 			self.gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, viewport_width, viewport_height);
 			self.gl.bind_renderbuffer(glow::RENDERBUFFER, None);
-			let target_framebuffer = self.gl.create_framebuffer()?;
-			self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target_framebuffer));
+			let target_framebuffer = crate::core::glstatecache::create_framebuffer(&self.gl)?;
+			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, Some(target_framebuffer));
 			self.gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
 			self.gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(stencil_renderbuffer));
 			let status = self.gl.check_framebuffer_status(glow::FRAMEBUFFER);
-			self.gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer);
+			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, framebuffer);
 			let target = OpacityLayerTarget {
 				texture,
 				framebuffer: target_framebuffer,
@@ -4777,9 +4781,9 @@ impl Graphic {
 	fn destroy_opacity_layer_target(&self, target: OpacityLayerTarget) {
 		self.forget_bound_texture(target.texture);
 		unsafe {
-			self.gl.delete_framebuffer(target.framebuffer);
+			crate::core::glstatecache::delete_framebuffer(&self.gl, target.framebuffer);
 			self.gl.delete_renderbuffer(target.stencil_renderbuffer);
-			self.gl.delete_texture(target.texture);
+			crate::core::glstatecache::delete_texture(&self.gl, target.texture);
 		}
 	}
 
@@ -4810,7 +4814,7 @@ impl Graphic {
 		// (begin 과 end 사이에 변환이 바뀌었을 수 있으므로 스냅샷 사용)
 		self.transform_matrix = clip_entry.transform_matrix;
 		unsafe {
-			self.gl.color_mask(false, false, false, false);
+			crate::core::glstatecache::color_mask(&self.gl, false, false, false, false);
 			self.gl.stencil_func(glow::ALWAYS, 0, 0xFF);
 			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::DECR);
 		}
@@ -4824,12 +4828,12 @@ impl Graphic {
 		self.batch_suspend_depth -= 1;
 		self.is_color_mask_known.set(false);
 		unsafe {
-			self.gl.color_mask(true, true, true, true);
+			crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
 			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
 
 			self.stencil_clip_depth -= 1;
 			if self.stencil_clip_depth == 0 {
-				self.gl.disable(glow::STENCIL_TEST);
+				crate::core::glstatecache::disable(&self.gl, glow::STENCIL_TEST);
 			}
 			else {
 				self.gl.stencil_func(glow::EQUAL, self.stencil_clip_depth, 0xFF);
@@ -4882,8 +4886,8 @@ impl Graphic {
 		let right_x = left_x.max((shader_clip_rect[2] as f64 - 0.5).ceil());
 		let bottom_y = top_y.max((shader_clip_rect[3] as f64 - 0.5).ceil());
 		unsafe {
-			self.gl.enable(glow::SCISSOR_TEST);
-			self.gl.scissor(left_x as i32, self.applied_viewport_height - bottom_y as i32, (right_x - left_x) as i32, (bottom_y - top_y) as i32);
+			crate::core::glstatecache::enable(&self.gl, glow::SCISSOR_TEST);
+			crate::core::glstatecache::scissor(&self.gl, left_x as i32, self.applied_viewport_height - bottom_y as i32, (right_x - left_x) as i32, (bottom_y - top_y) as i32);
 		}
 		self.is_clip_scissor_enabled = true;
 	}
@@ -4896,7 +4900,7 @@ impl Graphic {
 			return;
 		}
 		unsafe {
-			self.gl.disable(glow::SCISSOR_TEST);
+			crate::core::glstatecache::disable(&self.gl, glow::SCISSOR_TEST);
 		}
 		self.is_clip_scissor_enabled = false;
 	}
@@ -4924,9 +4928,9 @@ impl Graphic {
 		self.push_state();
 		unsafe {
 			if !is_writing || self.stencil_clip_depth == 0 {
-				self.gl.enable(glow::STENCIL_TEST);
+				crate::core::glstatecache::enable(&self.gl, glow::STENCIL_TEST);
 			}
-			self.gl.color_mask(false, false, false, false);
+			crate::core::glstatecache::color_mask(&self.gl, false, false, false, false);
 			self.gl.stencil_func(glow::ALWAYS, 0, 0xFF);
 			let stencil_operation = if is_writing {
 				glow::INCR
@@ -4944,7 +4948,7 @@ impl Graphic {
 		self.batch_suspend_depth -= 1;
 		self.is_color_mask_known.set(false);
 		unsafe {
-			self.gl.color_mask(true, true, true, true);
+			crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
 			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
 			let stencil_depth = if is_writing {
 				self.clip_stack.len() as i32
@@ -4953,7 +4957,7 @@ impl Graphic {
 				self.stencil_clip_depth
 			};
 			if stencil_depth == 0 {
-				self.gl.disable(glow::STENCIL_TEST);
+				crate::core::glstatecache::disable(&self.gl, glow::STENCIL_TEST);
 			}
 			else {
 				self.gl.stencil_func(glow::EQUAL, stencil_depth, 0xFF);
@@ -5096,18 +5100,18 @@ impl Graphic {
 		let projection_matrix_location = shader_program.get_uniform_location(&self.gl, "projectionMatrix");
 		let main_texture_location = shader_program.get_uniform_location(&self.gl, "mainTexture");
 		unsafe {
-			self.gl.viewport(0, 0, self.applied_viewport_width, self.applied_viewport_height);
-			self.gl.bind_vertex_array(Some(self.vertex_array));
+			crate::core::glstatecache::viewport(&self.gl, 0, 0, self.applied_viewport_width, self.applied_viewport_height);
+			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 			self.gl.uniform_1_i32(main_texture_location.as_ref(), 0);
-			self.gl.active_texture(glow::TEXTURE0);
-			self.gl.enable(glow::BLEND);
-			self.gl.disable(glow::DEPTH_TEST);
-			self.gl.disable(glow::CULL_FACE);
-			self.gl.disable(glow::SCISSOR_TEST);
+			crate::core::glstatecache::active_texture(&self.gl, glow::TEXTURE0);
+			crate::core::glstatecache::enable(&self.gl, glow::BLEND);
+			crate::core::glstatecache::disable(&self.gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::disable(&self.gl, glow::CULL_FACE);
+			crate::core::glstatecache::disable(&self.gl, glow::SCISSOR_TEST);
 			if self.stencil_clip_depth > 0 {
-				self.gl.enable(glow::STENCIL_TEST);
+				crate::core::glstatecache::enable(&self.gl, glow::STENCIL_TEST);
 			}
 		}
 		self.is_clip_scissor_enabled = false;
@@ -5148,7 +5152,7 @@ impl Graphic {
 		let row_byte_count = width * 4;
 		let mut bottom_up_pixels = vec![0u8; row_byte_count * height];
 		unsafe {
-			self.gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
+			crate::core::glstatecache::pixel_store_i32(&self.gl, glow::PACK_ALIGNMENT, 1);
 			self.gl.read_pixels(0, 0, width as i32, height as i32, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelPackData::Slice(Some(&mut bottom_up_pixels)));
 		}
 		let mut top_down_pixels = vec![0u8; row_byte_count * height];
@@ -5165,14 +5169,69 @@ impl Graphic {
 
 	//==============================================================================
 	/// GL 컨텍스트 반환.
-	/// - 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, 기억한 프로그램과 텍스처를 잊는다. (다음 그리기에서 다시 건다)
+	/// - 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, 기억한 프로그램과 텍스처, GL 상태 캐시를 잊는다. (다음 그리기에서 다시 건다)
 	///
 	/// # 돌려줌
 	/// Graphic 이 든 GL 컨텍스트.
 	//==============================================================================
 	pub fn get_gl(&self) -> &glow::Context {
 		self.forget_bound_render_state();
+		crate::core::glstatecache::reset(&self.gl);
 		&self.gl
+	}
+
+	//==============================================================================
+	/// GL 컨텍스트 반환. (엔진 안에서, 상태 캐시를 거쳐 GL 을 부르는 쪽이 쓴다, 상태 캐시를 잊지 않는다)
+	//==============================================================================
+	pub(crate) fn get_tracked_gl(&self) -> &glow::Context {
+		self.forget_bound_render_state();
+		&self.gl
+	}
+
+	//==============================================================================
+	/// 지금 그리는 프레임 버퍼 반환. (원본 getCurrentFramebuffer, 상태 캐시가 기억한 값, 그리는 중 GL 에 묻지 않는다)
+	///
+	/// # 돌려줌
+	/// 지금 묶인 그리기 프레임 버퍼. 기본 프레임 버퍼(창, 캔버스)면 None.
+	///
+	/// # 예제
+	/// 장면에서 지금 프레임 버퍼와 뷰포트 읽기
+	/// ```rust,no_run
+	/// use vanilla::Graphic;
+	///
+	/// fn draw(graphic: &mut Graphic) {
+	/// 	let framebuffer = graphic.get_current_framebuffer();
+	/// 	let viewport = graphic.get_current_viewport();
+	/// 	println!("{} {} {}", framebuffer.is_none(), viewport.get_width(), viewport.get_height());
+	/// 	graphic.reset_gl_state_cache();
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn get_current_framebuffer(&self) -> Option<GlFramebuffer> {
+		read_framebuffer_binding(&self.gl)
+	}
+
+	//==============================================================================
+	/// 지금 뷰포트 반환. (원본 getCurrentViewport, 픽셀, 왼쪽 아래가 원점, 상태 캐시가 기억한 값)
+	///
+	/// # 돌려줌
+	/// 뷰포트 사각형. (x, y, 너비, 높이)
+	//==============================================================================
+	pub fn get_current_viewport(&self) -> Rect {
+		let mut viewport = [0i32; 4];
+		unsafe {
+			crate::core::glstatecache::get_parameter_i32_slice(&self.gl, glow::VIEWPORT, &mut viewport);
+		}
+		Rect::create(viewport[0] as f64, viewport[1] as f64, viewport[2] as f64, viewport[3] as f64)
+	}
+
+	//==============================================================================
+	/// GL 상태 캐시 잊기. (원본 resetGLStateCache, 상태 캐시를 거치지 않고 glow 로 GL 상태를 바꾼 뒤 부른다, 다음에 읽을 때 GL 에 한 번씩 묻는다)
+	/// - get_gl 은 받은 쪽이 상태를 바꿀 수 있어 스스로 잊는다. run_external_pass 는 pass 가 끝나면 스스로 잊는다.
+	/// - 툰 렌더러의 on_before_draw 와 그리기 줄의 단계 콜백이 끝나면 렌더러가 스스로 잊는다.
+	//==============================================================================
+	pub fn reset_gl_state_cache(&self) {
+		crate::core::glstatecache::reset(&self.gl);
 	}
 
 	//==============================================================================
@@ -5278,7 +5337,7 @@ fn read_default_framebuffer_multisampled(gl: &glow::Context) -> Option<bool> {
 		if read_framebuffer_binding(gl).is_some() {
 			return None;
 		}
-		let sample_count = unsafe { gl.get_parameter_i32(glow::SAMPLES) };
+		let sample_count = unsafe { crate::core::glstatecache::get_parameter_i32(gl, glow::SAMPLES) };
 		Some(sample_count > 1)
 	}
 }
@@ -5299,48 +5358,56 @@ fn create_batch_clip_rect_data() -> [f32; BATCH_CLIP_SLOT_CAPACITY * 4] {
 /// 지금 묶인 프레임버퍼 읽기. (앞의 것을 돌려 놓을 때, 원본 getParameter(FRAMEBUFFER_BINDING), 기본 프레임버퍼면 None)
 //==============================================================================
 pub(crate) fn read_framebuffer_binding(gl: &glow::Context) -> Option<<glow::Context as glow::HasContext>::Framebuffer> {
-	if !is_gl_binding_present(glow::FRAMEBUFFER_BINDING) {
-		return None;
-	}
-	unsafe {
-		gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING)
-	}
+	crate::core::glstatecache::read_draw_framebuffer(gl, || {
+		if !is_gl_binding_present(glow::FRAMEBUFFER_BINDING) {
+			return None;
+		}
+		unsafe {
+			gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING)
+		}
+	})
 }
 
 //==============================================================================
 /// 지금 유닛에 묶인 2D 텍스처 읽기. (원본 getParameter(TEXTURE_BINDING_2D))
 //==============================================================================
 pub(crate) fn read_texture_binding(gl: &glow::Context) -> Option<GlTexture> {
-	if !is_gl_binding_present(glow::TEXTURE_BINDING_2D) {
-		return None;
-	}
-	unsafe {
-		gl.get_parameter_texture(glow::TEXTURE_BINDING_2D)
-	}
+	crate::core::glstatecache::read_texture_binding_2d(gl, || {
+		if !is_gl_binding_present(glow::TEXTURE_BINDING_2D) {
+			return None;
+		}
+		unsafe {
+			gl.get_parameter_texture(glow::TEXTURE_BINDING_2D)
+		}
+	})
 }
 
 //==============================================================================
 /// 지금 쓰는 셰이더 프로그램 읽기. (원본 getParameter(CURRENT_PROGRAM))
 //==============================================================================
 pub(crate) fn read_program_binding(gl: &glow::Context) -> Option<GlProgram> {
-	if !is_gl_binding_present(glow::CURRENT_PROGRAM) {
-		return None;
-	}
-	unsafe {
-		gl.get_parameter_program(glow::CURRENT_PROGRAM)
-	}
+	crate::core::glstatecache::read_program(gl, || {
+		if !is_gl_binding_present(glow::CURRENT_PROGRAM) {
+			return None;
+		}
+		unsafe {
+			gl.get_parameter_program(glow::CURRENT_PROGRAM)
+		}
+	})
 }
 
 //==============================================================================
 /// 지금 묶인 버텍스 어레이 읽기. (원본 getParameter(VERTEX_ARRAY_BINDING))
 //==============================================================================
 pub(crate) fn read_vertex_array_binding(gl: &glow::Context) -> Option<GlVertexArray> {
-	if !is_gl_binding_present(glow::VERTEX_ARRAY_BINDING) {
-		return None;
-	}
-	unsafe {
-		gl.get_parameter_vertex_array(glow::VERTEX_ARRAY_BINDING)
-	}
+	crate::core::glstatecache::read_vertex_array(gl, || {
+		if !is_gl_binding_present(glow::VERTEX_ARRAY_BINDING) {
+			return None;
+		}
+		unsafe {
+			gl.get_parameter_vertex_array(glow::VERTEX_ARRAY_BINDING)
+		}
+	})
 }
 
 //==============================================================================

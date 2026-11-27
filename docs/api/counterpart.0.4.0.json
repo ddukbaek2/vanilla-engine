@@ -10939,6 +10939,42 @@
 			"vanilla-engine": {
 				"module": "core/graphic",
 				"class": "Graphic",
+				"name": "get_current_framebuffer"
+			},
+			"vanilla.js": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "getCurrentFramebuffer"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "get_current_viewport"
+			},
+			"vanilla.js": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "getCurrentViewport"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "reset_gl_state_cache"
+			},
+			"vanilla.js": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "resetGLStateCache"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/graphic",
+				"class": "Graphic",
 				"name": "get_vertex_array"
 			},
 			"vanilla.js": {

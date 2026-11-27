@@ -86,7 +86,7 @@ impl FullscreenPass {
 	pub fn new(gl: &glow::Context, fragment_shader_source: &str) -> Result<FullscreenPass, String> {
 		let shader_program = ShaderProgram::new(gl, FULLSCREEN_VERTEXSHADER_SOURCE.trim(), fragment_shader_source.trim())?;
 		let vertex_array = unsafe {
-			gl.create_vertex_array()?
+			crate::core::glstatecache::create_vertex_array(gl)?
 		};
 		Ok(FullscreenPass {
 			shader_program,
@@ -103,7 +103,7 @@ impl FullscreenPass {
 	pub fn use_program(&self, gl: &glow::Context) {
 		self.shader_program.use_program(gl);
 		unsafe {
-			gl.bind_vertex_array(Some(self.vertex_array));
+			crate::core::glstatecache::bind_vertex_array(gl, Some(self.vertex_array));
 		}
 	}
 
@@ -161,8 +161,8 @@ impl FullscreenPass {
 	//==============================================================================
 	pub fn destroy(&self, gl: &glow::Context) {
 		unsafe {
-			gl.delete_program(self.shader_program.get_program());
-			gl.delete_vertex_array(self.vertex_array);
+			crate::core::glstatecache::delete_program(gl, self.shader_program.get_program());
+			crate::core::glstatecache::delete_vertex_array(gl, self.vertex_array);
 		}
 	}
 }

@@ -45671,11 +45671,89 @@
 								}
 							},
 							"description": {
-								"ko": "GL 컨텍스트 반환.\n- 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, 기억한 프로그램과 텍스처를 잊는다. (다음 그리기에서 다시 건다)",
-								"en": "Returns the GL context.\n- The receiver may change the program or texture, so the remembered program and texture are forgotten. (bound again on the next draw)"
+								"ko": "GL 컨텍스트 반환.\n- 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, 기억한 프로그램과 텍스처, GL 상태 캐시를 잊는다. (다음 그리기에서 다시 건다)",
+								"en": "Return the GL context.\n- The receiver can change the program or textures, so the remembered program and textures and the GL state cache are forgotten. (The next draw sets them again)"
 							},
 							"since": "0.3.2",
 							"source": "src/core/graphic.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_current_framebuffer",
+							"signature": "pub fn get_current_framebuffer(&self) -> Option<GlFramebuffer>",
+							"params": [],
+							"returns": {
+								"type": "Option<GlFramebuffer>",
+								"description": {
+									"ko": "지금 묶인 그리기 프레임 버퍼. 기본 프레임 버퍼(창, 캔버스)면 None.",
+									"en": "The draw framebuffer bound now. None for the default framebuffer (window, canvas)."
+								}
+							},
+							"description": {
+								"ko": "지금 그리는 프레임 버퍼 반환. (원본 getCurrentFramebuffer, 상태 캐시가 기억한 값, 그리는 중 GL 에 묻지 않는다)",
+								"en": "Return the framebuffer being drawn to now. (original getCurrentFramebuffer, the value remembered by the state cache, GL is not asked while drawing)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "getCurrentFramebuffer"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "장면에서 지금 프레임 버퍼와 뷰포트 읽기",
+										"en": "Read the current framebuffer and viewport in a scene"
+									},
+									"code": "use vanilla::Graphic;\n\nfn draw(graphic: &mut Graphic) {\n\tlet framebuffer = graphic.get_current_framebuffer();\n\tlet viewport = graphic.get_current_viewport();\n\tprintln!(\"{} {} {}\", framebuffer.is_none(), viewport.get_width(), viewport.get_height());\n\tgraphic.reset_gl_state_cache();\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "get_current_viewport",
+							"signature": "pub fn get_current_viewport(&self) -> Rect",
+							"params": [],
+							"returns": {
+								"type": "Rect",
+								"description": {
+									"ko": "뷰포트 사각형. (x, y, 너비, 높이)",
+									"en": "Viewport rectangle. (x, y, width, height)"
+								}
+							},
+							"description": {
+								"ko": "지금 뷰포트 반환. (원본 getCurrentViewport, 픽셀, 왼쪽 아래가 원점, 상태 캐시가 기억한 값)",
+								"en": "Return the current viewport. (original getCurrentViewport, pixels, bottom-left origin, the value remembered by the state cache)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "getCurrentViewport"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "reset_gl_state_cache",
+							"signature": "pub fn reset_gl_state_cache(&self)",
+							"params": [],
+							"description": {
+								"ko": "GL 상태 캐시 잊기. (원본 resetGLStateCache, 상태 캐시를 거치지 않고 glow 로 GL 상태를 바꾼 뒤 부른다, 다음에 읽을 때 GL 에 한 번씩 묻는다)\n- get_gl 은 받은 쪽이 상태를 바꿀 수 있어 스스로 잊는다. run_external_pass 는 pass 가 끝나면 스스로 잊는다.\n- 툰 렌더러의 on_before_draw 와 그리기 줄의 단계 콜백이 끝나면 렌더러가 스스로 잊는다.",
+								"en": "Forget the GL state cache. (original resetGLStateCache, call it after changing GL state through glow without going through the state cache; the next reads ask GL once each)\n- get_gl forgets by itself because the receiver can change state. run_external_pass forgets by itself when the pass ends.\n- The renderer forgets by itself after the toon renderer's on_before_draw and draw queue stage callbacks."
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "resetGLStateCache"
+							}
 						},
 						{
 							"kind": "method",
@@ -60842,8 +60920,8 @@
 								}
 							],
 							"description": {
-								"ko": "사용. (원본 useProgram)",
-								"en": "Use. (the original useProgram)"
+								"ko": "사용. (원본 useProgram, 상태 캐시가 이미 이 프로그램을 쓴다고 기억하면 GL 에 다시 걸지 않는다)",
+								"en": "Use. (original useProgram, not set on GL again when the state cache remembers this program is already in use)"
 							},
 							"since": "0.3.2",
 							"source": "src/core/shaderprogram.rs",
