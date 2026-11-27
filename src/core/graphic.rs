@@ -7081,6 +7081,25 @@ impl Graphic {
 	}
 
 	//==============================================================================
+	/// 앞의 GL 명령을 GPU 가 다 그리길 기다리기. (원본 waitGpuForGpuThroughput, 읽는 프레임버퍼의 1 화소를 읽는다, GPU 처리량 재기)
+	/// - 읽는 프레임버퍼가 기본이 아니면 잠깐 기본으로 바꿨다가 되돌린다.
+	//==============================================================================
+	pub(crate) fn wait_gpu_for_throughput(&self) {
+		let previous_read_framebuffer = crate::core::glstatecache::read_reading_framebuffer(&self.gl, || unsafe { self.gl.get_parameter_framebuffer(glow::READ_FRAMEBUFFER_BINDING) });
+		let mut pixel = [0u8; 4];
+		unsafe {
+			if previous_read_framebuffer.is_some() {
+				crate::core::glstatecache::bind_framebuffer(&self.gl, glow::READ_FRAMEBUFFER, None);
+			}
+			crate::core::glstatecache::pixel_store_i32(&self.gl, glow::PACK_ALIGNMENT, 1);
+			self.gl.read_pixels(0, 0, 1, 1, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelPackData::Slice(Some(&mut pixel)));
+			if previous_read_framebuffer.is_some() {
+				crate::core::glstatecache::bind_framebuffer(&self.gl, glow::READ_FRAMEBUFFER, previous_read_framebuffer);
+			}
+		}
+	}
+
+	//==============================================================================
 	/// 3D 색 공간 반환. (원본 getColorSpace, 생성 때 정한 값, 엔진 설정의 color_space)
 	///
 	/// # 돌려줌

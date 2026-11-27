@@ -81,6 +81,11 @@ const SCENE_LOAD_EXTRA_WAIT_SECONDS: f64 = 0.3;
 /// 로딩 화면 동안 한 프레임에 그림을 올리는 시간 한도. (밀리초, 원본 IMAGE_UPLOAD_TIME_SLICE_MILLISECONDS, 유니티 asyncUploadTimeSlice 기본 2)
 const IMAGE_UPLOAD_TIME_SLICE_MILLISECONDS: f64 = 2.0;
 
+/// GPU 처리량 재기(measure_gpu_throughput)의 데움 프레임 수. (덩이마다 1 화소 읽기로 GPU 를 기다리고 다음 갱신으로 넘겨 한 번에 길게 막지 않는다)
+const GPU_THROUGHPUT_WARMUP_FRAME_COUNT: u32 = 10;
+/// GPU 처리량 재기의 한 덩이의 프레임 수.
+const GPU_THROUGHPUT_CHUNK_FRAME_COUNT: u32 = 30;
+
 /// 찍기 모드의 한 프레임 간격. (밀리초, 1/60 초. 원본 CAPTURE_FRAME_MILLISECONDS 와 같은 셈이 되게 밀리초로 두고 0.001 을 곱한다)
 const CAPTURE_FRAME_MILLISECONDS: f64 = 1000.0 / 60.0;
 
@@ -332,6 +337,10 @@ pub struct Engine {
 	is_exit_requested: Cell<bool>,
 	/// 그래픽. (플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넣는다. 그리기 함수와 with_graphic 에 내어 준 동안은 비어 있다)
 	graphic: RefCell<Option<Graphic>>,
+	/// 재고 있는 GPU 처리량. (없으면 None, measure_gpu_throughput)
+	gpu_throughput_measurement: RefCell<Option<GpuThroughputMeasurement>>,
+	/// 엔진 루프가 한 번이라도 돌았는지. (measure_gpu_throughput 은 루프가 돈 뒤에만)
+	has_loop_started: Cell<bool>,
 	/// 프레임 번호마다 화면 저장을 받을 함수. (request_frame_capture)
 	frame_capture_handler_map: RefCell<std::collections::HashMap<u64, Vec<FrameCaptureHandler>>>,
 	/// 다음 프레임 첫머리에 캔버스와 뷰 영역을 다시 맞춰 달라고 했는지. (resize)
@@ -391,6 +400,8 @@ impl Engine {
 			frame_number: Cell::new(1),
 			version: ENGINE_VERSION,
 			is_exit_requested: Cell::new(false),
+			gpu_throughput_measurement: RefCell::new(None),
+			has_loop_started: Cell::new(false),
 			frame_capture_handler_map: RefCell::new(std::collections::HashMap::new()),
 			is_resize_requested: Cell::new(false),
 			pending_scene_list: RefCell::new(Vec::new()),
@@ -684,6 +695,7 @@ impl Engine {
 	/// 정상으로 끝나면 Ok. (데스크탑은 창이 닫혀 이벤트 루프가 끝날 때, 웹은 프레임을 걸어 둔 뒤 바로) 이벤트 루프나 창, GL 컨텍스트를 만들지 못하는 등 플랫폼이 실패하면 Err(까닭).
 	//==============================================================================
 	pub fn run(&'static self, scene: Box<dyn Scene>) -> Result<(), String> {
+		self.has_loop_started.set(true);
 		platform::run(EngineRunner::new(self, scene))
 	}
 
@@ -2008,6 +2020,92 @@ impl Engine {
 		}));
 		capture_promise
 	}
+
+	//==============================================================================
+	/// GPU 처리량 재기. (원본 measureGpuThroughput, 지금 장면을 갱신 없이 그리기만 잇달아 하고 GPU 가 다 그리길 기다린 프레임당 시간)
+	/// - 지금 장면을 씬 갱신(tick) 없이 엔진 프레임과 같은 그리기 길로 frame_count 번 잇달아 그리고, 1 화소 읽기로 GPU 가 다 그리길 기다린 벽시계 시간을 프레임 수로 나눈다.
+	///   그리는 쪽(CPU 의 GL 명령 쓰기), 드라이버, GPU 실행 가운데 가장 느린 단의 몫이다. GPU 가 가장 느리면 GPU 가 실제로 한 프레임을 그리는 시간이다.
+	/// - 다음 엔진 갱신부터 시작한다. 데움 10 프레임 뒤 30 프레임씩 덩이로 나눠 갱신 하나에 한 덩이를 그리고 덩이마다 GPU 를 기다린다. (한 번에 길게 막지 않는다, 덩이 사이는 재지 않는다)
+	/// - 재는 동안 엔진 시간, 입력, 프레임 번호, 화면 크기 맞추기, 찍기는 서 있고 씬의 tick 을 부르지 않는다. 씬의 draw 가 게임 상태를 바꾸지 않으면 게임 상태는 그대로다. 다 재면 엔진 루프가 그대로 이어 돈다.
+	/// - 같은 상태를 되풀이해 그리므로 바뀐 것만 다시 그리는 캐시(그림자 OnChange 같은)는 다시 굽지 않는다. 화면에 내는 것(합성)은 덩이마다 마지막 프레임만 한다.
+	/// - 재는 중에 또 부르거나, 엔진 루프가 돌기 전이거나, frame_count 가 0 이면 Err 로 풀린다.
+	///
+	/// # 인자
+	/// - `frame_count`: 잴 프레임 수. (1 이상, 데움은 빼고 센다)
+	///
+	/// # 돌려줌
+	/// GpuThroughput 으로 풀리는 Promise. (실패하면 Err(까닭))
+	///
+	/// # 예제
+	/// 지금 장면의 GPU 처리량 재기
+	/// ```rust,no_run
+	/// use vanilla::{Engine, GpuThroughput};
+	///
+	/// fn measure(engine: &'static Engine) {
+	/// 	engine.spawn_task(|mut engine_context| async move {
+	/// 		let result: Result<GpuThroughput, String> = engine_context.with(|engine| engine.measure_gpu_throughput(60)).await;
+	/// 		if let Ok(throughput) = result {
+	/// 			println!("{} 프레임, 프레임당 {} 밀리초", throughput.frame_count, throughput.milliseconds_per_frame);
+	/// 		}
+	/// 	});
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn measure_gpu_throughput(&self, frame_count: u32) -> Promise<Result<GpuThroughput, String>> {
+		let (promise, resolver) = Promise::create();
+		if frame_count < 1 {
+			resolver.resolve(Err(format!("frame_count is invalid: {}", frame_count)));
+			return promise;
+		}
+		if self.gpu_throughput_measurement.borrow().is_some() {
+			resolver.resolve(Err(String::from("measure_gpu_throughput is already running.")));
+			return promise;
+		}
+		if !self.has_loop_started.get() {
+			resolver.resolve(Err(String::from("measure_gpu_throughput needs a running engine loop. (call run first)")));
+			return promise;
+		}
+		if self.graphic.borrow().is_none() {
+			resolver.resolve(Err(String::from("measure_gpu_throughput needs a GL context.")));
+			return promise;
+		}
+		*self.gpu_throughput_measurement.borrow_mut() = Some(GpuThroughputMeasurement {
+			frame_count,
+			warmup_frame_count: GPU_THROUGHPUT_WARMUP_FRAME_COUNT,
+			measured_frame_count: 0,
+			total_milliseconds: 0.0,
+			chunk_milliseconds_per_frame: Vec::new(),
+			resolver,
+		});
+		promise
+	}
+}
+
+//==============================================================================
+/// GPU 처리량 재기의 결과. (원본 measureGpuThroughput 이 돌려주는 { frameCount, chunkFrameCount, millisecondsPerFrame, chunkMillisecondsPerFrame })
+//==============================================================================
+#[derive(Clone, Debug, PartialEq)]
+pub struct GpuThroughput {
+	/// 잰 프레임 수. (데움은 빼고 센다)
+	pub frame_count: u32,
+	/// 덩이 하나의 프레임 수.
+	pub chunk_frame_count: u32,
+	/// 프레임당 시간. (밀리초, 모든 덩이 시간의 합 / 프레임 수)
+	pub milliseconds_per_frame: f64,
+	/// 덩이마다 프레임당 시간. (밀리초)
+	pub chunk_milliseconds_per_frame: Vec<f64>,
+}
+
+//==============================================================================
+/// 재고 있는 GPU 처리량. (measure_gpu_throughput 이 걸고 엔진 루프가 덩이마다 진행한다)
+//==============================================================================
+struct GpuThroughputMeasurement {
+	frame_count: u32,
+	warmup_frame_count: u32,
+	measured_frame_count: u32,
+	total_milliseconds: f64,
+	chunk_milliseconds_per_frame: Vec<f64>,
+	resolver: PromiseResolver<Result<GpuThroughput, String>>,
 }
 
 //==============================================================================
@@ -2468,9 +2566,147 @@ impl EngineRunner {
 	}
 
 	//==============================================================================
+	/// 씬 갱신과 그리기. (원본 tickAndDrawScenes, 엔진 프레임과 GPU 처리량 재기가 같은 길로 그린다)
+	/// - `time_delta`: 이번 프레임 간격. (초)
+	/// - `is_tick_enabled`: false 면 씬을 갱신하지 않고 그리기만 한다. (질문 창이 떠 있거나 GPU 처리량을 재는 중)
+	/// - `loading_time`: 로딩 중인 씬을 진행할 때의 (씬 불러오기 시계 초, 그림 올리기 시간 한도 밀리초). None 이면 로딩 화면만 그린다.
+	//==============================================================================
+	fn tick_and_draw_scenes(&mut self, time_delta: f64, is_tick_enabled: bool, loading_time: Option<(f64, f64)>) {
+		// 그리기 통계. (지난 프레임 값을 넘겨 두고 이번 프레임을 새로 센다)
+		if let Some(mut graphic) = self.engine.get_graphic_mut() {
+			graphic.begin_frame_statistics();
+		}
+
+		// 씬 처리.
+		// - tick 은 그래픽이 엔진에 든 채로 받고(engine.get_graphic), 그리기 함수는 엔진이 내어 준 그래픽을 인자로 받는다. (with_graphic)
+		// - 씬마다 그리기 앞에 뷰 좌표를 걸어 둔다. (씬이 받는 터치 좌표와 같은 좌표, 기기 픽셀 배율이 1 이 아닌 화면에서도 같은 크기와 자리로 그린다, 원본과 같다)
+		//   캔버스의 실제 픽셀로 그리려면 씬에서 graphic.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0) 을 부른다.
+		let mut scene_list = std::mem::take(&mut self.scene_list);
+		for scene in scene_list.iter_mut() {
+			// 맡긴 애셋을 기다리는 씬은 로딩 화면만. (다 읽혔으면 이번 프레임부터 돈다, 원본처럼 내리는 중이어도 불러오기가 끝나면 initialize 한다, GPU 처리량 재기는 로딩을 진행하지 않는다)
+			if let Some((scene_load_seconds, image_upload_time_limit_milliseconds)) = loading_time {
+				if !scene.get_scene_base().is_loaded() {
+					advance_loading_scene(self.engine, scene.as_mut(), scene_load_seconds, image_upload_time_limit_milliseconds);
+				}
+			}
+			if !scene.get_scene_base().is_loaded() {
+				self.engine.with_graphic(|engine, graphic| {
+					engine.view_manager.borrow_mut().apply_view_rect(graphic);
+					scene.draw_on_load(graphic);
+				});
+				continue;
+			}
+
+			// 갱신. (씬의 터치 훅은 원본 Scene.tickTouch 처럼 tick 안의 터치 다음, 질문 창이 떠 있거나 GPU 처리량을 재는 프레임은 건너뛴다)
+			if is_tick_enabled {
+				scene.tick(time_delta);
+				dispatch_scene_touch(self.engine, scene.as_mut());
+			}
+
+			// 출력.
+			self.engine.with_graphic(|engine, graphic| {
+				engine.view_manager.borrow_mut().apply_view_rect(graphic);
+				scene.pre_draw(graphic);
+				scene.draw(graphic);
+				scene.post_draw(graphic);
+
+				let is_gizmo_visible = scene.get_scene_base().is_gizmo_visible();
+				if is_gizmo_visible {
+					scene.draw_gizmos(graphic);
+				}
+			});
+		}
+		scene_list.append(&mut self.scene_list);
+		self.scene_list = scene_list;
+
+		// 개발 정보 출력.
+		if self.engine.get_engine_configuration().use_statistics {
+			self.engine.with_graphic(|engine, graphic| {
+				draw_statistics(engine, graphic);
+			});
+		}
+
+		// 질문 창. (모든 것 위에, 창 안쪽 논리 좌표)
+		if self.engine.is_modal_dialog_open() {
+			self.engine.with_graphic(|engine, graphic| {
+				engine.view_manager.borrow_mut().apply_canvas_native_rect(graphic);
+				crate::core::modaldialog::draw_modal_dialog(engine, graphic);
+			});
+		}
+	}
+
+	//==============================================================================
+	/// GPU 처리량 재기의 한 덩이. (데움이 남았으면 데움 덩이, 다 재면 Promise 를 풀고 재기를 끝낸다)
+	//==============================================================================
+	fn run_gpu_throughput_chunk(&mut self) {
+		let canvas_pixel_size = self.engine.get_view_manager().get_canvas_pixel_size();
+		let time_delta = self.engine.time_manager.borrow().get_time_delta();
+		let (is_warmup, chunk_frame_count) = {
+			let measurement_slot = self.engine.gpu_throughput_measurement.borrow();
+			let measurement = measurement_slot.as_ref().unwrap();
+			let is_warmup = measurement.warmup_frame_count > 0;
+			let chunk_frame_count = if is_warmup {
+				measurement.warmup_frame_count
+			}
+			else {
+				GPU_THROUGHPUT_CHUNK_FRAME_COUNT.min(measurement.frame_count - measurement.measured_frame_count)
+			};
+			(is_warmup, chunk_frame_count)
+		};
+		match self.engine.get_graphic_mut() {
+			Some(mut graphic) => {
+				graphic.apply_settings(canvas_pixel_size.x as i32, canvas_pixel_size.y as i32);
+			}
+			None => {
+				let measurement = self.engine.gpu_throughput_measurement.borrow_mut().take().unwrap();
+				measurement.resolver.resolve(Err(String::from("measure_gpu_throughput needs a GL context.")));
+				return;
+			}
+		}
+		let start_instant = Instant::now();
+		for _ in 0..chunk_frame_count {
+			self.tick_and_draw_scenes(time_delta, false, None);
+			if let Some(mut graphic) = self.engine.get_graphic_mut() {
+				graphic.end_frame();
+			}
+		}
+		if let Some(graphic) = self.engine.get_graphic() {
+			graphic.wait_gpu_for_throughput();
+		}
+		let chunk_milliseconds = start_instant.elapsed().as_secs_f64() * 1000.0;
+		let mut measurement_slot = self.engine.gpu_throughput_measurement.borrow_mut();
+		let measurement = measurement_slot.as_mut().unwrap();
+		if is_warmup {
+			measurement.warmup_frame_count = 0;
+			return;
+		}
+		measurement.measured_frame_count += chunk_frame_count;
+		measurement.total_milliseconds += chunk_milliseconds;
+		measurement.chunk_milliseconds_per_frame.push(chunk_milliseconds / chunk_frame_count as f64);
+		if measurement.measured_frame_count >= measurement.frame_count {
+			let measurement = measurement_slot.take().unwrap();
+			drop(measurement_slot);
+			measurement.resolver.resolve(Ok(GpuThroughput {
+				frame_count: measurement.measured_frame_count,
+				chunk_frame_count: GPU_THROUGHPUT_CHUNK_FRAME_COUNT,
+				milliseconds_per_frame: measurement.total_milliseconds / measurement.measured_frame_count as f64,
+				chunk_milliseconds_per_frame: measurement.chunk_milliseconds_per_frame,
+			}));
+		}
+	}
+
+	//==============================================================================
 	/// 엔진 갱신. (한 프레임)
 	//==============================================================================
 	pub(crate) fn update_engine(&mut self) {
+		self.engine.has_loop_started.set(true);
+
+		// GPU 처리량을 재는 중이면 이 갱신은 씬을 갱신하지 않고 그리기만 한 덩이 잇달아 한다. (시간, 입력, 프레임 번호를 건드리지 않는다)
+		if self.engine.gpu_throughput_measurement.borrow().is_some() {
+			self.run_gpu_throughput_chunk();
+			return;
+		}
+
 		// 바이트가 온 글꼴 등록.
 		self.register_pending_fonts();
 
@@ -2536,65 +2772,8 @@ impl EngineRunner {
 			}
 		}
 
-		// 그리기 통계. (지난 프레임 값을 넘겨 두고 이번 프레임을 새로 센다)
-		if let Some(mut graphic) = self.engine.get_graphic_mut() {
-			graphic.begin_frame_statistics();
-		}
-
-		// 씬 처리.
-		// - tick 은 그래픽이 엔진에 든 채로 받고(engine.get_graphic), 그리기 함수는 엔진이 내어 준 그래픽을 인자로 받는다. (with_graphic)
-		// - 씬마다 그리기 앞에 뷰 좌표를 걸어 둔다. (씬이 받는 터치 좌표와 같은 좌표, 기기 픽셀 배율이 1 이 아닌 화면에서도 같은 크기와 자리로 그린다, 원본과 같다)
-		//   캔버스의 실제 픽셀로 그리려면 씬에서 graphic.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0) 을 부른다.
-		let mut scene_list = std::mem::take(&mut self.scene_list);
-		for scene in scene_list.iter_mut() {
-			// 맡긴 애셋을 기다리는 씬은 로딩 화면만. (다 읽혔으면 이번 프레임부터 돈다, 원본처럼 내리는 중이어도 불러오기가 끝나면 initialize 한다)
-			if !scene.get_scene_base().is_loaded() {
-				advance_loading_scene(self.engine, scene.as_mut(), scene_load_seconds, image_upload_time_limit_milliseconds);
-			}
-			if !scene.get_scene_base().is_loaded() {
-				self.engine.with_graphic(|engine, graphic| {
-					engine.view_manager.borrow_mut().apply_view_rect(graphic);
-					scene.draw_on_load(graphic);
-				});
-				continue;
-			}
-
-			// 갱신. (씬의 터치 훅은 원본 Scene.tickTouch 처럼 tick 안의 터치 다음, 질문 창이 떠 있던 프레임은 건너뛴다)
-			if !is_modal_dialog_open {
-				scene.tick(time_delta);
-				dispatch_scene_touch(self.engine, scene.as_mut());
-			}
-
-			// 출력.
-			self.engine.with_graphic(|engine, graphic| {
-				engine.view_manager.borrow_mut().apply_view_rect(graphic);
-				scene.pre_draw(graphic);
-				scene.draw(graphic);
-				scene.post_draw(graphic);
-
-				let is_gizmo_visible = scene.get_scene_base().is_gizmo_visible();
-				if is_gizmo_visible {
-					scene.draw_gizmos(graphic);
-				}
-			});
-		}
-		scene_list.append(&mut self.scene_list);
-		self.scene_list = scene_list;
-
-		// 개발 정보 출력.
-		if self.engine.get_engine_configuration().use_statistics {
-			self.engine.with_graphic(|engine, graphic| {
-				draw_statistics(engine, graphic);
-			});
-		}
-
-		// 질문 창. (모든 것 위에, 창 안쪽 논리 좌표)
-		if self.engine.is_modal_dialog_open() {
-			self.engine.with_graphic(|engine, graphic| {
-				engine.view_manager.borrow_mut().apply_canvas_native_rect(graphic);
-				crate::core::modaldialog::draw_modal_dialog(engine, graphic);
-			});
-		}
+		// 씬 갱신과 그리기. (엔진 프레임과 GPU 처리량 재기가 같은 길로 그린다)
+		self.tick_and_draw_scenes(time_delta, !is_modal_dialog_open, Some((scene_load_seconds, image_upload_time_limit_milliseconds)));
 
 		// 마우스 커서. (켜져 있고 바뀌었을 때만 플랫폼에 넘긴다)
 		let is_coarse_pointer = platform::is_coarse_pointer();

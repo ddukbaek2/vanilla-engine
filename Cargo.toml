@@ -59,6 +59,11 @@ harness = false
 name = "shadowcasterorder"
 harness = false
 
+# GPU 처리량 재기 시험. (원본 tests/core/gputhroughputchrome.test.mjs 와 같은 검사)
+[[test]]
+name = "gputhroughput"
+harness = false
+
 [dependencies]
 # 반사 매크로. (#[reflect], 원본 vanilla.js 의 실행 중 반사를 컴파일 때 지은 코드로 한다)
 vanilla-engine-macros = { version = "0.3.2", path = "macros" }
