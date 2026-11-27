@@ -712,6 +712,10 @@ pub trait Component: AsAny + Reflect {
 	/// 	color: Color,
 	/// }
 	///
+	/// #[vanilla::reflect]
+	/// impl Box2D {}
+	///
+	/// #[vanilla::reflect]
 	/// impl Component for Box2D {
 	/// 	fn get_component_base(&self) -> &ComponentBase {
 	/// 		&self.component_base
@@ -719,6 +723,10 @@ pub trait Component: AsAny + Reflect {
 	///
 	/// 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 	/// 		&mut self.component_base
+	/// 	}
+	///
+	/// 	fn get_component_type(&self) -> &'static str {
+	/// 		"Box2D"
 	/// 	}
 	///
 	/// 	fn write_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) -> bool {

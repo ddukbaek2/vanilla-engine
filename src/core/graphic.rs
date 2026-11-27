@@ -8047,7 +8047,7 @@ mod tests {
 					return;
 				}
 			};
-			let mut graphic = Graphic::new(gl, false).unwrap();
+			let mut graphic = Graphic::new(gl, false, crate::core::colorspace::ColorSpace::Gamma).unwrap();
 			unsafe {
 				let gl = graphic.get_gl();
 				let texture = gl.create_texture().unwrap();
