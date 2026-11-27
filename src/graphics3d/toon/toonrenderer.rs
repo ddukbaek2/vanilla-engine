@@ -59,6 +59,7 @@
 //!   Linear: 색 텍스처를 sRGB 형식으로 올려 GPU 가 선형으로 풀고, 넘기는 색은 sRGB 표준 곡선으로 선형으로 바꿔 곱하고 섞는다. 화면에 낼 때 같은 곡선으로 sRGB 로 바꾼다.
 //!   셰이더 소스마다 #define VANILLA_COLOR_SPACE_LINEAR 1 이 들어간다. (ToonPostProcess, ToonScreenOutline 도 같은 값으로 짓는다)
 //! - 텍스처 유닛: 점광 그림자 아틀라스 0, 램프 1, 매트캡 2, 해 그림자 3, 바탕색 4, 빛남 5, 데칼 6, 천사 고리 7, 머티리얼 8 ~ 15, 모서리 어둠 16. 유닛 0 의 묶음은 begin_frame 이 적어 두고 end_frame 이 돌린다.
+//!   유닛마다 묶인 텍스처가 같으면 묶지 않고, 고른 유닛도 그리기마다 0 으로 되돌리지 않는다. (고른 유닛은 end_frame 이 돌린다, 단계 콜백과 on_before_draw 에는 유닛 0 을 고른 채 넘긴다)
 //! - 모서리 어둠: set_ambient_occlusion_texture(ToonPostProcess::draw_ambient_occlusion 의 결과, 직접 빛 몫) 를 건 동안 몸은 TOON_AMBIENT_OCCLUSION 을 정의한 몸 프로그램으로 그린다.
 //!   (원본은 원점과 직접 빛 몫을 프레임 블록 ToonFrame 의 칸으로 올린다. 러스트는 프레임 블록이 없어 같은 이름의 유니폼 ambientOcclusionOrigin, ambientOcclusionDirectLightingStrength 로 올린다)
 //! - 2 번 UV: 배열에 uv1_data 가 있으면 vertexUv 가 (UV, 2 번 UV) 넷이다. 셰이더 조각은 ToonSurface.uv1 로 읽는다. (없으면 (0, 1))
@@ -2863,11 +2864,14 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
-	/// 유닛 0 에 묶인 텍스처 읽기. (지금 고른 유닛은 그대로 둔다)
+	/// 유닛 0 에 묶인 텍스처 읽기. (지금 고른 유닛은 그대로 둔다, 이미 유닛 0 이면 고르지 않는다)
 	//==============================================================================
 	fn read_first_unit_texture(gl: &crate::GlContext) -> Option<GlTexture> {
 		unsafe {
 			let active_texture = crate::core::glstatecache::get_parameter_i32(gl, glow::ACTIVE_TEXTURE);
+			if active_texture == glow::TEXTURE0 as i32 {
+				return crate::graphics3d::read_texture_binding(gl);
+			}
 			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 			let texture = crate::graphics3d::read_texture_binding(gl);
 			crate::core::glstatecache::active_texture(gl, active_texture as u32);
@@ -2908,10 +2912,20 @@ impl ToonRenderer {
 					crate::core::glstatecache::disable(gl, capability);
 				}
 			}
-			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
-			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, saved_state.first_unit_texture);
-			crate::core::glstatecache::active_texture(gl, saved_state.active_texture as u32);
+			// 유닛 0 의 묶음과 고른 유닛. (상태 캐시가 이미 그렇다고 기억하면 건너뛴다)
+			if !crate::core::glstatecache::is_texture_bound(gl, glow::TEXTURE0, glow::TEXTURE_2D, saved_state.first_unit_texture) {
+				ToonRenderer::apply_active_texture(gl, glow::TEXTURE0);
+				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, saved_state.first_unit_texture);
+			}
+			ToonRenderer::apply_active_texture(gl, saved_state.active_texture as u32);
 		}
+	}
+
+	//==============================================================================
+	/// 단계 콜백을 부르기 전에 유닛 0 을 고르기. (원본 pauseTrustedOptions(true) 의 activeTexture, 그리기가 고른 유닛을 0 으로 되돌리지 않으므로 콜백에는 지금까지처럼 유닛 0 을 고른 채 넘긴다)
+	//==============================================================================
+	pub(crate) fn select_first_unit(&self, gl: &crate::GlContext) {
+		ToonRenderer::apply_active_texture(gl, glow::TEXTURE0);
 	}
 
 	//==============================================================================
@@ -3842,8 +3856,10 @@ impl ToonRenderer {
 			self.bind_texture_unit(gl, unit, Some(*texture));
 			self.write_uniform_1i(gl, solid_program, uniform_name, unit as i32);
 		}
-		ToonRenderer::apply_active_texture(gl, glow::TEXTURE0);
+		// 고른 유닛은 그리기마다 0 으로 되돌리지 않는다. (다음 그리기가 같은 유닛만 바꾸면 active_texture 없이 bind_texture 하나로, 프레임 끝에 restore_state 가 돌린다)
 		if let Some(on_before_draw) = options.on_before_draw {
+			// 확장 콜백에는 지금까지처럼 유닛 0 을 고른 채 넘긴다.
+			ToonRenderer::apply_active_texture(gl, glow::TEXTURE0);
 			on_before_draw(solid_program, gl, ToonProgramKind::Solid);
 			self.forget_uniform_values(solid_program);
 		}

@@ -859,9 +859,23 @@ pub(crate) unsafe fn delete_buffer(gl: &impl GlowContextSource, buffer: GlBuffer
 //==============================================================================
 // 텍스처.
 //==============================================================================
+// 시험이 GL 호출을 세는 값. (active_texture 부른 수, bind_texture 부른 수)
+#[cfg(test)]
+thread_local! {
+	static TEXTURE_CALL_COUNT: Cell<(u32, u32)> = const { Cell::new((0, 0)) };
+}
+
+/// 지금까지 부른 active_texture 와 bind_texture 수. (시험용)
+#[cfg(test)]
+pub(crate) fn read_texture_call_count() -> (u32, u32) {
+	TEXTURE_CALL_COUNT.with(|count| count.get())
+}
+
 /// 활성 텍스처 유닛. (원본 activeTexture, TEXTURE0 + 번호)
 pub(crate) unsafe fn active_texture(gl: &impl GlowContextSource, texture_unit: u32) {
 	let gl = gl.read_glow_context();
+	#[cfg(test)]
+	TEXTURE_CALL_COUNT.with(|count| count.set((count.get().0 + 1, count.get().1)));
 	note_call(|| format!("active_texture(0x{:X})", texture_unit));
 	unsafe {
 		gl.active_texture(texture_unit);
@@ -878,6 +892,8 @@ pub(crate) unsafe fn active_texture(gl: &impl GlowContextSource, texture_unit: u
 /// 텍스처 묶기. (원본 bindTexture, 텍스처는 처음 묶은 대상에만 묶인다)
 pub(crate) unsafe fn bind_texture(gl: &impl GlowContextSource, target: u32, texture: Option<GlTexture>) {
 	let gl = gl.read_glow_context();
+	#[cfg(test)]
+	TEXTURE_CALL_COUNT.with(|count| count.set((count.get().0, count.get().1 + 1)));
 	note_call(|| format!("bind_texture(0x{:X}, {:?})", target, texture));
 	unsafe {
 		gl.bind_texture(target, texture);

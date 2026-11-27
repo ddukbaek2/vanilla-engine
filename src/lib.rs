@@ -105,7 +105,7 @@ pub use crate::core::component::{Component, ComponentBase};
 pub use crate::core::reflection::{FromReflectValue, Reflect, ReflectedGetter, ReflectedProperty, ReflectValue, ToReflectValue};
 // 반사 매크로. (컴포넌트의 impl 블록과 impl Component 블록에 #[vanilla::reflect] 로 붙인다. 원본의 실행 중 반사 자리)
 pub use vanilla_engine_macros::reflect;
-pub use crate::core::engine::{Engine, EngineConfiguration};
+pub use crate::core::engine::{Engine, EngineConfiguration, GpuThroughput};
 pub use crate::core::colorspace::ColorSpace;
 pub use crate::core::globalengine::EngineAccessError;
 pub use crate::core::engine::{PageEvent, PageEventListener};

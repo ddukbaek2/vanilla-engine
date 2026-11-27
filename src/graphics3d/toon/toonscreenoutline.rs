@@ -3,9 +3,9 @@
 //! - 노멀, 선 번호, 깊이를 선의 판에 그리고, 바로 이웃 사이의 경계에서 선을 잡아 점프 플러딩으로 넓힌 뒤 거리로 덮는 몫을 셈해 섞는다.
 //! - 선의 판: ToonRenderer 의 create_mesh 결과를 같은 행렬로 한 번 더 그려 노멀(팔면체 접기), 선 번호(14 비트), 꼴(바깥 선, 꺾임 선을 켤지)과 깊이를 쓴다.
 //! - 잡기: 화소와 바로 이웃 넷 사이의 경계마다 한 번 본다. 선은 화소가 아니라 화소 사이의 경계 가운데에 선다. (같은 경계를 두 번 긋지 않는다)
-//!   바깥 선은 빈 곳과 맞닿은 실루엣, 다른 번호와 맞닿은 곳, 같은 번호라도 서로의 접평면에서 깊이 문턱보다 떨어진 곳(가려진 실루엣)이다.
+//!   바깥 선은 빈 곳과 맞닿은 실루엣, 다른 번호와 맞닿은 곳, 같은 번호라도 가린 화소가 가려진 화소의 접평면에서 깊이 문턱과 오차 여유보다 떨어진 곳(가려진 실루엣)이다.
 //!   꺾임 선은 같은 번호 안에서 이웃한 두 노멀이 꺾임 각보다 더 벌어진 곳이다. 화소 하나 사이의 노멀만 보므로 둥근 면의 실루엣 둘레나 비스듬한 면에 띠가 서지 않는다.
-//!   깊이를 접평면 거리로 견주므로 비스듬히 보는 바닥에 가짜 선이 서지 않는다. 문턱에 그 깊이의 화소 크기 두 배를 더해 먼 것도 같은 뜻이 된다.
+//!   깊이를 접평면 거리로 견주므로 비스듬히 보는 바닥에 가짜 선이 서지 않는다. 문턱에 잰 오차(노멀 8 비트 각 오차 x 두 자리 사이 거리, 꺾임의 화소 한 칸 x 사인, 깊이 24 비트 한 칸) x 배율을 더해 먼 것도 같은 뜻이 되고, 나란한 낮은 턱은 화소 한 칸보다 낮아도 잡힌다.
 //! - 넓히기: 경계 토막까지의 거리를 점프 플러딩으로 퍼뜨린다. 굵기에 상관없이 걸음 수는 log2 이고, 바깥 선과 꺾임 선은 따로 퍼뜨려 굵기를 따로 준다.
 //! - 섞기: 그리는 영역의 화소마다 가장 가까운 경계까지의 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 덮는다. (가장자리가 부드럽고, 선의 판을 줄여도 늘인 선이 점선이 되지 않는다)
 //! - 모형마다: ToonLineDrawOptions 의 has_screen_outline 이 false 면 그 모형은 선을 내지 않고 뒤의 선만 가린다. has_crease_line 이 false 면 꺾임 선만 끈다.
@@ -242,6 +242,8 @@ pub struct ToonScreenOutline {
 	width_unit: ToonOutlineWidthUnit,
 	focus_distance: f64,
 	depth_threshold: f64,
+	/// 깊이 문턱에 더하는 오차 여유의 배율. (잰 오차의 몇 배)
+	depth_margin: f64,
 	crease_cosine: f64,
 	crease_width: f64,
 	crease_opacity: f64,
@@ -432,6 +434,7 @@ impl ToonScreenOutline {
 			width_unit: ToonOutlineWidthUnit::Pixel,
 			focus_distance: 0.0,
 			depth_threshold: 0.05,
+			depth_margin: 2.0,
 			crease_cosine: (std::f64::consts::PI / 3.0).cos(),
 			crease_width: 1.0,
 			crease_opacity: 1.0,
@@ -616,13 +619,75 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	/// 깊이 문턱 설정. (같은 번호의 이웃 화소가 서로의 접평면에서 이만큼 넘게 떨어지면 가려진 실루엣으로 긋는다, 월드 길이, 그 깊이의 화소 크기 두 배를 더해 쓴다)
+	/// 깊이 문턱 설정. (같은 번호의 이웃 화소 가운데 가린 쪽이 가려진 쪽의 접평면에서 이만큼 넘게 떨어지면 가려진 실루엣으로 긋는다, 월드 길이)
+	/// - `depth_threshold` 는 면에 수직인 거리이고, 화소 여유가 더해진다. (set_depth_margin 의 배율 x 잰 오차, 오차는 화소 크기와 면의 기울기를 따른다)
+	/// - 장면의 크기에 맞춘다. (사람 크기 장면이면 0.02 ~ 0.1, 0 이면 오차 여유만으로 가른다)
 	///
 	/// # 인자
-	/// - `depth_threshold`: 접평면 거리 문턱. (월드 길이)
+	/// - `depth_threshold`: 접평면 거리 문턱. (월드 길이, 면에 수직, 0 이상)
+	///
+	/// # 예제
+	/// 낮은 턱까지 실루엣으로 긋기
+	/// ```rust,no_run
+	/// use vanilla::{GlContext, ToonScreenOutline};
+	///
+	/// fn make_outline(gl: &GlContext) -> Result<ToonScreenOutline, String> {
+	/// 	let mut outline = ToonScreenOutline::new(gl)?;
+	/// 	outline.set_depth_threshold(0.01);
+	/// 	assert_eq!(outline.depth_threshold(), 0.01);
+	/// 	Ok(outline)
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn set_depth_threshold(&mut self, depth_threshold: f64) {
 		self.depth_threshold = depth_threshold.max(0.0);
+	}
+
+	//==============================================================================
+	/// 깊이 문턱 읽기. (월드 길이, 면에 수직)
+	///
+	/// # 돌려줌
+	/// 접평면 거리 문턱. (기본 0.05)
+	//==============================================================================
+	pub fn depth_threshold(&self) -> f64 {
+		self.depth_threshold
+	}
+
+	//==============================================================================
+	/// 깊이 여유 배율 설정. (깊이 문턱에 더하는 화소 여유가 잰 오차의 몇 배인지, 기본 2)
+	/// - 이어진 면에서도 생기는 접평면 거리의 오차를 화소마다 잰다. 노멀 8 비트 팔면체의 각 오차(0.0165 rad) x 두 화소 자리 사이 거리(면이 비스듬할수록 길다), 꺾인 줄을 사이에 둔 두 화소의 화소 한 칸 x 두 노멀이 벌어진 사인, 깊이 24 비트 한 칸.
+	/// - 두 면이 나란한 낮은 턱은 꺾임 몫이 0 이라 화소 한 칸보다 낮아도 잡힌다. 둥근 면을 굵은 다각형으로 지어 보간 노멀이 면에서 크게 벗어나는 모형에서 깊이 문턱을 아주 낮추면 잔선이 생기니, 그때 배율을 올린다.
+	/// - 0 이면 깊이 문턱만으로 가른다.
+	///
+	/// # 인자
+	/// - `depth_margin`: 잰 오차에 곱할 배율. (0 이상, 0 밑은 0)
+	///
+	/// # 예제
+	/// 여유를 줄여 낮은 턱을 더 잡기
+	/// ```rust,no_run
+	/// use vanilla::{GlContext, ToonScreenOutline};
+	///
+	/// fn make_outline(gl: &GlContext) -> Result<ToonScreenOutline, String> {
+	/// 	let mut outline = ToonScreenOutline::new(gl)?;
+	/// 	outline.set_depth_threshold(0.02);
+	/// 	outline.set_depth_margin(1.0);
+	/// 	assert_eq!(outline.depth_margin(), 1.0);
+	/// 	Ok(outline)
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn set_depth_margin(&mut self, depth_margin: f64) {
+		self.depth_margin = depth_margin.max(0.0);
+	}
+
+	//==============================================================================
+	/// 깊이 여유 배율 읽기.
+	///
+	/// # 돌려줌
+	/// 잰 오차에 곱할 배율. (기본 2)
+	//==============================================================================
+	pub fn depth_margin(&self) -> f64 {
+		self.depth_margin
 	}
 
 	//==============================================================================
@@ -914,6 +979,7 @@ impl ToonScreenOutline {
 			gl.uniform_4_f64(location("projectionDepth").as_ref(), projection[10], projection[14], projection[12], projection[13]);
 			gl.uniform_1_f64(location("isPerspective").as_ref(), if frame.is_perspective { 1.0 } else { 0.0 });
 			gl.uniform_1_f64(location("depthThreshold").as_ref(), self.depth_threshold);
+			gl.uniform_1_f64(location("depthMargin").as_ref(), self.depth_margin);
 			gl.uniform_1_f64(location("creaseCosine").as_ref(), if line_widths[1] > 0.0 { self.crease_cosine } else { -2.0 });
 			crate::core::glstatecache::draw_arrays(gl, glow::TRIANGLES, 0, 3);
 			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + DEPTH_TEXTURE_UNIT);
@@ -1396,6 +1462,14 @@ void main() {
 }
 ";
 
+// 씨앗을 고르는 셰이더. (화소와 바로 이웃 넷 사이의 경계마다 선인지 보고, 선이면 그 경계의 가운데를 씨앗으로 쓴다)
+// - 씨앗은 반 화소 단위 자리다. (x 가 홀수면 가로 이웃 사이의 세로 경계, y 가 홀수면 세로 이웃 사이의 가로 경계) rg 는 바깥 선, ba 는 꺾임 선.
+// - 같은 경계를 양쪽 화소가 함께 씨앗으로 들어도 선은 경계 한가운데 하나다. (선을 화소가 아니라 화소 사이에 둔다)
+// - 바깥 선: 한쪽이 빈 곳, 번호가 다름, 같은 번호라도 가린 화소가 가려진 화소의 접평면에서 깊이 문턱과 오차 여유를 더한 것보다 떨어짐. (가린 쪽의 꼴을 따르고, 맞닿은 두 번호는 한쪽만 켜져 있어도 긋는다)
+//   가려진 쪽의 접평면만 쓴다. 가린 쪽이 둥근 면의 실루엣이면 그 접평면이 시선을 품어, 뒤의 면이 얼마나 떨어져 있든 거리가 화소 한 칸 밑으로 줄기 때문이다.
+//   오차 여유는 이어진 면에서도 생기는 거리의 오차를 잰 것이다: 노멀 8 비트 팔면체의 각 오차 x 두 자리 사이 거리(면이 비스듬할수록 길다), 꺾인 줄을 사이에 둔 두 화소의 화소 한 칸 x 두 노멀이 벌어진 사인, 깊이 24 비트 한 칸.
+//   거기에 여유 배율(setDepthMargin)을 곱한다. 두 면이 나란한 턱은 꺾임 몫이 0 이라 화소 한 칸보다 낮아도 잡힌다.
+// - 꺾임 선: 같은 번호이고 떨어지지 않았는데 두 노멀이 꺾임 각보다 더 벌어짐. (비스듬한 면과 둥근 면은 접평면 안이라 바깥 선으로 잡히지 않는다)
 const SEED_FRAGMENT_SHADER: &str = "#version 300 es
 precision highp float;
 precision highp int;
@@ -1406,9 +1480,12 @@ uniform vec4 projectionScale;
 uniform vec4 projectionDepth;
 uniform float isPerspective;
 uniform float depthThreshold;
+uniform float depthMargin;
 uniform float creaseCosine;
 out uvec4 fragmentSeed;
 const uint NO_SEED = 65535u;
+const float NORMAL_ERROR = 0.0165;
+const float DEPTH_STEP = 1.0 / 16777215.0;
 const ivec2 SIDES[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
 struct LinePixel {
 	float id;
@@ -1416,6 +1493,7 @@ struct LinePixel {
 	vec3 normal;
 	vec3 position;
 	float footprint;
+	float depthError;
 };
 vec3 readNormal(vec2 encoded) {
 	vec2 folded = encoded * 2.0 - 1.0;
@@ -1438,11 +1516,13 @@ LinePixel readPixel(ivec2 pixel, vec2 size) {
 		float viewZ = -projectionDepth.y / (clipDepth + projectionDepth.x);
 		result.position = vec3(-viewZ * (clipPoint.x + projectionScale.z) / projectionScale.x, -viewZ * (clipPoint.y + projectionScale.w) / projectionScale.y, viewZ);
 		result.footprint = -viewZ * 2.0 / (projectionScale.y * size.y);
+		result.depthError = DEPTH_STEP * viewZ * viewZ / abs(projectionDepth.y) * length(result.position) / max(-viewZ, 1e-6);
 	}
 	else {
 		float viewZ = (clipDepth - projectionDepth.y) / projectionDepth.x;
 		result.position = vec3((clipPoint.x - projectionDepth.z) / projectionScale.x, (clipPoint.y - projectionDepth.w) / projectionScale.y, viewZ);
 		result.footprint = 2.0 / (projectionScale.y * size.y);
+		result.depthError = DEPTH_STEP / abs(projectionDepth.x);
 	}
 	return result;
 }
@@ -1462,9 +1542,16 @@ int readEdge(LinePixel first, LinePixel second) {
 	if (farId < 0.5) {
 		return hasContour(nearFlags) ? 2 : 0;
 	}
-	vec3 offset = second.position - first.position;
-	float planeDistance = min(abs(dot(offset, first.normal)), abs(dot(offset, second.normal)));
-	bool isSeparated = planeDistance > depthThreshold + 2.0 * max(first.footprint, second.footprint);
+	LinePixel nearPixel = first;
+	LinePixel farPixel = second;
+	if (!isFirstNearer) {
+		nearPixel = second;
+		farPixel = first;
+	}
+	vec3 offset = nearPixel.position - farPixel.position;
+	float planeDistance = abs(dot(offset, farPixel.normal));
+	float pixelError = length(offset) * NORMAL_ERROR + nearPixel.footprint * length(cross(nearPixel.normal, farPixel.normal)) + nearPixel.depthError + farPixel.depthError;
+	bool isSeparated = planeDistance > depthThreshold + depthMargin * pixelError;
 	if (isSeparated) {
 		return hasContour(nearFlags) ? 2 : 0;
 	}
