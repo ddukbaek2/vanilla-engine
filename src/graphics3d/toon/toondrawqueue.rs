@@ -388,6 +388,8 @@ impl<'a> ToonDrawQueue<'a> {
 				continue;
 			}
 			callback(gl, renderer);
+			// 콜백은 glow 로 상태를 바로 바꿀 수 있다. (상태 캐시를 거치지 않음, 뒤의 apply_frame_state 가 다시 건다)
+			crate::core::glstatecache::reset(gl);
 			is_run = true;
 		}
 		if is_run {

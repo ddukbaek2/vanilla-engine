@@ -19788,6 +19788,11 @@
 						"Clone",
 						"Default"
 					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "core/audiomanager",
+						"class": "AudioManager"
+					},
 					"source": "src/core/audiomanager.rs",
 					"members": [
 						{
@@ -19807,7 +19812,13 @@
 								"en": "Constructor. (does not create the AudioContext yet)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/audiomanager.rs"
+							"source": "src/core/audiomanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/audiomanager",
+								"class": "AudioManager",
+								"name": "constructor"
+							}
 						},
 						{
 							"kind": "method",
@@ -19819,7 +19830,13 @@
 								"en": "Signals that the first user gesture has occurred. (called from Engine::resume_on_user_gesture)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/audiomanager.rs"
+							"source": "src/core/audiomanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/audiomanager",
+								"class": "AudioManager",
+								"name": "markUserGesture"
+							}
 						},
 						{
 							"kind": "method",
@@ -19838,7 +19855,13 @@
 								"en": "Whether a user gesture has occurred. (always true on desktop)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/audiomanager.rs"
+							"source": "src/core/audiomanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/audiomanager",
+								"class": "AudioManager",
+								"name": "hasUserGesture"
+							}
 						},
 						{
 							"kind": "method",
@@ -19850,7 +19873,13 @@
 								"en": "Resumes the audio context.\n- Does nothing before a user gesture.\n- Web: calls resume() only when \"suspended\" or \"interrupted\", and silently ignores rejection. On iOS the clock is checked after resuming.\n- Desktop: opens the sound device if not yet open, and restarts it if suspended."
 							},
 							"since": "0.3.2",
-							"source": "src/core/audiomanager.rs"
+							"source": "src/core/audiomanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/audiomanager",
+								"class": "AudioManager",
+								"name": "resumeContext"
+							}
 						},
 						{
 							"kind": "method",
@@ -19869,7 +19898,13 @@
 								"en": "Creates an audio player. (creates the AudioContext if absent. A silent player if it cannot be created)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/audiomanager.rs"
+							"source": "src/core/audiomanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/audiomanager",
+								"class": "AudioManager",
+								"name": "createAudioPlayer"
+							}
 						},
 						{
 							"kind": "method",
@@ -19889,6 +19924,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/core/audiomanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/audiomanager",
+								"class": "AudioManager",
+								"name": "createAudioBus"
+							},
 							"examples": [
 								{
 									"title": {
@@ -19936,7 +19977,13 @@
 								"en": "AudioContext clock. (seconds, the original audioContext.currentTime, 0 if there is no AudioContext)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/audiomanager.rs"
+							"source": "src/core/audiomanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/audiomanager",
+								"class": "AudioManager",
+								"name": "getContextTime"
+							}
 						},
 						{
 							"kind": "method",
@@ -19956,6 +20003,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/core/audiomanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/audiomanager",
+								"class": "AudioManager",
+								"name": "getAudioContext"
+							},
 							"examples": [
 								{
 									"title": {
@@ -45618,11 +45671,89 @@
 								}
 							},
 							"description": {
-								"ko": "GL 컨텍스트 반환.\n- 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, 기억한 프로그램과 텍스처를 잊는다. (다음 그리기에서 다시 건다)",
-								"en": "Returns the GL context.\n- The receiver may change the program or texture, so the remembered program and texture are forgotten. (bound again on the next draw)"
+								"ko": "GL 컨텍스트 반환.\n- 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, 기억한 프로그램과 텍스처, GL 상태 캐시를 잊는다. (다음 그리기에서 다시 건다)",
+								"en": "Return the GL context.\n- The receiver can change the program or textures, so the remembered program and textures and the GL state cache are forgotten. (The next draw sets them again)"
 							},
 							"since": "0.3.2",
 							"source": "src/core/graphic.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_current_framebuffer",
+							"signature": "pub fn get_current_framebuffer(&self) -> Option<GlFramebuffer>",
+							"params": [],
+							"returns": {
+								"type": "Option<GlFramebuffer>",
+								"description": {
+									"ko": "지금 묶인 그리기 프레임 버퍼. 기본 프레임 버퍼(창, 캔버스)면 None.",
+									"en": "The draw framebuffer bound now. None for the default framebuffer (window, canvas)."
+								}
+							},
+							"description": {
+								"ko": "지금 그리는 프레임 버퍼 반환. (원본 getCurrentFramebuffer, 상태 캐시가 기억한 값, 그리는 중 GL 에 묻지 않는다)",
+								"en": "Return the framebuffer being drawn to now. (original getCurrentFramebuffer, the value remembered by the state cache, GL is not asked while drawing)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "getCurrentFramebuffer"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "장면에서 지금 프레임 버퍼와 뷰포트 읽기",
+										"en": "Read the current framebuffer and viewport in a scene"
+									},
+									"code": "use vanilla::Graphic;\n\nfn draw(graphic: &mut Graphic) {\n\tlet framebuffer = graphic.get_current_framebuffer();\n\tlet viewport = graphic.get_current_viewport();\n\tprintln!(\"{} {} {}\", framebuffer.is_none(), viewport.get_width(), viewport.get_height());\n\tgraphic.reset_gl_state_cache();\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "get_current_viewport",
+							"signature": "pub fn get_current_viewport(&self) -> Rect",
+							"params": [],
+							"returns": {
+								"type": "Rect",
+								"description": {
+									"ko": "뷰포트 사각형. (x, y, 너비, 높이)",
+									"en": "Viewport rectangle. (x, y, width, height)"
+								}
+							},
+							"description": {
+								"ko": "지금 뷰포트 반환. (원본 getCurrentViewport, 픽셀, 왼쪽 아래가 원점, 상태 캐시가 기억한 값)",
+								"en": "Return the current viewport. (original getCurrentViewport, pixels, bottom-left origin, the value remembered by the state cache)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "getCurrentViewport"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "reset_gl_state_cache",
+							"signature": "pub fn reset_gl_state_cache(&self)",
+							"params": [],
+							"description": {
+								"ko": "GL 상태 캐시 잊기. (원본 resetGLStateCache, 상태 캐시를 거치지 않고 glow 로 GL 상태를 바꾼 뒤 부른다, 다음에 읽을 때 GL 에 한 번씩 묻는다)\n- get_gl 은 받은 쪽이 상태를 바꿀 수 있어 스스로 잊는다. run_external_pass 는 pass 가 끝나면 스스로 잊는다.\n- 툰 렌더러의 on_before_draw 와 그리기 줄의 단계 콜백이 끝나면 렌더러가 스스로 잊는다.",
+								"en": "Forget the GL state cache. (original resetGLStateCache, call it after changing GL state through glow without going through the state cache; the next reads ask GL once each)\n- get_gl forgets by itself because the receiver can change state. run_external_pass forgets by itself when the pass ends.\n- The renderer forgets by itself after the toon renderer's on_before_draw and draw queue stage callbacks."
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "resetGLStateCache"
+							}
 						},
 						{
 							"kind": "method",
@@ -60752,11 +60883,17 @@
 								}
 							],
 							"description": {
-								"ko": "사용. (원본 useProgram)",
-								"en": "Use. (the original useProgram)"
+								"ko": "사용. (원본 useProgram, 상태 캐시가 이미 이 프로그램을 쓴다고 기억하면 GL 에 다시 걸지 않는다)",
+								"en": "Use. (original useProgram, not set on GL again when the state cache remembers this program is already in use)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/shaderprogram.rs"
+							"source": "src/core/shaderprogram.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic/shaderprogram",
+								"class": "ShaderProgram",
+								"name": "useProgram"
+							}
 						},
 						{
 							"kind": "method",
@@ -120279,6 +120416,11 @@
 					"traits": [
 						"Default"
 					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "misc/devtools",
+						"class": "DevTools"
+					},
 					"source": "src/misc/devtools.rs",
 					"members": [
 						{
@@ -120298,7 +120440,13 @@
 								"en": "Constructor. (hidden, Node Hierarchy tab, reads the saved settings)\n- Panel 810x520, left column width 405. Settings are read from local storage \"hierarchy.settings\", and are the defaults if missing or the JSON is broken."
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "constructor"
+							}
 						},
 						{
 							"kind": "method",
@@ -120319,7 +120467,13 @@
 								"en": "Sets the root node list. (roots stay expanded)"
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "setRootNodes"
+							}
 						},
 						{
 							"kind": "method",
@@ -120338,7 +120492,13 @@
 								"en": "Returns the visibility."
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "isVisible"
+							}
 						},
 						{
 							"kind": "method",
@@ -120367,7 +120527,13 @@
 								"en": "Shows and hides. (same as F2. When shown, docks the panel at the bottom right of the window and applies the all-gizmos setting)\n- Forced display of all gizmos is applied to Graphic at the end of tick or at the start of the next draw, whichever comes first. When hiding, closes a pending local storage question."
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "setVisible"
+							}
 						},
 						{
 							"kind": "method",
@@ -120386,7 +120552,13 @@
 								"en": "Returns the current tab. (0 Statistics, 1 Node Hierarchy, 2 Local Storage, 3 Settings)"
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "getActiveTab"
+							}
 						},
 						{
 							"kind": "method",
@@ -120407,7 +120579,13 @@
 								"en": "Sets the tab. (ignored if no such tab)"
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "setActiveTab"
+							}
 						},
 						{
 							"kind": "method",
@@ -120426,7 +120604,13 @@
 								"en": "Returns the selected node."
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "getSelectedNode"
+							}
 						},
 						{
 							"kind": "method",
@@ -120447,7 +120631,13 @@
 								"en": "Selects a node. (inspector scroll goes to the top)"
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "setSelectedNode"
+							}
 						},
 						{
 							"kind": "method",
@@ -120475,7 +120665,13 @@
 								"en": "Whether a node is expanded in the tree."
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "isNodeExpanded"
+							}
 						},
 						{
 							"kind": "method",
@@ -120504,7 +120700,13 @@
 								"en": "Expands and collapses a node in the tree."
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "setNodeExpanded"
+							}
 						},
 						{
 							"kind": "method",
@@ -120563,7 +120765,13 @@
 								"en": "Returns the panel area. (window inner logical coordinates)"
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "getPanelRect"
+							}
 						},
 						{
 							"kind": "method",
@@ -120591,7 +120799,13 @@
 								"en": "Returns whether the current touch position is inside the panel."
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "isPointerInsidePanel"
+							}
 						},
 						{
 							"kind": "method",
@@ -120628,7 +120842,13 @@
 								"en": "Update. (F2 toggle, tree list, touch)\n- If there is an inspect request (Inspect in the input field context menu), inspects that node first. When hidden, only checks F2.\n- When visible, removes deleted nodes from the selection, rereads the tree list and the &mut self getter values, receives the answer to the local storage question, and handles press, drag, and release.\n- At the end, applies a changed forced display of all gizmos to the engine's graphic. (as in the original it shows from that frame's drawing; without a graphic it is applied at the start of the next draw)"
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "tick"
+							}
 						},
 						{
 							"kind": "method",
@@ -120702,7 +120922,13 @@
 								"en": "Draws. (draws in the window's inner logical coordinates, and when done restores the drawing state it came in with)\n- First applies to Graphic a forced display of all gizmos that was changed outside tick and not applied yet. If hidden, draws only the FPS display and returns."
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "draw"
+							}
 						},
 						{
 							"kind": "method",
@@ -120721,7 +120947,13 @@
 								"en": "Returns whether FPS is shown. (Show FPS in Settings, when on, draw draws the FPS at the top left of the window even when the panel is closed)"
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "isFramePerSecondVisible"
+							}
 						}
 					],
 					"examples": [
@@ -171876,6 +172108,11 @@
 					"traits": [
 						"Default"
 					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "web/websocketclient",
+						"class": "WebSocketClient"
+					},
 					"source": "src/web/websocketclient.rs",
 					"members": [
 						{
@@ -171895,7 +172132,13 @@
 								"en": "Constructor. (before connecting)"
 							},
 							"since": "0.3.2",
-							"source": "src/web/websocketclient.rs"
+							"source": "src/web/websocketclient.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/websocketclient",
+								"class": "WebSocketClient",
+								"name": "constructor"
+							}
 						},
 						{
 							"kind": "method",
@@ -171916,7 +172159,13 @@
 								"en": "Connects. (does nothing if already connected. Once open, is_connected becomes true within the following ticks)\n- If the socket cannot be created, reports it to standard error and does nothing. If it fails to open, tick sees the error event and treats it as disconnected."
 							},
 							"since": "0.3.2",
-							"source": "src/web/websocketclient.rs"
+							"source": "src/web/websocketclient.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/websocketclient",
+								"class": "WebSocketClient",
+								"name": "connect"
+							}
 						},
 						{
 							"kind": "method",
@@ -171928,7 +172177,13 @@
 								"en": "Disconnects. (only when connected)"
 							},
 							"since": "0.3.2",
-							"source": "src/web/websocketclient.rs"
+							"source": "src/web/websocketclient.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/websocketclient",
+								"class": "WebSocketClient",
+								"name": "disconnect"
+							}
 						},
 						{
 							"kind": "method",
@@ -171949,7 +172204,13 @@
 								"en": "Sends JSON. (only while connected)\n- Sent as a text message. Discarded if not connected yet."
 							},
 							"since": "0.3.2",
-							"source": "src/web/websocketclient.rs"
+							"source": "src/web/websocketclient.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/websocketclient",
+								"class": "WebSocketClient",
+								"name": "send"
+							}
 						},
 						{
 							"kind": "method",
@@ -171961,7 +172222,13 @@
 								"en": "Update. (called every frame. Takes out accumulated events, changes the connection state and passes on received JSON)"
 							},
 							"since": "0.3.2",
-							"source": "src/web/websocketclient.rs"
+							"source": "src/web/websocketclient.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/websocketclient",
+								"class": "WebSocketClient",
+								"name": "tick"
+							}
 						},
 						{
 							"kind": "method",
@@ -171982,7 +172249,13 @@
 								"en": "Passes on received JSON. (to the receive callback if there is one, otherwise collected to be taken out with take_received_messages, the original receiveMessage)\n- When RECEIVED_MESSAGE_LIMIT(1024) messages are collected, the oldest is discarded. If the callback is already borrowed (called again from inside the callback), it is discarded without being passed on."
 							},
 							"since": "0.4.0",
-							"source": "src/web/websocketclient.rs"
+							"source": "src/web/websocketclient.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/websocketclient",
+								"class": "WebSocketClient",
+								"name": "receiveMessage"
+							}
 						},
 						{
 							"kind": "method",
@@ -172001,7 +172274,13 @@
 								"en": "Takes out the collected received messages. (those collected while there was no receive callback, in received order)"
 							},
 							"since": "0.3.2",
-							"source": "src/web/websocketclient.rs"
+							"source": "src/web/websocketclient.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/websocketclient",
+								"class": "WebSocketClient",
+								"name": "takeReceivedMessages"
+							}
 						},
 						{
 							"kind": "method",
@@ -172020,7 +172299,13 @@
 								"en": "Returns whether connected."
 							},
 							"since": "0.3.2",
-							"source": "src/web/websocketclient.rs"
+							"source": "src/web/websocketclient.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/websocketclient",
+								"class": "WebSocketClient",
+								"name": "isConnected"
+							}
 						},
 						{
 							"kind": "method",
@@ -172039,7 +172324,13 @@
 								"en": "Returns the WebSocket sender. (while trying to connect or connected)"
 							},
 							"since": "0.3.2",
-							"source": "src/web/websocketclient.rs"
+							"source": "src/web/websocketclient.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/websocketclient",
+								"class": "WebSocketClient",
+								"name": "getWebSocket"
+							}
 						},
 						{
 							"kind": "method",
@@ -172058,7 +172349,13 @@
 								"en": "Returns the WebSocket sender. (for modification, for sending non-text messages directly)"
 							},
 							"since": "0.3.2",
-							"source": "src/web/websocketclient.rs"
+							"source": "src/web/websocketclient.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/websocketclient",
+								"class": "WebSocketClient",
+								"name": "getWebSocket"
+							}
 						},
 						{
 							"kind": "method",
@@ -172080,6 +172377,12 @@
 							},
 							"since": "0.3.2",
 							"source": "src/web/websocketclient.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/websocketclient",
+								"class": "WebSocketClient",
+								"name": "setReceiveEvent"
+							},
 							"examples": [
 								{
 									"title": {
@@ -172108,7 +172411,13 @@
 								"en": "Returns the receive callback. (borrow it with borrow_mut to call it)"
 							},
 							"since": "0.3.2",
-							"source": "src/web/websocketclient.rs"
+							"source": "src/web/websocketclient.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/websocketclient",
+								"class": "WebSocketClient",
+								"name": "getReceiveEvent"
+							}
 						}
 					],
 					"examples": [
@@ -172178,6 +172487,11 @@
 					"summary": {
 						"ko": "테마 상수. (원본 PaneTheme)",
 						"en": "Theme constants. (original PaneTheme)"
+					},
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "web/pane",
+						"class": "PaneTheme"
 					},
 					"source": "src/web/pane.rs",
 					"members": [
@@ -173300,6 +173614,11 @@
 						"ko": "스타일 및 요소 생성 유틸리티. (원본 PaneStyle)",
 						"en": "Style and element creation utility. (original PaneStyle)"
 					},
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "web/pane",
+						"class": "PaneStyle"
+					},
 					"source": "src/web/pane/dompane.rs",
 					"members": [
 						{
@@ -173329,7 +173648,13 @@
 								"en": "Puts several styles into an element at once. ((CSS property name, value) list)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "PaneStyle",
+								"name": "apply"
+							}
 						},
 						{
 							"kind": "static",
@@ -173373,7 +173698,13 @@
 								"en": "Creates an element with a style preset applied.\n(preset: \"panel\" | \"toolbar\" | \"button\" | \"input\" | \"textarea\" | \"text\", only the common style otherwise)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "PaneStyle",
+								"name": "create"
+							}
 						}
 					],
 					"examples": [
@@ -173397,6 +173728,11 @@
 					"traits": [
 						"Clone"
 					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "web/pane",
+						"class": "Pane"
+					},
 					"source": "src/web/pane/dompane.rs",
 					"members": [
 						{
@@ -173425,7 +173761,13 @@
 								"en": "Constructor. (creates the container div and builds the drag listeners to attach to the document)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "constructor"
+							}
 						},
 						{
 							"kind": "method",
@@ -173446,7 +173788,13 @@
 								"en": "Adds a child. (places a resizer in between if there is a previous child)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "addPane"
+							}
 						},
 						{
 							"kind": "method",
@@ -173491,7 +173839,13 @@
 								"en": "Layout. (places itself, measures fixed size children first, splits the remaining space among flex children, then places the children and resizers in order)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "updateLayout"
+							}
 						},
 						{
 							"kind": "method",
@@ -173503,7 +173857,13 @@
 								"en": "Resets the layout. (clears sizes changed by dragging, including children)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "resetLayout"
+							}
 						},
 						{
 							"kind": "method",
@@ -173515,7 +173875,13 @@
 								"en": "Lays out again to fit the parent element size. (the window size if the parent size is 0, does nothing if there is no parent)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "refresh"
+							}
 						},
 						{
 							"kind": "method",
@@ -173536,7 +173902,13 @@
 								"en": "Attaches to an element. (lays out again when the window size changes and on the next frame. The window listener holds this pane until the end)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "attachTo"
+							}
 						},
 						{
 							"kind": "method",
@@ -173557,7 +173929,13 @@
 								"en": "Shows / hides. (a hidden pane takes no space, and the adjoining resizers are hidden too)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "setVisible"
+							}
 						},
 						{
 							"kind": "method",
@@ -173576,7 +173954,13 @@
 								"en": "Whether visible."
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "isVisible"
+							}
 						},
 						{
 							"kind": "method",
@@ -173595,7 +173979,13 @@
 								"en": "Whether flex. (initial size is Flex)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "isFlex"
+							}
 						},
 						{
 							"kind": "method",
@@ -173614,7 +174004,13 @@
 								"en": "Initial size."
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "getInitialSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -173633,7 +174029,13 @@
 								"en": "Fixed size. (pixels, measured from the initial size if 0)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "getFixedSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -173654,7 +174056,13 @@
 								"en": "Sets the fixed size. (used from the next layout. Not used for flex panes)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "setFixedSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -173673,7 +174081,13 @@
 								"en": "Minimum size."
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "getMinSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -173692,7 +174106,13 @@
 								"en": "Maximum size."
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "getMaxSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -173711,7 +174131,13 @@
 								"en": "Container element. (content is attached here)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "getContainer"
+							}
 						},
 						{
 							"kind": "method",
@@ -173732,7 +174158,13 @@
 								"en": "Sets the layout callback. (called every time update_layout finishes. None clears it)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "setCallback"
+							}
 						},
 						{
 							"kind": "method",
@@ -173751,7 +174183,13 @@
 								"en": "Whether it can be dragged with a resizer."
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "isResizable"
+							}
 						},
 						{
 							"kind": "method",
@@ -173770,7 +174208,13 @@
 								"en": "Edges that can be dragged."
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/dompane.rs"
+							"source": "src/web/pane/dompane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "getResizableEdges"
+							}
 						}
 					],
 					"examples": [
@@ -173816,6 +174260,11 @@
 					"traits": [
 						"Clone"
 					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "web/pane",
+						"class": "Pane"
+					},
 					"source": "src/web/pane/nodepane.rs",
 					"members": [
 						{
@@ -173852,7 +174301,13 @@
 								"en": "Constructor. (creates a detached container node. Background and clipping)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "constructor"
+							}
 						},
 						{
 							"kind": "method",
@@ -173881,7 +174336,13 @@
 								"en": "Adds a child. (places a resizer node in between if there is a previous child)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "addPane"
+							}
 						},
 						{
 							"kind": "method",
@@ -173934,7 +174395,13 @@
 								"en": "Layout. (places itself, and places the children and resizers with the same computation. Original updateLayout)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "updateLayout"
+							}
 						},
 						{
 							"kind": "method",
@@ -173946,7 +174413,13 @@
 								"en": "Resets the layout. (clears sizes changed by dragging, including children)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "resetLayout"
+							}
 						},
 						{
 							"kind": "method",
@@ -173967,7 +174440,13 @@
 								"en": "Lays out again to fit the parent node size. (does nothing if there is no parent)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "refresh"
+							}
 						},
 						{
 							"kind": "method",
@@ -173996,7 +174475,13 @@
 								"en": "Attaches to a node. (lays out on the spot, and lays out again later when the parent size changes. The window resize listener of the original attachTo)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "attachTo"
+							}
 						},
 						{
 							"kind": "method",
@@ -174025,7 +174510,13 @@
 								"en": "Shows / hides. (a hidden pane takes no space, and the adjoining resizers are hidden too)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "setVisible"
+							}
 						},
 						{
 							"kind": "method",
@@ -174044,7 +174535,13 @@
 								"en": "Whether visible."
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "isVisible"
+							}
 						},
 						{
 							"kind": "method",
@@ -174063,7 +174560,13 @@
 								"en": "Whether flex. (initial size is Flex)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "isFlex"
+							}
 						},
 						{
 							"kind": "method",
@@ -174082,7 +174585,13 @@
 								"en": "Initial size."
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "getInitialSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -174101,7 +174610,13 @@
 								"en": "Fixed size. (pixels, measured from the initial size if 0)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "getFixedSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -174122,7 +174637,13 @@
 								"en": "Sets the fixed size. (used from the next layout. Not used for flex panes)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "setFixedSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -174141,7 +174662,13 @@
 								"en": "Minimum size."
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "getMinSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -174160,7 +174687,13 @@
 								"en": "Maximum size."
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "getMaxSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -174179,7 +174712,13 @@
 								"en": "Container node. (content is attached as its children)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "getContainer"
+							}
 						},
 						{
 							"kind": "method",
@@ -174200,7 +174739,13 @@
 								"en": "Sets the layout callback. (called every time update_layout finishes. None clears it)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "setCallback"
+							}
 						},
 						{
 							"kind": "method",
@@ -174219,7 +174764,13 @@
 								"en": "Whether it can be dragged with a resizer."
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "isResizable"
+							}
 						},
 						{
 							"kind": "method",
@@ -174238,7 +174789,13 @@
 								"en": "Edges that can be dragged."
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "Pane",
+								"name": "getResizableEdges"
+							}
 						}
 					],
 					"examples": [
@@ -174510,6 +175067,11 @@
 						"ko": "스타일 및 요소 생성 유틸리티. (원본 PaneStyle)",
 						"en": "Style and element creation utility. (original PaneStyle)"
 					},
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "web/pane",
+						"class": "PaneStyle"
+					},
 					"source": "src/web/pane/nodepane.rs",
 					"members": [
 						{
@@ -174547,7 +175109,13 @@
 								"en": "Puts several styles into an element at once. ((CSS property name, value) list, does nothing for a node without a PaneElement)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "PaneStyle",
+								"name": "apply"
+							}
 						},
 						{
 							"kind": "static",
@@ -174599,7 +175167,13 @@
 								"en": "Creates an element node with a style preset applied. (a detached node, attach it with node_tree.add_child)\n(preset: \"panel\" | \"toolbar\" | \"button\" | \"input\" | \"textarea\" | \"text\", only the common style otherwise)"
 							},
 							"since": "0.4.0",
-							"source": "src/web/pane/nodepane.rs"
+							"source": "src/web/pane/nodepane.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "web/pane",
+								"class": "PaneStyle",
+								"name": "create"
+							}
 						}
 					],
 					"examples": [

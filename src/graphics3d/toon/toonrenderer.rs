@@ -2022,6 +2022,11 @@ impl ToonRenderer {
 		for key in key_list {
 			if let Some(Some(program_set)) = self.program_set_table.remove(&key) {
 				ToonRenderer::delete_program_set(gl, &program_set);
+				// 지운 프로그램의 이름은 GL 이 다시 줄 수 있어 기억한 유니폼 값도 버린다.
+				let uniform_slot_table = self.uniform_slot_table.get_mut();
+				for program in [&program_set.solid.program, &program_set.outline.program, &program_set.depth.program] {
+					uniform_slot_table.remove(&program.get_program());
+				}
 			}
 		}
 	}
@@ -2208,6 +2213,7 @@ impl ToonRenderer {
 		for program_set in self.program_set_table.values().flatten() {
 			ToonRenderer::delete_program_set(gl, program_set);
 		}
+		self.uniform_slot_table.borrow_mut().clear();
 		unsafe {
 			crate::core::glstatecache::delete_texture(gl, self.empty_shadow_texture);
 			crate::core::glstatecache::delete_texture(gl, self.white_texture);
@@ -3358,6 +3364,8 @@ impl ToonRenderer {
 			if let Some(on_before_draw) = options.on_before_draw {
 				on_before_draw(&depth_entry.program, gl, ToonProgramKind::Depth);
 				self.forget_uniform_values(&depth_entry.program);
+				// 콜백은 glow 로 상태를 바로 바꿀 수 있다. (상태 캐시를 거치지 않음)
+				crate::core::glstatecache::reset(gl);
 			}
 			ToonRenderer::apply_vertex_array(gl, body_vertex_array);
 			draw_elements(gl, index_start, index_count);
@@ -3407,6 +3415,8 @@ impl ToonRenderer {
 			if let Some(on_before_draw) = options.on_before_draw {
 				on_before_draw(outline_program, gl, ToonProgramKind::Outline);
 				self.forget_uniform_values(outline_program);
+				// 콜백은 glow 로 상태를 바로 바꿀 수 있다. (상태 캐시를 거치지 않음)
+				crate::core::glstatecache::reset(gl);
 			}
 			ToonRenderer::apply_cull_face(gl, glow::FRONT);
 			ToonRenderer::apply_vertex_array(gl, outline_vertex_array);
@@ -3475,6 +3485,8 @@ impl ToonRenderer {
 		if let Some(on_before_draw) = options.on_before_draw {
 			on_before_draw(solid_program, gl, ToonProgramKind::Solid);
 			self.forget_uniform_values(solid_program);
+			// 콜백은 glow 로 상태를 바로 바꿀 수 있다. (상태 캐시를 거치지 않음)
+			crate::core::glstatecache::reset(gl);
 		}
 		ToonRenderer::apply_cull_face(gl, glow::BACK);
 		ToonRenderer::apply_vertex_array(gl, body_vertex_array);

@@ -1261,6 +1261,8 @@ impl Drop for ExternalPassGuard<'_> {
 	/// 2D 상태 되돌리기.
 	//==============================================================================
 	fn drop(&mut self) {
+		// pass 는 glow 로 상태를 바로 바꿀 수 있어(상태 캐시를 거치지 않음) 기억을 잊고 되돌린다. (되돌리기가 다시 건 값은 다시 기억한다)
+		crate::core::glstatecache::reset(&self.graphic.gl);
 		self.graphic.restore_render_state();
 		if self.shader_clip_count > 0 {
 			self.graphic.write_shader_clips_to_stencil(false);
@@ -5167,7 +5169,7 @@ impl Graphic {
 
 	//==============================================================================
 	/// GL 컨텍스트 반환.
-	/// - 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, 기억한 프로그램과 텍스처를 잊는다. (다음 그리기에서 다시 건다)
+	/// - 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, 기억한 프로그램과 텍스처, GL 상태 캐시를 잊는다. (다음 그리기에서 다시 건다)
 	///
 	/// # 돌려줌
 	/// Graphic 이 든 GL 컨텍스트.
@@ -5201,7 +5203,6 @@ impl Graphic {
 	/// 	let framebuffer = graphic.get_current_framebuffer();
 	/// 	let viewport = graphic.get_current_viewport();
 	/// 	println!("{} {} {}", framebuffer.is_none(), viewport.get_width(), viewport.get_height());
-	/// 	// glow 로 상태를 직접 바꿨으면 상태 캐시를 잊게 한다.
 	/// 	graphic.reset_gl_state_cache();
 	/// }
 	/// ```
@@ -5226,7 +5227,8 @@ impl Graphic {
 
 	//==============================================================================
 	/// GL 상태 캐시 잊기. (원본 resetGLStateCache, 상태 캐시를 거치지 않고 glow 로 GL 상태를 바꾼 뒤 부른다, 다음에 읽을 때 GL 에 한 번씩 묻는다)
-	/// - get_gl 은 받은 쪽이 상태를 바꿀 수 있어 스스로 잊는다. run_external_pass 의 pass 안에서 glow 로 상태를 직접 바꾸면 pass 가 끝난 뒤 이것을 부른다.
+	/// - get_gl 은 받은 쪽이 상태를 바꿀 수 있어 스스로 잊는다. run_external_pass 는 pass 가 끝나면 스스로 잊는다.
+	/// - 툰 렌더러의 on_before_draw 와 그리기 줄의 단계 콜백이 끝나면 렌더러가 스스로 잊는다.
 	//==============================================================================
 	pub fn reset_gl_state_cache(&self) {
 		crate::core::glstatecache::reset(&self.gl);
