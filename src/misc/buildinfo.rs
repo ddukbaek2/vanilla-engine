@@ -7,6 +7,8 @@
 //!   2. 없으면 version.json. { version, date, time, hash, ... } 꼴이고, 글은 "날짜 시각 (해시)" 이다. 해시가 없으면 version.
 //!      웹은 페이지 기준 주소를 캐시 없이(fetch 의 cache: "no-cache") 받는다. 새 판을 올려도 옛 판 표시가 남지 않게 한다.
 //!      데스크탑은 애셋 폴더에서 읽는다. (그 자리에서 끝난다, 파일이라 옛 판이 남는 캐시가 없다)
+//!      받지 못하면(파일 없음, HTTP 오류, 네트워크 오류) 원본 load 가 오류를 삼키는 것처럼 조용히 넘어간다.
+//!      손잡이는 빈 바이트로 끝나 실패로 치지 않으니 AssetLoader 에 넣어도 실패 목록에 들지 않는다.
 //!   3. 둘 다 없으면 set_package_version 으로 넣은 판. (게임 크레이트가 env!("CARGO_PKG_VERSION") 을 넘긴다, 넣지 않았으면 원본처럼 빈 글)
 //! - 원본과 다른 점:
 //!   원본 생성자의 version.json 주소 기본 인자는 new()(기본 주소)와 set_version_json_path 로 나눴다.
@@ -268,6 +270,8 @@ impl BuildInfo {
 	//==============================================================================
 	/// version.json 읽기 손잡이. (씬이 track_load_handle 로 맡긴다. meta 로 읽었으면 None)
 	///
+	/// - 받지 못했어도 실패가 아니라 빈 바이트로 끝난다. (원본 load 의 try/catch 처럼, AssetLoader 의 실패 목록에 들지 않는다)
+	///
 	/// # 돌려줌
 	/// version.json 받기 손잡이. load 전이거나 meta 로 읽었거나 파일 경로가 빈 글이면 None.
 	//==============================================================================
@@ -409,10 +413,12 @@ mod platform_build_info {
 	use crate::core::engine::Engine;
 
 	//==============================================================================
-	/// version.json 요청. (애셋 폴더에서 그 자리에서 읽는다)
+	/// version.json 요청. (애셋 폴더에서 그 자리에서 읽는다. 못 읽으면 실패 대신 빈 바이트로 끝난다)
 	//==============================================================================
 	pub fn request_version_json(engine: &Engine, version_json_path: &str) -> AssetLoadHandle {
-		engine.request_asset_bytes(version_json_path)
+		let asset_load_handle = engine.request_asset_bytes(version_json_path);
+		let bytes = asset_load_handle.get_bytes().map(|bytes| bytes.as_ref().clone()).unwrap_or_default();
+		AssetLoadHandle::create_loaded(version_json_path, bytes)
 	}
 }
 
@@ -426,15 +432,15 @@ mod platform_build_info {
 	use wasm_bindgen::{JsCast, JsValue};
 
 	//==============================================================================
-	/// version.json 요청. (fetch 를 cache: "no-cache" 로 부른다. 받으면 손잡이를 끝낸다)
+	/// version.json 요청. (fetch 를 cache: "no-cache" 로 부른다. 받으면 손잡이를 끝낸다, 못 받으면 원본 try/catch 처럼 실패 대신 빈 바이트로 끝낸다)
 	//==============================================================================
 	pub fn request_version_json(_engine: &Engine, version_json_path: &str) -> AssetLoadHandle {
 		let load_handle = AssetLoadHandle::create_pending(version_json_path);
 		let load_handle_for_fetch = load_handle.clone();
 		let version_json_path = version_json_path.to_string();
 		wasm_bindgen_futures::spawn_local(async move {
-			let result = fetch_without_cache(&version_json_path).await;
-			load_handle_for_fetch.finish(result);
+			let bytes = fetch_without_cache(&version_json_path).await.unwrap_or_default();
+			load_handle_for_fetch.finish(Ok(bytes));
 		});
 		load_handle
 	}
@@ -495,6 +501,15 @@ mod tests {
 		missing_build_info.set_version_json_path("missing-version.json");
 		missing_build_info.load(&engine);
 		assert!(missing_build_info.is_loaded());
+		assert!(!missing_build_info.get_load_handle().expect("load handle").is_failed());
+		// 원본 assetLoader.addTask("buildInfo", () => buildInfo.load()) 처럼 실패 목록에 들지 않는다.
+		let asset_loader = crate::resource::assetloader::AssetLoader::new();
+		asset_loader.add_load_handle(missing_build_info.get_load_handle().expect("load handle"));
+		asset_loader.load(&engine);
+		asset_loader.update(&engine);
+		assert!(asset_loader.is_finished());
+		assert_eq!(asset_loader.get_loaded_count(), 1);
+		assert!(asset_loader.get_failed_list().is_empty());
 		assert!(missing_build_info.read_version_data().is_none());
 		assert_eq!(missing_build_info.read_text(), "0.9.0");
 		assert_eq!(missing_build_info.get_package_version(), "0.9.0");

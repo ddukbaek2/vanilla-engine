@@ -42,6 +42,7 @@
 //! 화면 넘기기는 플랫폼이 update_engine 다음에 한다.
 //==============================================================================
 use crate::base::color::Color;
+use crate::base::format::{format_fixed, number_to_string};
 use crate::core::textshaping::FontFaceDescriptors;
 use crate::base::pivot::Pivot;
 use crate::base::platform::Platform;
@@ -324,6 +325,8 @@ pub struct Engine {
 	pending_font_operation_list: Vec<PendingFontOperation>,
 	pending_default_font_handle: Option<AssetLoadHandle>,
 	platform: Platform,
+	/// 개발 정보 글이 차지한 영역. (원본 #statisticsTextRect, 배경 판은 앞 프레임의 영역으로 그린다. 너비는 늘기만 한다)
+	statistics_text_rect: Rect,
 	next_scene_number: u64,
 	pending_unload_scene_id_list: Vec<SceneId>,
 	/// 불러온(create 를 부른) 씬의 핸들. (불러온 차례, get_all_loaded_scenes)
@@ -376,6 +379,7 @@ impl Engine {
 			pending_font_operation_list: Vec::new(),
 			pending_default_font_handle: None,
 			platform: Platform::new(),
+			statistics_text_rect: Rect::zero(),
 			next_scene_number: 0,
 			pending_unload_scene_id_list: Vec::new(),
 			loaded_scene_id_list: Vec::new(),
@@ -2440,27 +2444,87 @@ impl EngineRunner {
 }
 
 //==============================================================================
-/// 개발 정보 출력. (왼쪽 위에 FPS, 드로우 콜, 정점 수, 화면 밖이라 거른 노드 수)
+/// 개발 정보 출력. (원본 drawStatistics, 왼쪽 위 1.4 배에 엔진 판, 플랫폼, 화면, 입력, 시간, 그리기 수를 줄마다 16 씩)
+/// - 변환을 장치 픽셀 단위 기본으로 되돌리고 1.4 배로 그린다. 배경 판(검정 60%, 둥근 모서리 12)은 앞 프레임에 쌓은 글 영역으로 그린다.
+/// - 글꼴은 "16px DOSGothic"(없으면 시스템 글꼴), 왼쪽 위 기준, 흰색. 빈 글 줄은 그리지 않고 자리만 16 내린다.
 //==============================================================================
-fn draw_statistics(engine: &Engine, graphic: &mut Graphic) {
-	let view_manager = engine.get_view_manager();
-	let time_manager = engine.get_time_manager();
-	view_manager.apply_canvas_native_rect(graphic);
+fn draw_statistics(engine: &mut Engine, graphic: &mut Graphic) {
+	let mut text_position = Vector2::create(16.0, 16.0);
+	engine.statistics_text_rect.position = text_position;
 
-	let frame_per_second = time_manager.get_frame_per_second();
-	let draw_call_count = graphic.get_last_frame_draw_call_count();
-	let vertex_count = graphic.get_last_frame_vertex_count();
-	let culled_node_count = graphic.get_last_frame_culled_node_count();
-	let statistics_text = format!("FPS {}  DrawCall {}  Vertex {}  Culled {}", frame_per_second, draw_call_count, vertex_count, culled_node_count);
-
-	graphic.set_font_string("14px default");
-	let text_metrics = graphic.measure_text(&statistics_text);
+	// 배경 출력.
+	// 기본 위치인 화면 좌상단으로 이동.
+	graphic.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+	graphic.scale(1.4, 1.4);
 	graphic.set_fill_color(Color::create(0.0, 0.0, 0.0, 0.6));
-	graphic.draw_rect(Rect::create(4.0, 4.0, text_metrics.width + 12.0, 22.0));
+	let statistics_text_rect = engine.statistics_text_rect;
+	graphic.draw_round_rect(Rect::create(
+		statistics_text_rect.position.x - 10.0,
+		statistics_text_rect.position.y - 10.0,
+		statistics_text_rect.size.x + 20.0,
+		statistics_text_rect.size.y + 20.0,
+	), 12.0);
+	engine.statistics_text_rect.size.y = 0.0;
+
+	graphic.set_font_string("16px DOSGothic");
 	graphic.set_text_align(TextAlign::Left);
-	graphic.set_text_baseline(TextBaseline::Middle);
+	graphic.set_text_baseline(TextBaseline::Top);
 	graphic.set_fill_color(Color::white());
-	graphic.draw_fill_text(&statistics_text, 10.0, 15.0);
+
+	let mut text_list: Vec<String> = Vec::new();
+
+	// 플랫폼 정보 출력.
+	let (platform_type, browser_type) = engine.platform.get_platform_info();
+	text_list.push(format!("engineVersion: {}", engine.get_version_string()));
+	text_list.push(format!("platformName: {}", platform_type.get_name()));
+	text_list.push(format!("browserName: {}", browser_type.get_name()));
+	text_list.push(String::new());
+
+	// 화면 정보 출력.
+	let view_manager = engine.get_view_manager();
+	let input_manager = engine.get_input_manager();
+	let time_manager = engine.get_time_manager();
+	let canvas_native_size = view_manager.get_canvas_native_size();
+	let view_scale_mode = view_manager.get_view_scale_mode();
+	let reference_resolution_size = view_manager.get_reference_resolution_size();
+	let view_native_rect = view_manager.get_view_native_rect();
+	let view_size = view_manager.get_view_size();
+	let canvas_native_input_position = input_manager.get_canvas_native_input_position();
+	let view_input_position = input_manager.get_view_input_position();
+	let format_pair = |x: f64, y: f64| -> String {
+		format!("({}, {})", number_to_string(x), number_to_string(y))
+	};
+	text_list.push(format!("canvasNativeSize: {}", format_pair(canvas_native_size.x, canvas_native_size.y)));
+	text_list.push(format!("referenceResolutionSize: {}", format_pair(reference_resolution_size.x, reference_resolution_size.y)));
+	text_list.push(format!("viewScaleMode: {}", view_scale_mode.get_name()));
+	text_list.push(format!("viewNativeRect: {} - {}", format_pair(view_native_rect.position.x, view_native_rect.position.y), format_pair(view_native_rect.size.x, view_native_rect.size.y)));
+	text_list.push(format!("viewSize: {}", format_pair(view_size.x, view_size.y)));
+	text_list.push(format!("canvasNativeInputPosition: {}", format_pair(canvas_native_input_position.x, canvas_native_input_position.y)));
+	text_list.push(format!("viewInputPosition: {}", format_pair(view_input_position.x, view_input_position.y)));
+	text_list.push(String::new());
+
+	// 초당 프레임 정보 출력.
+	text_list.push(format!("time: {}s", format_fixed(time_manager.get_time(), 2)));
+	text_list.push(format!("framePerSecond: {}", time_manager.get_frame_per_second()));
+	text_list.push(format!("timeDelta: {}s", format_fixed(time_manager.get_time_delta(), 3)));
+	text_list.push(format!("drawCalls: {}", graphic.get_last_frame_draw_call_count()));
+	text_list.push(format!("vertices: {}", graphic.get_last_frame_vertex_count()));
+	text_list.push(format!("triangles: {}", graphic.get_last_frame_triangle_count()));
+	text_list.push(format!("culledNodes: {}", graphic.get_last_frame_culled_node_count()));
+
+	for text in text_list.iter() {
+		if !text.is_empty() {
+			graphic.draw_fill_text(text, text_position.x, text_position.y);
+		}
+
+		// 위치 증가.
+		text_position.y += 16.0;
+
+		// 영역 넓히기.
+		let text_metrics = graphic.measure_text(text);
+		engine.statistics_text_rect.size.x = engine.statistics_text_rect.size.x.max(text_metrics.width);
+		engine.statistics_text_rect.size.y += 16.0;
+	}
 }
 
 //==============================================================================
