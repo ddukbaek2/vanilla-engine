@@ -188744,6 +188744,17 @@
 			},
 			"classes": [
 				{
+					"name": "LayoutVariableEvent",
+					"kind": "type",
+					"summary": {
+						"ko": "값이 바뀐 변수를 받는 함수. (원본 setValueChangedEvent 의 함수)",
+						"en": "Function that receives the changed variable. (the function of the original setValueChangedEvent)"
+					},
+					"signature": "pub type LayoutVariableEvent = Rc<dyn Fn(&LayoutVariable)>",
+					"source": "src/ui/autolayout/layoutvariable.rs",
+					"members": []
+				},
+				{
 					"name": "LayoutVariable",
 					"kind": "struct",
 					"summary": {
@@ -188894,6 +188905,68 @@
 								"module": "ui/autolayout/layoutvariable",
 								"class": "LayoutVariable",
 								"name": "setValue"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "set_value_changed_event",
+							"signature": "pub fn set_value_changed_event(&self, value_changed_event: Option<LayoutVariableEvent>)",
+							"params": [
+								{
+									"name": "value_changed_event",
+									"type": "Option<LayoutVariableEvent>",
+									"description": {
+										"ko": "바뀐 변수를 받는 함수. None 이면 지운다.",
+										"en": "Function that receives the changed variable. None clears it."
+									}
+								}
+							],
+							"description": {
+								"ko": "값이 바뀔 때 부를 함수 설정. (원본 setValueChangedEvent, 솔버가 푼 값이 달라질 때만 부른다, None 이면 부르지 않는다)\n- 변수를 가진 쪽이 바뀐 것을 알아챈다. (원본 UINode 는 자리와 크기 변수에 걸어 하위 트리 그리기 경계를 다시 셈하게 한다. 러스트 판 UINode 는 노드 트랜스폼에 풀어 넣으므로 트랜스폼 세터가 알린다)",
+								"en": "Sets the function to call when the value changes. (original setValueChangedEvent, called only when the value solved by the solver differs, not called if None)\n- Lets the owner of the variable notice the change. (the original UINode sets it on its position and size variables to recompute subtree draw bounds. The Rust UINode writes the solution into the node transform, so the transform setters report it)"
+							},
+							"since": "0.4.0",
+							"source": "src/ui/autolayout/layoutvariable.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/autolayout/layoutvariable",
+								"class": "LayoutVariable",
+								"name": "setValueChangedEvent"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "값이 바뀔 때 알기",
+										"en": "Notice when the value changes"
+									},
+									"code": "use std::cell::Cell;\nuse std::rc::Rc;\nuse vanilla::LayoutVariable;\n\nlet width = LayoutVariable::new(\"width\");\nlet changed_count = Rc::new(Cell::new(0));\nlet counter = changed_count.clone();\nwidth.set_value_changed_event(Some(Rc::new(move |variable: &LayoutVariable| {\n\tassert_eq!(variable.get_value(), 120.0);\n\tcounter.set(counter.get() + 1);\n})));\nwidth.set_value(120.0);\nwidth.set_value(120.0);\nassert_eq!(changed_count.get(), 1);\nassert!(width.get_value_changed_event().is_some());",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "get_value_changed_event",
+							"signature": "pub fn get_value_changed_event(&self) -> Option<LayoutVariableEvent>",
+							"params": [],
+							"returns": {
+								"type": "Option<LayoutVariableEvent>",
+								"description": {
+									"ko": "건 함수. 없으면 None.",
+									"en": "The set function. None if there is none."
+								}
+							},
+							"description": {
+								"ko": "값이 바뀔 때 부를 함수 반환. (원본 getValueChangedEvent)",
+								"en": "Returns the function called when the value changes. (original getValueChangedEvent)"
+							},
+							"since": "0.4.0",
+							"source": "src/ui/autolayout/layoutvariable.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/autolayout/layoutvariable",
+								"class": "LayoutVariable",
+								"name": "getValueChangedEvent"
 							}
 						},
 						{

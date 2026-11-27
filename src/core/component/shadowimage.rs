@@ -280,19 +280,6 @@ impl ShadowImage {
 	}
 
 	//==============================================================================
-	/// 구운 그림이 그림자 내림으로 아래로 늘어나는 만큼. (픽셀, 웹은 원본처럼 올림, 데스크탑은 반올림한 내림만큼 옮겨 셈한다)
-	//==============================================================================
-	fn calculate_bake_offset(shadow_offset: f64, bake_scale: f64) -> i32 {
-		let scaled_offset = (shadow_offset * bake_scale).max(0.0);
-		if cfg!(target_arch = "wasm32") {
-			scaled_offset.ceil() as i32
-		}
-		else {
-			scaled_offset.round() as i32
-		}
-	}
-
-	//==============================================================================
 	/// 그림 설정. (조각을 주지 않으면 그림 전체)
 	/// - 받은 그림은 다시 구울 때 픽셀을 읽으므로 GPU 에 올린 뒤에도 CPU 픽셀을 남기게 한다. (Image::set_pixels_retained(true))
 	///
@@ -467,18 +454,15 @@ impl Component for ShadowImage {
 	}
 
 	//==============================================================================
-	/// 화면 밖 거르기에 쓰는, 실제로 그리는 사각형. (content 영역에 그림자 여백(번짐, 아래로 내림)을 더한다, content_size 가 0 이하면 None)
+	/// 화면 밖 거르기와 하위 트리 그리기 경계에 쓰는, 실제로 그리는 사각형. (원본 ShadowImage.calculateDrawnRect)
+	/// - content 영역에 번짐 두 배와 굽는 여유를 사방으로, 그림자 내림만큼 아래(음수면 위)로 더한다. 굽기와 굽는 배율과 상관없이 넉넉한 사각형이다.
 	//==============================================================================
-	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {
-		// 그림은 content 안에 들지만 구운 한 장은 그림자 여백(번짐, 아래로 내림)만큼 넓다. (bake 와 같은 셈)
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, _graphic: &mut Graphic) -> Option<Rect> {
 		let content_size = transform.get_content_size();
-		if content_size.x <= 0.0 || content_size.y <= 0.0 {
-			return None;
-		}
-		let bake_scale = graphic.calculate_text_bake_scale();
-		let padding = ShadowImage::calculate_bake_padding(self.shadow_blur, bake_scale) as f64 / bake_scale;
-		let offset = ShadowImage::calculate_bake_offset(self.shadow_offset, bake_scale) as f64 / bake_scale;
-		Some(Rect::create(-padding, -padding, content_size.x + padding * 2.0, content_size.y + padding * 2.0 + offset))
+		let blur_margin = self.shadow_blur.max(0.0) * 2.0 + BAKE_PADDING as f64;
+		let top_y = -blur_margin + self.shadow_offset.min(0.0);
+		let bottom_y = content_size.y + blur_margin + self.shadow_offset.max(0.0);
+		Some(Rect::create(-blur_margin, top_y, content_size.x + blur_margin * 2.0, bottom_y - top_y))
 	}
 
 	//==============================================================================

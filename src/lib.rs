@@ -260,7 +260,7 @@ pub use crate::ui::autolayout::layoutrelation::LayoutRelation;
 pub use crate::ui::autolayout::layoutsolver::{LayoutError, LayoutSolver};
 pub use crate::ui::autolayout::layoutstrength::LayoutStrength;
 pub use crate::ui::autolayout::layoutterm::LayoutTerm;
-pub use crate::ui::autolayout::layoutvariable::LayoutVariable;
+pub use crate::ui::autolayout::layoutvariable::{LayoutVariable, LayoutVariableEvent};
 pub use crate::ui::uinode::{LayoutMargins, UINode, NO_INTRINSIC_METRIC};
 pub use crate::ui::uiscene::{UIScene, UISceneBase};
 pub use crate::ui::buttonmotion::attach_button_motion;

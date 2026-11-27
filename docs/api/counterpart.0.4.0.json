@@ -39627,6 +39627,30 @@
 			"vanilla-engine": {
 				"module": "ui/autolayout/layoutvariable",
 				"class": "LayoutVariable",
+				"name": "set_value_changed_event"
+			},
+			"vanilla.js": {
+				"module": "ui/autolayout/layoutvariable",
+				"class": "LayoutVariable",
+				"name": "setValueChangedEvent"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/autolayout/layoutvariable",
+				"class": "LayoutVariable",
+				"name": "get_value_changed_event"
+			},
+			"vanilla.js": {
+				"module": "ui/autolayout/layoutvariable",
+				"class": "LayoutVariable",
+				"name": "getValueChangedEvent"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/autolayout/layoutvariable",
+				"class": "LayoutVariable",
 				"name": "get_value"
 			},
 			"vanilla.js": {
