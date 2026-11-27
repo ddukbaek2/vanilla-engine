@@ -8,7 +8,7 @@
 //==============================================================================
 use std::sync::atomic::{AtomicU32, Ordering};
 use vanilla::core::graphic::TextAlign;
-use vanilla::{Color, Component, ComponentBase, Engine, EngineConfiguration, Graphic, Mask, NodeId, NodeTransform, NodeTree, Outline, Paint, Pivot, Scene, SceneBase, UIButton, UILabel, UILineChart, UIScrollView, UISlider, UIView, Vector2, ViewScaleMode};
+use vanilla::{Color, Component, ComponentBase, Engine, EngineConfiguration, Graphic, Mask, NodeId, NodeTransform, NodeTree, Outline, Paint, ParticleSystem, Pivot, Scene, SceneBase, UIButton, UILabel, UILineChart, UIScrollView, UISlider, UIView, TrailRenderer, Vector2, ViewScaleMode};
 
 const VIEW_WIDTH: f64 = 640.0;
 const VIEW_HEIGHT: f64 = 360.0;
@@ -141,6 +141,8 @@ struct SubtreeCullScene {
 	mover_id: Option<NodeId>,
 	rotated_id: Option<NodeId>,
 	inner_scroll_id: Option<NodeId>,
+	particle_id: Option<NodeId>,
+	trail_id: Option<NodeId>,
 	line_list: Vec<String>,
 	probe_frame_list: Vec<Vec<u32>>,
 }
@@ -281,8 +283,35 @@ impl SubtreeCullScene {
 		add_probe(node_tree, mover_id, 3);
 		self.scroll_view_id = Some(scroll_id);
 		self.mover_id = Some(mover_id);
+		// 화면 아래 밖에서 날아오르는 파티클. (수동 틱, 씨앗 고정, 화면 밖이면 켠 길은 그리지 않는다)
+		let particle_id = create_box_node(node_tree, root_id, 470.0, VIEW_HEIGHT + 60.0, 0.0, 0.0);
+		{
+			let particle_system = node_tree.add_component(particle_id, ParticleSystem::new()).expect("particle");
+			particle_system.set_random_seed(7);
+			particle_system.set_manual_tick(true);
+			particle_system.set_emission_rate(20.0);
+			particle_system.set_start_lifetime(3.0, 3.0);
+			particle_system.set_start_speed(0.0, 20.0);
+			particle_system.set_start_size(10.0, 14.0);
+			particle_system.set_gravity(0.0, -120.0);
+			particle_system.set_start_color("#ffd040", "#ff6020");
+			particle_system.play();
+		}
+		add_probe(node_tree, particle_id, 4);
+
+		// 화면 아래 밖에서 올라오는 노드의 꼬리.
+		let trail_id = create_box_node(node_tree, root_id, 560.0, VIEW_HEIGHT + 60.0, 0.0, 0.0);
+		{
+			let trail_renderer = node_tree.add_component(trail_id, TrailRenderer::new()).expect("trail");
+			trail_renderer.set_time(0.5);
+			trail_renderer.set_width(8.0, 1.0);
+			trail_renderer.set_colors("#60c0ff", "#2040a0");
+		}
+		add_probe(node_tree, trail_id, 5);
 		self.rotated_id = Some(rotated_id);
 		self.inner_scroll_id = Some(inner_scroll_id);
+		self.particle_id = Some(particle_id);
+		self.trail_id = Some(trail_id);
 		add_push_counters(node_tree, root_id);
 	}
 
@@ -307,6 +336,13 @@ impl SubtreeCullScene {
 					let inner_offset_y = -((frame_number - STATIC_FIRST_FRAME) as f64) * 1.7;
 					UIScrollView::set_scroll_offset_in_tree(node_tree, inner_scroll_id, Vector2::create(0.0, inner_offset_y));
 				}
+				let particle_id = self.particle_id.expect("particle");
+				node_tree.with_component_mut::<ParticleSystem, _>(particle_id, |particle_system, _node_tree| {
+					particle_system.simulate(1.0 / 60.0);
+				});
+				let trail_id = self.trail_id.expect("trail");
+				let trail_y = VIEW_HEIGHT + 60.0 - frame_number as f64 * 2.0;
+				node_tree[trail_id].set_local_position(Vector2::create(560.0 + (frame_number as f64 * 0.1).sin() * 20.0, trail_y.max(-200.0)));
 				if frame_number == 70 {
 					let rotated_id = self.rotated_id.expect("rotated");
 					node_tree[rotated_id].set_local_rotation(-50.0);
@@ -468,10 +504,29 @@ fn run_check() -> bool {
 				}
 				continue;
 			}
+			// 파티클과 꼬리 노드의 셈은 내용 크기가 0 이라 끈 길(노드마다 거르기)이 늘 그린다. 아래에서 따로 본다.
+			if scene_name == "parent" && probe_index >= 4 {
+				continue;
+			}
 			if on_list != off_list {
 				let first_difference = on_list.iter().zip(off_list.iter()).position(|(on_count, off_count)| on_count != off_count);
 				println!("실패: {} 셈 {} 의 그린 수가 켬과 끔에서 다르다 (처음 다른 프레임 {:?})", scene_name, probe_index, first_difference.map(|frame_index| frame_index + 1));
 				is_passed = false;
+			}
+		}
+
+		// 파티클과 꼬리는 화면 밖이면 켠 길이 그리지 않고(모두 끈 길은 프레임마다), 들어오면 그린다.
+		if scene_name == "parent" {
+			for (probe_index, probe_name) in [(4, "파티클"), (5, "꼬리")] {
+				let on_list = read_probe(&result_list[0].1, probe_index);
+				let all_off_list = read_probe(&result_list[2].1, probe_index);
+				let first_on = on_list.iter().position(|count| *count > 0).map(|frame_index| frame_index + 1);
+				let all_off_drawn_count = all_off_list.iter().filter(|count| **count > 0).count();
+				println!("{} {} 켬 처음 그린 프레임 {:?}, 모두 끈 길이 그린 프레임 수 {}", scene_name, probe_name, first_on, all_off_drawn_count);
+				if first_on.map(|frame_number| frame_number <= 2).unwrap_or(true) || all_off_drawn_count < 290 {
+					println!("실패: {} {} 이 화면 밖에서 건너뛰어지지 않았거나 들어와도 그려지지 않았다", scene_name, probe_name);
+					is_passed = false;
+				}
 			}
 		}
 
@@ -534,6 +589,8 @@ fn main() {
 		mover_id: None,
 		rotated_id: None,
 		inner_scroll_id: None,
+		particle_id: None,
+		trail_id: None,
 		line_list: Vec::new(),
 		probe_frame_list: Vec::new(),
 	};
