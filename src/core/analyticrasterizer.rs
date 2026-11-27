@@ -757,13 +757,12 @@ impl AnalyticEdge {
 		let mut old_y = quad_y;
 		let mut delta_x = quad_dx;
 		let mut delta_y = quad_dy;
-		let mut snapped_x = snapped_x;
-		let mut snapped_y = snapped_y;
 		let shift = self.curve_shift;
 		let (mut new_x, mut new_y);
+		// 맞춘 점은 고리가 끝난 뒤에만 바꾼다. (높이 없는 조각을 건너뛰면 다음 조각이 처음 맞춘 점에서 잇는다)
+		let (mut new_snapped_x, mut new_snapped_y);
 		loop {
 			let slope;
-			let (new_snapped_x, new_snapped_y);
 			count -= 1;
 			if count > 0 {
 				new_x = old_x.wrapping_add(delta_x >> shift);
@@ -811,8 +810,6 @@ impl AnalyticEdge {
 			}
 			old_x = new_x;
 			old_y = new_y;
-			snapped_x = new_snapped_x;
-			snapped_y = new_snapped_y;
 			if !(count > 0 && !is_success) {
 				break;
 			}
@@ -826,8 +823,8 @@ impl AnalyticEdge {
 			quad_ddy,
 			last_x,
 			last_y,
-			snapped_x,
-			snapped_y,
+			snapped_x: new_snapped_x,
+			snapped_y: new_snapped_y,
 		};
 		self.curve_count = count;
 		is_success
