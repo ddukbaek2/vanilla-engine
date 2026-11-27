@@ -345,7 +345,7 @@ fn run_check() -> bool {
 	check(rotated_mismatch_text.is_empty(), format!("돌린 스크롤 목록에서 켠 길이 그린 줄은 끈 길도 그림 {}", rotated_mismatch_text));
 
 	// 마지막 프레임에 그린 칸. (새 자르기 밖 칸은 그리지 않는다)
-	let (last_draw_list, last_inside_list) = on_result.frame_list.last().cloned().unwrap_or_default();
+	let last_draw_list = on_result.frame_list.last().map(|(draw_list, _)| draw_list.clone()).unwrap_or_default();
 	let row_index_list = find_index_list("줄 ");
 	let drawn_row_count = row_index_list.iter().filter(|counter_index| last_draw_list[**counter_index] > 0).count();
 	let mask_index_list = find_index_list("마스크 칸 ");
@@ -363,8 +363,12 @@ fn run_check() -> bool {
 	};
 	check(is_all_inside("판 칸 "), String::from("판 아래 칸은 프레임마다 '다 안' 으로 그림"));
 	check(is_all_inside("돌린 판 칸 "), String::from("돌린 판 아래 칸도 프레임마다 '다 안' 으로 그림 (변환 뒤 디바이스 좌표로 본다)"));
-	let partial_row_count = row_index_list.iter().filter(|counter_index| last_draw_list[**counter_index] > last_inside_list[**counter_index]).count();
-	let inside_row_count = row_index_list.iter().filter(|counter_index| last_inside_list[**counter_index] > 0).count();
+	// 원본처럼 처음부터 마지막 프레임까지 모은 수로 센다.
+	let total_draw_list: Vec<u32> = (0..name_list.len()).map(|counter_index| on_result.frame_list.iter().map(|(draw_list, _)| draw_list[counter_index]).sum()).collect();
+	let total_inside_list: Vec<u32> = (0..name_list.len()).map(|counter_index| on_result.frame_list.iter().map(|(_, inside_list)| inside_list[counter_index]).sum()).collect();
+	let partial_row_count = row_index_list.iter().filter(|counter_index| total_draw_list[**counter_index] > total_inside_list[**counter_index]).count();
+	let inside_row_count = row_index_list.iter().filter(|counter_index| total_inside_list[**counter_index] > 0).count();
+	println!("건너뛴 하위 트리(30) {}, 그린 줄 칸 {}, '다 안' 줄 칸 {}, 걸친 줄 칸 {}, 돌린 줄 칸 {}", on_result.culled_subtree_count, drawn_row_count, inside_row_count, partial_row_count, drawn_rotated_row_count);
 	check(partial_row_count > 0, format!("가장자리에 걸친 줄의 칸은 '다 안' 이 아닌 프레임이 있음 ({})", partial_row_count));
 	check(inside_row_count > 0, format!("새 자르기 안에 다 든 줄의 칸은 다시 '다 안' 으로 그림 ({})", inside_row_count));
 	let off_inside_count: u32 = off_result.frame_list.iter().map(|(_, inside_list)| inside_list.iter().sum::<u32>()).sum();
@@ -391,7 +395,8 @@ fn main() {
 	};
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("다 안 거르기");
-	engine_configuration.window_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
+	// 원본 시험처럼 디바이스 픽셀이 기준 단위의 1/3 이 되게 1920 x 1080 으로 그린다. ('다 안' 은 한 디바이스 픽셀 좁혀 본다)
+	engine_configuration.window_size = Vector2::create(VIEW_WIDTH * 3.0, VIEW_HEIGHT * 3.0);
 	engine_configuration.reference_resolution_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
 	engine_configuration.view_scale_mode = ViewScaleMode::StretchShort;
 	let engine = Engine::new(engine_configuration);

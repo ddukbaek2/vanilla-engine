@@ -470,7 +470,7 @@ impl ShadowText {
 		#[cfg(target_arch = "wasm32")]
 		{
 			if graphic.get_text_string_texture_cache().is_browser_raster() {
-				return self.bake_with_browser(&font_string, fit_width, bake_scale);
+				return self.bake_with_browser(&font_string, bake_scale);
 			}
 		}
 		let scaled_blur = self.shadow_blur * bake_scale;
@@ -508,7 +508,7 @@ impl ShadowText {
 	/// 브라우저 캔버스로 굽기. (웹, 원본 bakeText: 글자 색으로 fillText, 그림자는 캔버스의 shadowColor / shadowBlur / shadowOffsetY, 밑줄과 취소선은 fillRect)
 	//==============================================================================
 	#[cfg(target_arch = "wasm32")]
-	fn bake_with_browser(&self, font_string: &str, fit_width: f64, bake_scale: f64) -> Option<BakedText> {
+	fn bake_with_browser(&self, font_string: &str, bake_scale: f64) -> Option<BakedText> {
 		let font_description = crate::core::textstringtexturecache::parse_font_string(font_string);
 		let browser_bake = crate::platform::web::systemfont::bake_shadow_text(&self.text, &font_description, bake_scale, self.resolve_shaping_text_direction().to_shaping_direction(), self.text_color, self.shadow_color, self.shadow_offset, self.shadow_blur, self.is_underline, self.is_strikethrough)?;
 		Some(BakedText {
