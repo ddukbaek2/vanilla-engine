@@ -106251,7 +106251,7 @@
 										"ko": "텍셀 단위로 그림자 치우침 정하기",
 										"en": "Setting the shadow bias in texels"
 									},
-									"code": "use vanilla::{ShadowMap, Vector3};\n\nfn soften_shadow(gl: &glow::Context) {\n\tlet mut shadow_map = ShadowMap::new(gl, 1024).unwrap();\n\tshadow_map.update_light_matrix(Vector3::create(0.0, 0.0, 0.0), Vector3::create(-0.3, -1.0, -0.2), 20.0, 1.0, 100.0);\n\tshadow_map.set_bias(0.5, 1.5);\n\tprintln!(\"{} {}\", shadow_map.get_depth_bias(), shadow_map.get_normal_bias());\n\tshadow_map.destroy(gl);\n}",
+									"code": "use vanilla::{GlContext, ShadowMap, Vector3};\n\nfn soften_shadow(gl: &GlContext) {\n\tlet mut shadow_map = ShadowMap::new(gl, 1024).unwrap();\n\tshadow_map.update_light_matrix(Vector3::create(0.0, 0.0, 0.0), Vector3::create(-0.3, -1.0, -0.2), 20.0, 1.0, 100.0);\n\tshadow_map.set_bias(0.5, 1.5);\n\tprintln!(\"{} {}\", shadow_map.get_depth_bias(), shadow_map.get_normal_bias());\n\tshadow_map.destroy(gl);\n}",
 									"language": "rust"
 								}
 							]
