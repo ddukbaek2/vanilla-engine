@@ -37,7 +37,7 @@ Vanilla Engine (vanilla-engine) is a Rust port of the web game engine [vanilla.j
 
 | Target | Window and rendering | Verified on |
 | --- | --- | --- |
-| Desktop | winit window and a glutin OpenGL 3.3 core context (depth 24, stencil 8) | Run and verified on Windows 11 and macOS (Apple silicon). Linux has only been compiled for |
+| Desktop | winit window and a glutin OpenGL 3.3 core context (depth 24, stencil 8) | macOS (Apple silicon) was run and verified on a local machine, and Windows and Linux (X11, Wayland) by a GitHub Actions run on 2026-11-27. After that the check is run by hand only |
 | Web | `wasm32-unknown-unknown`, canvas and WebGL2, `requestAnimationFrame` | Run and verified in Chrome |
 
 It has not yet been run on real mobile devices.
