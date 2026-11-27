@@ -233,7 +233,7 @@ init();
 
 - 엔진 `Cargo.toml` 의 프로필은 게임 빌드에 이어지지 않습니다. 출시 설정과 `wasm-release` 는 게임 `Cargo.toml` 에 둡니다.
 - 데스크탑 애셋 폴더의 상대 경로는 실행할 때의 작업 폴더 기준입니다. 다른 자리에서 실행 파일을 열면 애셋을 못 찾을 수 있습니다.
-- 원본의 기본 글꼴(DOSGothic)은 엔진에 넣지 않았습니다. `default_font_url` 의 처음 값도 빈 글입니다. 게임 글꼴은 `default_font_url`, `default_font_bytes`, `FontAsset` 가운데 하나로 줍니다.
+- 엔진은 글꼴을 따로 넣거나 받지 않습니다. `default_font_url` 의 처음 값은 빈 글입니다(원본 `defaultFontUrl` 과 같다). 게임 글꼴은 `default_font_url`, `default_font_bytes`, `FontAsset` 가운데 하나로 줍니다.
 - `title` 은 데스크탑 창 제목입니다. 웹은 시작할 때 이 칸을 문서 제목에 쓰지 않으므로 `index.html` 의 `<title>` 로 정하거나, 실행 중에 `Engine::set_title` 을 부릅니다.
 - 리눅스 대상 검사는 cpal 의 alsa-sys 와 gilrs 의 libudev-sys 가 pkg-config 를 부릅니다. 맥에서 검사할 때는 빈 플래그를 내는 pkg-config 를 `PKG_CONFIG` 로 주고 `PKG_CONFIG_ALLOW_CROSS=1` 로 검사합니다.
 
