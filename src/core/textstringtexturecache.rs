@@ -1558,14 +1558,22 @@ impl TextStringTextureCache {
 					if glyph_width == 0 || glyph_height == 0 {
 						continue;
 					}
-					(glyph_left_x as f32, glyph_bottom_y as f32, (glyph_left_x + glyph_width) as f32, (glyph_bottom_y + glyph_height) as f32)
+					// 맥에서 경로가 없는 글리프(색 이모지 같은)는 스키아 getBounds 다. CoreText 상자를 바깥 정수로 넓힌 뒤 사방 1 픽셀을 더 넓힌다. (SkScalerContext_Mac::generateMetrics 의 outset(1, 1))
+					let outset = if cfg!(target_os = "macos") && face.font.is_core_text_raster() {
+						1
+					}
+					else {
+						0
+					};
+					((glyph_left_x - outset) as f32, (glyph_bottom_y - outset) as f32, (glyph_left_x + glyph_width + outset) as f32, (glyph_bottom_y + glyph_height + outset) as f32)
 				}
 			};
 			let mut left_x = shaped_glyph.position_x + glyph_left_x;
 			let mut right_x = shaped_glyph.position_x + glyph_right_x;
 			let mut top_y = shaped_glyph.position_y + glyph_top_y;
 			let mut bottom_y = shaped_glyph.position_y + glyph_bottom_y;
-			if face.is_synthetic_bold {
+			// 가짜 굵게는 윤곽을 넓힌다. 맥에서 경로가 없는 글리프(색 이모지)는 스키아가 경로를 청하지 않아(neverRequestPath) 상자가 그대로다. (맥 크롬 158 bold 16px 이모지 상자가 보통과 같다)
+			if face.is_synthetic_bold && !(cfg!(target_os = "macos") && face.font.is_core_text_raster()) {
 				let radius = textshaping::calculate_synthetic_bold_radius(font_size);
 				left_x -= radius;
 				right_x += radius;
