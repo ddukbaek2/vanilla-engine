@@ -18,11 +18,11 @@
 //!     (Image::sniff_image_mime_type, WHATWG MIME 스니핑의 그림 표와 AVIF, 모르면 None) 바이트를 받는 create_image_description(bytes) 는 원본과 같다.
 //!   - 원본 이미지 서술의 source(캔버스/비트맵)는 RGBA 픽셀(ImageSource)로 받는다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::core::graphic::GlTexture;
 use crate::core::shaderprogram::ShaderProgram;
-use glow::HasContext;
 use crate::core::gluniform::GlUniformF64;
 use std::cell::{Cell, RefCell};
 use std::future::{Future, IntoFuture};
@@ -319,7 +319,7 @@ pub struct MaterialDescription {
 /// ```rust,no_run
 /// use vanilla::{ImageDescriptionOptions, Material, SkinnedModelRenderer};
 ///
-/// fn create_material(gl: &glow::Context, skinned_model_renderer: &SkinnedModelRenderer) -> Result<Material, String> {
+/// fn create_material(gl: &vanilla::GlContext, skinned_model_renderer: &SkinnedModelRenderer) -> Result<Material, String> {
 /// 	let mut description = Material::create_default_description();
 /// 	description.base_color_factor = [0.8, 0.6, 0.5];
 /// 	let bytes = std::fs::read("examples/assets/atlas/icons.png").map_err(|error| error.to_string())?;
@@ -427,7 +427,7 @@ impl Material {
 	/// 기본 슬롯 8 개에 모두 텍스처를 지은 머티리얼. (glossiness_image 가 있으면 글로시니스 경로, opacity_image 가 있으면 알파 컷아웃)
 	/// 이미지를 못 풀거나 텍스처를 못 만들면 Err(오류 글).
 	//==============================================================================
-	pub fn create_from_description(gl: &glow::Context, shader_program: Rc<ShaderProgram>, description: &MaterialDescription) -> Result<Material, String> {
+	pub fn create_from_description(gl: &GlContext, shader_program: Rc<ShaderProgram>, description: &MaterialDescription) -> Result<Material, String> {
 		let mut material = Material::new(shader_program);
 		material.base_color_factor.set(description.base_color_factor);
 		material.metallic_factor = description.metallic_factor;
@@ -448,7 +448,7 @@ impl Material {
 	/// # 돌려줌
 	/// 하나라도 못 지으면 그 오류. (그때까지 지은 텍스처는 슬롯에 남아 있다, 부른 쪽이 destroy 로 지운다)
 	//==============================================================================
-	fn create_description_textures(&mut self, gl: &glow::Context, description: &MaterialDescription) -> Result<(), String> {
+	fn create_description_textures(&mut self, gl: &GlContext, description: &MaterialDescription) -> Result<(), String> {
 		self.base_color_texture = Some(self.create_owned_texture(gl, description.base_color_image.as_ref(), [255, 255, 255, 255])?);
 		self.normal_texture = Some(self.create_owned_texture(gl, description.normal_image.as_ref(), [128, 128, 255, 255])?);
 		self.metallic_roughness_texture = Some(self.create_owned_texture(gl, description.metallic_roughness_image.as_ref(), [255, 255, 255, 255])?);
@@ -479,14 +479,14 @@ impl Material {
 	/// use vanilla::core::graphic::GlTexture;
 	/// use vanilla::{ImageDescriptionOptions, Material};
 	///
-	/// fn create_albedo_texture(gl: &glow::Context, bytes: Option<Vec<u8>>) -> Result<GlTexture, String> {
+	/// fn create_albedo_texture(gl: &vanilla::GlContext, bytes: Option<Vec<u8>>) -> Result<GlTexture, String> {
 	/// 	let options = ImageDescriptionOptions { is_color_data: true, anisotropy: 8.0, ..ImageDescriptionOptions::default() };
 	/// 	let image_description = bytes.map(|bytes| Material::create_image_description(bytes, None, Some(options)));
 	/// 	Material::create_texture(gl, image_description.as_ref(), [255, 255, 255, 255])
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn create_texture(gl: &glow::Context, image_description: Option<&ImageDescription>, fallback_color: [u8; 4]) -> Result<GlTexture, String> {
+	pub fn create_texture(gl: &GlContext, image_description: Option<&ImageDescription>, fallback_color: [u8; 4]) -> Result<GlTexture, String> {
 		let (texture, _) = Material::create_texture_with_byte_count(gl, image_description, fallback_color)?;
 		Ok(texture)
 	}
@@ -494,7 +494,7 @@ impl Material {
 	//==============================================================================
 	/// 기본 슬롯 텍스처 생성. (create_texture 와 같고, 지은 GPU 바이트를 이 머티리얼의 텍스처 바이트 수에 더한다)
 	//==============================================================================
-	fn create_owned_texture(&mut self, gl: &glow::Context, image_description: Option<&ImageDescription>, fallback_color: [u8; 4]) -> Result<GlTexture, String> {
+	fn create_owned_texture(&mut self, gl: &GlContext, image_description: Option<&ImageDescription>, fallback_color: [u8; 4]) -> Result<GlTexture, String> {
 		let (texture, byte_count) = Material::create_texture_with_byte_count(gl, image_description, fallback_color)?;
 		self.texture_byte_count += byte_count;
 		Ok(texture)
@@ -503,7 +503,7 @@ impl Material {
 	//==============================================================================
 	/// 텍스처 생성 본문. (GL 텍스처와 GPU 바이트 수, 단색은 1x1 4 바이트, 그림은 밉맵까지)
 	//==============================================================================
-	fn create_texture_with_byte_count(gl: &glow::Context, image_description: Option<&ImageDescription>, fallback_color: [u8; 4]) -> Result<(GlTexture, usize), String> {
+	fn create_texture_with_byte_count(gl: &GlContext, image_description: Option<&ImageDescription>, fallback_color: [u8; 4]) -> Result<(GlTexture, usize), String> {
 		let has_bytes = image_description.map(|description| !description.bytes.is_empty()).unwrap_or(false);
 		let has_source = image_description.map(|description| description.source.is_some()).unwrap_or(false);
 		let image_description = match image_description {
@@ -670,7 +670,7 @@ impl Material {
 	/// ```rust,no_run
 	/// use vanilla::{Material, SKIN_TEXTURE_UNIT_DETAILHEIGHT};
 	///
-	/// fn attach_detail_height(gl: &glow::Context, material: &Material) -> Result<(), String> {
+	/// fn attach_detail_height(gl: &vanilla::GlContext, material: &Material) -> Result<(), String> {
 	/// 	let detail_height_texture = Material::create_texture(gl, None, [128, 128, 128, 255])?;
 	/// 	material.set_texture("detailHeightTexture", SKIN_TEXTURE_UNIT_DETAILHEIGHT, Some(detail_height_texture));
 	/// 	Ok(())
@@ -696,7 +696,7 @@ impl Material {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
-	pub fn apply(&self, gl: &glow::Context) {
+	pub fn apply(&self, gl: &GlContext) {
 		let shader_program = &self.shader_program;
 		let base_color_factor_location = shader_program.get_uniform_location(gl, "baseColorFactor");
 		let metallic_factor_location = shader_program.get_uniform_location(gl, "metallicFactor");
@@ -933,7 +933,7 @@ impl Material {
 	/// # 인자
 	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
-	pub fn destroy(&self, gl: &glow::Context) {
+	pub fn destroy(&self, gl: &GlContext) {
 		if !self.owns_textures {
 			return;
 		}
@@ -1087,14 +1087,14 @@ mod tests {
 	fn failed_description_deletes_created_textures() {
 		use crate::core::imagetexturecache::fake_gl::{self, FakeGlObject};
 		let gl = fake_gl::create_context();
-		let shader_program = Rc::new(ShaderProgram::new(&gl, "", "").expect("shader program"));
+		let shader_program = Rc::new(ShaderProgram::new(GlContext::from_context(&gl), "", "").expect("shader program"));
 		let mut description = Material::create_default_description();
 		description.metallic_roughness_image = Some(Material::create_image_description(vec![1, 2, 3], None, None));
-		assert!(Material::create_from_description(&gl, shader_program.clone(), &description).is_err());
+		assert!(Material::create_from_description(GlContext::from_context(&gl), shader_program.clone(), &description).is_err());
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Texture), 0);
-		let material = Material::create_from_description(&gl, shader_program, &Material::create_default_description()).expect("material");
+		let material = Material::create_from_description(GlContext::from_context(&gl), shader_program, &Material::create_default_description()).expect("material");
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Texture), 8);
-		material.destroy(&gl);
+		material.destroy(GlContext::from_context(&gl));
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Texture), 0);
 	}
 }

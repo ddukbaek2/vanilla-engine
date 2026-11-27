@@ -8,7 +8,7 @@
 //! - 사용: ShaderWarmer::new(gl, &[(정점 소스, 조각 소스, 어트리뷰트 위치 목록)]) 뒤 매 프레임 update(gl).
 //!   어트리뷰트 위치는 ShaderProgram::create_with_attribute_locations 에 넘길 것과 같게 줘야 캐시에 걸린다.
 //==============================================================================
-use glow::HasContext;
+use crate::core::glcontext::GlContext;
 
 use crate::core::graphic::{GlProgram, GlShader};
 use crate::core::shaderprogram::convert_to_desktop_source;
@@ -72,7 +72,7 @@ impl ShaderWarmer {
 	/// # 돌려줌
 	/// 만든 워머. 확장이 없으면 아무것도 걸지 않아 is_finished 가 바로 true 다. (컴파일이나 링크가 틀려도 오류를 내지 않는다)
 	//==============================================================================
-	pub fn new(gl: &glow::Context, program_source_list: &[ShaderWarmerSource]) -> ShaderWarmer {
+	pub fn new(gl: &GlContext, program_source_list: &[ShaderWarmerSource]) -> ShaderWarmer {
 		let is_supported = gl.supported_extensions().iter().any(|extension_name| extension_name.contains("parallel_shader_compile"));
 		let mut shader_warmer = ShaderWarmer { is_supported, pending_program_list: Vec::new() };
 		if !is_supported {
@@ -89,7 +89,7 @@ impl ShaderWarmer {
 	//==============================================================================
 	/// 하나를 컴파일하고 링크 걸기. (ShaderProgram 과 같은 차례, 결과는 묻지 않는다)
 	//==============================================================================
-	fn link_program(gl: &glow::Context, vertex_shader_source: &str, fragment_shader_source: &str, attribute_location_list: &[(&str, u32)]) -> Option<(GlProgram, GlShader, GlShader)> {
+	fn link_program(gl: &GlContext, vertex_shader_source: &str, fragment_shader_source: &str, attribute_location_list: &[(&str, u32)]) -> Option<(GlProgram, GlShader, GlShader)> {
 		let desktop_vertex_shader_source = convert_to_desktop_source(vertex_shader_source);
 		let desktop_fragment_shader_source = convert_to_desktop_source(fragment_shader_source);
 		unsafe {
@@ -116,7 +116,7 @@ impl ShaderWarmer {
 	/// # 인자
 	/// - `gl`: new 에 준 것과 같은 GL 컨텍스트.
 	//==============================================================================
-	pub fn update(&mut self, gl: &glow::Context) {
+	pub fn update(&mut self, gl: &GlContext) {
 		if self.pending_program_list.is_empty() {
 			return;
 		}

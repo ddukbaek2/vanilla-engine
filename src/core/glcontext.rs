@@ -1,28 +1,32 @@
 //==============================================================================
 //! 엔진 GL 컨텍스트. (원본 Graphic.getWebGL2RenderingContext 가 주는 컨텍스트, 상태 함수를 가로챈 것)
 //! - 원본은 컨텍스트 객체의 상태 함수를 가로채 게임이 직접 부른 GL 까지 상태 캐시가 기억한다. glow 의 HasContext 는 봉인된 트레이트라
-//!   밖에서 구현할 수 없어, glow::Context 를 감싼 이 형이 상태 함수를 같은 이름, 같은 꼴의 고유 메서드로 가로채 상태 캐시를 거쳐 부른다.
-//! - 상태 함수 밖의 것(그리기, 버퍼, 유니폼, 셰이더 같은 것)은 Deref 로 안의 glow::Context 에 그대로 간다. (원본도 가로채지 않은 함수는 그대로다)
-//!   고유 메서드가 트레이트 메서드보다 먼저 골리므로 `use glow::HasContext;` 를 둔 게임 코드도 고칠 것 없이 상태 캐시를 거친다.
-//! - 엔진 함수가 받는 `&glow::Context` 자리에 그대로 넘긴다. (Deref 로 바뀐다, 엔진 안은 상태 캐시를 거쳐 부른다)
-//! - `let raw: &glow::Context = gl;` 처럼 안의 glow::Context 를 꺼내 상태 함수를 바로 부르면 상태 캐시가 모른다. 그때는 Graphic::reset_gl_state_cache 를 부른다.
-//!   (원본에서 WebGL2RenderingContext.prototype.viewport.call 처럼 가로채지 못한 길로 부른 것과 같다)
+//!   밖에서 구현할 수 없어, glow::Context 를 감싼 이 형이 HasContext 의 메서드 모두를 같은 이름, 같은 꼴의 고유 메서드로 둔다.
+//! - 상태 함수(묶기, 켜고 끄기, 뷰포트, 가위, 섞기, 깊이, 면, 프로그램, 버텍스 어레이, 버퍼 묶기, 텍스처, 비우기 색, 픽셀 저장)는 이 파일에서 손으로 두어
+//!   상태 캐시를 거쳐 부른다. 원본 WebGL2 에 없는 데스크탑 전용 상태 함수(glEnablei, glViewportArrayv 같은 것)는 부른 뒤 상태 캐시가 그 값을 잊는다.
+//! - 그 밖의 것(그리기, 버퍼 채우기, 유니폼, 셰이더 같은 것)은 glcontext/generated.rs 에 기계로 지어 안의 glow::Context 를 그대로 부른다. (원본도 가로채지 않은 함수는 그대로다)
+//! - 안의 glow::Context 를 꺼내는 공개 길은 없다. (Deref, AsRef 를 두지 않는다) 게임 도움 함수는 `&GlContext` 를 받는다.
+//!   `&glow::Context` 를 받는 함수에는 넘기지 못해(컴파일 오류) 상태 캐시를 건너뛰는 길이 생기지 않는다. 엔진 안의 GL 초기화와 상태 캐시만 crate 안 길로 꺼낸다.
+//! - `use glow::HasContext;` 는 없어도 된다. (있어도 고유 메서드가 골리고, GlContext 는 HasContext 를 구현하지 않는다)
 //! - 엔진은 GL 을 넘기는 자리에서 상태 캐시를 스스로 잊지 않는다. (원본과 같음) 상태 캐시를 거치지 않은 호출은 VANILLA_GL_STATE_CHECK=1 로 돌려 찾는다.
 //==============================================================================
 use crate::core::glstatecache::{self, GlStatePart};
 use crate::core::graphic::{GlBuffer, GlFramebuffer, GlProgram, GlTexture, GlVertexArray};
 use glow::HasContext;
+use std::rc::Rc;
+
+mod generated;
 
 //==============================================================================
 /// 엔진 GL 컨텍스트. (원본 WebGL2RenderingContext, Graphic::get_gl 이 준다, 상태 함수가 상태 캐시를 거친다)
-/// - 상태 함수(묶기, 켜고 끄기, 뷰포트, 가위, 섞기, 깊이, 면, 프로그램, 버텍스 어레이, 버퍼 묶기, 텍스처, 비우기 색, 픽셀 저장)는 상태 캐시를 거쳐 GL 을 부르고,
-///   읽기(get_parameter_*, is_enabled)는 기억한 값으로 답한다. 그 밖의 함수는 안의 glow::Context 를 그대로 부른다.
+/// - glow 의 HasContext 메서드 모두를 같은 이름, 같은 꼴로 둔다. 상태 함수(묶기, 켜고 끄기, 뷰포트, 가위, 섞기, 깊이, 면, 프로그램, 버텍스 어레이, 버퍼 묶기, 텍스처, 비우기 색, 픽셀 저장)는
+///   상태 캐시를 거쳐 GL 을 부르고, 읽기(get_parameter_*, is_enabled)는 기억한 값으로 답한다. 그 밖의 함수는 안의 glow::Context 를 그대로 부른다.
 /// - 게임 코드가 이것으로 상태를 바꾼 직후 같은 콜백 안에서 엔진 그리기를 이어 불러도 엔진이 바뀐 상태를 안다.
+/// - 안의 glow::Context 는 꺼낼 수 없다. 게임의 도움 함수는 `gl: &GlContext` 를 받는다. (`&glow::Context` 를 받는 함수에는 넘기지 못한다)
 ///
 /// # 예제
 /// 가위로 왼쪽 위 칸만 비운 뒤 엔진 그리기 잇기
 /// ```rust,no_run
-/// use glow::HasContext;
 /// use vanilla::{Colors, Graphic, Rect};
 ///
 /// fn draw(graphic: &mut Graphic) {
@@ -52,6 +56,104 @@ impl GlContext {
 	pub(crate) fn from_context(context: &glow::Context) -> &GlContext {
 		// repr(transparent) 라 GlContext 와 glow::Context 는 같은 꼴이다.
 		unsafe { &*(context as *const glow::Context as *const GlContext) }
+	}
+
+	//==============================================================================
+	/// 안의 glow 컨텍스트 꺼내기. (엔진 안의 GL 초기화와 상태 캐시만 쓴다, 여기로 상태 함수를 부르면 상태 캐시를 건너뛴다)
+	//==============================================================================
+	pub(crate) fn get_glow_context_unchecked(&self) -> &glow::Context {
+		&self.context
+	}
+
+	//==============================================================================
+	/// 이름 붙은 프레임 버퍼 만들기. (데스크탑 GL 의 glCreateFramebuffers, 지운 이름을 GL 이 다시 주면 상태 캐시가 그 이름의 기억을 잊는다)
+	///
+	/// # 돌려줌
+	/// 새 프레임 버퍼. 못 만들면 까닭.
+	//==============================================================================
+	pub unsafe fn create_named_framebuffer(&self) -> Result<GlFramebuffer, String> {
+		let framebuffer = unsafe { self.context.create_named_framebuffer() }?;
+		glstatecache::forget(&self.context, GlStatePart::Framebuffer(framebuffer));
+		Ok(framebuffer)
+	}
+
+	//==============================================================================
+	/// 이름 붙은 텍스처 만들기. (데스크탑 GL 의 glCreateTextures, 지운 이름을 GL 이 다시 주면 상태 캐시가 그 이름의 기억을 잊는다)
+	///
+	/// # 인자
+	/// - `target`: 텍스처 대상. (TEXTURE_2D 같은 것)
+	///
+	/// # 돌려줌
+	/// 새 텍스처. 못 만들면 까닭.
+	//==============================================================================
+	pub unsafe fn create_named_texture(&self, target: u32) -> Result<GlTexture, String> {
+		let texture = unsafe { self.context.create_named_texture(target) }?;
+		glstatecache::forget(&self.context, GlStatePart::Texture(texture));
+		Ok(texture)
+	}
+
+	//==============================================================================
+	/// 이름 붙은 버퍼 만들기. (데스크탑 GL 의 glCreateBuffers, 지운 이름을 GL 이 다시 주면 상태 캐시가 그 이름의 기억을 잊는다)
+	///
+	/// # 돌려줌
+	/// 새 버퍼. 못 만들면 까닭.
+	//==============================================================================
+	pub unsafe fn create_named_buffer(&self) -> Result<GlBuffer, String> {
+		let buffer = unsafe { self.context.create_named_buffer() }?;
+		glstatecache::forget(&self.context, GlStatePart::Buffer(buffer));
+		Ok(buffer)
+	}
+
+	//==============================================================================
+	/// 이름 붙은 버텍스 어레이 만들기. (데스크탑 GL 의 glCreateVertexArrays, 지운 이름을 GL 이 다시 주면 상태 캐시가 그 이름의 기억을 잊는다)
+	///
+	/// # 돌려줌
+	/// 새 버텍스 어레이. 못 만들면 까닭.
+	//==============================================================================
+	pub unsafe fn create_named_vertex_array(&self) -> Result<GlVertexArray, String> {
+		let vertex_array = unsafe { self.context.create_named_vertex_array() }?;
+		glstatecache::forget(&self.context, GlStatePart::VertexArray(vertex_array));
+		Ok(vertex_array)
+	}
+
+	//==============================================================================
+	/// 프로그램 바이너리 올리기. (GL ES 3 의 glProgramBinary, 링크 결과가 바뀌어 상태 캐시가 그 프로그램의 링크 결과를 잊는다)
+	///
+	/// # 인자
+	/// - `program`: 올릴 프로그램.
+	/// - `binary`: get_program_binary 로 받은 바이너리.
+	//==============================================================================
+	pub unsafe fn program_binary(&self, program: GlProgram, binary: &glow::ProgramBinary) {
+		unsafe {
+			self.context.program_binary(program, binary);
+		}
+		glstatecache::forget(&self.context, GlStatePart::Program(program));
+	}
+
+	//==============================================================================
+	/// 픽셀 저장 설정을 참 거짓으로. (원본 pixelStorei 에 true, false 를 넘긴 것, glow 처럼 0 과 1 로 pixel_store_i32 를 거친다)
+	///
+	/// # 인자
+	/// - `parameter`: 설정 이름. (UNPACK_FLIP_Y_WEBGL 같은 것)
+	/// - `value`: 값.
+	//==============================================================================
+	pub unsafe fn pixel_store_bool(&self, parameter: u32, value: bool) {
+		unsafe { glstatecache::pixel_store_i32(&self.context, parameter, value as i32) }
+	}
+
+	//==============================================================================
+	/// 바깥에서 만든 프레임 버퍼 묶기. (웹 전용, glow 의 같은 이름, 상태 캐시가 프레임 버퍼 묶음을 잊는다)
+	///
+	/// # 인자
+	/// - `target`: FRAMEBUFFER, DRAW_FRAMEBUFFER, READ_FRAMEBUFFER.
+	/// - `framebuffer`: 묶을 WebGL 프레임 버퍼.
+	//==============================================================================
+	#[cfg(all(target_family = "wasm", not(target_os = "emscripten")))]
+	pub unsafe fn bind_external_framebuffer(&self, target: u32, framebuffer: &web_sys::WebGlFramebuffer) {
+		unsafe {
+			self.context.bind_external_framebuffer(target, framebuffer);
+		}
+		glstatecache::forget(&self.context, GlStatePart::FramebufferBinding);
 	}
 
 	//==============================================================================
@@ -664,7 +766,7 @@ impl GlContext {
 	//==============================================================================
 	pub unsafe fn get_parameter_framebuffer(&self, parameter: u32) -> Option<GlFramebuffer> {
 		match parameter {
-			glow::DRAW_FRAMEBUFFER_BINDING => crate::core::graphic::read_framebuffer_binding(&self.context),
+			glow::DRAW_FRAMEBUFFER_BINDING => crate::core::graphic::read_framebuffer_binding(self),
 			glow::READ_FRAMEBUFFER_BINDING => glstatecache::read_reading_framebuffer(&self.context, || unsafe { self.context.get_parameter_framebuffer(parameter) }),
 			_ => unsafe { self.context.get_parameter_framebuffer(parameter) },
 		}
@@ -681,7 +783,7 @@ impl GlContext {
 	//==============================================================================
 	pub unsafe fn get_parameter_program(&self, parameter: u32) -> Option<GlProgram> {
 		if parameter == glow::CURRENT_PROGRAM {
-			return crate::core::graphic::read_program_binding(&self.context);
+			return crate::core::graphic::read_program_binding(self);
 		}
 		unsafe { self.context.get_parameter_program(parameter) }
 	}
@@ -697,7 +799,7 @@ impl GlContext {
 	//==============================================================================
 	pub unsafe fn get_parameter_vertex_array(&self, parameter: u32) -> Option<GlVertexArray> {
 		if parameter == glow::VERTEX_ARRAY_BINDING {
-			return crate::core::graphic::read_vertex_array_binding(&self.context);
+			return crate::core::graphic::read_vertex_array_binding(self);
 		}
 		unsafe { self.context.get_parameter_vertex_array(parameter) }
 	}
@@ -713,19 +815,115 @@ impl GlContext {
 	//==============================================================================
 	pub unsafe fn get_parameter_texture(&self, parameter: u32) -> Option<GlTexture> {
 		if parameter == glow::TEXTURE_BINDING_2D {
-			return crate::core::graphic::read_texture_binding(&self.context);
+			return crate::core::graphic::read_texture_binding(self);
 		}
 		unsafe { self.context.get_parameter_texture(parameter) }
 	}
 }
 
-impl std::ops::Deref for GlContext {
-	type Target = glow::Context;
+//==============================================================================
+/// 상태 캐시 함수가 받는 컨텍스트. (glow::Context 와 GlContext 둘 다, crate 안에서만 보인다)
+//==============================================================================
+pub(crate) trait GlowContextSource {
+	//==============================================================================
+	/// 안의 glow 컨텍스트. (같은 자리를 가리킨다, 상태 캐시가 컨텍스트를 찾는 열쇠)
+	//==============================================================================
+	fn read_glow_context(&self) -> &glow::Context;
+}
 
+impl GlowContextSource for glow::Context {
 	//==============================================================================
-	/// 안의 glow 컨텍스트. (가로채지 않은 함수가 이리로 간다, 엔진 함수의 `&glow::Context` 인자로 넘길 때도)
+	/// 그 자신.
 	//==============================================================================
-	fn deref(&self) -> &glow::Context {
+	fn read_glow_context(&self) -> &glow::Context {
+		self
+	}
+}
+
+impl GlowContextSource for GlContext {
+	//==============================================================================
+	/// 감싼 glow 컨텍스트.
+	//==============================================================================
+	fn read_glow_context(&self) -> &glow::Context {
 		&self.context
 	}
 }
+
+impl<T: GlowContextSource + ?Sized> GlowContextSource for &T {
+	//==============================================================================
+	/// 가리키는 것의 glow 컨텍스트.
+	//==============================================================================
+	fn read_glow_context(&self) -> &glow::Context {
+		(**self).read_glow_context()
+	}
+}
+
+impl<T: GlowContextSource + ?Sized> GlowContextSource for Rc<T> {
+	//==============================================================================
+	/// 가리키는 것의 glow 컨텍스트.
+	//==============================================================================
+	fn read_glow_context(&self) -> &glow::Context {
+		(**self).read_glow_context()
+	}
+}
+
+//==============================================================================
+// 컴파일 시험. (안의 glow::Context 를 꺼내는 공개 길이 없는지, cargo test --doc 이 돌린다)
+//==============================================================================
+/// `&glow::Context` 를 받는 함수에 GlContext 를 넘기지 못한다.
+/// ```compile_fail
+/// fn helper(gl: &glow::Context) {
+/// 	let _ = gl;
+/// }
+/// fn draw(graphic: &mut vanilla::Graphic) {
+/// 	helper(graphic.get_gl());
+/// }
+/// ```
+///
+/// GlContext 는 glow::HasContext 를 구현하지 않는다. (트레이트로 상태 함수를 바로 부르지 못한다)
+/// ```compile_fail
+/// fn draw(graphic: &mut vanilla::Graphic) {
+/// 	unsafe {
+/// 		glow::HasContext::enable(graphic.get_gl(), glow::BLEND);
+/// 	}
+/// }
+/// ```
+///
+/// Deref, AsRef 로 꺼내지 못한다.
+/// ```compile_fail
+/// fn draw(graphic: &mut vanilla::Graphic) {
+/// 	let raw: &glow::Context = graphic.get_gl().as_ref();
+/// 	let _ = raw;
+/// }
+/// ```
+///
+/// ```compile_fail
+/// fn draw(graphic: &mut vanilla::Graphic) {
+/// 	let raw: &glow::Context = &*graphic.get_gl();
+/// 	let _ = raw;
+/// }
+/// ```
+///
+/// crate 안 길은 밖에서 보이지 않는다.
+/// ```compile_fail
+/// fn draw(graphic: &mut vanilla::Graphic) {
+/// 	let raw: &glow::Context = graphic.get_gl().get_glow_context_unchecked();
+/// 	let _ = raw;
+/// }
+/// ```
+///
+/// 같은 이름의 고유 메서드로는 그대로 돈다. (`use glow::HasContext;` 가 없어도)
+/// ```rust,no_run
+/// fn helper(gl: &vanilla::GlContext) {
+/// 	unsafe {
+/// 		gl.enable(glow::BLEND);
+/// 		gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+/// 		gl.draw_arrays(glow::TRIANGLES, 0, 3);
+/// 	}
+/// }
+/// fn draw(graphic: &mut vanilla::Graphic) {
+/// 	helper(graphic.get_gl());
+/// }
+/// ```
+#[cfg(doctest)]
+struct RawContextAccessTest;

@@ -69,7 +69,7 @@ const ROCK_COUNT: usize = 27;
 //==============================================================================
 // 도형 하나로 지은 배열.
 //==============================================================================
-fn build_mesh(renderer: &ToonRenderer, gl: &glow::Context, geometry: &vanilla::ToonGeometry, matrix: &Matrix4, color_text: &str, options: ToonPartOptions) -> Option<ToonMesh> {
+fn build_mesh(renderer: &ToonRenderer, gl: &GlContext, geometry: &vanilla::ToonGeometry, matrix: &Matrix4, color_text: &str, options: ToonPartOptions) -> Option<ToonMesh> {
 	let mut builder = MeshBuilder::new();
 	builder.add_part(geometry, matrix, color_text, options);
 	renderer.create_mesh(gl, &builder.read_arrays())
@@ -138,7 +138,7 @@ struct MaterialResources {
 }
 
 impl MaterialResources {
-	fn new(gl: &glow::Context) -> Result<MaterialResources, String> {
+	fn new(gl: &GlContext) -> Result<MaterialResources, String> {
 		let mut renderer = ToonRenderer::new(gl)?;
 		renderer.set_light([-0.4, -1.0, -0.3], [0.9, 0.85, 0.8], [0.32, 0.36, 0.46], [0.14, 0.12, 0.11]);
 		renderer.set_fill_light([0.7, -0.2, 0.6], [0.12, 0.1, 0.16]);
@@ -211,7 +211,7 @@ impl ToonMaterialScene {
 	//==============================================================================
 	// 한 프레임 그리기. (time 초의 자리)
 	//==============================================================================
-	fn draw_scene(resources: &mut MaterialResources, camera: &Camera3D, gl: &glow::Context, time: f64) {
+	fn draw_scene(resources: &mut MaterialResources, camera: &Camera3D, gl: &GlContext, time: f64) {
 		let mut point_light_list = Vec::new();
 		let light_color_list = [[1.0, 0.35, 0.3], [0.3, 1.0, 0.45], [0.35, 0.5, 1.0]];
 		for (index, color) in light_color_list.iter().enumerate() {

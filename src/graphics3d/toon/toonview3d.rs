@@ -25,7 +25,6 @@ use crate::core::glcontext::GlContext;
 use std::cell::{RefCell, RefMut};
 use std::rc::{Rc, Weak};
 
-use glow::HasContext;
 
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
@@ -70,7 +69,7 @@ pub type ToonViewFallbackDrawCallback = Box<dyn FnMut(&mut Graphic, Vector2)>;
 /// 렌더 스케일 판에 그리는 동안 들고, 끝나면(패닉해도) 판을 풀고 앞의 프레임 버퍼와 상태를 되돌리는 가드.
 //==============================================================================
 struct RenderScaleTargetGuard<'a> {
-	gl: &'a glow::Context,
+	gl: &'a GlContext,
 	target: &'a RenderTarget,
 	output_framebuffer: Option<GlFramebuffer>,
 	color_write_mask: [bool; 4],
@@ -133,7 +132,7 @@ impl Drop for ScreenRectGuard<'_> {
 /// builder.add_part(&create_sphere_geometry(0.5, 24, 16, std::f64::consts::PI), &Matrix4::create_translation(0.0, 0.5, 0.0), "#f0b080", ToonPartOptions::default());
 /// let arrays = builder.read_arrays();
 /// let mut mesh: Option<ToonMesh> = None;
-/// view.set_draw_callback(Some(Box::new(move |renderer: &mut ToonRenderer, camera: &Camera3D, _screen_rect: Rect, gl: &GlContext, _output: ToonViewOutput| {
+/// view.set_draw_callback(Some(Box::new(move |renderer: &mut ToonRenderer, camera: &Camera3D, _screen_rect: Rect, gl: &vanilla::GlContext, _output: ToonViewOutput| {
 /// 	if mesh.is_none() {
 /// 		mesh = renderer.create_mesh(gl, &arrays);
 /// 	}
@@ -582,7 +581,7 @@ impl ToonView3D {
 			return;
 		};
 		if let Some(gl) = self.gl_context.upgrade() {
-			render_scale_target.destroy(&gl);
+			render_scale_target.destroy(GlContext::from_context(&gl));
 		}
 	}
 }
@@ -600,7 +599,7 @@ impl Drop for ToonView3D {
 /// 그리기 함수에 넘길 출력 읽기. (지금 묶인 프레임 버퍼와 그 안의 GL 뷰포트, 왼쪽 아래 원점, 원본 writeOutputScreenRect)
 /// - 사각형은 지금 뷰포트 안의 픽셀(왼쪽 위 원점)이다. 정수 픽셀로 반올림한다. (GL 뷰포트는 정수)
 //==============================================================================
-fn read_output(gl: &glow::Context, x: f64, y: f64, width: f64, height: f64) -> ToonViewOutput {
+fn read_output(gl: &GlContext, x: f64, y: f64, width: f64, height: f64) -> ToonViewOutput {
 	let mut viewport = [0i32; 4];
 	unsafe {
 		crate::core::glstatecache::get_parameter_i32_slice(gl, glow::VIEWPORT, &mut viewport);
@@ -616,7 +615,7 @@ fn read_output(gl: &glow::Context, x: f64, y: f64, width: f64, height: f64) -> T
 //==============================================================================
 /// 배율 판 읽기. (없거나 크기가 다르면 짓거나 고친다, 못 지으면 렌더 스케일을 1 로 되돌리고 None)
 //==============================================================================
-fn read_render_scale_target<'a>(gl: &glow::Context, render_scale_target: &'a mut Option<RenderTarget>, render_scale: &mut f64, width: i32, height: i32, sample_count: i32) -> Option<&'a RenderTarget> {
+fn read_render_scale_target<'a>(gl: &GlContext, render_scale_target: &'a mut Option<RenderTarget>, render_scale: &mut f64, width: i32, height: i32, sample_count: i32) -> Option<&'a RenderTarget> {
 	if render_scale_target.is_none() {
 		let options = RenderTargetOptions { sample_count, depth_bits: 24, ..RenderTargetOptions::default() };
 		match RenderTarget::new(gl, width, height, true, Some(options)) {

@@ -10,13 +10,13 @@
 //!     컴포넌트가 버려질 때(Drop, 노드를 지우거나 씬을 내릴 때)도 스스로 지운다. (ScreenEffect 와 같다)
 //!   - 줄이 한 번에 그릴 수 있는 정점 수(Graphic 한도)를 넘으면 나눠 그린다. 원본은 배열을 늘려 한 번에 그린다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{GlTexture, Graphic, PARTICLE_FLOATS_PER_VERTEX};
 use crate::effect::particlesystem::draw_colored_quads_in_chunks;
 use crate::core::node::nodetree::ComponentContext;
 use crate::core::node::worldnode::NodeTransform;
-use glow::HasContext;
 use std::rc::Weak;
 
 /// 붙을 때 content_size 가 비어 있으면 쓰는 크기. (원본 생성자)
@@ -182,7 +182,7 @@ impl HeatHazeEffect {
 	//==============================================================================
 	/// 떠 올 텍스처 준비. (크기가 바뀌면 다시 잡는다. 실패하면 None)
 	//==============================================================================
-	fn ensure_capture_texture(&mut self, gl: &glow::Context, width: i32, height: i32) -> Option<GlTexture> {
+	fn ensure_capture_texture(&mut self, gl: &GlContext, width: i32, height: i32) -> Option<GlTexture> {
 		if let Some(capture_texture) = self.capture_texture {
 			if self.capture_texture_width == width && self.capture_texture_height == height {
 				return Some(capture_texture);
@@ -400,16 +400,16 @@ mod tests {
 		let gl = fake_gl::create_context();
 		crate::core::imagetexturecache::register_pixel_read_context(&gl);
 		let mut heat_haze_effect = HeatHazeEffect::new();
-		assert!(heat_haze_effect.ensure_capture_texture(&gl, 32, 16).is_some());
-		assert!(heat_haze_effect.ensure_capture_texture(&gl, 64, 16).is_some());
+		assert!(heat_haze_effect.ensure_capture_texture(GlContext::from_context(&gl), 32, 16).is_some());
+		assert!(heat_haze_effect.ensure_capture_texture(GlContext::from_context(&gl), 64, 16).is_some());
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Texture), 1);
 		heat_haze_effect.destroy();
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Texture), 0);
-		assert!(heat_haze_effect.ensure_capture_texture(&gl, 32, 16).is_some());
+		assert!(heat_haze_effect.ensure_capture_texture(GlContext::from_context(&gl), 32, 16).is_some());
 		drop(heat_haze_effect);
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Texture), 0);
 		let mut orphan_effect = HeatHazeEffect::new();
-		assert!(orphan_effect.ensure_capture_texture(&gl, 8, 8).is_some());
+		assert!(orphan_effect.ensure_capture_texture(GlContext::from_context(&gl), 8, 8).is_some());
 		drop(gl);
 		drop(orphan_effect);
 	}

@@ -30,7 +30,7 @@
 //! use vanilla::{create_box_geometry, GlContext, Matrix4, MeshBuilder, ShaderProgram, ToonDrawOptions, ToonMaterialChunks, ToonPartOptions, ToonProgramKind, ToonRenderer, ToonTextureOptions, Vector3};
 //! use glow::HasContext;
 //!
-//! fn draw_stripe(gl: &glow::Context) -> Result<(), String> {
+//! fn draw_stripe(gl: &vanilla::GlContext) -> Result<(), String> {
 //! 	let mut renderer = ToonRenderer::new(gl)?;
 //! 	let material = renderer.create_material(ToonMaterialChunks {
 //! 		name: String::from("stripe"),
@@ -47,7 +47,7 @@
 //! 	let mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("mesh failed")?;
 //! 	let view_matrix = Matrix4::create_look_at(Vector3::create(2.0, 2.0, 3.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
 //! 	renderer.begin_frame_with_matrices(gl, &view_matrix, &Matrix4::create_perspective(0.8, 1.0, 0.1, 20.0));
-//! 	let set_shift = |program: &ShaderProgram, gl: &GlContext, _kind: ToonProgramKind| unsafe {
+//! 	let set_shift = |program: &ShaderProgram, gl: &vanilla::GlContext, _kind: ToonProgramKind| unsafe {
 //! 		gl.uniform_1_f32(program.get_uniform_location(gl, "stripeShift").as_ref(), 0.25);
 //! 	};
 //! 	renderer.draw_mesh(gl, &mesh, &Matrix4::create_identity(), ToonDrawOptions {
@@ -158,7 +158,7 @@ pub struct ToonMaterialChunks {
 /// ```rust,no_run
 /// use vanilla::{ToonMaterialChunks, ToonRenderer};
 ///
-/// fn prepare_lean_rim(gl: &glow::Context, renderer: &mut ToonRenderer) -> Result<(), String> {
+/// fn prepare_lean_rim(gl: &vanilla::GlContext, renderer: &mut ToonRenderer) -> Result<(), String> {
 /// 	let material = renderer.create_material(ToonMaterialChunks {
 /// 		name: String::from("leanRim"),
 /// 		light_chunk: String::from("void applyLight(ToonSurface surface, inout ToonLighting lighting) { lighting.rim *= 2.0; }"),
@@ -287,7 +287,7 @@ pub struct ToonInstanceAttribute {
 /// ```rust,no_run
 /// use vanilla::{ToonBufferUsage, ToonInstanceBuffer, ToonInstanceLayout, ToonMaterialChunks, ToonRenderer};
 ///
-/// fn create_scatter(gl: &glow::Context, renderer: &mut ToonRenderer) -> Result<ToonInstanceBuffer, String> {
+/// fn create_scatter(gl: &vanilla::GlContext, renderer: &mut ToonRenderer) -> Result<ToonInstanceBuffer, String> {
 /// 	let instance_layout = ToonInstanceLayout::new(&[("instanceOffset", 3), ("instanceScale", 1), ("instanceTint", 4)])?;
 /// 	let material = renderer.create_material(ToonMaterialChunks {
 /// 		name: String::from("scatter"),

@@ -14,7 +14,6 @@ use crate::base::matrix4::Matrix4;
 use crate::base::vector3::Vector3;
 use crate::core::graphic::GlTexture;
 use crate::graphics3d::GlFramebuffer;
-use glow::HasContext;
 
 //==============================================================================
 // 전역 상수 목록.
@@ -39,7 +38,7 @@ const CUBE_FACE_UPS: [[f64; 3]; 6] = [[0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.
 /// 깊이 판 짓기. (하드웨어 비교 샘플링 sampler2DShadow 의 DEPTH_COMPONENT24 텍스처와 컬러 없는 프레임버퍼, 앞의 텍스처와 프레임버퍼 묶음은 돌린다)
 /// - 깊이 텍스처를 묶은 채로 두면, 그 유닛을 읽는 프로그램이 이 프레임버퍼에 그릴 때 되먹임 고리로 INVALID_OPERATION 이 난다.
 //==============================================================================
-fn create_depth_target(gl: &glow::Context, resolution: i32) -> Result<(GlFramebuffer, GlTexture), String> {
+fn create_depth_target(gl: &crate::GlContext, resolution: i32) -> Result<(GlFramebuffer, GlTexture), String> {
 	unsafe {
 		let previous_texture = crate::graphics3d::read_texture_binding(gl);
 		let previous_framebuffer = crate::graphics3d::read_framebuffer_binding(gl);
@@ -68,7 +67,7 @@ fn create_depth_target(gl: &glow::Context, resolution: i32) -> Result<(GlFramebu
 /// - 가위 시험을 끈다. (2D 자르기 안의 바깥 패스에서 불려도 판 전체를 비우고 그린다)
 /// - 깊이 시험과 깊이 쓰기를 켠다.
 //==============================================================================
-fn bind_shadow_target(gl: &glow::Context, framebuffer: GlFramebuffer, resolution: i32) {
+fn bind_shadow_target(gl: &crate::GlContext, framebuffer: GlFramebuffer, resolution: i32) {
 	unsafe {
 		// 비우기는 가위 시험을 받는다.
 		crate::core::glstatecache::disable(gl, glow::SCISSOR_TEST);
@@ -129,11 +128,11 @@ fn normalize_direction(direction: [f64; 3]) -> [f64; 3] {
 /// use vanilla::graphics3d::shadowmap::DEFAULT_SHADOWMAP_RESOLUTION;
 /// use vanilla::{Matrix4, ShadowMap, SkinnedModel, SkinnedModelRenderer, Vector3};
 ///
-/// fn create_shadow_map(gl: &glow::Context) -> Result<ShadowMap, String> {
+/// fn create_shadow_map(gl: &vanilla::GlContext) -> Result<ShadowMap, String> {
 /// 	ShadowMap::new(gl, DEFAULT_SHADOWMAP_RESOLUTION)
 /// }
 ///
-/// fn render_shadow_pass(gl: &glow::Context, shadow_map: &mut ShadowMap, skinned_model_renderer: &mut SkinnedModelRenderer, skinned_model: &mut SkinnedModel) {
+/// fn render_shadow_pass(gl: &vanilla::GlContext, shadow_map: &mut ShadowMap, skinned_model_renderer: &mut SkinnedModelRenderer, skinned_model: &mut SkinnedModel) {
 /// 	let light_direction = Vector3::create(-0.5, -0.8, -0.35);
 /// 	shadow_map.update_light_matrix(Vector3::zero(), light_direction, 4.0, 0.5, 30.0);
 /// 	let light_view_projection_elements = *shadow_map.get_light_view_projection_matrix().get_elements();
@@ -164,7 +163,7 @@ impl ShadowMap {
 	/// # 돌려줌
 	/// 새 섀도우 맵. 텍스처나 프레임버퍼를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
-	pub fn new(gl: &glow::Context, resolution: i32) -> Result<ShadowMap, String> {
+	pub fn new(gl: &crate::GlContext, resolution: i32) -> Result<ShadowMap, String> {
 		let (framebuffer, depth_texture) = create_depth_target(gl, resolution)?;
 		Ok(ShadowMap { framebuffer, depth_texture, resolution, light_view_projection_matrix: Matrix4::create_identity() })
 	}
@@ -221,7 +220,7 @@ impl ShadowMap {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
-	pub fn begin_render(&self, gl: &glow::Context) {
+	pub fn begin_render(&self, gl: &crate::GlContext) {
 		bind_shadow_target(gl, self.framebuffer, self.resolution);
 	}
 
@@ -271,7 +270,7 @@ impl ShadowMap {
 	/// # 인자
 	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
-	pub fn destroy(&self, gl: &glow::Context) {
+	pub fn destroy(&self, gl: &crate::GlContext) {
 		unsafe {
 			crate::core::glstatecache::delete_framebuffer(gl, self.framebuffer);
 			crate::core::glstatecache::delete_texture(gl, self.depth_texture);
@@ -402,7 +401,7 @@ pub struct ShadowAtlasLightSource {
 /// ```rust,no_run
 /// use vanilla::{ShadowAtlas, ShadowAtlasLightSource};
 ///
-/// fn render_shadows(gl: &glow::Context, shadow_atlas: &mut ShadowAtlas, light_source_list: &[ShadowAtlasLightSource]) {
+/// fn render_shadows(gl: &vanilla::GlContext, shadow_atlas: &mut ShadowAtlas, light_source_list: &[ShadowAtlasLightSource]) {
 /// 	shadow_atlas.update_lights(light_source_list);
 /// 	shadow_atlas.begin_render(gl);
 /// 	for tile_index in 0..shadow_atlas.get_tile_count() {
@@ -438,7 +437,7 @@ impl ShadowAtlas {
 	/// # 돌려줌
 	/// 새 그림자 아틀라스. 텍스처나 프레임버퍼를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
-	pub fn new(gl: &glow::Context, resolution: i32, tile_resolution: i32) -> Result<ShadowAtlas, String> {
+	pub fn new(gl: &crate::GlContext, resolution: i32, tile_resolution: i32) -> Result<ShadowAtlas, String> {
 		let (framebuffer, depth_texture) = create_depth_target(gl, resolution)?;
 		Ok(ShadowAtlas { framebuffer, depth_texture, resolution, tile_resolution: tile_resolution.min(resolution).max(1), grid_size: 1, tile_size: resolution, light_list: Vec::new(), tile_list: Vec::new() })
 	}
@@ -511,7 +510,7 @@ impl ShadowAtlas {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
-	pub fn begin_render(&self, gl: &glow::Context) {
+	pub fn begin_render(&self, gl: &crate::GlContext) {
 		bind_shadow_target(gl, self.framebuffer, self.resolution);
 	}
 
@@ -522,7 +521,7 @@ impl ShadowAtlas {
 	/// - `gl`: GL 컨텍스트.
 	/// - `tile_index`: 칸 번호. (0 ~ get_tile_count() - 1, 밖이면 패닉)
 	//==============================================================================
-	pub fn begin_tile(&self, gl: &glow::Context, tile_index: usize) {
+	pub fn begin_tile(&self, gl: &crate::GlContext, tile_index: usize) {
 		let tile = self.tile_list[tile_index];
 		unsafe {
 			crate::core::glstatecache::viewport(gl, tile.x, tile.y, tile.size, tile.size);
@@ -647,7 +646,7 @@ impl ShadowAtlas {
 	/// # 인자
 	/// - `gl`: 이 아틀라스를 지은 GL 컨텍스트.
 	//==============================================================================
-	pub fn destroy(&self, gl: &glow::Context) {
+	pub fn destroy(&self, gl: &crate::GlContext) {
 		unsafe {
 			crate::core::glstatecache::delete_framebuffer(gl, self.framebuffer);
 			crate::core::glstatecache::delete_texture(gl, self.depth_texture);
@@ -740,7 +739,7 @@ mod tests {
 			eprintln!("shadowmap: 창 없는 GL 컨텍스트를 짓지 못해 건너뜀");
 			return;
 		};
-		let gl: &glow::Context = &gl;
+		let gl: &crate::GlContext = crate::GlContext::from_context(&gl);
 		let shadow_map = ShadowMap::new(gl, 16).unwrap();
 		let shadow_atlas = ShadowAtlas::new(gl, 16, 8).unwrap();
 		let mut scissor_result_list = Vec::new();
@@ -755,7 +754,7 @@ mod tests {
 			else {
 				shadow_map.begin_render(gl);
 			}
-			scissor_result_list.push(unsafe { glow::HasContext::is_enabled(gl, glow::SCISSOR_TEST) });
+			scissor_result_list.push(unsafe { glow::HasContext::is_enabled(gl.get_glow_context_unchecked(), glow::SCISSOR_TEST) });
 		}
 		assert_eq!(scissor_result_list, vec![false, false], "begin_render 가 가위 시험을 끄지 않았다 (ShadowMap, ShadowAtlas)");
 	}

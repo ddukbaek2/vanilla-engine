@@ -21,11 +21,11 @@
 //!     그때 GL 컨텍스트의 약한 손잡이를 쥐어, destroy() 는 원본처럼 인자 없이 풀고, 버려질 때(Drop, 씬을 내릴 때)도 스스로 푼다.
 //!   - 효과는 문자열 대신 ScreenEffectType 열거형이다. (원본 문자열 이름은 get_name / from_name)
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::animation::timeline::TimelineValue;
 use crate::base::color::Color;
 use crate::core::fullscreenpass::FullscreenPass;
 use crate::core::graphic::{GlTexture, Graphic};
-use glow::HasContext;
 use crate::core::gluniform::GlUniformF64;
 use std::collections::HashMap;
 use std::rc::Weak;
@@ -1069,7 +1069,7 @@ fn create_pass_step(pass_name: &'static str, effect_state: Option<&ScreenEffectS
 //==============================================================================
 /// 색 텍스처 생성. (RGBA8, 화면 사본은 RGB8: 기본 프레임버퍼(알파 없음)에서 copyTexSubImage2D 로 떠 오려면 성분이 같아야 한다)
 //==============================================================================
-fn create_color_texture(gl: &glow::Context, width: i32, height: i32, is_opaque: bool) -> Result<GlTexture, String> {
+fn create_color_texture(gl: &GlContext, width: i32, height: i32, is_opaque: bool) -> Result<GlTexture, String> {
 	unsafe {
 		let texture = crate::core::glstatecache::create_texture(gl)?;
 		crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
@@ -1090,7 +1090,7 @@ fn create_color_texture(gl: &glow::Context, width: i32, height: i32, is_opaque: 
 //==============================================================================
 /// 렌더 대상 생성. (색 텍스처 + 필요하면 스텐실 렌더버퍼)
 //==============================================================================
-fn create_render_target(gl: &glow::Context, width: i32, height: i32, use_stencil: bool, is_opaque: bool) -> Result<RenderTarget, String> {
+fn create_render_target(gl: &GlContext, width: i32, height: i32, use_stencil: bool, is_opaque: bool) -> Result<RenderTarget, String> {
 	let texture = create_color_texture(gl, width, height, is_opaque)?;
 	unsafe {
 		let framebuffer = match crate::core::glstatecache::create_framebuffer(gl) {
@@ -1136,7 +1136,7 @@ fn create_render_target(gl: &glow::Context, width: i32, height: i32, use_stencil
 //==============================================================================
 /// 렌더 대상 파괴.
 //==============================================================================
-fn destroy_render_target(gl: &glow::Context, render_target: &RenderTarget) {
+fn destroy_render_target(gl: &GlContext, render_target: &RenderTarget) {
 	unsafe {
 		crate::core::glstatecache::delete_framebuffer(gl, render_target.framebuffer);
 		crate::core::glstatecache::delete_texture(gl, render_target.texture);
@@ -1149,7 +1149,7 @@ fn destroy_render_target(gl: &glow::Context, render_target: &RenderTarget) {
 //==============================================================================
 /// 렌더 대상 모음 파괴.
 //==============================================================================
-fn destroy_render_target_set(gl: &glow::Context, render_target_set: &RenderTargetSet) {
+fn destroy_render_target_set(gl: &GlContext, render_target_set: &RenderTargetSet) {
 	destroy_render_target(gl, &render_target_set.scene_target);
 	destroy_render_target(gl, &render_target_set.ping_target);
 	destroy_render_target(gl, &render_target_set.pong_target);
@@ -1591,7 +1591,7 @@ impl ScreenEffect {
 	//==============================================================================
 	/// 렌더 대상 준비. (크기가 바뀌면 다시 만든다)
 	//==============================================================================
-	fn ensure_targets(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
+	fn ensure_targets(&mut self, gl: &GlContext, width: i32, height: i32) -> Result<(), String> {
 		if let Some(render_target_set) = &self.render_target_set {
 			if render_target_set.scene_target.width == width && render_target_set.scene_target.height == height {
 				return Ok(());
@@ -1633,7 +1633,7 @@ impl ScreenEffect {
 	//==============================================================================
 	/// 패스 준비. (없으면 컴파일해 담는다. 실패도 담아 두고 한 번만 알린다. 원본 resolvePass)
 	//==============================================================================
-	fn ensure_pass(&mut self, gl: &glow::Context, pass_name: &'static str) {
+	fn ensure_pass(&mut self, gl: &GlContext, pass_name: &'static str) {
 		if self.pass_table.contains_key(pass_name) {
 			return;
 		}
@@ -1884,10 +1884,10 @@ impl ScreenEffect {
 			}
 		};
 		if let Some(render_target_set) = render_target_set {
-			destroy_render_target_set(&gl, &render_target_set);
+			destroy_render_target_set(GlContext::from_context(&gl), &render_target_set);
 		}
 		for pass in pass_list {
-			pass.destroy(&gl);
+			pass.destroy(GlContext::from_context(&gl));
 		}
 	}
 }
@@ -1940,22 +1940,22 @@ mod tests {
 			[FakeGlObject::Texture, FakeGlObject::Framebuffer, FakeGlObject::Program, FakeGlObject::VertexArray].iter().map(|object| fake_gl::get_live_count(*object)).sum()
 		};
 		let mut screen_effect = ScreenEffect::new();
-		screen_effect.gl_context = crate::core::imagetexturecache::find_gl_context_handle(&gl).expect("handle");
-		screen_effect.ensure_targets(&gl, 64, 32).expect("targets");
-		screen_effect.ensure_pass(&gl, "copy");
+		screen_effect.gl_context = crate::core::imagetexturecache::find_gl_context_handle(GlContext::from_context(&gl)).expect("handle");
+		screen_effect.ensure_targets(GlContext::from_context(&gl), 64, 32).expect("targets");
+		screen_effect.ensure_pass(GlContext::from_context(&gl), "copy");
 		assert_eq!(live_object_count(), 12);
 		screen_effect.destroy();
 		assert_eq!(live_object_count(), 0);
-		screen_effect.ensure_targets(&gl, 64, 32).expect("targets");
-		screen_effect.ensure_pass(&gl, "vignette");
+		screen_effect.ensure_targets(GlContext::from_context(&gl), 64, 32).expect("targets");
+		screen_effect.ensure_pass(GlContext::from_context(&gl), "vignette");
 		drop(screen_effect);
 		assert_eq!(live_object_count(), 0);
 		let mut failing_effect = ScreenEffect::new();
 		fake_gl::fail_after(FakeGlObject::Framebuffer, 3);
-		assert!(failing_effect.ensure_targets(&gl, 64, 32).is_err());
+		assert!(failing_effect.ensure_targets(GlContext::from_context(&gl), 64, 32).is_err());
 		assert_eq!(live_object_count(), 0);
 		fake_gl::fail_after(FakeGlObject::Framebuffer, 5);
-		failing_effect.ensure_targets(&gl, 64, 32).expect("targets");
+		failing_effect.ensure_targets(GlContext::from_context(&gl), 64, 32).expect("targets");
 		assert_eq!(live_object_count(), 10);
 	}
 

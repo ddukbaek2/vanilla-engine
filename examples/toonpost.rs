@@ -8,6 +8,7 @@
 //   빛 점 120 개(상한 160), 불꽃 줄기 밝기 배 5. 불덩이는 3 초마다 사건 열쇠와 나이로 한 번만 낸다.
 // - 실행: cargo run --example toonpost
 //==============================================================================
+use vanilla::GlContext;
 use std::f64::consts::PI;
 use vanilla::{
 	create_box_geometry, create_part_matrix, create_sphere_geometry, Camera3D, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, NodeId, NodeTree, Paint, Pivot, Rect, Scene, SceneBase, Text, TextAlign, ToonBlobShadowOptions, ToonDecalOptions, ToonDrawOptions, ToonDrawQueue,
@@ -62,7 +63,7 @@ impl PanelDrawer {
 	//==============================================================================
 	// 모형 짓기. (처음 그릴 때 한 번)
 	//==============================================================================
-	fn create_meshes(renderer: &ToonRenderer, gl: &glow::Context) -> Option<PanelMeshes> {
+	fn create_meshes(renderer: &ToonRenderer, gl: &GlContext) -> Option<PanelMeshes> {
 		let outline_options = ToonPartOptions { outline_width: 0.03, ..ToonPartOptions::default() };
 		Some(PanelMeshes {
 			ground: renderer.create_mesh(gl, &build_arrays(&create_box_geometry(8.0, 0.2, 6.0), [0.0, -0.1, 0.0], "#8a857b", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() }))?,
@@ -75,7 +76,7 @@ impl PanelDrawer {
 	//==============================================================================
 	// 후처리 짓기. (판의 꼴마다)
 	//==============================================================================
-	fn create_post_process(&self, gl: &glow::Context, width: i32, height: i32) -> Result<ToonPostProcess, String> {
+	fn create_post_process(&self, gl: &GlContext, width: i32, height: i32) -> Result<ToonPostProcess, String> {
 		match self.panel_mode {
 			PANEL_MODE_MULTISAMPLE => {
 				let mut post_process = ToonPostProcess::new_with_options(gl, width, height, ToonPostProcessOptions { sample_count: 4, depth_bits: 24, ..ToonPostProcessOptions::default() })?;
@@ -98,7 +99,7 @@ impl PanelDrawer {
 	//==============================================================================
 	// 효과 짓기. (램프, 테 색, 꼴 밝기 배, 빛 점 상한, 오래 가는 바닥 자국)
 	//==============================================================================
-	fn create_vfx(gl: &glow::Context) -> Result<ToonVfx, String> {
+	fn create_vfx(gl: &GlContext) -> Result<ToonVfx, String> {
 		let mut vfx = ToonVfx::new(gl, TOON_VFX_DEFAULT_PARTICLE_CAPACITY)?;
 		vfx.set_ramps(&[vec!["#ffffff", "#ffe08a", "#ff9a3c", "#d4441c", "#5a1a10", "#1a0a08"], vec!["#ffffff", "#bff6ff", "#5fd0ff", "#2a7ad8", "#123c7a", "#06142a"]]);
 		vfx.set_rim_color([0.078, 0.086, 0.11]);
@@ -162,7 +163,7 @@ impl PanelDrawer {
 	//==============================================================================
 	// 판 그리기. (ToonView3D 의 그리기 함수)
 	//==============================================================================
-	fn draw(&mut self, renderer: &mut ToonRenderer, camera: &Camera3D, screen_rect: Rect, gl: &glow::Context, output: ToonViewOutput) {
+	fn draw(&mut self, renderer: &mut ToonRenderer, camera: &Camera3D, screen_rect: Rect, gl: &GlContext, output: ToonViewOutput) {
 		if self.meshes.is_none() {
 			self.meshes = PanelDrawer::create_meshes(renderer, gl);
 		}

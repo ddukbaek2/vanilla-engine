@@ -11,7 +11,6 @@
 //   (VANILLA_CAPTURE_PATH 는 창을 숨기려고 건다, 찍는 프레임은 이 예제가 정한다)
 //==============================================================================
 
-use glow::HasContext;
 use vanilla::core::graphic::TextAlign;
 use vanilla::core::shaderprogram::ShaderProgram;
 use vanilla::{BlendMode, Color, Engine, EngineConfiguration, Graphic, NodeId, NodeTree, Paint, Pivot, Rect, Scene, SceneBase, UIButton, UILabel, UIScrollView, UIView, Vector2, ViewScaleMode};

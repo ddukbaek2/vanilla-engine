@@ -6,9 +6,9 @@
 //! - 캔버스 비 상한이 걸리면 창을 검게 비우고 가운데의 캔버스 자리에 그린다. (웹은 캔버스를 줄여 페이지 가운데에 둔다)
 //! - 늘이기는 선형 거르기다. (브라우저가 캔버스를 늘이는 기본과 같다)
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::core::fullscreenpass::FullscreenPass;
 use crate::core::graphic::{GlTexture, GlUniformLocation};
-use glow::HasContext;
 
 /// 렌더 영역을 늘여 그리는 셰이더.
 const RENDER_SCALE_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
@@ -35,7 +35,7 @@ impl RenderScaler {
 	//==============================================================================
 	/// 생성. (셰이더와 텍스처)
 	//==============================================================================
-	pub(crate) fn new(gl: &glow::Context) -> Result<RenderScaler, String> {
+	pub(crate) fn new(gl: &GlContext) -> Result<RenderScaler, String> {
 		let fullscreen_pass = FullscreenPass::new(gl, RENDER_SCALE_FRAGMENTSHADER_SOURCE)?;
 		let source_texture_location = fullscreen_pass.get_uniform_location(gl, "sourceTexture");
 		let source_texture = unsafe {
@@ -60,7 +60,7 @@ impl RenderScaler {
 	/// - 캔버스 자리가 창보다 작으면 나머지는 검게 비운다.
 	/// - 건드린 GL 상태(뷰포트, 블렌드, 스텐실, 시저, 깊이)는 되돌린다. 프로그램과 텍스처는 Graphic 이 다음 프레임 첫머리에 다시 건다.
 	//==============================================================================
-	pub(crate) fn present(&self, gl: &glow::Context, render_width: i32, render_height: i32, destination_rect: [i32; 4], window_width: i32, window_height: i32) {
+	pub(crate) fn present(&self, gl: &GlContext, render_width: i32, render_height: i32, destination_rect: [i32; 4], window_width: i32, window_height: i32) {
 		unsafe {
 			let is_blend_enabled = crate::core::glstatecache::is_enabled(gl, glow::BLEND);
 			let is_stencil_test_enabled = crate::core::glstatecache::is_enabled(gl, glow::STENCIL_TEST);

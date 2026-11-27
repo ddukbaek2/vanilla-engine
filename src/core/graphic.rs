@@ -1282,7 +1282,7 @@ impl Graphic {
 		// 읽은 그림을 미리 올릴 수 있는 주인으로 알린다. (원본 DecodedImageStore.registerOwner)
 		crate::core::decodedimagestore::register_owner(&gl);
 		// 셰이더 프로그램.
-		let shader_program = ShaderProgram::new(&gl, VERTEXSHADER_SOURCE, FRAGMENTSHADER_SOURCE)?;
+		let shader_program = ShaderProgram::new(GlContext::from_context(&gl), VERTEXSHADER_SOURCE, FRAGMENTSHADER_SOURCE)?;
 
 		// 버텍스 어레이 / 버텍스 버퍼. (스트리밍, 인터리브 x/y/u/v)
 		let vertex_data = vec![0.0f32; VERTEX_CAPACITY * FLOATS_PER_VERTEX];
@@ -1293,8 +1293,8 @@ impl Graphic {
 			crate::core::glstatecache::bind_buffer(&gl, glow::ARRAY_BUFFER, Some(vertex_buffer));
 			gl.buffer_data_size(glow::ARRAY_BUFFER, (vertex_data.len() * 4) as i32, glow::DYNAMIC_DRAW);
 			let stride_bytes = (FLOATS_PER_VERTEX * 4) as i32;
-			let vertex_position_location = shader_program.get_attribute_location(&gl, "vertexPosition");
-			let vertex_texture_coordinate_location = shader_program.get_attribute_location(&gl, "vertexTextureCoordinate");
+			let vertex_position_location = shader_program.get_attribute_location(GlContext::from_context(&gl), "vertexPosition");
+			let vertex_texture_coordinate_location = shader_program.get_attribute_location(GlContext::from_context(&gl), "vertexTextureCoordinate");
 			if let Some(vertex_position_location) = vertex_position_location {
 				gl.enable_vertex_attrib_array(vertex_position_location);
 				gl.vertex_attrib_pointer_f32(vertex_position_location, 2, glow::FLOAT, false, stride_bytes, 0);
@@ -1323,9 +1323,9 @@ impl Graphic {
 		};
 
 		// 텍스처 유닛 고정.
-		shader_program.use_program(&gl);
-		let main_texture_location = shader_program.get_uniform_location(&gl, "mainTexture");
-		let texture_lod_bias_location = shader_program.get_uniform_location(&gl, "textureLodBias");
+		shader_program.use_program(GlContext::from_context(&gl));
+		let main_texture_location = shader_program.get_uniform_location(GlContext::from_context(&gl), "mainTexture");
+		let texture_lod_bias_location = shader_program.get_uniform_location(GlContext::from_context(&gl), "textureLodBias");
 		unsafe {
 			gl.uniform_1_i32(main_texture_location.as_ref(), 0);
 			gl.uniform_1_f64(texture_lod_bias_location.as_ref(), 0.0);
@@ -1465,7 +1465,7 @@ impl Graphic {
 
 		// 프로그램/버퍼 바인딩 및 프로젝션 업로드. (바깥 GL 이 바꾼 묶음은 상태 캐시가 알므로 따로 잊지 않는다)
 		self.use_shader_program(&self.shader_program);
-		let projection_matrix_location = self.shader_program.get_uniform_location(&self.gl, "projectionMatrix");
+		let projection_matrix_location = self.shader_program.get_uniform_location(GlContext::from_context(&self.gl), "projectionMatrix");
 		unsafe {
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
 			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(self.vertex_buffer));
@@ -1486,7 +1486,7 @@ impl Graphic {
 
 		// 기본 프레임버퍼가 멀티샘플인지 처음 한 번 읽어 둔다. (프레임 첫머리는 기본 프레임버퍼를 칠한다)
 		if self.framebuffer_sample_state < 0 {
-			if let Some(is_multisampled) = read_default_framebuffer_multisampled(&self.gl) {
+			if let Some(is_multisampled) = read_default_framebuffer_multisampled(GlContext::from_context(&self.gl)) {
 				self.framebuffer_sample_state = if is_multisampled {
 					1
 				}
@@ -1527,7 +1527,7 @@ impl Graphic {
 	pub fn end_frame(&mut self) {
 		self.flush_batch();
 		if self.frame_number.is_multiple_of(IMAGE_TEXTURE_SWEEP_INTERVAL) {
-			self.image_texture_cache.sweep(&self.gl);
+			self.image_texture_cache.sweep(GlContext::from_context(&self.gl));
 		}
 		self.release_color_mask();
 	}
@@ -1537,7 +1537,7 @@ impl Graphic {
 	/// - Graphic 은 쓰게 한 프로그램을 따로 기억하지 않는다. 게임이 같은 컨텍스트로 다른 프로그램을 쓰게 해도 다음 그리기가 제 프로그램을 다시 건다.
 	//==============================================================================
 	fn use_shader_program(&self, shader_program: &ShaderProgram) {
-		shader_program.use_program(&self.gl);
+		shader_program.use_program(GlContext::from_context(&self.gl));
 	}
 
 	//==============================================================================
@@ -1563,7 +1563,7 @@ impl Graphic {
 	///   게임이 run_external_pass 밖에서 같은 컨텍스트로 이것들을 바꿔 두고 돌아와도 다음 2D 그리기가 맞게 된다.
 	//==============================================================================
 	fn apply_draw_state(&self) {
-		let gl: &glow::Context = &self.gl;
+		let gl: &GlContext = GlContext::from_context(&self.gl);
 		unsafe {
 			if !crate::core::glstatecache::is_capability_set(gl, glow::BLEND, true) {
 				crate::core::glstatecache::enable(gl, glow::BLEND);
@@ -1630,7 +1630,7 @@ impl Graphic {
 		if self.batch_suspend_depth > 0 {
 			return;
 		}
-		let is_alpha_written = read_framebuffer_binding(&self.gl).is_some();
+		let is_alpha_written = read_framebuffer_binding(GlContext::from_context(&self.gl)).is_some();
 		if crate::core::glstatecache::is_color_mask(&self.gl, true, true, true, is_alpha_written) {
 			return;
 		}
@@ -1792,7 +1792,7 @@ impl Graphic {
 	/// 사용 중인 셰이더 프로그램에 밉맵 단계 보정 적용. (유니폼이 없는 프로그램은 넘어간다)
 	//==============================================================================
 	fn apply_image_mipmap_bias(&self, shader_program: &ShaderProgram) {
-		let texture_lod_bias_location = match shader_program.get_uniform_location(&self.gl, "textureLodBias") {
+		let texture_lod_bias_location = match shader_program.get_uniform_location(GlContext::from_context(&self.gl), "textureLodBias") {
 			Some(texture_lod_bias_location) => {
 				texture_lod_bias_location
 			}
@@ -2031,7 +2031,7 @@ impl Graphic {
 		if self.blend_mode != BlendMode::Multiply {
 			return self.shader_blend_mode_index;
 		}
-		if read_framebuffer_binding(&self.gl).is_none() {
+		if read_framebuffer_binding(GlContext::from_context(&self.gl)).is_none() {
 			return 0;
 		}
 		MULTIPLY_SHADER_BLEND_MODE_INDEX
@@ -2268,10 +2268,10 @@ impl Graphic {
 		};
 		let program = shader_program.get_program();
 		if self.uniform_location_program != Some(program) {
-			let model_matrix_location = shader_program.get_uniform_location(&self.gl, "modelMatrix");
-			let main_color_location = shader_program.get_uniform_location(&self.gl, "mainColor");
-			let tint_color_location = shader_program.get_uniform_location(&self.gl, "tintColor");
-			let global_alpha_location = shader_program.get_uniform_location(&self.gl, "globalAlpha");
+			let model_matrix_location = shader_program.get_uniform_location(GlContext::from_context(&self.gl), "modelMatrix");
+			let main_color_location = shader_program.get_uniform_location(GlContext::from_context(&self.gl), "mainColor");
+			let tint_color_location = shader_program.get_uniform_location(GlContext::from_context(&self.gl), "tintColor");
+			let global_alpha_location = shader_program.get_uniform_location(GlContext::from_context(&self.gl), "globalAlpha");
 			self.uniform_location_program = Some(program);
 			self.model_matrix_location = model_matrix_location;
 			self.main_color_location = main_color_location;
@@ -2330,7 +2330,7 @@ impl Graphic {
 				return;
 			}
 		};
-		let framebuffer = read_framebuffer_binding(&self.gl);
+		let framebuffer = read_framebuffer_binding(GlContext::from_context(&self.gl));
 		if let Err(error) = self.copy_backdrop(framebuffer, backdrop_rect) {
 			eprintln!("Graphic: backdrop copy failed: {}", error);
 			return;
@@ -2418,8 +2418,8 @@ impl Graphic {
 			}
 		};
 		self.use_shader_program(blend_shader_program);
-		let projection_matrix_location = blend_shader_program.get_uniform_location(&self.gl, "projectionMatrix");
-		let blend_mode_index_location = blend_shader_program.get_uniform_location(&self.gl, "blendModeIndex");
+		let projection_matrix_location = blend_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "projectionMatrix");
+		let blend_mode_index_location = blend_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "blendModeIndex");
 		unsafe {
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 			self.gl.uniform_1_i32(blend_mode_index_location.as_ref(), shader_blend_mode_index);
@@ -2592,11 +2592,11 @@ impl Graphic {
 		}
 		let mut attribute_location_list: Vec<(&str, u32)> = Vec::new();
 		for attribute_name in ["vertexPosition", "vertexTextureCoordinate"] {
-			if let Some(attribute_location) = self.shader_program.get_attribute_location(&self.gl, attribute_name) {
+			if let Some(attribute_location) = self.shader_program.get_attribute_location(GlContext::from_context(&self.gl), attribute_name) {
 				attribute_location_list.push((attribute_name, attribute_location));
 			}
 		}
-		let blend_shader_program = ShaderProgram::create_with_attribute_locations(&self.gl, VERTEXSHADER_SOURCE, BLEND_FRAGMENTSHADER_SOURCE, &attribute_location_list)?;
+		let blend_shader_program = ShaderProgram::create_with_attribute_locations(GlContext::from_context(&self.gl), VERTEXSHADER_SOURCE, BLEND_FRAGMENTSHADER_SOURCE, &attribute_location_list)?;
 		self.use_shader_program(&blend_shader_program);
 		self.apply_blend_texture_units(&blend_shader_program);
 		self.blend_shader_program = Some(blend_shader_program);
@@ -2620,11 +2620,11 @@ impl Graphic {
 		};
 		let mut attribute_location_list: Vec<(&str, u32)> = Vec::new();
 		for attribute_name in ["vertexPosition", "vertexTextureCoordinate", "vertexColor"] {
-			if let Some(attribute_location) = particle_shader_program.get_attribute_location(&self.gl, attribute_name) {
+			if let Some(attribute_location) = particle_shader_program.get_attribute_location(GlContext::from_context(&self.gl), attribute_name) {
 				attribute_location_list.push((attribute_name, attribute_location));
 			}
 		}
-		let particle_blend_shader_program = ShaderProgram::create_with_attribute_locations(&self.gl, PARTICLE_VERTEXSHADER_SOURCE, PARTICLE_BLEND_FRAGMENTSHADER_SOURCE, &attribute_location_list)?;
+		let particle_blend_shader_program = ShaderProgram::create_with_attribute_locations(GlContext::from_context(&self.gl), PARTICLE_VERTEXSHADER_SOURCE, PARTICLE_BLEND_FRAGMENTSHADER_SOURCE, &attribute_location_list)?;
 		self.use_shader_program(&particle_blend_shader_program);
 		self.apply_blend_texture_units(&particle_blend_shader_program);
 		self.particle_blend_shader_program = Some(particle_blend_shader_program);
@@ -2635,8 +2635,8 @@ impl Graphic {
 	/// 사용 중인 섞기 셰이더 프로그램에 텍스처 유닛(그릴 그림 0 번, 떠 온 아래 1 번)과 밉맵 단계 보정 걸기.
 	//==============================================================================
 	fn apply_blend_texture_units(&self, shader_program: &ShaderProgram) {
-		let main_texture_location = shader_program.get_uniform_location(&self.gl, "mainTexture");
-		let backdrop_texture_location = shader_program.get_uniform_location(&self.gl, "backdropTexture");
+		let main_texture_location = shader_program.get_uniform_location(GlContext::from_context(&self.gl), "mainTexture");
+		let backdrop_texture_location = shader_program.get_uniform_location(GlContext::from_context(&self.gl), "backdropTexture");
 		unsafe {
 			self.gl.uniform_1_i32(main_texture_location.as_ref(), 0);
 			self.gl.uniform_1_i32(backdrop_texture_location.as_ref(), 1);
@@ -2813,9 +2813,9 @@ impl Graphic {
 			}
 		};
 		self.use_shader_program(batch_shader_program);
-		let projection_matrix_location = batch_shader_program.get_uniform_location(&self.gl, "projectionMatrix");
-		let framebuffer_height_location = batch_shader_program.get_uniform_location(&self.gl, "framebufferHeight");
-		let clip_rect_list_location = batch_shader_program.get_uniform_location(&self.gl, "clipRectList");
+		let projection_matrix_location = batch_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "projectionMatrix");
+		let framebuffer_height_location = batch_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "framebufferHeight");
+		let clip_rect_list_location = batch_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "clipRectList");
 		let vertex_bytes = float_slice_to_bytes(&self.batch_vertex_data[..vertex_count * BATCH_FLOATS_PER_VERTEX]);
 		unsafe {
 			crate::core::glstatecache::bind_vertex_array(&self.gl, self.batch_vertex_array);
@@ -3030,7 +3030,7 @@ impl Graphic {
 		}
 		let maximum_texture_unit_count = unsafe { crate::core::glstatecache::get_parameter_i32(&self.gl, glow::MAX_TEXTURE_IMAGE_UNITS) };
 		let texture_slot_count = (maximum_texture_unit_count.max(1) as usize).min(BATCH_TEXTURE_SLOT_LIMIT);
-		let batch_shader_program = ShaderProgram::new(&self.gl, BATCH_VERTEXSHADER_SOURCE, &create_batch_fragment_shader_source(texture_slot_count))?;
+		let batch_shader_program = ShaderProgram::new(GlContext::from_context(&self.gl), BATCH_VERTEXSHADER_SOURCE, &create_batch_fragment_shader_source(texture_slot_count))?;
 		self.batch_texture_slot_count = texture_slot_count;
 		self.clear_batch_textures();
 		self.batch_clip_rect_data = create_batch_clip_rect_data();
@@ -3043,7 +3043,7 @@ impl Graphic {
 			let stride_bytes = (BATCH_FLOATS_PER_VERTEX * 4) as i32;
 			let attribute_layout: [(&str, i32, i32); 5] = [("vertexPosition", 2, 0), ("vertexTextureCoordinate", 2, 8), ("vertexColor", 4, 16), ("vertexTintColor", 4, 32), ("vertexSlot", 2, 48)];
 			for (attribute_name, component_count, byte_offset) in attribute_layout {
-				let attribute_location = batch_shader_program.get_attribute_location(&self.gl, attribute_name);
+				let attribute_location = batch_shader_program.get_attribute_location(GlContext::from_context(&self.gl), attribute_name);
 				if let Some(attribute_location) = attribute_location {
 					self.gl.enable_vertex_attrib_array(attribute_location);
 					self.gl.vertex_attrib_pointer_f32(attribute_location, component_count, glow::FLOAT, false, stride_bytes, byte_offset);
@@ -3056,7 +3056,7 @@ impl Graphic {
 		}
 		self.use_shader_program(&batch_shader_program);
 		let texture_unit_list: Vec<i32> = (0..texture_slot_count as i32).collect();
-		let main_texture_list_location = batch_shader_program.get_uniform_location(&self.gl, "mainTextureList");
+		let main_texture_list_location = batch_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "mainTextureList");
 		unsafe {
 			self.gl.uniform_1_i32_slice(main_texture_list_location.as_ref(), &texture_unit_list);
 		}
@@ -3072,7 +3072,7 @@ impl Graphic {
 		if self.particle_shader_program.is_some() {
 			return Ok(());
 		}
-		let particle_shader_program = ShaderProgram::new(&self.gl, PARTICLE_VERTEXSHADER_SOURCE, PARTICLE_FRAGMENTSHADER_SOURCE)?;
+		let particle_shader_program = ShaderProgram::new(GlContext::from_context(&self.gl), PARTICLE_VERTEXSHADER_SOURCE, PARTICLE_FRAGMENTSHADER_SOURCE)?;
 		unsafe {
 			let particle_vertex_array = crate::core::glstatecache::create_vertex_array(&self.gl)?;
 			let particle_vertex_buffer = crate::core::glstatecache::create_buffer(&self.gl)?;
@@ -3082,7 +3082,7 @@ impl Graphic {
 			let stride_bytes = (PARTICLE_FLOATS_PER_VERTEX * 4) as i32;
 			let attribute_layout: [(&str, i32, i32); 3] = [("vertexPosition", 2, 0), ("vertexTextureCoordinate", 2, 8), ("vertexColor", 4, 16)];
 			for (attribute_name, component_count, byte_offset) in attribute_layout {
-				let attribute_location = particle_shader_program.get_attribute_location(&self.gl, attribute_name);
+				let attribute_location = particle_shader_program.get_attribute_location(GlContext::from_context(&self.gl), attribute_name);
 				if let Some(attribute_location) = attribute_location {
 					self.gl.enable_vertex_attrib_array(attribute_location);
 					self.gl.vertex_attrib_pointer_f32(attribute_location, component_count, glow::FLOAT, false, stride_bytes, byte_offset);
@@ -3094,7 +3094,7 @@ impl Graphic {
 			self.particle_vertex_buffer = Some(particle_vertex_buffer);
 		}
 		self.use_shader_program(&particle_shader_program);
-		let main_texture_location = particle_shader_program.get_uniform_location(&self.gl, "mainTexture");
+		let main_texture_location = particle_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "mainTexture");
 		unsafe {
 			self.gl.uniform_1_i32(main_texture_location.as_ref(), 0);
 		}
@@ -3197,10 +3197,10 @@ impl Graphic {
 		};
 		self.transform_matrix.write_to_float32_array(&mut self.model_matrix_array);
 		self.use_shader_program(particle_shader_program);
-		let projection_matrix_location = particle_shader_program.get_uniform_location(&self.gl, "projectionMatrix");
-		let model_matrix_location = particle_shader_program.get_uniform_location(&self.gl, "modelMatrix");
-		let global_alpha_location = particle_shader_program.get_uniform_location(&self.gl, "globalAlpha");
-		let blend_mode_index_location = particle_shader_program.get_uniform_location(&self.gl, "blendModeIndex");
+		let projection_matrix_location = particle_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "projectionMatrix");
+		let model_matrix_location = particle_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "modelMatrix");
+		let global_alpha_location = particle_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "globalAlpha");
+		let blend_mode_index_location = particle_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "blendModeIndex");
 		let vertex_bytes = float_slice_to_bytes(&self.particle_vertex_data[..vertex_count * PARTICLE_FLOATS_PER_VERTEX]);
 		unsafe {
 			crate::core::glstatecache::bind_vertex_array(&self.gl, self.particle_vertex_array);
@@ -3242,7 +3242,7 @@ impl Graphic {
 	///   모은 쿼드와 겹치는 쿼드가 나오거나 SHADER_BLEND_PARTICLE_GROUP_CAPACITY 개가 차면 거기서 끊는다. (모두 겹치면 쿼드 하나에 복사 한 번, 드로우 콜 한 번)
 	//==============================================================================
 	fn draw_colored_quad_groups(&mut self, vertex_count: usize, texture: GlTexture) {
-		let framebuffer = read_framebuffer_binding(&self.gl);
+		let framebuffer = read_framebuffer_binding(GlContext::from_context(&self.gl));
 		let quad_float_count = 6 * PARTICLE_FLOATS_PER_VERTEX;
 		let quad_count = vertex_count / 6;
 		let mut group_rect_list = std::mem::take(&mut self.particle_group_rect_list);
@@ -3448,7 +3448,7 @@ impl Graphic {
 	/// 읽은 그림의 주인 번호. (이 Graphic 의 GL 컨텍스트, ImageAsset::load 가 손잡이에 건다)
 	//==============================================================================
 	pub(crate) fn read_image_owner(&self) -> usize {
-		crate::core::decodedimagestore::read_owner(&self.gl)
+		crate::core::decodedimagestore::read_owner(GlContext::from_context(&self.gl))
 	}
 
 	//==============================================================================
@@ -3468,7 +3468,7 @@ impl Graphic {
 		}
 
 		// 새로 올리거나 필터를 다시 걸면 텍스처 바인드가 바뀐다. (상태 캐시를 거쳐 묶으므로 따로 잊지 않는다)
-		self.image_texture_cache.get_texture(&self.gl, image, is_image_smoothing_enabled, is_image_mipmap_enabled)
+		self.image_texture_cache.get_texture(GlContext::from_context(&self.gl), image, is_image_smoothing_enabled, is_image_mipmap_enabled)
 	}
 
 	//==============================================================================
@@ -3489,7 +3489,7 @@ impl Graphic {
 			}
 		};
 		self.flush_batch();
-		match crate::core::imagetexturecache::read_texture_pixels(&self.gl, texture, image.get_width(), image.get_height()) {
+		match crate::core::imagetexturecache::read_texture_pixels(GlContext::from_context(&self.gl), texture, image.get_width(), image.get_height()) {
 			Some(pixels) => {
 				image.restore_pixels(pixels);
 				true
@@ -4571,12 +4571,12 @@ impl Graphic {
 		// 새 글리프는 장의 빈 칸에만 올리므로 묶음을 내보내지 않는다. (올리며 텍스처를 묶는 것은 상태 캐시를 거친다)
 		if self.text_string_texture_cache.has_pending_deleted_textures() {
 			self.flush_batch();
-			self.text_string_texture_cache.delete_pending_textures(&self.gl);
+			self.text_string_texture_cache.delete_pending_textures(GlContext::from_context(&self.gl));
 		}
-		let entry = self.text_string_texture_cache.get_entry(&self.gl, text_draw_kind, text, &self.font_string, line_width, bake_scale, shaping_direction);
+		let entry = self.text_string_texture_cache.get_entry(GlContext::from_context(&self.gl), text_draw_kind, text, &self.font_string, line_width, bake_scale, shaping_direction);
 		if self.text_string_texture_cache.has_pending_deleted_textures() {
 			self.flush_batch();
-			self.text_string_texture_cache.delete_pending_textures(&self.gl);
+			self.text_string_texture_cache.delete_pending_textures(GlContext::from_context(&self.gl));
 		}
 		entry
 	}
@@ -4743,7 +4743,7 @@ impl Graphic {
 	//==============================================================================
 	pub fn begin_opacity_layer(&mut self) {
 		self.flush_batch();
-		let previous_framebuffer = read_framebuffer_binding(&self.gl);
+		let previous_framebuffer = read_framebuffer_binding(GlContext::from_context(&self.gl));
 		let global_alpha = self.global_alpha;
 		let target = match self.acquire_opacity_layer_target(previous_framebuffer) {
 			Ok(target) => {
@@ -5085,8 +5085,8 @@ impl Graphic {
 		self.shader_program_override = shader_program;
 		let active_shader_program = self.get_shader_program();
 		self.use_shader_program(active_shader_program);
-		let projection_matrix_location = active_shader_program.get_uniform_location(&self.gl, "projectionMatrix");
-		let main_texture_location = active_shader_program.get_uniform_location(&self.gl, "mainTexture");
+		let projection_matrix_location = active_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "projectionMatrix");
+		let main_texture_location = active_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "mainTexture");
 		unsafe {
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 			self.gl.uniform_1_i32(main_texture_location.as_ref(), 0);
@@ -5158,11 +5158,11 @@ impl Graphic {
 		let (vertex_shader_source, fragment_shader_source) = create_shader_source();
 		let mut attribute_location_list: Vec<(&str, u32)> = Vec::new();
 		for attribute_name in ["vertexPosition", "vertexTextureCoordinate"] {
-			if let Some(attribute_location) = self.shader_program.get_attribute_location(&self.gl, attribute_name) {
+			if let Some(attribute_location) = self.shader_program.get_attribute_location(GlContext::from_context(&self.gl), attribute_name) {
 				attribute_location_list.push((attribute_name, attribute_location));
 			}
 		}
-		let shader_program = match ShaderProgram::create_with_attribute_locations(&self.gl, &vertex_shader_source, &fragment_shader_source, &attribute_location_list) {
+		let shader_program = match ShaderProgram::create_with_attribute_locations(GlContext::from_context(&self.gl), &vertex_shader_source, &fragment_shader_source, &attribute_location_list) {
 			Ok(shader_program) => {
 				Some(Rc::new(shader_program))
 			}
@@ -5187,8 +5187,8 @@ impl Graphic {
 		self.is_clip_scissor_enabled = false;
 		let shader_program = self.get_shader_program();
 		self.use_shader_program(shader_program);
-		let projection_matrix_location = shader_program.get_uniform_location(&self.gl, "projectionMatrix");
-		let main_texture_location = shader_program.get_uniform_location(&self.gl, "mainTexture");
+		let projection_matrix_location = shader_program.get_uniform_location(GlContext::from_context(&self.gl), "projectionMatrix");
+		let main_texture_location = shader_program.get_uniform_location(GlContext::from_context(&self.gl), "mainTexture");
 		unsafe {
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
 			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(self.vertex_buffer));
@@ -5277,7 +5277,7 @@ impl Graphic {
 	/// - GL 상태 캐시는 잊지 않는다. (원본과 같음, 안의 glow::Context 를 꺼내 상태를 바꿨으면 reset_gl_state_cache 를 부른다)
 	///
 	/// # 돌려줌
-	/// Graphic 이 든 GL 컨텍스트. 엔진 함수의 `&glow::Context` 인자로도 그대로 넘긴다.
+	/// Graphic 이 든 GL 컨텍스트. 엔진 함수의 `&GlContext` 인자로 그대로 넘긴다. (안의 glow::Context 는 꺼낼 수 없다)
 	//==============================================================================
 	pub fn get_gl(&self) -> &GlContext {
 		self.release_color_mask();
@@ -5287,9 +5287,9 @@ impl Graphic {
 	//==============================================================================
 	/// GL 컨텍스트 반환. (엔진 안에서, 상태 캐시를 거쳐 GL 을 부르는 쪽이 쓴다, 상태 캐시를 잊지 않는다)
 	//==============================================================================
-	pub(crate) fn get_tracked_gl(&self) -> &glow::Context {
+	pub(crate) fn get_tracked_gl(&self) -> &GlContext {
 		self.release_color_mask();
-		&self.gl
+		GlContext::from_context(&self.gl)
 	}
 
 	//==============================================================================
@@ -5312,7 +5312,7 @@ impl Graphic {
 	/// ```
 	//==============================================================================
 	pub fn get_current_framebuffer(&self) -> Option<GlFramebuffer> {
-		read_framebuffer_binding(&self.gl)
+		read_framebuffer_binding(GlContext::from_context(&self.gl))
 	}
 
 	//==============================================================================
@@ -5332,7 +5332,7 @@ impl Graphic {
 	//==============================================================================
 	/// GL 상태 캐시 잊기. (원본 resetGLStateCache, 상태 캐시를 거치지 않고 GL 상태를 바꾼 뒤 부른다, 다음에 읽을 때 GL 에 한 번씩 묻는다)
 	/// - get_gl, run_external_pass, 툰 렌더러의 콜백이 주는 GlContext 는 상태 함수가 상태 캐시를 거치므로, 같은 콜백 안에서 엔진 그리기를 이어 불러도 부를 것 없다.
-	/// - GlContext 에서 안의 glow::Context 를 꺼내(`let raw: &glow::Context = gl;`, `&glow::Context` 꼴의 함수에 넘기기) 상태 함수를 바로 불렀거나,
+	/// - GlContext 는 안의 glow::Context 를 꺼낼 길이 없어 게임 코드로는 상태 캐시를 건너뛰지 못한다.
 	///   다른 라이브러리가 같은 GL 컨텍스트의 상태를 바꾼 뒤 같은 콜백 안에서 엔진 그리기를 이어 부를 때 부른다.
 	/// - 엔진은 GL 을 넘기는 자리(get_gl, run_external_pass, 툰 렌더러의 콜백)에서 스스로 잊지 않는다. (원본과 같음)
 	/// - 상태 캐시를 거치지 않은 호출을 찾으려면 환경 변수 VANILLA_GL_STATE_CHECK=1 로 돌린다. (엔진 그리기 앞마다 기억한 값과 진짜 GL 을 견주어 어긋난 곳과 앞의 상태 호출을 표준 오류에 남긴다)
@@ -5433,7 +5433,7 @@ fn is_gl_binding_present(parameter: u32) -> bool {
 /// 기본 프레임버퍼가 멀티샘플인지 읽기. (원본 getContextAttributes().antialias, 기본 프레임버퍼가 묶여 있지 않으면 None)
 /// - 웹은 원본처럼 컨텍스트 속성 antialias 를 본다. 데스크탑은 기본 프레임버퍼의 SAMPLES 를 읽는다. (창을 멀티샘플 4 로 짓고, 안 되면 표본 하나로 짓는다)
 //==============================================================================
-fn read_default_framebuffer_multisampled(gl: &glow::Context) -> Option<bool> {
+fn read_default_framebuffer_multisampled(gl: &GlContext) -> Option<bool> {
 	#[cfg(target_arch = "wasm32")]
 	{
 		let _ = gl;
@@ -5464,13 +5464,13 @@ fn create_batch_clip_rect_data() -> [f32; BATCH_CLIP_SLOT_CAPACITY * 4] {
 //==============================================================================
 /// 지금 묶인 프레임버퍼 읽기. (앞의 것을 돌려 놓을 때, 원본 getParameter(FRAMEBUFFER_BINDING), 기본 프레임버퍼면 None)
 //==============================================================================
-pub(crate) fn read_framebuffer_binding(gl: &glow::Context) -> Option<<glow::Context as glow::HasContext>::Framebuffer> {
+pub(crate) fn read_framebuffer_binding(gl: &GlContext) -> Option<<glow::Context as glow::HasContext>::Framebuffer> {
 	crate::core::glstatecache::read_draw_framebuffer(gl, || {
 		if !is_gl_binding_present(glow::FRAMEBUFFER_BINDING) {
 			return None;
 		}
 		unsafe {
-			gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING)
+			gl.get_glow_context_unchecked().get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING)
 		}
 	})
 }
@@ -5478,13 +5478,13 @@ pub(crate) fn read_framebuffer_binding(gl: &glow::Context) -> Option<<glow::Cont
 //==============================================================================
 /// 지금 유닛에 묶인 2D 텍스처 읽기. (원본 getParameter(TEXTURE_BINDING_2D))
 //==============================================================================
-pub(crate) fn read_texture_binding(gl: &glow::Context) -> Option<GlTexture> {
+pub(crate) fn read_texture_binding(gl: &GlContext) -> Option<GlTexture> {
 	crate::core::glstatecache::read_texture_binding_2d(gl, || {
 		if !is_gl_binding_present(glow::TEXTURE_BINDING_2D) {
 			return None;
 		}
 		unsafe {
-			gl.get_parameter_texture(glow::TEXTURE_BINDING_2D)
+			gl.get_glow_context_unchecked().get_parameter_texture(glow::TEXTURE_BINDING_2D)
 		}
 	})
 }
@@ -5492,13 +5492,13 @@ pub(crate) fn read_texture_binding(gl: &glow::Context) -> Option<GlTexture> {
 //==============================================================================
 /// 지금 쓰는 셰이더 프로그램 읽기. (원본 getParameter(CURRENT_PROGRAM))
 //==============================================================================
-pub(crate) fn read_program_binding(gl: &glow::Context) -> Option<GlProgram> {
+pub(crate) fn read_program_binding(gl: &GlContext) -> Option<GlProgram> {
 	crate::core::glstatecache::read_program(gl, || {
 		if !is_gl_binding_present(glow::CURRENT_PROGRAM) {
 			return None;
 		}
 		unsafe {
-			gl.get_parameter_program(glow::CURRENT_PROGRAM)
+			gl.get_glow_context_unchecked().get_parameter_program(glow::CURRENT_PROGRAM)
 		}
 	})
 }
@@ -5506,13 +5506,13 @@ pub(crate) fn read_program_binding(gl: &glow::Context) -> Option<GlProgram> {
 //==============================================================================
 /// 지금 묶인 버텍스 어레이 읽기. (원본 getParameter(VERTEX_ARRAY_BINDING))
 //==============================================================================
-pub(crate) fn read_vertex_array_binding(gl: &glow::Context) -> Option<GlVertexArray> {
+pub(crate) fn read_vertex_array_binding(gl: &GlContext) -> Option<GlVertexArray> {
 	crate::core::glstatecache::read_vertex_array(gl, || {
 		if !is_gl_binding_present(glow::VERTEX_ARRAY_BINDING) {
 			return None;
 		}
 		unsafe {
-			gl.get_parameter_vertex_array(glow::VERTEX_ARRAY_BINDING)
+			gl.get_glow_context_unchecked().get_parameter_vertex_array(glow::VERTEX_ARRAY_BINDING)
 		}
 	})
 }
@@ -6060,7 +6060,7 @@ mod tests {
 			};
 			let vertex_shader_source = "#version 300 es\nin vec2 vertexPosition; in vec2 vertexTextureCoordinate; uniform mat3 projectionMatrix; uniform mat3 modelMatrix; out vec2 textureCoordinate;\nvoid main() { vec3 position = projectionMatrix * modelMatrix * vec3(vertexPosition, 1.0); gl_Position = vec4(position.xy, 0.0, 1.0); textureCoordinate = vertexTextureCoordinate; }";
 			let fragment_shader_source = "#version 300 es\nprecision highp float; in vec2 textureCoordinate; uniform sampler2D mainTexture; uniform vec4 mainColor; uniform float globalAlpha; out vec4 outputColor;\nvoid main() { float alpha = texture(mainTexture, textureCoordinate).a * mainColor.a * globalAlpha; outputColor = vec4(vec3(1.0, 0.3, 0.1) * alpha, alpha); }";
-			let override_program = Rc::new(ShaderProgram::new(&graphic.gl, vertex_shader_source, fragment_shader_source).unwrap());
+			let override_program = Rc::new(ShaderProgram::new(GlContext::from_context(&graphic.gl), vertex_shader_source, fragment_shader_source).unwrap());
 			fill_target(&mut graphic, BACKGROUND_BYTES);
 			graphic.begin_clip_rect(Rect::create(8.0, 0.0, 8.0, 16.0), 0.0);
 			graphic.set_blend_mode(BlendMode::Overlay);
@@ -6142,7 +6142,7 @@ mod tests {
 				eprintln!("graphic: 창 없는 GL 컨텍스트를 짓지 못해 건너뜀");
 				return;
 			};
-			let red_program = ShaderProgram::new(&graphic.gl, FULLSCREEN_VERTEX_SHADER_SOURCE, RED_FRAGMENT_SHADER_SOURCE).unwrap();
+			let red_program = ShaderProgram::new(GlContext::from_context(&graphic.gl), FULLSCREEN_VERTEX_SHADER_SOURCE, RED_FRAGMENT_SHADER_SOURCE).unwrap();
 			let (other_vertex_array, other_buffer) = unsafe {
 				let gl = graphic.get_gl();
 				let vertex_array = gl.create_vertex_array().unwrap();

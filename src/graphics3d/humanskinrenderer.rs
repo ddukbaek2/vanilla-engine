@@ -19,12 +19,12 @@
 //!     원본의 Math.floor 없이 1 ~ 24 로 자른다.
 //!   - set_shadow_map 은 기반 렌더러처럼 행렬 16개를 복사해 둔다. 생성은 셰이더 컴파일 실패를 오류(Result)로 돌려준다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::core::graphic::GlTexture;
 use crate::core::shaderprogram::ShaderProgram;
 use crate::graphics3d::material::{Material, TEXTURE_UNIT_BASECOLOR, TEXTURE_UNIT_SHADOWMAP};
 use crate::graphics3d::skinnedmodel::{Drawable, SkinnedModel};
 use crate::graphics3d::skinnedmodelrenderer::{SkinnedModelRenderer, MORPH_GLSL};
-use glow::HasContext;
 use crate::core::gluniform::GlUniformF64;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
@@ -735,7 +735,7 @@ pub fn create_cutout_depth_vertex_shader_source() -> String {
 /// use glow::HasContext;
 /// use vanilla::{HumanSkinRenderer, Matrix4, RenderTarget, RenderTargetOptions, SkinnedModel, Vector3, SKIN_SHADING_EYE, SKIN_SHADING_HAIR};
 ///
-/// fn create_head(gl: &glow::Context, glb_bytes: &[u8]) -> Result<(HumanSkinRenderer, SkinnedModel, RenderTarget), String> {
+/// fn create_head(gl: &vanilla::GlContext, glb_bytes: &[u8]) -> Result<(HumanSkinRenderer, SkinnedModel, RenderTarget), String> {
 /// 	let mut human_skin_renderer = HumanSkinRenderer::new(gl)?;
 /// 	let mut skinned_model = SkinnedModel::load_from_bytes(gl, glb_bytes, &human_skin_renderer)?;
 /// 	for drawable in skinned_model.get_drawable_list() {
@@ -752,7 +752,7 @@ pub fn create_cutout_depth_vertex_shader_source() -> String {
 /// 	Ok((human_skin_renderer, skinned_model, scene_render_target))
 /// }
 ///
-/// fn render_head(gl: &glow::Context, human_skin_renderer: &HumanSkinRenderer, skinned_model: &mut SkinnedModel, scene_render_target: &RenderTarget) {
+/// fn render_head(gl: &vanilla::GlContext, human_skin_renderer: &HumanSkinRenderer, skinned_model: &mut SkinnedModel, scene_render_target: &RenderTarget) {
 /// 	let aspect_ratio = scene_render_target.get_width() as f64 / scene_render_target.get_height() as f64;
 /// 	let camera_position = Vector3::create(0.0, 1.6, 0.6);
 /// 	let view_matrix = Matrix4::create_look_at(camera_position, Vector3::create(0.0, 1.6, 0.0), Vector3::up());
@@ -833,7 +833,7 @@ impl HumanSkinRenderer {
 	/// # 돌려줌
 	/// 새 피부 렌더러. (기본 3점 조명, 그림자 강도 0, 그림자 표본 12, 머리카락 프린지 켜짐, 주름 맵 꺼짐) 셰이더 컴파일에 실패하면 Err(오류 글).
 	//==============================================================================
-	pub fn new(gl: &glow::Context) -> Result<HumanSkinRenderer, String> {
+	pub fn new(gl: &GlContext) -> Result<HumanSkinRenderer, String> {
 		let skin_vertex_shader_source = create_skin_vertex_shader_source();
 		let skinned_model_renderer = SkinnedModelRenderer::new(gl, Some(SKIN_FRAGMENTSHADER_SOURCE), Some(&skin_vertex_shader_source))?;
 		let cutout_depth_vertex_shader_source = create_cutout_depth_vertex_shader_source();
@@ -900,7 +900,7 @@ impl HumanSkinRenderer {
 	/// - `camera_y`: 카메라 월드 y.
 	/// - `camera_z`: 카메라 월드 z.
 	//==============================================================================
-	pub fn draw(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f64, camera_y: f64, camera_z: f64) {
+	pub fn draw(&self, gl: &GlContext, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f64, camera_y: f64, camera_z: f64) {
 		self.draw_pass(gl, skinned_model, view_projection_elements, model_matrix_elements, camera_x, camera_y, camera_z, 0);
 	}
 
@@ -923,7 +923,7 @@ impl HumanSkinRenderer {
 	/// use glow::HasContext;
 	/// use vanilla::{HumanSkinRenderer, SkinnedModel};
 	///
-	/// fn render_blended(gl: &glow::Context, human_skin_renderer: &HumanSkinRenderer, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16]) {
+	/// fn render_blended(gl: &vanilla::GlContext, human_skin_renderer: &HumanSkinRenderer, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16]) {
 	/// 	unsafe {
 	/// 		gl.enable(glow::BLEND);
 	/// 		gl.blend_func_separate(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::ZERO, glow::ONE);
@@ -937,7 +937,7 @@ impl HumanSkinRenderer {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn draw_blended(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f64, camera_y: f64, camera_z: f64) {
+	pub fn draw_blended(&self, gl: &GlContext, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f64, camera_y: f64, camera_z: f64) {
 		self.draw_pass(gl, skinned_model, view_projection_elements, model_matrix_elements, camera_x, camera_y, camera_z, 1);
 	}
 
@@ -955,7 +955,7 @@ impl HumanSkinRenderer {
 	/// - `pass_mode`: 패스. (0 = 불투명, 1 = 블렌드)
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
-	pub fn draw_pass(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f64, camera_y: f64, camera_z: f64, pass_mode: i32) {
+	pub fn draw_pass(&self, gl: &GlContext, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f64, camera_y: f64, camera_z: f64, pass_mode: i32) {
 		skinned_model.upload_pending_morph_targets(gl);
 		let shader_program = self.skinned_model_renderer.get_shader_program();
 		let shader_program = &*shader_program;
@@ -1031,7 +1031,7 @@ impl HumanSkinRenderer {
 	/// ```rust,no_run
 	/// use vanilla::{HumanSkinRenderer, Matrix4, ShadowMap, SkinnedModel, Vector3};
 	///
-	/// fn render_shadow(gl: &glow::Context, human_skin_renderer: &mut HumanSkinRenderer, shadow_map: &mut ShadowMap, skinned_model: &mut SkinnedModel) {
+	/// fn render_shadow(gl: &vanilla::GlContext, human_skin_renderer: &mut HumanSkinRenderer, shadow_map: &mut ShadowMap, skinned_model: &mut SkinnedModel) {
 	/// 	shadow_map.update_light_matrix(Vector3::create(0.0, 1.6, 0.0), Vector3::create(-0.45, -0.6, -0.65), 0.45, 0.2, 4.0);
 	/// 	let light_view_projection_elements = *shadow_map.get_light_view_projection_matrix().get_elements();
 	/// 	let model_matrix = Matrix4::create_identity();
@@ -1043,7 +1043,7 @@ impl HumanSkinRenderer {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn draw_depth(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, light_view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16]) {
+	pub fn draw_depth(&self, gl: &GlContext, skinned_model: &mut SkinnedModel, light_view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16]) {
 		skinned_model.upload_pending_morph_targets(gl);
 		let depth_shader_program = self.skinned_model_renderer.get_depth_shader_program();
 		let cutout_depth_shader_program = self.get_cutout_depth_shader_program();
@@ -1115,7 +1115,7 @@ impl HumanSkinRenderer {
 	/// - `gl`: GL 컨텍스트.
 	/// - `shader_program`: 유니폼을 걸 셰이더. (지금 쓰는 프로그램이어야 한다)
 	//==============================================================================
-	pub fn apply_environment_uniforms(&self, gl: &glow::Context, shader_program: &ShaderProgram) {
+	pub fn apply_environment_uniforms(&self, gl: &GlContext, shader_program: &ShaderProgram) {
 		let light_directions_location = shader_program.get_uniform_location(gl, "lightDirections[0]");
 		let light_colors_location = shader_program.get_uniform_location(gl, "lightColors[0]");
 		let ambient_sky_color_location = shader_program.get_uniform_location(gl, "ambientSkyColor");
@@ -1184,7 +1184,7 @@ impl HumanSkinRenderer {
 	/// - `gl`: GL 컨텍스트.
 	/// - `shader_program`: 유니폼을 걸 셰이더. (지금 쓰는 프로그램이어야 한다)
 	//==============================================================================
-	pub fn apply_shadow_uniforms(&self, gl: &glow::Context, shader_program: &ShaderProgram) {
+	pub fn apply_shadow_uniforms(&self, gl: &GlContext, shader_program: &ShaderProgram) {
 		let shadow_map_texture_location = shader_program.get_uniform_location(gl, "shadowMapTexture");
 		let shadow_strength_location = shader_program.get_uniform_location(gl, "shadowStrength");
 		let shadow_softness_location = shader_program.get_uniform_location(gl, "shadowSoftness");
@@ -1625,7 +1625,7 @@ fn build_wrinkle_tile_mask(wrinkle_channel_weights: &[f32; WRINKLE_CHANNEL_COUNT
 //==============================================================================
 /// 드로어블 삼각형 출력. (인덱스가 있으면 drawElements, 없으면 drawArrays)
 //==============================================================================
-fn draw_drawable_triangles(gl: &glow::Context, drawable: &Drawable) {
+fn draw_drawable_triangles(gl: &GlContext, drawable: &Drawable) {
 	unsafe {
 		crate::core::glstatecache::bind_vertex_array(gl, Some(drawable.vertex_array));
 		if drawable.is_indexed {

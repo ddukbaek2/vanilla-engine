@@ -7,7 +7,6 @@
 //! - GL 컨텍스트를 짓지 못하면 실패한다. (말없이 건너뛰지 않는다)
 //! - 실행: cargo test --test toonhighlight
 //==============================================================================
-use glow::HasContext;
 use vanilla::{create_octahedron_geometry, Engine, EngineConfiguration, Matrix4, MeshBuilder, ToonDrawOptions, ToonInstance, ToonLineDrawOptions, ToonOutlineWidthUnit, ToonPartOptions, ToonRenderer, ToonScreenOutline, Vector3};
 
 /// 찍는 너비. (원본 캔버스와 같다)

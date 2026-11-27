@@ -14,7 +14,6 @@
 //   화면 저장: VANILLA_CAPTURE_PATH=shots/blend_{frame}.png VANILLA_CAPTURE_FRAMES=30,90,150,210,270,330,390,450 VANILLA_CAPTURE_EXIT=1
 //==============================================================================
 
-use glow::HasContext;
 use std::rc::Rc;
 use vanilla::{BlendMode, Color, Engine, EngineConfiguration, Graphic, Image, Rect, RenderTarget, Scene, SceneBase, TextAlign, TextBaseline, Vector2, ViewScaleMode};
 

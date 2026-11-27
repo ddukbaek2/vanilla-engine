@@ -5,10 +5,10 @@
 //! - GLSL 과 커널, 기본값(반경 0.03, 강도 1, 바이어스 0.002, 배율 0.5)은 원본과 같다. 원본 ${SAMPLE_COUNT} 는 숫자 16 으로 옮겼다.
 //! - GL 을 쓰는 함수는 gl 을 받고, 생성과 크기 변경은 GL 객체를 못 만들면 오류(Result)를 돌려준다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::core::graphic::GlTexture;
 use crate::graphics3d::fullscreenpass::FullscreenPass;
 use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
-use glow::HasContext;
 use crate::core::gluniform::GlUniformF64;
 
 //==============================================================================
@@ -124,7 +124,7 @@ void main() {
 /// ```rust,no_run
 /// use vanilla::{AmbientOcclusionEffect, Camera3D, RenderTarget, RenderTargetOptions};
 ///
-/// fn create_resources(gl: &glow::Context) -> Result<(RenderTarget, AmbientOcclusionEffect), String> {
+/// fn create_resources(gl: &vanilla::GlContext) -> Result<(RenderTarget, AmbientOcclusionEffect), String> {
 /// 	let options = RenderTargetOptions { color_attachment_count: 2, use_float_color: true, use_depth_texture: true, ..RenderTargetOptions::default() };
 /// 	let scene_render_target = RenderTarget::new(gl, 1280, 720, true, Some(options))?;
 /// 	let mut ambient_occlusion_effect = AmbientOcclusionEffect::new(gl)?;
@@ -134,7 +134,7 @@ void main() {
 /// 	Ok((scene_render_target, ambient_occlusion_effect))
 /// }
 ///
-/// fn render_occlusion(gl: &glow::Context, ambient_occlusion_effect: &AmbientOcclusionEffect, scene_render_target: &RenderTarget, camera: &Camera3D) {
+/// fn render_occlusion(gl: &vanilla::GlContext, ambient_occlusion_effect: &AmbientOcclusionEffect, scene_render_target: &RenderTarget, camera: &Camera3D) {
 /// 	let view_matrix = camera.get_view_matrix();
 /// 	ambient_occlusion_effect.render(gl, scene_render_target.get_depth_texture(), scene_render_target.get_color_texture(1), view_matrix.get_elements(), camera.get_field_of_view(), camera.get_aspect_ratio(), camera.get_near_distance(), camera.get_far_distance());
 /// 	let visibility_texture = ambient_occlusion_effect.get_result_texture();
@@ -165,7 +165,7 @@ impl AmbientOcclusionEffect {
 	/// # 돌려줌
 	/// 새 이펙트. (반경 0.03, 강도 1, 바이어스 0.002, 배율 0.5, 커널까지 셈한 것) 셰이더 컴파일이나 판 만들기에 실패하면 Err(오류 글).
 	//==============================================================================
-	pub fn new(gl: &glow::Context) -> Result<AmbientOcclusionEffect, String> {
+	pub fn new(gl: &GlContext) -> Result<AmbientOcclusionEffect, String> {
 		let float_color_options = RenderTargetOptions {
 			use_float_color: true,
 			..RenderTargetOptions::default()
@@ -243,7 +243,7 @@ impl AmbientOcclusionEffect {
 	/// # 돌려줌
 	/// 판을 맞췄으면 Ok. 다시 짓다 GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
-	pub fn resize(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
+	pub fn resize(&mut self, gl: &GlContext, width: i32, height: i32) -> Result<(), String> {
 		let scaled_width = ((width as f64 * self.scale).floor() as i32).max(1);
 		let scaled_height = ((height as f64 * self.scale).floor() as i32).max(1);
 		self.occlusion_render_target.resize(gl, scaled_width, scaled_height)?;
@@ -268,7 +268,7 @@ impl AmbientOcclusionEffect {
 	/// - `near_distance`: 투영의 가까운 거리. (깊이를 선형으로 풀 때)
 	/// - `far_distance`: 투영의 먼 거리.
 	//==============================================================================
-	pub fn render(&self, gl: &glow::Context, depth_texture: Option<GlTexture>, normal_texture: Option<GlTexture>, view_matrix_elements: &[f32; 16], field_of_view_radian: f64, aspect_ratio: f64, near_distance: f64, far_distance: f64) {
+	pub fn render(&self, gl: &GlContext, depth_texture: Option<GlTexture>, normal_texture: Option<GlTexture>, view_matrix_elements: &[f32; 16], field_of_view_radian: f64, aspect_ratio: f64, near_distance: f64, far_distance: f64) {
 		unsafe {
 			crate::core::glstatecache::disable(gl, glow::DEPTH_TEST);
 			crate::core::glstatecache::disable(gl, glow::BLEND);
@@ -370,7 +370,7 @@ impl AmbientOcclusionEffect {
 	/// # 인자
 	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
-	pub fn destroy(&mut self, gl: &glow::Context) {
+	pub fn destroy(&mut self, gl: &GlContext) {
 		self.occlusion_render_target.destroy(gl);
 		self.ping_render_target.destroy(gl);
 		self.pong_render_target.destroy(gl);

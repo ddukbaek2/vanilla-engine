@@ -23,7 +23,7 @@
 //! - 노드 사각형 안에 낼 때: resize(사각형 너비, 높이) → begin → 그리기(ToonRenderer 의 화면 사각형은 풀어 둔다) → end(None, [x, 드로잉 버퍼 높이 - y - 높이, 너비, 높이]).
 //! - 원본과 다른 점: GL 객체를 다시 짓는 설정(set_sample_count, set_resolution_scale, set_bloom_levels, set_bloom_float_color)은 gl 을 받고 Result 를 돌려준다.
 //==============================================================================
-use glow::HasContext;
+use crate::core::glcontext::GlContext;
 use crate::core::gluniform::GlUniformF64;
 
 use crate::base::matrix4::Matrix4;
@@ -135,7 +135,7 @@ struct LitArea {
 /// ```rust,no_run
 /// use vanilla::{create_sphere_geometry, Camera3D, Matrix4, MeshBuilder, ToonDrawOptions, ToonPartOptions, ToonPostProcess, ToonPostProcessOptions, ToonRenderer, Vector3};
 ///
-/// fn draw_glowing_ball(gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
+/// fn draw_glowing_ball(gl: &vanilla::GlContext, width: i32, height: i32) -> Result<(), String> {
 /// 	let mut post_process = ToonPostProcess::new_with_options(gl, width, height, ToonPostProcessOptions { sample_count: 4, ..ToonPostProcessOptions::default() })?;
 /// 	post_process.set_exposure(1.2);
 /// 	post_process.set_bloom(true, 0.8, 0.9, 1.6);
@@ -208,7 +208,7 @@ impl ToonPostProcess {
 	/// # 돌려줌
 	/// 새 툰 HDR 마무리. 씬 렌더 타겟, 블룸, 합성 셰이더를 못 지으면 Err(오류 글).
 	//==============================================================================
-	pub fn new(gl: &glow::Context, width: i32, height: i32) -> Result<ToonPostProcess, String> {
+	pub fn new(gl: &GlContext, width: i32, height: i32) -> Result<ToonPostProcess, String> {
 		ToonPostProcess::new_with_options(gl, width, height, ToonPostProcessOptions::default())
 	}
 
@@ -224,7 +224,7 @@ impl ToonPostProcess {
 	/// # 돌려줌
 	/// 새 툰 HDR 마무리. 씬 렌더 타겟, 블룸, 합성 셰이더를 못 지으면 Err(오류 글).
 	//==============================================================================
-	pub fn new_with_options(gl: &glow::Context, width: i32, height: i32, options: ToonPostProcessOptions) -> Result<ToonPostProcess, String> {
+	pub fn new_with_options(gl: &GlContext, width: i32, height: i32, options: ToonPostProcessOptions) -> Result<ToonPostProcess, String> {
 		let use_float_color = options.use_float_color && ToonPostProcess::is_float_color_supported(gl);
 		let depth_bits = if options.depth_bits == 24 {
 			24
@@ -276,7 +276,7 @@ impl ToonPostProcess {
 	/// # 돌려줌
 	/// RGBA16F 판에 그릴 수 있으면 true.
 	//==============================================================================
-	pub fn is_float_color_supported(gl: &glow::Context) -> bool {
+	pub fn is_float_color_supported(gl: &GlContext) -> bool {
 		#[cfg(target_arch = "wasm32")]
 		{
 			let supported_extensions = gl.supported_extensions();
@@ -310,7 +310,7 @@ impl ToonPostProcess {
 	//==============================================================================
 	/// 씬 렌더 타겟 짓기. (출력 크기 x 해상도 배율, 지금 옵션으로)
 	//==============================================================================
-	fn create_scene_render_target(&self, gl: &glow::Context) -> Result<RenderTarget, String> {
+	fn create_scene_render_target(&self, gl: &GlContext) -> Result<RenderTarget, String> {
 		let options = RenderTargetOptions { color_attachment_count: 1, use_float_color: self.use_float_color, use_depth_texture: self.use_depth_texture, sample_count: self.requested_sample_count, depth_bits: self.depth_bits };
 		RenderTarget::new(gl, self.read_scene_width(), self.read_scene_height(), true, Some(options))
 	}
@@ -340,7 +340,7 @@ impl ToonPostProcess {
 	/// # 돌려줌
 	/// 판을 맞췄으면 Ok. 다시 짓다 GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
-	pub fn resize(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
+	pub fn resize(&mut self, gl: &GlContext, width: i32, height: i32) -> Result<(), String> {
 		self.output_width = width.max(1);
 		self.output_height = height.max(1);
 		let scene_width = self.read_scene_width();
@@ -366,7 +366,7 @@ impl ToonPostProcess {
 	/// # 돌려줌
 	/// 판을 맞췄으면 Ok. 다시 짓다 GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
-	pub fn set_resolution_scale(&mut self, gl: &glow::Context, resolution_scale: f64) -> Result<(), String> {
+	pub fn set_resolution_scale(&mut self, gl: &GlContext, resolution_scale: f64) -> Result<(), String> {
 		self.resolution_scale = resolution_scale.clamp(0.05, 4.0);
 		self.resize(gl, self.output_width, self.output_height)
 	}
@@ -391,7 +391,7 @@ impl ToonPostProcess {
 	/// # 돌려줌
 	/// 같은 수거나 씬 판을 다시 지었으면 Ok. 새 판을 못 지으면 Err(GL 의 오류 글, 앞의 판은 그대로 둔다).
 	//==============================================================================
-	pub fn set_sample_count(&mut self, gl: &glow::Context, sample_count: i32) -> Result<(), String> {
+	pub fn set_sample_count(&mut self, gl: &GlContext, sample_count: i32) -> Result<(), String> {
 		let safe_sample_count = sample_count.max(0);
 		if safe_sample_count == self.requested_sample_count {
 			return Ok(());
@@ -430,7 +430,7 @@ impl ToonPostProcess {
 	/// - `gl`: GL 컨텍스트.
 	/// - `clear_color`: [r, g, b] 바탕 색. (HDR 길은 선형 색, LDR 길은 화면 색)
 	//==============================================================================
-	pub fn begin(&self, gl: &glow::Context, clear_color: [f64; 3]) {
+	pub fn begin(&self, gl: &GlContext, clear_color: [f64; 3]) {
 		self.scene_render_target.bind(gl);
 		unsafe {
 			crate::core::glstatecache::viewport(gl, 0, 0, self.scene_render_target.get_width(), self.scene_render_target.get_height());
@@ -448,7 +448,7 @@ impl ToonPostProcess {
 	/// - `output_framebuffer`: 낼 프레임버퍼. (None 이면 화면)
 	/// - `viewport`: [x, y, 너비, 높이] 낼 자리. (드로잉 버퍼 픽셀, 왼쪽 아래가 원점)
 	//==============================================================================
-	pub fn end(&self, gl: &glow::Context, output_framebuffer: Option<GlFramebuffer>, viewport: [i32; 4]) {
+	pub fn end(&self, gl: &GlContext, output_framebuffer: Option<GlFramebuffer>, viewport: [i32; 4]) {
 		self.scene_render_target.resolve(gl);
 		let scene_texture = self.scene_render_target.get_color_texture(0);
 		let mut bloom_texture = scene_texture;
@@ -558,7 +558,7 @@ impl ToonPostProcess {
 	/// # 돌려줌
 	/// 바꿨으면 Ok. 다단 블룸의 셰이더나 판을 못 지으면 Err(오류 글).
 	//==============================================================================
-	pub fn set_bloom_levels(&mut self, gl: &glow::Context, level_count: usize, threshold: f64, knee: f64) -> Result<(), String> {
+	pub fn set_bloom_levels(&mut self, gl: &GlContext, level_count: usize, threshold: f64, knee: f64) -> Result<(), String> {
 		self.bloom_threshold = threshold.max(0.0);
 		self.bloom_knee = knee.max(0.0);
 		if level_count == 0 {
@@ -599,7 +599,7 @@ impl ToonPostProcess {
 	/// # 돌려줌
 	/// 바꿨거나 이미 같으면 Ok. 새 판을 못 지으면 Err(GL 의 오류 글, 앞의 판은 그대로 둔다).
 	//==============================================================================
-	pub fn set_bloom_float_color(&mut self, gl: &glow::Context, is_float_color: bool) -> Result<(), String> {
+	pub fn set_bloom_float_color(&mut self, gl: &GlContext, is_float_color: bool) -> Result<(), String> {
 		let use_float_color = is_float_color && self.use_float_color;
 		self.bloom_effect.set_use_float_color(gl, use_float_color)
 	}
@@ -687,7 +687,7 @@ impl ToonPostProcess {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
-	pub fn destroy(&mut self, gl: &glow::Context) {
+	pub fn destroy(&mut self, gl: &GlContext) {
 		self.scene_render_target.destroy(gl);
 		self.bloom_effect.destroy(gl);
 		if let Some(mut multi_level_bloom_effect) = self.multi_level_bloom_effect.take() {

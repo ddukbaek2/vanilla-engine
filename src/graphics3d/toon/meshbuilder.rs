@@ -811,7 +811,7 @@ fn read_normal_key(normal: [f64; 3]) -> (i64, i64, i64) {
 /// use std::f64::consts::PI;
 /// use vanilla::{create_rounded_box_geometry, create_sphere_geometry, Camera3D, Matrix4, MeshBuilder, ToonDrawOptions, ToonPartOptions, ToonRenderer, Vector3};
 ///
-/// fn draw_lamp(gl: &glow::Context, renderer: &mut ToonRenderer, camera: &mut Camera3D) {
+/// fn draw_lamp(gl: &vanilla::GlContext, renderer: &mut ToonRenderer, camera: &mut Camera3D) {
 /// 	let mut builder = MeshBuilder::new();
 /// 	builder.add_part(&create_rounded_box_geometry(1.0, 0.5, 0.6, 3, 0.1), &Matrix4::create_translation(0.0, 0.25, 0.0), "#d0d8e0", ToonPartOptions::default());
 /// 	let lamp_start = builder.get_index_count();

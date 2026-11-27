@@ -22,9 +22,9 @@
 //!   원본에서 주지 않아도 되는 값(undefined)은 Option 이다. add_lightning 의 life, age 는 ToonLightningOptions 에 함께 든다.
 //!   사건 열쇠는 원본이 수나 글을 받지만 러스트 판은 u64 다. (글 열쇠는 게임이 수로 바꿔 넘긴다)
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use std::collections::HashSet;
 
-use glow::HasContext;
 use crate::core::gluniform::GlUniformF64;
 
 use crate::base::matrix4::Matrix4;
@@ -642,7 +642,7 @@ impl Default for ToonDecalOptions {
 /// ```rust,no_run
 /// use vanilla::{Matrix4, ToonBlobShadowOptions, ToonVfx, Vector3};
 ///
-/// fn draw_blob_shadows(gl: &glow::Context, vfx: &mut ToonVfx) {
+/// fn draw_blob_shadows(gl: &vanilla::GlContext, vfx: &mut ToonVfx) {
 /// 	let view_matrix = Matrix4::create_look_at(Vector3::create(0.0, 4.0, 6.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
 /// 	let projection_matrix = Matrix4::create_perspective(std::f64::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
 /// 	let character_positions = [[0.0, 0.0], [1.5, -0.5], [-1.0, 1.0]];
@@ -728,7 +728,7 @@ impl Default for ToonPlumeOptions {
 /// ```rust,no_run
 /// use vanilla::{Matrix4, ToonBeamOptions, ToonVfx, Vector3};
 ///
-/// fn draw_beam(gl: &glow::Context, vfx: &mut ToonVfx) {
+/// fn draw_beam(gl: &vanilla::GlContext, vfx: &mut ToonVfx) {
 /// 	let view_matrix = Matrix4::create_look_at(Vector3::create(4.0, 3.0, 4.0), Vector3::create(0.0, 1.0, -4.0), Vector3::create(0.0, 1.0, 0.0));
 /// 	let projection_matrix = Matrix4::create_perspective(std::f64::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
 /// 	let start = [0.0, 1.0, 0.0];
@@ -1139,7 +1139,7 @@ struct VfxFrame {
 /// ```rust,no_run
 /// use vanilla::{create_box_geometry, Matrix4, MeshBuilder, ToonDecalOptions, ToonDrawOptions, ToonFireballOptions, ToonParticleOptions, ToonPartOptions, ToonRenderer, ToonShockwaveOptions, ToonVfx, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange, ToonVfxShape, Vector3, TOON_VFX_DEFAULT_PARTICLE_CAPACITY};
 ///
-/// fn draw_explosion(gl: &glow::Context) -> Result<(), String> {
+/// fn draw_explosion(gl: &vanilla::GlContext) -> Result<(), String> {
 /// 	let mut renderer = ToonRenderer::new(gl)?;
 /// 	let mut builder = MeshBuilder::new();
 /// 	builder.add_part(&create_box_geometry(8.0, 0.2, 8.0), &Matrix4::create_translation(0.0, -0.1, 0.0), "#708090", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
@@ -1553,7 +1553,7 @@ fn read_axis_sides(axis: [f64; 3]) -> [[f64; 3]; 2] {
 //==============================================================================
 /// 유니폼 올리기. (이름으로 찾아)
 //==============================================================================
-fn set_uniform_float(gl: &glow::Context, shader_program: &ShaderProgram, name: &str, value: f64) {
+fn set_uniform_float(gl: &GlContext, shader_program: &ShaderProgram, name: &str, value: f64) {
 	unsafe {
 		gl.uniform_1_f64(shader_program.get_uniform_location(gl, name).as_ref(), value);
 	}
@@ -1562,7 +1562,7 @@ fn set_uniform_float(gl: &glow::Context, shader_program: &ShaderProgram, name: &
 //==============================================================================
 /// vec2 유니폼 올리기. (이름으로 찾아)
 //==============================================================================
-fn set_uniform_vector2(gl: &glow::Context, shader_program: &ShaderProgram, name: &str, x: f64, y: f64) {
+fn set_uniform_vector2(gl: &GlContext, shader_program: &ShaderProgram, name: &str, x: f64, y: f64) {
 	unsafe {
 		gl.uniform_2_f64(shader_program.get_uniform_location(gl, name).as_ref(), x, y);
 	}
@@ -1571,7 +1571,7 @@ fn set_uniform_vector2(gl: &glow::Context, shader_program: &ShaderProgram, name:
 //==============================================================================
 /// vec3 유니폼 올리기. (이름으로 찾아)
 //==============================================================================
-fn set_uniform_vector3(gl: &glow::Context, shader_program: &ShaderProgram, name: &str, value: [f64; 3]) {
+fn set_uniform_vector3(gl: &GlContext, shader_program: &ShaderProgram, name: &str, value: [f64; 3]) {
 	unsafe {
 		gl.uniform_3_f64(shader_program.get_uniform_location(gl, name).as_ref(), value[0], value[1], value[2]);
 	}
@@ -1580,7 +1580,7 @@ fn set_uniform_vector3(gl: &glow::Context, shader_program: &ShaderProgram, name:
 //==============================================================================
 /// vec4 유니폼 올리기. (이름으로 찾아)
 //==============================================================================
-fn set_uniform_vector4(gl: &glow::Context, shader_program: &ShaderProgram, name: &str, value: [f64; 4]) {
+fn set_uniform_vector4(gl: &GlContext, shader_program: &ShaderProgram, name: &str, value: [f64; 4]) {
 	unsafe {
 		gl.uniform_4_f64(shader_program.get_uniform_location(gl, name).as_ref(), value[0], value[1], value[2], value[3]);
 	}
@@ -1610,7 +1610,7 @@ impl ToonVfx {
 	/// # 돌려줌
 	/// 효과 바탕. 셰이더, 버퍼, 버텍스 어레이를 못 지으면 Err(오류 글).
 	//==============================================================================
-	pub fn new(gl: &glow::Context, particle_capacity: usize) -> Result<ToonVfx, String> {
+	pub fn new(gl: &GlContext, particle_capacity: usize) -> Result<ToonVfx, String> {
 		let source_list = ToonVfx::read_program_sources();
 		let location_list: [&[(&str, u32)]; 8] = [&PARTICLE_ATTRIBUTE_LOCATIONS, &SPHERE_ATTRIBUTE_LOCATIONS, &GRID_ATTRIBUTE_LOCATIONS, &CORNER_ATTRIBUTE_LOCATIONS, &GRID_ATTRIBUTE_LOCATIONS, &GRID_ATTRIBUTE_LOCATIONS, &RIBBON_ATTRIBUTE_LOCATIONS, &CORNER_ATTRIBUTE_LOCATIONS];
 		let mut program_list = Vec::new();
@@ -1724,7 +1724,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 파티클 꼴의 버텍스 어레이. (네 귀퉁이와 인스턴스 값 일곱)
 	//==============================================================================
-	unsafe fn create_particle_vertex_array(gl: &glow::Context, buffer_list: &mut Vec<GlBuffer>, corner_data: &[f32], instance_buffer: GlBuffer) -> Result<GlVertexArray, String> {
+	unsafe fn create_particle_vertex_array(gl: &GlContext, buffer_list: &mut Vec<GlBuffer>, corner_data: &[f32], instance_buffer: GlBuffer) -> Result<GlVertexArray, String> {
 		let vertex_array = crate::core::glstatecache::create_vertex_array(gl)?;
 		crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
 		ToonVfx::bind_corner_buffer(gl, buffer_list, corner_data, 0)?;
@@ -1742,7 +1742,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 네 귀퉁이 버퍼를 묶인 버텍스 어레이에 붙이기.
 	//==============================================================================
-	unsafe fn bind_corner_buffer(gl: &glow::Context, buffer_list: &mut Vec<GlBuffer>, corner_data: &[f32], location: u32) -> Result<(), String> {
+	unsafe fn bind_corner_buffer(gl: &GlContext, buffer_list: &mut Vec<GlBuffer>, corner_data: &[f32], location: u32) -> Result<(), String> {
 		let corner_buffer = crate::core::glstatecache::create_buffer(gl)?;
 		buffer_list.push(corner_buffer);
 		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(corner_buffer));
@@ -1755,7 +1755,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 번호로 그리는 메쉬 짓기. (자리는 어트리뷰트 0)
 	//==============================================================================
-	unsafe fn create_indexed_mesh(gl: &glow::Context, buffer_list: &mut Vec<GlBuffer>, positions: &[f32], indices: &[u16], component_count: i32) -> Result<IndexedMesh, String> {
+	unsafe fn create_indexed_mesh(gl: &GlContext, buffer_list: &mut Vec<GlBuffer>, positions: &[f32], indices: &[u16], component_count: i32) -> Result<IndexedMesh, String> {
 		let vertex_array = crate::core::glstatecache::create_vertex_array(gl)?;
 		crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
 		let vertex_buffer = crate::core::glstatecache::create_buffer(gl)?;
@@ -1787,7 +1787,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 아틀라스 텍스처 읽기. (처음 부를 때 픽셀을 지어 올리고, 램프가 바뀌었으면 다시 올림)
 	//==============================================================================
-	fn read_atlas_texture(&mut self, gl: &glow::Context) -> Option<GlTexture> {
+	fn read_atlas_texture(&mut self, gl: &GlContext) -> Option<GlTexture> {
 		if let (Some(atlas_texture), false) = (self.atlas_texture, self.is_ramp_dirty) {
 			return Some(atlas_texture);
 		}
@@ -1828,7 +1828,7 @@ impl ToonVfx {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
-	pub fn prepare(&mut self, gl: &glow::Context) {
+	pub fn prepare(&mut self, gl: &GlContext) {
 		self.read_atlas_texture(gl);
 	}
 
@@ -2455,7 +2455,7 @@ impl ToonVfx {
 	/// - `view_matrix`: 카메라의 보기 행렬.
 	/// - `projection_matrix`: 투영 행렬. (원근이나 직교)
 	//==============================================================================
-	pub fn draw(&mut self, gl: &glow::Context, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
+	pub fn draw(&mut self, gl: &GlContext, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
 		let is_particle_live = self.particle_used_count > 0 && self.time < self.particle_live_until;
 		let time = self.time;
 		let live_lightning_list: Vec<ToonLightningOptions> = self.lightning_list.iter().filter(|lightning| lightning.age >= 0.0).copied().collect();
@@ -2549,7 +2549,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 프로그램을 쓰고 보기와 투영과 아틀라스 유니폼 올리기.
 	//==============================================================================
-	fn use_program(gl: &glow::Context, shader_program: &ShaderProgram, frame: &VfxFrame) {
+	fn use_program(gl: &GlContext, shader_program: &ShaderProgram, frame: &VfxFrame) {
 		shader_program.use_program(gl);
 		unsafe {
 			gl.uniform_matrix_4_f32_slice(shader_program.get_uniform_location(gl, "viewProjectionMatrix").as_ref(), false, &frame.view_projection_matrix.elements);
@@ -2560,7 +2560,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 번호로 그리는 메쉬 그리기.
 	//==============================================================================
-	fn draw_indexed_mesh(gl: &glow::Context, indexed_mesh: &IndexedMesh) {
+	fn draw_indexed_mesh(gl: &GlContext, indexed_mesh: &IndexedMesh) {
 		unsafe {
 			crate::core::glstatecache::draw_elements(gl, glow::TRIANGLES, indexed_mesh.index_count, glow::UNSIGNED_SHORT, 0);
 		}
@@ -2569,7 +2569,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 바닥 자국 그리기. (나이 먹는 자국, 이번 프레임에 넘긴 자국 차례, 아직 나타나지 않은 것은 건너뜀, 깜빡이면 걸러 엷게)
 	//==============================================================================
-	fn draw_decals(&self, gl: &glow::Context, frame: &VfxFrame) {
+	fn draw_decals(&self, gl: &GlContext, frame: &VfxFrame) {
 		if self.decal_list.is_empty() && self.queued_decal_list.is_empty() {
 			return;
 		}
@@ -2600,7 +2600,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 바닥 자국 하나 그리기. (자국 셰이더와 네 귀퉁이가 묶여 있음)
 	//==============================================================================
-	fn draw_decal(&self, gl: &glow::Context, decal: &LiveDecal, alpha: f64, heat: f64) {
+	fn draw_decal(&self, gl: &GlContext, decal: &LiveDecal, alpha: f64, heat: f64) {
 		let decal_program = &self.decal_program;
 		let options = &decal.options;
 		let start_radius = options.start_radius.unwrap_or(options.radius);
@@ -2624,7 +2624,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 충격파 띠 그리기. (바닥 빛을 먼저 납작하게, 그 위에 말려 오르는 띠)
 	//==============================================================================
-	fn draw_shockwaves(&self, gl: &glow::Context, frame: &VfxFrame) {
+	fn draw_shockwaves(&self, gl: &GlContext, frame: &VfxFrame) {
 		if self.shockwave_list.is_empty() {
 			return;
 		}
@@ -2668,7 +2668,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 연기 기둥 그리기. (빠르게 솟아 퍼지고, 열기는 앞 칠 할에 식고, 끝 사 할에 엷어짐)
 	//==============================================================================
-	fn draw_plumes(&self, gl: &glow::Context, frame: &VfxFrame) {
+	fn draw_plumes(&self, gl: &GlContext, frame: &VfxFrame) {
 		if self.plume_list.is_empty() {
 			return;
 		}
@@ -2699,7 +2699,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 불덩이 그리기. (부풀기는 빠르게 시작해 느려지고, 열기는 식고, 끝에 연기로 걷힘)
 	//==============================================================================
-	fn draw_fireballs(&self, gl: &glow::Context, frame: &VfxFrame) {
+	fn draw_fireballs(&self, gl: &GlContext, frame: &VfxFrame) {
 		if self.fireball_list.is_empty() {
 			return;
 		}
@@ -2736,7 +2736,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 회전체 빔 그리기. (넘긴 차례대로, 축과 두 옆 쪽은 여기서 셈)
 	//==============================================================================
-	fn draw_beams(&self, gl: &glow::Context, frame: &VfxFrame) {
+	fn draw_beams(&self, gl: &GlContext, frame: &VfxFrame) {
 		if self.queued_beam_list.is_empty() {
 			return;
 		}
@@ -2765,7 +2765,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 리본 그리기. (점마다 앞뒤 점으로 잡은 쪽과 카메라 쪽에 수직으로 펴서 한 버퍼에 쓰고, 리본마다 띠로 그림)
 	//==============================================================================
-	fn draw_ribbons(&mut self, gl: &glow::Context, frame: &VfxFrame) {
+	fn draw_ribbons(&mut self, gl: &GlContext, frame: &VfxFrame) {
 		if self.queued_ribbon_list.is_empty() {
 			return;
 		}
@@ -2837,7 +2837,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 파티클 그리기. (새로 낸 것이 있으면 쓴 칸까지 버퍼를 다시 올림, 사라진 것은 정점 셰이더가 접음, 이번 프레임의 빛 점도 같은 셰이더로)
 	//==============================================================================
-	fn draw_particles(&mut self, gl: &glow::Context, frame: &VfxFrame, is_particle_live: bool) {
+	fn draw_particles(&mut self, gl: &GlContext, frame: &VfxFrame, is_particle_live: bool) {
 		let glint_count = self.queued_glint_count;
 		if !is_particle_live && glint_count == 0 {
 			return;
@@ -2873,7 +2873,7 @@ impl ToonVfx {
 	//==============================================================================
 	/// 섬광 그리기. (뷰포트 전체의 네 귀퉁이를 깊이 시험 없이, 섬광마다 처음이 세고 나이로 빠르게 걷힘)
 	//==============================================================================
-	fn draw_flashes(&self, gl: &glow::Context) {
+	fn draw_flashes(&self, gl: &GlContext) {
 		if self.flash_list.is_empty() {
 			return;
 		}
@@ -2904,7 +2904,7 @@ impl ToonVfx {
 	/// # 인자
 	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
-	pub fn destroy(&mut self, gl: &glow::Context) {
+	pub fn destroy(&mut self, gl: &GlContext) {
 		unsafe {
 			for buffer in self.buffer_list.drain(..) {
 				crate::core::glstatecache::delete_buffer(gl, buffer);

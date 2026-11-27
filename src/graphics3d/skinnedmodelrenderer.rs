@@ -14,11 +14,11 @@
 //!   - set_shadow_map 은 원본처럼 배열을 참조로 들지 않고 16개를 복사해 둔다.
 //!   - 생성은 셰이더 컴파일 실패를 오류(Result)로 돌려준다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::core::graphic::GlTexture;
 use crate::core::shaderprogram::ShaderProgram;
 use crate::graphics3d::material::TEXTURE_UNIT_SHADOWMAP;
 use crate::graphics3d::skinnedmodel::{Drawable, SkinnedModel};
-use glow::HasContext;
 use crate::core::gluniform::GlUniformF64;
 use std::rc::Rc;
 
@@ -366,12 +366,12 @@ impl SkinnedModelRenderer {
 	/// 	outputColor = vec4(1.0, 0.5, 0.2, 1.0);
 	/// }";
 	///
-	/// fn create_flat_renderer(gl: &glow::Context) -> Result<SkinnedModelRenderer, String> {
+	/// fn create_flat_renderer(gl: &vanilla::GlContext) -> Result<SkinnedModelRenderer, String> {
 	/// 	SkinnedModelRenderer::new(gl, Some(FLAT_FRAGMENTSHADER_SOURCE), None)
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn new(gl: &glow::Context, fragment_shader_source: Option<&str>, vertex_shader_source: Option<&str>) -> Result<SkinnedModelRenderer, String> {
+	pub fn new(gl: &GlContext, fragment_shader_source: Option<&str>, vertex_shader_source: Option<&str>) -> Result<SkinnedModelRenderer, String> {
 		let resolved_fragment_shader_source = fragment_shader_source.unwrap_or(SKINNED_FRAGMENTSHADER_SOURCE);
 		let resolved_vertex_shader_source = vertex_shader_source.unwrap_or(SKINNED_VERTEXSHADER_SOURCE);
 		let shader_program = ShaderProgram::new(gl, resolved_vertex_shader_source.trim(), resolved_fragment_shader_source.trim())?;
@@ -397,7 +397,7 @@ impl SkinnedModelRenderer {
 	/// 빈 그림자 텍스처 짓기. (1x1 깊이 1, 비교 샘플링)
 	/// - sampler2DShadow 유닛에 비교 모드가 없는 텍스처가 묶이면 WebGL 이 그리기를 거부하고, 깊이 텍스처가 없으면 맥 드라이버가 알린다.
 	//==============================================================================
-	fn create_empty_shadow_texture(gl: &glow::Context) -> Result<GlTexture, String> {
+	fn create_empty_shadow_texture(gl: &GlContext) -> Result<GlTexture, String> {
 		unsafe {
 			let texture = crate::core::glstatecache::create_texture(gl)?;
 			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
@@ -431,7 +431,7 @@ impl SkinnedModelRenderer {
 	/// - `camera_y`: 카메라 월드 Y.
 	/// - `camera_z`: 카메라 월드 Z.
 	//==============================================================================
-	pub fn draw(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f64, camera_y: f64, camera_z: f64) {
+	pub fn draw(&self, gl: &GlContext, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f64, camera_y: f64, camera_z: f64) {
 		skinned_model.upload_pending_morph_targets(gl);
 		let shader_program = &*self.shader_program;
 		shader_program.use_program(gl);
@@ -516,7 +516,7 @@ impl SkinnedModelRenderer {
 	/// use glow::HasContext;
 	/// use vanilla::{Matrix4, ShadowMap, SkinnedModel, SkinnedModelRenderer, Vector3};
 	///
-	/// fn draw_with_shadow(gl: &glow::Context, skinned_model_renderer: &mut SkinnedModelRenderer, shadow_map: &mut ShadowMap, skinned_model: &mut SkinnedModel, view_projection_matrix: &Matrix4, camera_position: Vector3, drawing_buffer_width: i32, drawing_buffer_height: i32) {
+	/// fn draw_with_shadow(gl: &vanilla::GlContext, skinned_model_renderer: &mut SkinnedModelRenderer, shadow_map: &mut ShadowMap, skinned_model: &mut SkinnedModel, view_projection_matrix: &Matrix4, camera_position: Vector3, drawing_buffer_width: i32, drawing_buffer_height: i32) {
 	/// 	let model_matrix = Matrix4::create_identity();
 	/// 	let sun_direction = Vector3::create(0.5, 0.8, 0.35).normalize();
 	/// 	shadow_map.update_light_matrix(Vector3::zero(), sun_direction.multiply_scalar(-1.0), 4.0, 0.5, 30.0);
@@ -535,7 +535,7 @@ impl SkinnedModelRenderer {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn draw_depth(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, light_view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16]) {
+	pub fn draw_depth(&self, gl: &GlContext, skinned_model: &mut SkinnedModel, light_view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16]) {
 		skinned_model.upload_pending_morph_targets(gl);
 		let depth_shader_program = &self.depth_shader_program;
 		depth_shader_program.use_program(gl);
@@ -581,7 +581,7 @@ impl SkinnedModelRenderer {
 	/// - `blue`: 선 색 파랑. (0 ~ 1)
 	/// - `alpha`: 선 불투명도. (0 ~ 1, 블렌드를 켜야 반투명이 된다)
 	//==============================================================================
-	pub fn draw_wireframe(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], red: f64, green: f64, blue: f64, alpha: f64) {
+	pub fn draw_wireframe(&self, gl: &GlContext, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], red: f64, green: f64, blue: f64, alpha: f64) {
 		skinned_model.upload_pending_morph_targets(gl);
 		for drawable_index in 0..skinned_model.get_drawable_list().len() {
 			if skinned_model.get_drawable_list()[drawable_index].wireframe_index_buffer.is_none() {
@@ -635,7 +635,7 @@ impl SkinnedModelRenderer {
 	/// - `shader_program`: 유니폼을 넣을 셰이더. (지금 쓰는 프로그램)
 	/// - `drawable`: 모프 상태를 읽을 드로어블.
 	//==============================================================================
-	pub fn apply_morph_uniforms(&self, gl: &glow::Context, shader_program: &ShaderProgram, drawable: &Drawable) {
+	pub fn apply_morph_uniforms(&self, gl: &GlContext, shader_program: &ShaderProgram, drawable: &Drawable) {
 		let morph_target_count_location = shader_program.get_uniform_location(gl, "morphTargetCount");
 		let target_count = match drawable.morph_texture {
 			Some(_) => {
@@ -769,7 +769,7 @@ impl SkinnedModelRenderer {
 //==============================================================================
 /// 드로어블 삼각형 출력. (인덱스가 있으면 drawElements, 없으면 drawArrays)
 //==============================================================================
-fn draw_drawable_triangles(gl: &glow::Context, drawable: &Drawable) {
+fn draw_drawable_triangles(gl: &GlContext, drawable: &Drawable) {
 	unsafe {
 		crate::core::glstatecache::bind_vertex_array(gl, Some(drawable.vertex_array));
 		if drawable.is_indexed {

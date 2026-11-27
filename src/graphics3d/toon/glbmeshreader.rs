@@ -254,7 +254,7 @@ pub struct ToonSkeleton {
 /// ```rust,no_run
 /// use vanilla::{read_glb_node_arrays, ToonMesh, ToonOutlineOptions, ToonRenderer};
 ///
-/// fn create_part_meshes(gl: &glow::Context, renderer: &ToonRenderer, bytes: &[u8]) -> Result<Vec<(String, ToonMesh, f64)>, String> {
+/// fn create_part_meshes(gl: &vanilla::GlContext, renderer: &ToonRenderer, bytes: &[u8]) -> Result<Vec<(String, ToonMesh, f64)>, String> {
 /// 	let outline_options = ToonOutlineOptions { width: 1.5, added_parts: vec![String::from("vanguard_Mesh"), String::from("vanguard_visor")], ..ToonOutlineOptions::default() };
 /// 	let part_arrays = read_glb_node_arrays(bytes, Some(&outline_options))?;
 /// 	let mut meshes = Vec::new();
@@ -942,7 +942,7 @@ fn read_texture_image(chunks: &GlbChunks, texture_info: &Value) -> Option<usize>
 /// use vanilla::core::graphic::GlTexture;
 /// use vanilla::{decode_glb_image, read_glb_images, ToonRenderer, ToonTextureOptions};
 ///
-/// fn create_image_textures(gl: &glow::Context, renderer: &ToonRenderer, bytes: &[u8]) -> Result<Vec<Option<GlTexture>>, String> {
+/// fn create_image_textures(gl: &vanilla::GlContext, renderer: &ToonRenderer, bytes: &[u8]) -> Result<Vec<Option<GlTexture>>, String> {
 /// 	let mut textures = Vec::new();
 /// 	for image in read_glb_images(bytes)?.iter() {
 /// 		if image.data.is_empty() {

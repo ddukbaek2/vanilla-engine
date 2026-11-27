@@ -9,6 +9,7 @@
 // - 환경 변수 VANILLA_RENDER_SCALE=0.5 처럼 주면 두 판의 3D 만 그 배율로 그려 늘여 얹는다. (원본 ?renderScale=0.5, ToonView3D::set_render_scale, 이름표와 띠 같은 2D 는 기기 화소 그대로)
 // - 실행: cargo run --example toonview
 //==============================================================================
+use vanilla::GlContext;
 use std::cell::{Cell, RefCell};
 use std::f64::consts::PI;
 use std::rc::Rc;
@@ -65,7 +66,7 @@ impl PanelDrawer {
 	//==============================================================================
 	// 모형 짓기. (처음 그릴 때 한 번)
 	//==============================================================================
-	fn create_meshes(renderer: &ToonRenderer, gl: &glow::Context) -> Option<PanelMeshes> {
+	fn create_meshes(renderer: &ToonRenderer, gl: &GlContext) -> Option<PanelMeshes> {
 		let outline_options = ToonPartOptions { outline_width: 0.03, ..ToonPartOptions::default() };
 		let chunk = build_arrays(&create_faceted_chunk_geometry(0.4, &[1.0, 0.85, 1.1, 0.95, 1.05, 0.9], [1.0, 0.8, 1.0]), [0.0, 0.3, 0.0], "#9a8a7a", ToonPartOptions::default());
 		let pile = MeshBuilder::combine(&[ToonMeshPiece { arrays: &chunk, offset: [0.0, 0.0, 0.0] }, ToonMeshPiece { arrays: &chunk, offset: [0.7, 0.0, 0.2] }, ToonMeshPiece { arrays: &chunk, offset: [0.3, 0.45, 0.1] }]);
@@ -82,7 +83,7 @@ impl PanelDrawer {
 	//==============================================================================
 	// 판 그리기. (ToonView3D 의 그리기 함수)
 	//==============================================================================
-	fn draw(&mut self, renderer: &mut ToonRenderer, camera: &Camera3D, screen_rect: Rect, gl: &glow::Context, output: ToonViewOutput) {
+	fn draw(&mut self, renderer: &mut ToonRenderer, camera: &Camera3D, screen_rect: Rect, gl: &GlContext, output: ToonViewOutput) {
 		if self.meshes.is_none() {
 			self.meshes = PanelDrawer::create_meshes(renderer, gl);
 		}

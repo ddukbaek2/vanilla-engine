@@ -329,7 +329,7 @@ fn normalize_direction(direction: [f64; 3]) -> [f64; 3] {
 /// ```rust,no_run
 /// use vanilla::{create_sphere_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonPartOptions, ToonRenderer, ToonShade, Vector3};
 ///
-/// fn draw_skin(gl: &glow::Context, renderer: &mut ToonRenderer) -> Option<()> {
+/// fn draw_skin(gl: &vanilla::GlContext, renderer: &mut ToonRenderer) -> Option<()> {
 /// 	let mut skin_light_set = renderer.create_light_set();
 /// 	skin_light_set.set_shade(ToonShade { step: 0.55, feather: 0.04, color: [0.86, 0.6, 0.6], ..ToonShade::default() });
 /// 	let mut builder = MeshBuilder::new();

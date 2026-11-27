@@ -6,9 +6,9 @@
 //! - 놓은 픽셀이 다시 필요하면(Canvas2D 의 drawImage, createPattern) 그림이 기억한 텍스처를 GPU 에서 되읽는다. (restore_image_pixels_from_texture)
 //!   크롬이 GPU 에 있는 그림을 CPU 캔버스에 그릴 때 텍스처를 되읽는 것과 같은 길이다. 되읽을 GL 컨텍스트는 Graphic 이 만들 때 건다.
 //==============================================================================
+use crate::core::glcontext::GlContext;
 use crate::core::graphic::GlTexture;
 use crate::core::image::Image;
-use glow::HasContext;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
@@ -36,11 +36,11 @@ pub(crate) fn register_pixel_read_context(gl: &Rc<glow::Context>) {
 /// # 돌려줌
 /// `gl` 이 Graphic 이 건 컨텍스트와 같으면 그 손잡이. 걸린 컨텍스트가 없거나 다른 컨텍스트면 None.
 //==============================================================================
-pub(crate) fn find_gl_context_handle(gl: &glow::Context) -> Option<Weak<glow::Context>> {
+pub(crate) fn find_gl_context_handle(gl: &GlContext) -> Option<Weak<glow::Context>> {
 	PIXEL_READ_CONTEXT.with(|context_cell| {
 		let context_handle = context_cell.borrow().clone();
 		let registered_gl = context_handle.upgrade()?;
-		if std::ptr::eq(Rc::as_ptr(&registered_gl), gl) {
+		if std::ptr::eq(Rc::as_ptr(&registered_gl), gl.get_glow_context_unchecked()) {
 			Some(context_handle)
 		}
 		else {
@@ -53,7 +53,7 @@ pub(crate) fn find_gl_context_handle(gl: &glow::Context) -> Option<Weak<glow::Co
 /// 텍스처 픽셀 읽기. (올린 그대로의 프리멀티플라이드 RGBA, 위에서 아래 차례. 못 읽으면 None)
 /// - 텍스처를 잠깐 만든 프레임버퍼에 붙여 읽고, 그 전에 묶여 있던 프레임버퍼로 되돌린다. 묶인 텍스처는 바꾸지 않는다.
 //==============================================================================
-pub(crate) fn read_texture_pixels(gl: &glow::Context, texture: GlTexture, width: u32, height: u32) -> Option<Vec<u8>> {
+pub(crate) fn read_texture_pixels(gl: &GlContext, texture: GlTexture, width: u32, height: u32) -> Option<Vec<u8>> {
 	let mut pixels = vec![0u8; width as usize * height as usize * 4];
 	unsafe {
 		let previous_framebuffer = crate::core::graphic::read_framebuffer_binding(gl);
@@ -98,7 +98,7 @@ pub(crate) fn restore_image_pixels_from_texture(image: &Image) -> bool {
 			return false;
 		}
 	};
-	match read_texture_pixels(&gl, texture, image.get_width(), image.get_height()) {
+	match read_texture_pixels(GlContext::from_context(&gl), texture, image.get_width(), image.get_height()) {
 		Some(pixels) => {
 			image.restore_pixels(pixels);
 			true
@@ -196,7 +196,7 @@ impl ImageTextureCache {
 	/// # 돌려줌
 	/// 이미지의 텍스처. GL 텍스처를 만들지 못하면 None.
 	//==============================================================================
-	pub fn get_texture(&mut self, gl: &glow::Context, image: &Rc<Image>, is_smoothing: bool, is_mipmap: bool) -> Option<crate::core::graphic::GlTexture> {
+	pub fn get_texture(&mut self, gl: &GlContext, image: &Rc<Image>, is_smoothing: bool, is_mipmap: bool) -> Option<crate::core::graphic::GlTexture> {
 		let instance_id = image.get_instance_id();
 		if let Some(entry) = self.entry_table.get_mut(&instance_id) {
 			if entry.is_smoothing != is_smoothing || entry.is_mipmap != is_mipmap {
@@ -256,7 +256,7 @@ impl ImageTextureCache {
 	/// # 인자
 	/// - `gl`: 텍스처를 만든 GL 컨텍스트.
 	//==============================================================================
-	pub fn sweep(&mut self, gl: &glow::Context) {
+	pub fn sweep(&mut self, gl: &GlContext) {
 		self.entry_table.retain(|_, entry| {
 			let is_alive = entry.image.strong_count() > 0;
 			if !is_alive {
@@ -298,7 +298,7 @@ fn has_complete_pixels(image: &Image) -> bool {
 //==============================================================================
 /// 텍스처 필터 적용. (스무딩 끄면 도트가 또렷한 NEAREST)
 //==============================================================================
-unsafe fn apply_filter(gl: &glow::Context, is_smoothing: bool, is_mipmap: bool) {
+unsafe fn apply_filter(gl: &GlContext, is_smoothing: bool, is_mipmap: bool) {
 	let magnify_filter = if is_smoothing {
 		glow::LINEAR
 	}
@@ -742,18 +742,18 @@ mod tests {
 		let gl = fake_gl::create_context();
 		let image = Image::create_from_pixels(2, 1, vec![255, 0, 0, 255, 0, 255, 0, 255]);
 		let mut first_cache = ImageTextureCache::new();
-		assert!(first_cache.get_texture(&gl, &image, true, false).is_some());
+		assert!(first_cache.get_texture(GlContext::from_context(&gl), &image, true, false).is_some());
 		assert!(!image.has_pixels());
 		let mut second_cache = ImageTextureCache::new();
-		assert!(second_cache.get_texture(&gl, &image, true, false).is_none());
+		assert!(second_cache.get_texture(GlContext::from_context(&gl), &image, true, false).is_none());
 		assert_eq!(fake_gl::get_live_count(fake_gl::FakeGlObject::Texture), 1);
 		register_pixel_read_context(&gl);
-		assert!(second_cache.get_texture(&gl, &image, true, false).is_some());
+		assert!(second_cache.get_texture(GlContext::from_context(&gl), &image, true, false).is_some());
 		assert_eq!(fake_gl::get_live_count(fake_gl::FakeGlObject::Texture), 2);
 		assert_eq!(fake_gl::get_live_count(fake_gl::FakeGlObject::Framebuffer), 0);
 		drop(image);
-		first_cache.sweep(&gl);
-		second_cache.sweep(&gl);
+		first_cache.sweep(GlContext::from_context(&gl));
+		second_cache.sweep(GlContext::from_context(&gl));
 		assert_eq!(fake_gl::get_live_count(fake_gl::FakeGlObject::Texture), 0);
 	}
 
@@ -763,13 +763,13 @@ mod tests {
 	#[test]
 	fn gl_context_handle_matches_registered_context() {
 		let gl = fake_gl::create_context();
-		assert!(find_gl_context_handle(&gl).is_none());
+		assert!(find_gl_context_handle(GlContext::from_context(&gl)).is_none());
 		register_pixel_read_context(&gl);
-		let context_handle = find_gl_context_handle(&gl).expect("handle");
+		let context_handle = find_gl_context_handle(GlContext::from_context(&gl)).expect("handle");
 		let other_gl = fake_gl::create_context();
-		assert!(find_gl_context_handle(&other_gl).is_none());
+		assert!(find_gl_context_handle(GlContext::from_context(&other_gl)).is_none());
 		drop(gl);
 		assert!(context_handle.upgrade().is_none());
-		assert!(find_gl_context_handle(&other_gl).is_none());
+		assert!(find_gl_context_handle(GlContext::from_context(&other_gl)).is_none());
 	}
 }
