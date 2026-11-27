@@ -34,6 +34,11 @@ exclude = ["third_party/rustybuzz", "third_party/ttf-parser"]
 name = "toonhighlight"
 harness = false
 
+# 해 그림자 치우침 찍기 시험. (원본 tests/graphics3d/shadowbiaschrome.test.mjs 와 같은 장면)
+[[test]]
+name = "shadowbias"
+harness = false
+
 [dependencies]
 # 반사 매크로. (#[reflect], 원본 vanilla.js 의 실행 중 반사를 컴파일 때 지은 코드로 한다)
 vanilla-engine-macros = { version = "0.3.2", path = "macros" }

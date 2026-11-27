@@ -576,7 +576,7 @@ pub struct FbxCornerArrays {
 /// let (mesh_description_list, _material_description_list) = skinned_model.interpret_content(&json, &binary_buffer).unwrap();
 /// let mesh_description = &mesh_description_list[0];
 /// assert_eq!(mesh_description.positions.len(), 9);
-/// assert!(mesh_description.normals.is_none());
+/// assert_eq!(mesh_description.normals.as_deref(), Some(&[0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0][..]));
 /// assert!(mesh_description.indices.is_none());
 /// assert_eq!(&mesh_description.weights[0..4], &[1.0, 0.0, 0.0, 0.0]);
 /// assert_eq!(mesh_description.material_index, None);
@@ -587,7 +587,7 @@ pub struct FbxCornerArrays {
 pub struct MeshDescription {
 	/// 정점 위치. (정점마다 x, y, z)
 	pub positions: Vec<f64>,
-	/// 정점 노멀. (3개씩, None 이면 업로드할 때 스무스 노멀을 지어 쓴다)
+	/// 정점 노멀. (3개씩, None 이면 업로드할 때 스무스 노멀을 지어 쓴다, glTF 는 노멀이 없으면 평평한 노멀을 지어 늘 Some)
 	pub normals: Option<Vec<f64>>,
 	/// 정점 UV. (2개씩, 없으면 None)
 	pub texture_coordinates: Option<Vec<f64>>,
@@ -1681,6 +1681,7 @@ impl SkinnedModel {
 	//==============================================================================
 	/// glTF 내용 해석. (GL 무관, 노드 / 스킨 / 애니메이션을 채우고 중립 메시 / 머티리얼 서술을 돌려준다)
 	/// - 모델의 노드, 루트, 스킨, 클립을 이 내용으로 바꾼다. 클립이 있으면 첫 클립을 재생 중으로 둔다.
+	/// - 노멀이 없는 프리미티브는 glTF 2.0 명세대로 평평한 노멀(삼각형마다 하나)이다. 꼭짓점을 삼각형마다 따로 풀어 면 노멀을 주고 indices 는 None 이다.
 	///
 	/// # 인자
 	/// - `json`: glTF JSON 전체.
@@ -1926,7 +1927,7 @@ impl SkinnedModel {
 						String::new()
 					}
 				};
-				mesh_description_list.push(MeshDescription {
+				let mut mesh_description = MeshDescription {
 					positions,
 					normals,
 					texture_coordinates,
@@ -1939,7 +1940,12 @@ impl SkinnedModel {
 					node_index: Some(node_index),
 					morph_targets,
 					morph_weights,
-				});
+				};
+				// 노멀이 없으면 glTF 2.0 명세대로 평평한 노멀이다. (꼭짓점을 삼각형마다 풀어 번호 없이 그린다, 툰 GLB 읽기와 같다)
+				if mesh_description.normals.is_none() {
+					create_flat_normal_arrays(&mut mesh_description);
+				}
+				mesh_description_list.push(mesh_description);
 			}
 		}
 
@@ -3825,6 +3831,78 @@ fn apply_texture_transform(texture_coordinates: &mut [f64], texture_info: &Value
 }
 
 //==============================================================================
+/// 꼭짓점 속성을 삼각형 꼭짓점마다 따로 풀기. (번호 차례대로 component_count 씩 옮김, 범위 밖 번호는 0, 원본 unweldAttributeArray)
+///
+/// # 인자
+/// - `values`: 꼭짓점마다 component_count 개의 값.
+/// - `corner_indices`: 삼각형마다 꼭짓점 번호 셋.
+/// - `component_count`: 꼭짓점 하나의 값 수.
+///
+/// # 돌려줌
+/// 번호마다 푼 값. (corner_indices.len() x component_count 개)
+//==============================================================================
+fn unweld_attribute_array<T: Copy + Default>(values: &[T], corner_indices: &[usize], component_count: usize) -> Vec<T> {
+	let mut result_array = vec![T::default(); corner_indices.len() * component_count];
+	for (corner_index, vertex_index) in corner_indices.iter().enumerate() {
+		for component_index in 0..component_count {
+			let value_index = vertex_index * component_count + component_index;
+			result_array[corner_index * component_count + component_index] = values.get(value_index).copied().unwrap_or_default();
+		}
+	}
+	result_array
+}
+
+//==============================================================================
+/// 노멀이 없는 glTF 프리미티브를 평평한 노멀로 풀기. (glTF 2.0 명세: 노멀이 없으면 삼각형마다 노멀 하나인 평평한 노멀이고, 탄젠트는 무시한다, 원본 createFlatNormalArrays)
+/// - 꼭짓점을 번호 차례대로 삼각형마다 따로 풀고 번호 없이 그린다. (위치, 텍스처 좌표, 조인트, 가중치, 모프 타깃의 델타)
+/// - 삼각형마다 (p1 - p0) x (p2 - p0) 을 길이 1 로 줄여 세 꼭짓점에 준다. (넓이가 0 인 삼각형은 0, 셈은 64 비트 실수로 하고 원본 Float32Array 와 같게 32 비트 실수로 반올림해 담는다)
+/// - 툰 GLB 읽기(glbmeshreader.rs 의 create_flat_normals)와 같은 차례, 같은 셈이다.
+///
+/// # 인자
+/// - `mesh_description`: 노멀이 없는 프리미티브의 서술. (indices 가 None 이면 꼭짓점 셋씩 삼각형, 위치, 텍스처 좌표, 조인트, 가중치, 번호, 모프 타깃을 바꾼다)
+//==============================================================================
+fn create_flat_normal_arrays(mesh_description: &mut MeshDescription) {
+	let vertex_count = mesh_description.positions.len() / 3;
+	let corner_indices: Vec<usize> = match mesh_description.indices.as_ref() {
+		Some(IndexArray::UnsignedShort(indices)) => {
+			indices.iter().map(|index| *index as usize).collect()
+		}
+		Some(IndexArray::UnsignedInt(indices)) => {
+			indices.iter().map(|index| *index as usize).collect()
+		}
+		None => {
+			(0..vertex_count).collect()
+		}
+	};
+	let positions = unweld_attribute_array(&mesh_description.positions, &corner_indices, 3);
+	let mut normals = vec![0.0f64; positions.len()];
+	for (triangle_index, triangle) in positions.chunks_exact(9).enumerate() {
+		let first_edge = [triangle[3] - triangle[0], triangle[4] - triangle[1], triangle[5] - triangle[2]];
+		let second_edge = [triangle[6] - triangle[0], triangle[7] - triangle[1], triangle[8] - triangle[2]];
+		let cross = [first_edge[1] * second_edge[2] - first_edge[2] * second_edge[1], first_edge[2] * second_edge[0] - first_edge[0] * second_edge[2], first_edge[0] * second_edge[1] - first_edge[1] * second_edge[0]];
+		let length = (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+		if length <= 0.0 {
+			continue;
+		}
+		for corner_index in 0..3 {
+			for axis in 0..3 {
+				normals[triangle_index * 9 + corner_index * 3 + axis] = ((cross[axis] / length) as f32) as f64;
+			}
+		}
+	}
+	mesh_description.texture_coordinates = mesh_description.texture_coordinates.as_ref().map(|texture_coordinates| unweld_attribute_array(texture_coordinates, &corner_indices, 2));
+	mesh_description.joints = unweld_attribute_array(&mesh_description.joints, &corner_indices, 4);
+	mesh_description.weights = unweld_attribute_array(&mesh_description.weights, &corner_indices, 4);
+	for morph_target in mesh_description.morph_targets.iter_mut() {
+		morph_target.position_deltas = unweld_attribute_array(&morph_target.position_deltas, &corner_indices, 3);
+		morph_target.normal_deltas = morph_target.normal_deltas.as_ref().map(|normal_deltas| unweld_attribute_array(normal_deltas, &corner_indices, 3));
+	}
+	mesh_description.positions = positions;
+	mesh_description.normals = Some(normals);
+	mesh_description.indices = None;
+}
+
+//==============================================================================
 /// glTF 필수 확장 확인. (extensionsRequired 에 읽지 못하는 확장이 있으면 Err)
 //==============================================================================
 fn check_required_extensions(json: &Value) -> Result<(), String> {
@@ -4200,8 +4278,10 @@ mod tests {
 		assert_eq!(skinned_mesh.joints, vec![0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
 		assert_near(skinned_mesh.weights[0], 128.0 / 255.0);
 		assert_near(skinned_mesh.weights[4], 1.0);
-		assert_eq!(skinned_mesh.indices, Some(IndexArray::UnsignedShort(vec![0, 1, 2])));
-		assert!(skinned_mesh.normals.is_none());
+		// 노멀이 없어 glTF 2.0 명세대로 평평한 노멀이다. (번호 0, 1, 2 차례로 풀어 번호 없이 그린다)
+		assert_eq!(skinned_mesh.indices, None);
+		assert_eq!(skinned_mesh.normals.as_ref().map(|normals| normals.len()), Some(9));
+		assert_eq!(skinned_mesh.normals.as_ref().map(|normals| normals[0..3] == normals[3..6] && normals[0..3] == normals[6..9]), Some(true));
 		assert_eq!(skinned_mesh.material_index, Some(0));
 		assert_eq!(skinned_mesh.material_name, "testMaterial");
 		assert_eq!(skinned_mesh.morph_targets.len(), 1);
@@ -4342,7 +4422,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 실제 GLB. (원본 예제 fox.glb, 조인트 24개, 클립 Survey/Walk/Run, 노멀 없음, 인덱스 없음, PNG 텍스처, 파일이 없으면 건너뛴다)
+	/// 실제 GLB. (원본 예제 fox.glb, 조인트 24개, 클립 Survey/Walk/Run, 노멀과 인덱스 없음(glTF 2.0 명세대로 평평한 노멀), PNG 텍스처, 파일이 없으면 건너뛴다)
 	//==============================================================================
 	#[test]
 	fn fox_glb_from_examples() {
@@ -4363,11 +4443,21 @@ mod tests {
 		assert_eq!(skinned_model.get_skin_list()[0].joint_node_indices.len(), 24);
 		assert_eq!(mesh_description_list.len(), 1);
 		let fox_mesh = &mesh_description_list[0];
-		assert!(fox_mesh.normals.is_none() && fox_mesh.indices.is_none());
+		// 여우 GLB 는 노멀과 인덱스가 없어 glTF 2.0 명세대로 평평한 노멀이다. (원본 modelreading.test.mjs 와 같은 검사)
+		let fox_primitive = &json["meshes"][0]["primitives"][0];
+		assert!(fox_primitive["attributes"]["NORMAL"].is_null() && fox_primitive["indices"].is_null(), "여우 GLB 는 노멀과 인덱스 없음");
+		assert!(fox_mesh.indices.is_none(), "여우 인덱스 없음");
 		assert_eq!(fox_mesh.positions.len() / 3, fox_mesh.weights.len() / 4);
+		let fox_normals = fox_mesh.normals.as_ref().expect("여우 평평한 노멀");
+		assert_eq!(fox_normals.len(), fox_mesh.positions.len(), "여우 평평한 노멀 수");
+		assert!((crate::base::trigonometry::hypot_list(&fox_normals[0..3]) - 1.0).abs() <= 1e-6, "여우 평평한 노멀 길이");
+		assert_eq!(&fox_normals[3..6], &fox_normals[0..3], "여우 평평한 노멀은 삼각형의 세 꼭짓점이 같다");
+		assert_eq!(&fox_normals[6..9], &fox_normals[0..3], "여우 평평한 노멀은 삼각형의 세 꼭짓점이 같다");
+		// 번호 없는 메시는 꼭짓점마다 삼각형 하나라 부드러운 노멀(업로드 때 노멀이 없는 서술에 짓는 것)도 면 노멀이다.
 		let normals = SkinnedModel::generate_smooth_normals(&fox_mesh.positions, None);
 		let first_length = (normals[0] * normals[0] + normals[1] * normals[1] + normals[2] * normals[2]).sqrt();
 		assert_near(first_length, 1.0);
+		assert!(normals.iter().zip(fox_normals.iter()).all(|(smooth, flat)| (*smooth as f64 - *flat).abs() <= 1e-5), "번호 없는 메시의 부드러운 노멀은 평평한 노멀");
 		let base_color_image = material_description_list[0].base_color_image.as_ref().expect("fox texture");
 		assert_eq!(base_color_image.mime_type.as_deref(), Some("image/png"));
 		let (image_width, image_height, pixels) = crate::graphics3d::material::decode_image_bytes(&base_color_image.bytes).expect("fox png");
@@ -4465,10 +4555,11 @@ mod tests {
 		assert_eq!(asset.get_reference_count(), 3);
 		assert_eq!(SkinnedModelAsset::get_cached_count(), 1);
 		assert_eq!(live_count(FakeGlObject::VertexArray), 1);
-		assert_eq!(live_count(FakeGlObject::Buffer), 5);
+		// 삼각형에 노멀이 없어 glTF 2.0 명세대로 평평한 노멀로 풀고 번호 없이 그린다. (버퍼 넷: 위치, 노멀, 조인트, 가중치, 인덱스 버퍼 없음)
+		assert_eq!(live_count(FakeGlObject::Buffer), 4);
 		assert_eq!(live_count(FakeGlObject::Texture), 17);
-		// 위치 36 + 노멀 36 + 조인트 24 + 가중치 48 + 인덱스 6 + 모프 텍스처 3 x 2 x 16 + 머티리얼 텍스처 16 x 4
-		assert_eq!(asset.get_gpu_byte_count(), 36 + 36 + 24 + 48 + 6 + 3 * 2 * 16 + 16 * 4);
+		// 위치 36 + 노멀 36 + 조인트 24 + 가중치 48 + 모프 텍스처 3 x 2 x 16 + 머티리얼 텍스처 16 x 4 (번호 없이 그려 인덱스 버퍼 없음)
+		assert_eq!(asset.get_gpu_byte_count(), 36 + 36 + 24 + 48 + 3 * 2 * 16 + 16 * 4);
 
 		// 인스턴스는 포즈와 재생 상태가 따로다. (첫 클립을 돌리고 한 쪽만 움직인다)
 		first_model.update(0.5);
@@ -4502,12 +4593,12 @@ mod tests {
 		assert_eq!(live_count(FakeGlObject::Texture), 17);
 		assert_eq!(asset.get_reference_count(), 2);
 		first_model.destroy(&gl);
-		assert_eq!((live_count(FakeGlObject::VertexArray), live_count(FakeGlObject::Buffer), live_count(FakeGlObject::Texture)), (1, 5, 17));
+		assert_eq!((live_count(FakeGlObject::VertexArray), live_count(FakeGlObject::Buffer), live_count(FakeGlObject::Texture)), (1, 4, 17));
 		assert_eq!(asset.get_reference_count(), 1);
 		assert!(!asset.is_destroyed());
 		let mut fourth_model = second_model.create_instance().expect("fourth model");
 		assert_eq!(asset.get_reference_count(), 2);
-		assert_eq!(live_count(FakeGlObject::Buffer), 5);
+		assert_eq!(live_count(FakeGlObject::Buffer), 4);
 		fourth_model.destroy(&gl);
 		second_model.destroy(&gl);
 		assert!(asset.is_destroyed());

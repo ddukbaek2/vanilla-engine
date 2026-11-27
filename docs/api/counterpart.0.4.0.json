@@ -19723,6 +19723,42 @@
 			"vanilla-engine": {
 				"module": "graphics3d/shadowmap",
 				"class": "ShadowMap",
+				"name": "set_bias"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowMap",
+				"name": "setBias"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowMap",
+				"name": "get_depth_bias"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowMap",
+				"name": "getDepthBias"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowMap",
+				"name": "get_normal_bias"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowMap",
+				"name": "getNormalBias"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowMap",
 				"name": "destroy"
 			},
 			"vanilla.js": {
