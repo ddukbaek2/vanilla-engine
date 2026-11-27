@@ -94342,6 +94342,25 @@
 			"functions": [
 				{
 					"kind": "field",
+					"name": "COMPONENT_TYPE_BYTE",
+					"signature": "pub const COMPONENT_TYPE_BYTE: u32 = 5120",
+					"params": [],
+					"returns": {
+						"type": "u32",
+						"description": {
+							"ko": "",
+							"en": ""
+						}
+					},
+					"description": {
+						"ko": "부호 있는 8비트 정수. (glTF componentType 5120, KHR_mesh_quantization 의 노멀 같은 것)",
+						"en": "Signed 8-bit integer. (glTF componentType 5120, such as KHR_mesh_quantization normals)"
+					},
+					"since": "0.4.0",
+					"source": "src/graphics3d/skinnedmodel.rs"
+				},
+				{
+					"kind": "field",
 					"name": "COMPONENT_TYPE_UNSIGNED_BYTE",
 					"signature": "pub const COMPONENT_TYPE_UNSIGNED_BYTE: u32 = 5121",
 					"params": [],
@@ -94357,6 +94376,25 @@
 						"en": "Accessor component type. (the keys of the original COMPONENT_ARRAY_TABLE)"
 					},
 					"since": "0.3.2",
+					"source": "src/graphics3d/skinnedmodel.rs"
+				},
+				{
+					"kind": "field",
+					"name": "COMPONENT_TYPE_SHORT",
+					"signature": "pub const COMPONENT_TYPE_SHORT: u32 = 5122",
+					"params": [],
+					"returns": {
+						"type": "u32",
+						"description": {
+							"ko": "",
+							"en": ""
+						}
+					},
+					"description": {
+						"ko": "부호 있는 16비트 정수. (glTF componentType 5122, KHR_mesh_quantization 의 위치, 노멀, 돌림 움직임 같은 것)",
+						"en": "Signed 16-bit integer. (glTF componentType 5122, such as KHR_mesh_quantization positions, normals and rotation animations)"
+					},
+					"since": "0.4.0",
 					"source": "src/graphics3d/skinnedmodel.rs"
 				},
 				{
@@ -94527,8 +94565,8 @@
 					"returns": {
 						"type": "Result<AccessorArray, String>",
 						"description": {
-							"ko": "컴포넌트 타입 그대로의 배열. (정규화하지 않는다, bufferView 가 없는 접근자는 0 으로 채운다) 접근자가 없거나, 타입을 모르거나, 버퍼 밖을 가리키면 Err.",
-							"en": "Array in the component type as is. (not normalized, accessors without a bufferView are filled with 0) Err if the accessor does not exist, the type is unknown, or it points outside the buffer."
+							"ko": "컴포넌트 타입 그대로의 배열. (정규화하지 않는다, bufferView 가 없는 접근자는 0 으로 채운다) 접근자가 없거나, 타입을 모르거나, 버퍼 밖을 가리키거나, 바이너리 덩어리(buffers[0]) 밖의 버퍼를 가리키면 Err.",
+							"en": "Array in the component type as is. (not normalized, accessors without a bufferView are filled with 0) Err if the accessor does not exist, the type is unknown, it points outside the buffer, or it points to a buffer outside the binary chunk (buffers[0])."
 						}
 					},
 					"description": {
@@ -94544,6 +94582,60 @@
 								"en": "Read one float VEC2 accessor"
 							},
 							"code": "use serde_json::json;\nuse vanilla::graphics3d::skinnedmodel::{read_accessor_array, AccessorArray};\n\nlet binary_buffer: Vec<u8> = [0.5f32, 1.0, 1.5, 2.0].iter().flat_map(|value| value.to_le_bytes()).collect();\nlet json = json!({\n\t\"accessors\": [{ \"bufferView\": 0, \"componentType\": 5126, \"count\": 2, \"type\": \"VEC2\" }],\n\t\"bufferViews\": [{ \"buffer\": 0, \"byteOffset\": 0, \"byteLength\": 16 }]\n});\nassert_eq!(read_accessor_array(&json, &binary_buffer, 0), Ok(AccessorArray::Float(vec![0.5, 1.0, 1.5, 2.0])));\nassert!(read_accessor_array(&json, &binary_buffer, 1).is_err());",
+							"language": "rust"
+						}
+					]
+				},
+				{
+					"kind": "method",
+					"name": "read_float_accessor_array",
+					"signature": "pub fn read_float_accessor_array(json: &Value, binary_buffer: &[u8], accessor_index: usize) -> Result<Vec<f64>, String>",
+					"params": [
+						{
+							"name": "json",
+							"type": "&Value",
+							"description": {
+								"ko": "glTF JSON 전체.",
+								"en": "The whole glTF JSON."
+							}
+						},
+						{
+							"name": "binary_buffer",
+							"type": "&[u8]",
+							"description": {
+								"ko": "BIN 청크 바이트.",
+								"en": "BIN chunk bytes."
+							}
+						},
+						{
+							"name": "accessor_index",
+							"type": "usize",
+							"description": {
+								"ko": "접근자 인덱스.",
+								"en": "Accessor index."
+							}
+						}
+					],
+					"returns": {
+						"type": "Result<Vec<f64>, String>",
+						"description": {
+							"ko": "32비트 실수로 반올림한 값을 f64 로 담은 새 목록. (원본 Float32Array 와 같은 값) read_accessor_array 가 Err 면 그 Err.",
+							"en": "A new list of values rounded to 32-bit floats, stored as f64. (the same values as the original's Float32Array) If read_accessor_array returns Err, that Err."
+						}
+					},
+					"description": {
+						"ko": "실수로 쓰는 접근자 CPU 읽기. (위치, 노멀, 텍스처 좌표, 모프 델타, 애니메이션 값, KHR_mesh_quantization 의 정수 속성을 실수로 되풀이)\n- 정규화(normalized) 정수는 glTF 명세의 공식으로 나눈다. (부호 없는 것은 c / 255, c / 65535, 부호 있는 것은 max(c / 127, -1), max(c / 32767, -1))\n- 정규화가 아닌 정수는 값 그대로 실수로 옮긴다. (위치의 크기와 자리는 노드 변환이나 inverseBindMatrices 가, 텍스처 좌표의 것은 KHR_texture_transform 이 맡는다)",
+						"en": "CPU read of an accessor used as floats. (positions, normals, texture coordinates, morph deltas, animation values, dequantizing KHR_mesh_quantization integer attributes into floats)\n- Normalized integers are divided with the glTF spec formulas. (unsigned ones as c / 255, c / 65535, signed ones as max(c / 127, -1), max(c / 32767, -1))\n- Non-normalized integers are moved to floats as is. (the node transform or inverseBindMatrices takes care of position scale and offset, KHR_texture_transform takes care of texture coordinates)"
+					},
+					"since": "0.4.0",
+					"source": "src/graphics3d/skinnedmodel.rs",
+					"examples": [
+						{
+							"title": {
+								"ko": "정규화한 SHORT VEC2 접근자 읽기 (-32768 은 -1 아래라 -1 로 자른다)",
+								"en": "Reading a normalized SHORT VEC2 accessor (-32768 is below -1, so it is clamped to -1)"
+							},
+							"code": "use serde_json::json;\nuse vanilla::graphics3d::skinnedmodel::read_float_accessor_array;\n\nlet binary_buffer: Vec<u8> = [-32768i16, 32767, 0, 16384].iter().flat_map(|value| value.to_le_bytes()).collect();\nlet json = json!({\n\t\"accessors\": [{ \"bufferView\": 0, \"componentType\": 5122, \"normalized\": true, \"count\": 2, \"type\": \"VEC2\" }],\n\t\"bufferViews\": [{ \"buffer\": 0, \"byteOffset\": 0, \"byteLength\": 8 }]\n});\nlet values = read_float_accessor_array(&json, &binary_buffer, 0).unwrap();\nassert_eq!(values[..3], [-1.0, 1.0, 0.0]);\nassert_eq!(values[3], (16384.0f64 / 32767.0) as f32 as f64);",
 							"language": "rust"
 						}
 					]
@@ -94758,11 +94850,27 @@
 					"source": "src/graphics3d/skinnedmodel.rs",
 					"values": [
 						{
+							"name": "Byte",
+							"value": "Byte(Vec<i8>)",
+							"description": {
+								"ko": "부호 있는 8비트. (componentType 5120)",
+								"en": "Signed 8-bit. (componentType 5120)"
+							}
+						},
+						{
 							"name": "UnsignedByte",
 							"value": "UnsignedByte(Vec<u8>)",
 							"description": {
 								"ko": "부호 없는 8비트. (componentType 5121)",
 								"en": "Unsigned 8-bit. (componentType 5121)"
+							}
+						},
+						{
+							"name": "Short",
+							"value": "Short(Vec<i16>)",
+							"description": {
+								"ko": "부호 있는 16비트. (componentType 5122)",
+								"en": "Signed 16-bit. (componentType 5122)"
 							}
 						},
 						{
@@ -94842,8 +94950,8 @@
 								}
 							},
 							"description": {
-								"ko": "컴포넌트 타입. (5121 / 5123 / 5125 / 5126)",
-								"en": "Component type. (5121 / 5123 / 5125 / 5126)"
+								"ko": "컴포넌트 타입. (5120 / 5121 / 5122 / 5123 / 5125 / 5126)",
+								"en": "Component type. (5120 / 5121 / 5122 / 5123 / 5125 / 5126)"
 							},
 							"since": "0.3.2",
 							"source": "src/graphics3d/skinnedmodel.rs"
@@ -94875,8 +94983,8 @@
 							"returns": {
 								"type": "Vec<u16>",
 								"description": {
-									"ko": "u16 으로 바꾼 새 목록. (u32 는 아래 16비트만 남고, 실수는 소수점 아래를 버리고 0 ~ 65535 로 자른다)",
-									"en": "A new list converted to u16. (u32 keeps only the lower 16 bits, floats drop the fractional part and are clamped to 0 ~ 65535)"
+									"ko": "u16 으로 바꾼 새 목록. (부호 있는 정수와 u32 는 아래 16비트만 남고, 실수는 소수점 아래를 버리고 0 ~ 65535 로 자른다)",
+									"en": "A new list converted to u16. (signed integers and u32 keep only the lower 16 bits, floats drop the fractional part and are clamped to 0 ~ 65535)"
 								}
 							},
 							"description": {
@@ -96982,8 +97090,8 @@
 		{
 			"name": "graphics3d/toon/glbmeshreader",
 			"summary": {
-				"ko": "점토 모형(GLB) 읽기와 뼈대 자세. (vanilla.js graphics3d/toon/glbmeshreader.js)\n- 재질 색으로 칠하는 모형을 툰 3D 의 MeshBuilder 꼭짓점 배열로 읽는다. 텍스처 좌표와 재질 텍스처가 있으면 그것도 읽는다. (외계행성 광부 키우기에서 왔다)\n  - 부품 하나가 노드 하나이고, 노드의 메시는 색마다 프리미티브 하나다. 꼭짓점은 위치와 노멀, 뼈대가 있으면 본 번호와 무게다.\n  - 재질의 baseColorFactor 는 선형 색이라 sRGB 로 바꿔 담고, emissiveFactor 가 있으면 빛남으로 담는다. (emissiveTexture 가 있으면 빛남은 재질 범위로만 넘긴다)\n  - TEXCOORD_0 이 있으면 uv_data 로, TEXCOORD_1 이 있으면 uv1_data(2 번 UV, 천사 고리)로 담는다. 프리미티브마다 재질 범위(ToonMaterialRange)를 담는다. (재질 이름, extras, 텍스처 그림 차례)\n    부품 안에서 칸을 갈라 칠할 때(강조색 칸, 표시판) 재질 이름이나 extras 로 고르고 ToonDrawOptions 의 index_start, index_count 로 그 칸만 그린다.\n  - 그림은 read_glb_images 로 읽고 decode_glb_image 로 풀어 ToonRenderer::create_texture 에 넘긴다.\n  - 재질 extras 의 outline 은 바깥선 껍데기(뒷면만 그림), basic 은 빛을 받지 않는 부품이다.\n    바깥선 설정을 주면 그 껍데기는 담지 않고, \".outline\" 짝이 있는 노드의 몸으로 점마다 같은 굵기의 껍데기를 새로 짓는다.\n  - 뼈대(skin)가 있으면 본 노드와 그 거꾸로 묶는 행렬, 움직임(animations)과 그 extras 를 함께 읽는다. 자세는 write_skin_pose 가 셈한다.\n    섞은 자세를 스킨 행렬로 짓기 전에 뼈마다 고치려면 pose_adjust 에 고리(ToonPoseAdjust::Hook)나 고침 표(ToonPoseAdjust::Bones, adjust_bones, BoneModifier)를 준다.\n  - 부품을 따로 숨기거나 칠하는 모형은 read_glb_node_arrays 로 노드마다 따로 읽는다. (노드 extras 와 비치는 정도를 함께)\n  - 한 덩이로 읽은 뼈대 모형의 노드 extras 와 부품의 자리, 따르는 본은 read_glb_node_infos 로 따로 읽는다.\n- 엔진의 SkinnedModel(텍스처 PBR)과는 따로다. 툰 그리기에 쓸 꼭짓점 배열만 뽑는다.",
-				"en": "Reading clay models (GLB) and skeleton poses. (vanilla.js graphics3d/toon/glbmeshreader.js)\n- Reads models painted with material colors into toon 3D MeshBuilder vertex arrays. Texture coordinates and material textures are read too if present. (Came from webgame-rimminer)\n  - One part is one node, and a node's mesh is one primitive per color. Vertices are position and normal, plus joint indices and weights if there is a skeleton.\n  - The material's baseColorFactor is a linear color, so it is converted to sRGB, and emissiveFactor, if present, is stored as glow. (If there is an emissiveTexture, glow is passed only through the material range)\n  - TEXCOORD_0, if present, goes into uv_data and TEXCOORD_1 into uv1_data (second UV, angel ring). A material range (ToonMaterialRange) is stored per primitive. (Material name, extras, texture image order)\n    When painting split areas inside a part (accent color areas, display panels), pick them by material name or extras and draw only that area with index_start and index_count of ToonDrawOptions.\n  - Images are read with read_glb_images, decoded with decode_glb_image and passed to ToonRenderer::create_texture.\n  - outline in material extras is an outline shell (only back faces drawn), and basic is a part that does not receive light.\n    If outline options are given, that shell is not stored, and a shell of uniform thickness per point is newly built from the body of each node that has a \".outline\" pair.\n  - If there is a skeleton (skin), the joint nodes and their inverse bind matrices, the animations (animations) and their extras are read together. Poses are computed by write_skin_pose.\n    To modify bones before the blended pose is built into skin matrices, pass a hook (ToonPoseAdjust::Hook) or a modification table (ToonPoseAdjust::Bones, adjust_bones, BoneModifier) as pose_adjust.\n  - Models whose parts are hidden or painted separately are read per node with read_glb_node_arrays. (Together with node extras and transparency)\n  - For a skeletal model read as one lump, node extras, part positions and the joints they follow are read separately with read_glb_node_infos.\n- Separate from the engine's SkinnedModel (textured PBR). Only the vertex arrays used for toon drawing are extracted."
+				"ko": "점토 모형(GLB) 읽기와 뼈대 자세. (vanilla.js graphics3d/toon/glbmeshreader.js)\n- 재질 색으로 칠하는 모형을 툰 3D 의 MeshBuilder 꼭짓점 배열로 읽는다. 텍스처 좌표와 재질 텍스처가 있으면 그것도 읽는다. (외계행성 광부 키우기에서 왔다)\n  - 부품 하나가 노드 하나이고, 노드의 메시는 색마다 프리미티브 하나다. 꼭짓점은 위치와 노멀, 뼈대가 있으면 본 번호와 무게다.\n    노멀이 없는 프리미티브는 glTF 명세대로 평평한 노멀(삼각형마다 하나)을 짓는다. (꼭짓점을 삼각형마다 따로 푼다)\n  - 재질의 baseColorFactor 는 선형 색이라 sRGB 로 바꿔 담고, emissiveFactor 가 있으면 빛남으로 담는다. (emissiveTexture 가 있으면 빛남은 재질 범위로만 넘긴다)\n  - TEXCOORD_0 이 있으면 uv_data 로, TEXCOORD_1 이 있으면 uv1_data(2 번 UV, 천사 고리)로 담는다. 프리미티브마다 재질 범위(ToonMaterialRange)를 담는다. (재질 이름, extras, 텍스처 그림 차례)\n    부품 안에서 칸을 갈라 칠할 때(강조색 칸, 표시판) 재질 이름이나 extras 로 고르고 ToonDrawOptions 의 index_start, index_count 로 그 칸만 그린다.\n  - 그림은 read_glb_images 로 읽고 decode_glb_image 로 풀어 ToonRenderer::create_texture 에 넘긴다.\n  - 재질 extras 의 outline 은 바깥선 껍데기(뒷면만 그림), basic 은 빛을 받지 않는 부품이다.\n    바깥선 설정을 주면 그 껍데기는 담지 않고, \".outline\" 짝이 있는 노드의 몸으로 점마다 같은 굵기의 껍데기를 새로 짓는다.\n  - 뼈대(skin)가 있으면 본 노드와 그 거꾸로 묶는 행렬, 움직임(animations)과 그 extras 를 함께 읽는다. 자세는 write_skin_pose 가 셈한다.\n    섞은 자세를 스킨 행렬로 짓기 전에 뼈마다 고치려면 pose_adjust 에 고리(ToonPoseAdjust::Hook)나 고침 표(ToonPoseAdjust::Bones, adjust_bones, BoneModifier)를 준다.\n  - 부품을 따로 숨기거나 칠하는 모형은 read_glb_node_arrays 로 노드마다 따로 읽는다. (노드 extras 와 비치는 정도를 함께)\n  - 한 덩이로 읽은 뼈대 모형의 노드 extras 와 부품의 자리, 따르는 본은 read_glb_node_infos 로 따로 읽는다.\n  - 꼭짓점 속성을 정수로 담은 GLB(KHR_mesh_quantization)도 읽는다. 정규화 정수는 glTF 명세의 공식으로 나누고, 텍스처 좌표는 재질 텍스처의 KHR_texture_transform 을 구워 넣는다.\n    이름 없는 메시 노드는 이름 있는 부모 노드의 부품에 든다. (양자화 도구가 되풀이 변환을 맡기는 잎 노드) extensionsRequired 에 읽지 못하는 확장(meshopt 압축 등)이 있거나 바이너리 덩어리 밖의 버퍼를 가리키면 Err.\n- 엔진의 SkinnedModel(텍스처 PBR)과는 따로다. 툰 그리기에 쓸 꼭짓점 배열만 뽑는다.",
+				"en": "Reading clay models (GLB) and skeleton poses. (vanilla.js graphics3d/toon/glbmeshreader.js)\n- Reads models painted with material colors into toon 3D MeshBuilder vertex arrays. Texture coordinates and material textures are read too if present. (Came from webgame-rimminer)\n  - One part is one node, and a node's mesh is one primitive per color. Vertices are position and normal, plus joint indices and weights if there is a skeleton.\n    A primitive without normals gets flat normals (one per triangle) as the glTF spec says. (Vertices are split per triangle)\n  - The material's baseColorFactor is a linear color, so it is converted to sRGB, and emissiveFactor, if present, is stored as glow. (If there is an emissiveTexture, glow is passed only through the material range)\n  - TEXCOORD_0, if present, goes into uv_data and TEXCOORD_1 into uv1_data (second UV, angel ring). A material range (ToonMaterialRange) is stored per primitive. (Material name, extras, texture image order)\n    When painting split areas inside a part (accent color areas, display panels), pick them by material name or extras and draw only that area with index_start and index_count of ToonDrawOptions.\n  - Images are read with read_glb_images, decoded with decode_glb_image and passed to ToonRenderer::create_texture.\n  - outline in material extras is an outline shell (only back faces drawn), and basic is a part that does not receive light.\n    If outline options are given, that shell is not stored, and a shell of uniform thickness per point is newly built from the body of each node that has a \".outline\" pair.\n  - If there is a skeleton (skin), the joint nodes and their inverse bind matrices, the animations (animations) and their extras are read together. Poses are computed by write_skin_pose.\n    To modify bones before the blended pose is built into skin matrices, pass a hook (ToonPoseAdjust::Hook) or a modification table (ToonPoseAdjust::Bones, adjust_bones, BoneModifier) as pose_adjust.\n  - Models whose parts are hidden or painted separately are read per node with read_glb_node_arrays. (Together with node extras and transparency)\n  - For a skeletal model read as one lump, node extras, part positions and the joints they follow are read separately with read_glb_node_infos.\n  - GLB files whose vertex attributes are stored as integers (KHR_mesh_quantization) are read too. Normalized integers are divided with the glTF spec formulas, and texture coordinates get the material texture KHR_texture_transform baked in.\n    An unnamed mesh node belongs to the part of its named parent node. (the leaf node a quantizer adds for the dequantization transform) Err if extensionsRequired lists an extension that cannot be read (meshopt compression and others) or an accessor points to a buffer outside the binary chunk.\n- Separate from the engine's SkinnedModel (textured PBR). Only the vertex arrays used for toon drawing are extracted."
 			},
 			"classes": [
 				{
@@ -98250,8 +98358,8 @@
 						}
 					},
 					"description": {
-						"ko": "GLB 의 메시 노드마다의 extras, 가운데, 따르는 본. (이름 끝이 \".outline\" 인 노드와 바깥선 재질은 뺀다)\n- center 는 꼭짓점이 놓인 범위의 가운데다. (모형 좌표, 뼈대로 움직이는 노드는 쉬는 자세의 자리, 꼭짓점이 없으면 원점)\n- joint_index 는 그 노드의 꼭짓점이 가장 무겁게 딸린 본의 skin 안 차례다. (write_skin_pose 가 쓴 본 행렬의 차례)",
-						"en": "Extras, center and following bone of each mesh node of the GLB. (nodes whose name ends in \".outline\" and outline materials are excluded)\n- center is the center of the range the vertices occupy. (model coordinates, the rest pose position for nodes moved by the skeleton, the origin if there are no vertices)\n- joint_index is the index within the skin of the bone the node's vertices are most heavily bound to. (the order of the bone matrices written by write_skin_pose)"
+						"ko": "GLB 의 메시 노드마다의 extras, 가운데, 따르는 본. (이름 끝이 \".outline\" 인 노드와 바깥선 재질은 뺀다, 이름 없는 메시 노드는 이름 있는 부모 부품에 모은다)\n- center 는 꼭짓점이 놓인 범위의 가운데다. (모형 좌표, 뼈대로 움직이는 노드는 쉬는 자세의 자리, 꼭짓점이 없으면 원점)\n- joint_index 는 그 노드의 꼭짓점이 가장 무겁게 딸린 본의 skin 안 차례다. (write_skin_pose 가 쓴 본 행렬의 차례)",
+						"en": "Extras, center and following bone of each mesh node of the GLB. (nodes whose name ends in \".outline\" and outline materials are excluded, an unnamed mesh node is gathered into its named parent part)\n- center is the center of the range the vertices occupy. (model coordinates, the rest pose position for nodes moved by the skeleton, the origin if there are no vertices)\n- joint_index is the index within the skin of the bone the node's vertices are most heavily bound to. (the order of the bone matrices written by write_skin_pose)"
 					},
 					"since": "0.4.0",
 					"source": "src/graphics3d/toon/glbmeshreader.rs",
