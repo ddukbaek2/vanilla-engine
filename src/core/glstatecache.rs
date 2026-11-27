@@ -5,12 +5,12 @@
 //!   엔진의 상태 함수 호출이 이 모듈의 같은 이름 함수(첫 인자 gl)를 거쳐 GL 을 부른다.
 //! - 상태를 바꾸는 함수는 늘 GL 을 부르고 바뀐 값을 기억한다. 같은 값이면 건너뛰는 것은 부르는 쪽이 is_program_in_use 같은 것으로 물어 한다. (원본과 같음)
 //! - 읽는 함수(get_parameter_*, is_enabled, read_*)는 기억한 값으로 답한다. 모르는 값(처음, reset 뒤, 검사하지 못한 인자를 받은 뒤)만 GL 에 한 번 묻고 기억한다.
-//! - 기억하지 않는 값(스텐실 함수, 버퍼 묶음 같은 것)은 GL 에 그대로 묻는다. 바뀌지 않는 한도 값(MAX_SAMPLES 같은 것)은 한 번 묻고 기억한다.
+//! - 기억하지 않는 값(스텐실 함수, ARRAY_BUFFER 밖의 버퍼 묶음 같은 것)은 GL 에 그대로 묻는다. ARRAY_BUFFER 묶음은 견주기(is_array_buffer_bound)에만 쓰고 읽기는 GL 에 묻는다. (원본과 같음) 바뀌지 않는 한도 값(MAX_SAMPLES 같은 것)은 한 번 묻고 기억한다.
 //! - 이 모듈을 거치지 않고 glow 로 상태를 바꾸면 reset 을 부른다. (Graphic::reset_gl_state_cache, 게임에 넘기는 GlContext 의 상태 함수는 이 모듈을 거친다)
 //! - 검사 모드(VANILLA_GL_STATE_CHECK=1)는 그리기 앞마다 기억한 값을 진짜 GL 과 견준다. (아래 '검사 모드')
 //! - 캐시를 걸지 않은 컨텍스트(Graphic 밖에서 만든 것)는 기억 없이 GL 을 그대로 부르고 묻는다.
 //==============================================================================
-use crate::core::graphic::{GlFramebuffer, GlProgram, GlTexture, GlVertexArray};
+use crate::core::graphic::{GlBuffer, GlFramebuffer, GlProgram, GlTexture, GlVertexArray};
 use glow::HasContext;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -24,6 +24,9 @@ const CAPABILITY_LIST: [u32; 10] = [glow::BLEND, glow::CULL_FACE, glow::DEPTH_TE
 
 /// 텍스처 대상. (차례가 칸 번호)
 const TEXTURE_TARGET_LIST: [u32; 4] = [glow::TEXTURE_2D, glow::TEXTURE_CUBE_MAP, glow::TEXTURE_3D, glow::TEXTURE_2D_ARRAY];
+
+/// 버퍼 묶음 대상. (WebGL2 의 bindBuffer 가 받는 것 모두, 원본 BUFFER_TARGET_SET)
+const BUFFER_TARGET_LIST: [u32; 8] = [glow::ARRAY_BUFFER, glow::ELEMENT_ARRAY_BUFFER, glow::COPY_READ_BUFFER, glow::COPY_WRITE_BUFFER, glow::TRANSFORM_FEEDBACK_BUFFER, glow::UNIFORM_BUFFER, glow::PIXEL_PACK_BUFFER, glow::PIXEL_UNPACK_BUFFER];
 
 /// 섞기 인자로 받는 값.
 const BLEND_FACTOR_LIST: [u32; 15] = [glow::ZERO, glow::ONE, glow::SRC_COLOR, glow::ONE_MINUS_SRC_COLOR, glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::DST_ALPHA, glow::ONE_MINUS_DST_ALPHA, glow::DST_COLOR, glow::ONE_MINUS_DST_COLOR, glow::SRC_ALPHA_SATURATE, glow::CONSTANT_COLOR, glow::ONE_MINUS_CONSTANT_COLOR, glow::CONSTANT_ALPHA, glow::ONE_MINUS_CONSTANT_ALPHA];
@@ -58,6 +61,7 @@ pub(crate) struct GlStateCache {
 	cull_face_mode: Cell<Option<u32>>,
 	program: Cell<Option<Option<GlProgram>>>,
 	vertex_array: Cell<Option<Option<GlVertexArray>>>,
+	array_buffer: Cell<Option<Option<GlBuffer>>>, // ARRAY_BUFFER 에 묶은 버퍼. (버텍스 어레이에 들지 않는 전역 묶음, 견주기에만 쓰고 읽기는 GL 에 묻는다)
 	active_texture: Cell<Option<u32>>,
 	capability_list: [Cell<Option<bool>>; 10],
 	texture_binding_table: RefCell<HashMap<u32, Option<GlTexture>>>, // 키 유닛 * 4 + 대상 칸. (없으면 모른다)
@@ -69,6 +73,8 @@ pub(crate) struct GlStateCache {
 	deleted_framebuffer_set: RefCell<HashSet<GlFramebuffer>>, // 지운 것. (묶으면 GL 이 무시한다, 이 모듈의 create_* 로 같은 이름을 다시 받으면 뺀다)
 	deleted_texture_set: RefCell<HashSet<GlTexture>>,
 	deleted_vertex_array_set: RefCell<HashSet<GlVertexArray>>,
+	deleted_buffer_set: RefCell<HashSet<GlBuffer>>,
+	buffer_element_table: RefCell<HashMap<GlBuffer, bool>>, // 버퍼마다 처음 묶은 대상이 ELEMENT_ARRAY_BUFFER 인지. (WebGL 은 둘 사이를 오가며 묶지 못하게 한다)
 }
 
 impl GlStateCache {
@@ -91,6 +97,7 @@ impl GlStateCache {
 			cull_face_mode: Cell::new(None),
 			program: Cell::new(None),
 			vertex_array: Cell::new(None),
+			array_buffer: Cell::new(None),
 			active_texture: Cell::new(None),
 			capability_list: Default::default(),
 			texture_binding_table: RefCell::new(HashMap::new()),
@@ -102,6 +109,8 @@ impl GlStateCache {
 			deleted_framebuffer_set: RefCell::new(HashSet::new()),
 			deleted_texture_set: RefCell::new(HashSet::new()),
 			deleted_vertex_array_set: RefCell::new(HashSet::new()),
+			deleted_buffer_set: RefCell::new(HashSet::new()),
+			buffer_element_table: RefCell::new(HashMap::new()),
 		}
 	}
 
@@ -123,6 +132,7 @@ impl GlStateCache {
 		self.cull_face_mode.set(None);
 		self.program.set(None);
 		self.vertex_array.set(None);
+		self.array_buffer.set(None);
 		self.active_texture.set(None);
 		for capability in &self.capability_list {
 			capability.set(None);
@@ -703,6 +713,68 @@ pub(crate) unsafe fn delete_vertex_array(gl: &glow::Context, vertex_array: GlVer
 }
 
 //==============================================================================
+// 버퍼. (ARRAY_BUFFER 묶음만 기억한다, 버퍼는 ELEMENT_ARRAY_BUFFER 와 그 밖의 대상 사이를 오가며 묶지 못한다, 어기면 WebGL 이 무시한다)
+//==============================================================================
+/// 버퍼 묶기. (원본 bindBuffer)
+pub(crate) unsafe fn bind_buffer(gl: &glow::Context, target: u32, buffer: Option<GlBuffer>) {
+	note_call(|| format!("bind_buffer(0x{:X}, {:?})", target, buffer));
+	unsafe {
+		gl.bind_buffer(target, buffer);
+	}
+	if !BUFFER_TARGET_LIST.contains(&target) {
+		return;
+	}
+	with_state_cache(gl, |state_cache| {
+		let Some(state_cache) = state_cache else {
+			return;
+		};
+		let is_element_target = target == glow::ELEMENT_ARRAY_BUFFER;
+		let is_buffer_object = buffer.is_some_and(|buffer| !state_cache.deleted_buffer_set.borrow().contains(&buffer));
+		if let (true, Some(buffer)) = (is_buffer_object, buffer) {
+			state_cache.buffer_element_table.borrow_mut().entry(buffer).or_insert(is_element_target);
+		}
+		if target != glow::ARRAY_BUFFER {
+			return;
+		}
+		let Some(buffer) = buffer else {
+			state_cache.array_buffer.set(Some(None));
+			return;
+		};
+		let is_known = is_buffer_object && state_cache.buffer_element_table.borrow().get(&buffer) == Some(&false);
+		state_cache.array_buffer.set(if is_known { Some(Some(buffer)) } else { None });
+	});
+}
+
+/// 버퍼 만들기. (지운 이름을 GL 이 다시 주면 지운 기억과 처음 묶은 대상을 뺀다)
+pub(crate) unsafe fn create_buffer(gl: &glow::Context) -> Result<GlBuffer, String> {
+	note_call(|| String::from("create_buffer()"));
+	let buffer = unsafe { gl.create_buffer() }?;
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.deleted_buffer_set.borrow_mut().remove(&buffer);
+			state_cache.buffer_element_table.borrow_mut().remove(&buffer);
+		}
+	});
+	Ok(buffer)
+}
+
+/// 버퍼 지우기. (원본 deleteBuffer, ARRAY_BUFFER 에 묶인 것을 지우면 GL 이 풀어 준다)
+pub(crate) unsafe fn delete_buffer(gl: &glow::Context, buffer: GlBuffer) {
+	note_call(|| format!("delete_buffer({:?})", buffer));
+	unsafe {
+		gl.delete_buffer(buffer);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.deleted_buffer_set.borrow_mut().insert(buffer);
+			if state_cache.array_buffer.get() == Some(Some(buffer)) {
+				state_cache.array_buffer.set(Some(None));
+			}
+		}
+	});
+}
+
+//==============================================================================
 // 텍스처.
 //==============================================================================
 /// 활성 텍스처 유닛. (원본 activeTexture, TEXTURE0 + 번호)
@@ -1048,6 +1120,39 @@ pub(crate) fn is_vertex_array_bound(gl: &glow::Context, vertex_array: Option<GlV
 	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.vertex_array.get() == Some(vertex_array)))
 }
 
+/// ARRAY_BUFFER 에 그 버퍼가 묶였는지. (원본 isArrayBufferBound)
+pub(crate) fn is_array_buffer_bound(gl: &glow::Context, buffer: Option<GlBuffer>) -> bool {
+	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.array_buffer.get() == Some(buffer)))
+}
+
+/// 기능이 그렇게 켜졌거나 꺼졌는지. (원본 isCapabilitySet, GL 에 묻지 않는다)
+pub(crate) fn is_capability_set(gl: &glow::Context, capability: u32, is_enabled: bool) -> bool {
+	let Some(capability_index) = GlStateCache::find_capability_index(capability) else {
+		return false;
+	};
+	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.capability_list[capability_index].get() == Some(is_enabled)))
+}
+
+/// 섞기 인자가 그것인지. (원본 isBlendFunction, blend_func 로 건 꼴, RGB 와 알파가 같은 인자)
+pub(crate) fn is_blend_function(gl: &glow::Context, source_factor: u32, destination_factor: u32) -> bool {
+	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.blend_factors.get() == Some([source_factor, destination_factor, source_factor, destination_factor])))
+}
+
+/// 섞기 식이 그것인지. (원본 isBlendEquation, RGB 와 알파가 같은 식)
+pub(crate) fn is_blend_equation(gl: &glow::Context, mode: u32) -> bool {
+	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.blend_equations.get() == Some([mode, mode])))
+}
+
+/// 뷰포트가 그것인지. (원본 isViewport, GL 에 묻지 않는다)
+pub(crate) fn is_viewport(gl: &glow::Context, x: i32, y: i32, width: i32, height: i32) -> bool {
+	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.viewport.get() == Some([x, y, width, height])))
+}
+
+/// 색 쓰기 가림이 그것인지. (GL 에 묻지 않는다, 데스크탑 기본 프레임버퍼에 알파를 쓰지 않는 Graphic 의 색 쓰기 마스크가 견준다)
+pub(crate) fn is_color_mask(gl: &glow::Context, red: bool, green: bool, blue: bool, alpha: bool) -> bool {
+	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.color_write_mask.get() == Some([red, green, blue, alpha])))
+}
+
 /// 활성 텍스처 유닛이 그것인지. (원본 isActiveTexture, TEXTURE0 + 번호)
 pub(crate) fn is_active_texture(gl: &glow::Context, texture_unit: u32) -> bool {
 	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.active_texture.get() == Some(texture_unit)))
@@ -1188,6 +1293,7 @@ fn collect_check_mismatch_list(gl: &glow::Context, state_cache: &GlStateCache) -
 		compare_cell!("CULL_FACE_MODE", state_cache.cull_face_mode, gl.get_parameter_i32(glow::CULL_FACE_MODE) as u32);
 		compare_cell!("CURRENT_PROGRAM", state_cache.program, gl.get_parameter_program(glow::CURRENT_PROGRAM));
 		compare_cell!("VERTEX_ARRAY_BINDING", state_cache.vertex_array, gl.get_parameter_vertex_array(glow::VERTEX_ARRAY_BINDING));
+		compare_cell!("ARRAY_BUFFER_BINDING", state_cache.array_buffer, gl.get_parameter_buffer(glow::ARRAY_BUFFER_BINDING));
 		let real_active_texture = gl.get_parameter_i32(glow::ACTIVE_TEXTURE) as u32;
 		compare_cell!("ACTIVE_TEXTURE", state_cache.active_texture, real_active_texture);
 		for (capability_index, capability) in CAPABILITY_LIST.iter().enumerate() {
@@ -1305,7 +1411,7 @@ pub(crate) unsafe fn draw_elements_instanced(gl: &glow::Context, mode: u32, coun
 // 시험. (원본 webglstatecachechrome.test.mjs 와 같은 꼴, 진짜 GL 컨텍스트를 맥의 CGL 로 창 없이 짓는다)
 //==============================================================================
 #[cfg(all(test, target_os = "macos"))]
-mod tests {
+pub(crate) mod tests {
 	use super::*;
 	use std::ffi::{c_char, c_void};
 
@@ -1325,7 +1431,7 @@ mod tests {
 	const FRAGMENT_SHADER_SOURCE: &str = "#version 300 es\nprecision highp float;\nout vec4 outputColor;\nvoid main() {\n\toutputColor = vec4(1.0);\n}\n";
 
 	/// 창 없는 GL 3.2 이상 코어 컨텍스트. (CGL 을 바로 불러 AppKit 과 주 스레드 없이 짓는다, 못 지으면 None, 시험을 건너뛴다)
-	fn create_surfaceless_context() -> Option<Rc<glow::Context>> {
+	pub(crate) fn create_surfaceless_context() -> Option<Rc<glow::Context>> {
 		// kCGLPFAOpenGLProfile, kCGLOGLPVersion_3_2_Core (맥은 4.1 코어를 준다), kCGLPFAAccelerated.
 		let attribute_list: [i32; 4] = [99, 0x3200, 73, 0];
 		let mut pixel_format: *mut c_void = std::ptr::null_mut();

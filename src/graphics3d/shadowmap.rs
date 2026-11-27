@@ -64,6 +64,23 @@ fn create_depth_target(gl: &glow::Context, resolution: i32) -> Result<(GlFramebu
 }
 
 //==============================================================================
+/// 그림자 깊이 판 묶기. (원본 bindShadowTarget, 판을 묶고 뷰포트를 판 전체로, 깊이를 비운다, 해 그림자 판과 점광 판이 같이 쓴다)
+/// - 가위 시험을 끈다. (2D 자르기 안의 바깥 패스에서 불려도 판 전체를 비우고 그린다)
+/// - 깊이 시험과 깊이 쓰기를 켠다.
+//==============================================================================
+fn bind_shadow_target(gl: &glow::Context, framebuffer: GlFramebuffer, resolution: i32) {
+	unsafe {
+		// 비우기는 가위 시험을 받는다.
+		crate::core::glstatecache::disable(gl, glow::SCISSOR_TEST);
+		crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(framebuffer));
+		crate::core::glstatecache::viewport(gl, 0, 0, resolution, resolution);
+		crate::core::glstatecache::enable(gl, glow::DEPTH_TEST);
+		crate::core::glstatecache::depth_mask(gl, true);
+		gl.clear(glow::DEPTH_BUFFER_BIT);
+	}
+}
+
+//==============================================================================
 /// 앞쪽, 위쪽, 자리로 보기 행렬 짓기. (오른쪽은 앞쪽 x 위쪽, 카메라는 앞쪽을 본다, 셰이더가 같은 바탕으로 칸 자리를 셈한다)
 //==============================================================================
 fn create_basis_view_matrix(position: [f64; 3], forward: [f64; 3], up: [f64; 3]) -> Matrix4 {
@@ -199,19 +216,13 @@ impl ShadowMap {
 
 	//==============================================================================
 	/// 깊이 패스 시작. (프레임버퍼 바인드 + 뷰포트 + 깊이 클리어)
-	/// - 깊이 시험과 깊이 쓰기를 켠다. 끝나면 부르는 쪽이 다음 패스의 프레임버퍼와 뷰포트를 다시 잡는다.
+	/// - 가위 시험을 끄고 깊이 시험과 깊이 쓰기를 켠다. 끝나면 부르는 쪽이 다음 패스의 프레임버퍼와 뷰포트를 다시 잡는다.
 	///
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn begin_render(&self, gl: &glow::Context) {
-		unsafe {
-			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(self.framebuffer));
-			crate::core::glstatecache::viewport(gl, 0, 0, self.resolution, self.resolution);
-			crate::core::glstatecache::enable(gl, glow::DEPTH_TEST);
-			crate::core::glstatecache::depth_mask(gl, true);
-			gl.clear(glow::DEPTH_BUFFER_BIT);
-		}
+		bind_shadow_target(gl, self.framebuffer, self.resolution);
 	}
 
 	//==============================================================================
@@ -501,14 +512,7 @@ impl ShadowAtlas {
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn begin_render(&self, gl: &glow::Context) {
-		unsafe {
-			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(self.framebuffer));
-			crate::core::glstatecache::viewport(gl, 0, 0, self.resolution, self.resolution);
-			crate::core::glstatecache::disable(gl, glow::SCISSOR_TEST);
-			crate::core::glstatecache::enable(gl, glow::DEPTH_TEST);
-			crate::core::glstatecache::depth_mask(gl, true);
-			gl.clear(glow::DEPTH_BUFFER_BIT);
-		}
+		bind_shadow_target(gl, self.framebuffer, self.resolution);
 	}
 
 	//==============================================================================
@@ -724,5 +728,35 @@ mod tests {
 		assert_eq!(round_half_up(-2.5), -2.0);
 		assert_eq!(round_half_up(-2.6), -3.0);
 		assert_eq!(round_half_up(1.49), 1.0);
+	}
+
+	//==============================================================================
+	/// 가위 시험을 켠 채(2D 자르기 안의 바깥 패스처럼) begin_render 를 불러도 해 그림자 판과 점광 판 모두 가위를 끄는지. (원본 61f4793, 진짜 GL, 맥 CGL)
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	#[test]
+	fn begin_render_disables_scissor() {
+		let Some(gl) = crate::core::glstatecache::tests::create_surfaceless_context() else {
+			eprintln!("shadowmap: 창 없는 GL 컨텍스트를 짓지 못해 건너뜀");
+			return;
+		};
+		let gl: &glow::Context = &gl;
+		let shadow_map = ShadowMap::new(gl, 16).unwrap();
+		let shadow_atlas = ShadowAtlas::new(gl, 16, 8).unwrap();
+		let mut scissor_result_list = Vec::new();
+		for is_atlas in [false, true] {
+			unsafe {
+				crate::core::glstatecache::enable(gl, glow::SCISSOR_TEST);
+				crate::core::glstatecache::scissor(gl, 0, 0, 8, 8);
+			}
+			if is_atlas {
+				shadow_atlas.begin_render(gl);
+			}
+			else {
+				shadow_map.begin_render(gl);
+			}
+			scissor_result_list.push(unsafe { glow::HasContext::is_enabled(gl, glow::SCISSOR_TEST) });
+		}
+		assert_eq!(scissor_result_list, vec![false, false], "begin_render 가 가위 시험을 끄지 않았다 (ShadowMap, ShadowAtlas)");
 	}
 }

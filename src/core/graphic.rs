@@ -2336,6 +2336,10 @@ impl Graphic {
 			self.gl.clear_buffer_f32_slice(glow::COLOR, 0, &[0.0, 0.0, 0.0, 0.0]);
 			crate::core::glstatecache::disable(&self.gl, glow::SCISSOR_TEST);
 		}
+		// 비운 가위를 셰이더 자르기 가위로 되돌린다. (자르기가 없으면 가위를 끈다)
+		// 떠 오기는 가위에 잘려 자르기 안만 떠 왔으므로, 옮겨 섞을 때 가위가 없으면 자르기 밖을 낡은 떠 온 값으로 덮는다.
+		self.is_clip_scissor_enabled = false;
+		self.apply_clip_scissor();
 		self.use_shader_program(self.get_shader_program());
 		self.upload_draw_uniforms(color, false);
 		self.bind_main_texture(texture);
@@ -4631,7 +4635,7 @@ impl Graphic {
 	//==============================================================================
 	/// 투명도 층 시작. (CSS opacity, 어도비 투명도 묶음처럼 end_opacity_layer 까지 그린 것을 따로 칸에 모았다가 지금 전역 알파로 한 번에 얹는다)
 	/// - 층 안의 그림은 서로 겹친 자리가 비치지 않는다. (노드마다 투명도를 곱해 따로 얹으면 겹친 자리에서 아래 그림이 비친다)
-	/// - 층 안은 전역 알파 1 에서 시작한다. 층 칸은 화면과 같은 크기의 RGBA8 이고 스텐실을 지금 자르기 깊이로 채워 둬 층 안의 자르기도 그대로 된다.
+	/// - 층 안은 전역 알파 1 에서 시작한다. 층 칸은 화면과 같은 크기의 RGBA8 이고 깊이를 비우고 스텐실을 지금 자르기 깊이로 채워 둬 층 안의 자르기와 3D 패스(run_external_pass 의 is_depth_cleared 거짓)도 그대로 된다.
 	///   바깥 자르기는 얹을 때 걸린다. 층은 겹쳐 열 수 있다. 칸을 지을 수 없으면 층 없이 그대로 그린다.
 	/// - NodeTree 는 set_opacity_layer 를 켠 노드의 투명도가 1 보다 작으면 그 노드와 자손을 층으로 그린다.
 	///
@@ -4672,8 +4676,10 @@ impl Graphic {
 				crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, Some(target.framebuffer));
 				crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
 				self.gl.stencil_mask(0xFF);
+				crate::core::glstatecache::depth_mask(&self.gl, true);
 				self.gl.clear_buffer_f32_slice(glow::COLOR, 0, &[0.0, 0.0, 0.0, 0.0]);
-				self.gl.clear_buffer_i32_slice(glow::STENCIL, 0, &[clip_depth]);
+				// 깊이는 1 로, 스텐실은 지금 자르기 깊이로 비운다. (지난 층의 깊이가 남으면 층 안의 깊이를 비우지 않는 3D 패스가 가려진다, 원본 clearBufferfi)
+				self.gl.clear_buffer_depth_stencil(glow::DEPTH_STENCIL, 0, 1.0, clip_depth);
 			}
 			self.is_color_mask_known.set(false);
 			self.global_alpha = 1.0;
@@ -5893,5 +5899,182 @@ mod tests {
 		let (closed_vertex_count, closed_next_segment_index) = write_polyline_vertices(&mut vertex_data, &closed_positions, 1.0, true, 0);
 		assert_eq!(closed_vertex_count, 3 * 6);
 		assert_eq!(closed_next_segment_index, closed_segment_count);
+	}
+
+	//==============================================================================
+	// 진짜 GL 시험. (맥 CGL 로 창 없이 짓은 컨텍스트에 16 x 16 칸을 묶고 Graphic 으로 그린다, 원본 batchclipchrome, externalglstatechrome 과 같은 꼴)
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	mod gl_tests {
+		use super::*;
+
+		/// 시험 칸 한 변. (픽셀)
+		const TARGET_SIZE: i32 = 16;
+		/// 바탕색. (원본 시험의 #406080)
+		const BACKGROUND_BYTES: [u8; 3] = [64, 96, 128];
+		const FULLSCREEN_VERTEX_SHADER_SOURCE: &str = "#version 300 es\nvoid main() {\n\tvec2 position = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)) * 2.0 - 1.0;\n\tgl_Position = vec4(position, 0.0, 1.0);\n}\n";
+		const RED_FRAGMENT_SHADER_SOURCE: &str = "#version 300 es\nprecision highp float;\nout vec4 outputColor;\nvoid main() {\n\toutputColor = vec4(1.0, 0.0, 0.0, 1.0);\n}\n";
+
+		/// 창 없는 컨텍스트에 Graphic 을 짓고, 색과 깊이 스텐실이 있는 16 x 16 칸을 묶어 프레임을 연다. (못 지으면 None, 시험을 건너뛴다)
+		fn create_test_graphic() -> Option<Graphic> {
+			let gl = crate::core::glstatecache::tests::create_surfaceless_context()?;
+			let gl = Rc::try_unwrap(gl).ok()?;
+			let mut graphic = Graphic::new(gl, false).ok()?;
+			unsafe {
+				let gl = graphic.get_gl();
+				let texture = gl.create_texture().unwrap();
+				gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+				gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, TARGET_SIZE, TARGET_SIZE, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None));
+				let renderbuffer = gl.create_renderbuffer().unwrap();
+				gl.bind_renderbuffer(glow::RENDERBUFFER, Some(renderbuffer));
+				gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, TARGET_SIZE, TARGET_SIZE);
+				let framebuffer = gl.create_framebuffer().unwrap();
+				gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+				gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
+				gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(renderbuffer));
+				assert_eq!(gl.check_framebuffer_status(glow::FRAMEBUFFER), glow::FRAMEBUFFER_COMPLETE);
+			}
+			graphic.apply_settings(TARGET_SIZE, TARGET_SIZE);
+			Some(graphic)
+		}
+
+		/// 2D 좌표(왼쪽 위 원점)의 픽셀 읽기. (RGB)
+		fn read_pixel(graphic: &mut Graphic, x: i32, y: i32) -> [u8; 3] {
+			graphic.flush_batch();
+			let mut pixel = [0u8; 4];
+			unsafe {
+				crate::core::glstatecache::pixel_store_i32(&graphic.gl, glow::PACK_ALIGNMENT, 1);
+				graphic.gl.read_pixels(x, TARGET_SIZE - 1 - y, 1, 1, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelPackData::Slice(Some(&mut pixel)));
+			}
+			[pixel[0], pixel[1], pixel[2]]
+		}
+
+		/// 칸 전체를 한 색으로 칠하기.
+		fn fill_target(graphic: &mut Graphic, bytes: [u8; 3]) {
+			graphic.set_fill_color(Color::create_from_bytes(bytes[0], bytes[1], bytes[2], 255));
+			graphic.draw_rect(Rect::create(0.0, 0.0, TARGET_SIZE as f64, TARGET_SIZE as f64));
+		}
+
+		/// 축에 맞는 자르기(셰이더 자르기) 안에서 바꿔 끼운 셰이더에 셰이더 섞기(overlay)를 주면, 덧그림 칸을 옮겨 섞을 때 자르기 밖을 덮지 않는지. (원본 eb4338b)
+		#[test]
+		fn shader_blend_override_keeps_outside_clip() {
+			let Some(mut graphic) = create_test_graphic() else {
+				eprintln!("graphic: 창 없는 GL 컨텍스트를 짓지 못해 건너뜀");
+				return;
+			};
+			let vertex_shader_source = "#version 300 es\nin vec2 vertexPosition; in vec2 vertexTextureCoordinate; uniform mat3 projectionMatrix; uniform mat3 modelMatrix; out vec2 textureCoordinate;\nvoid main() { vec3 position = projectionMatrix * modelMatrix * vec3(vertexPosition, 1.0); gl_Position = vec4(position.xy, 0.0, 1.0); textureCoordinate = vertexTextureCoordinate; }";
+			let fragment_shader_source = "#version 300 es\nprecision highp float; in vec2 textureCoordinate; uniform sampler2D mainTexture; uniform vec4 mainColor; uniform float globalAlpha; out vec4 outputColor;\nvoid main() { float alpha = texture(mainTexture, textureCoordinate).a * mainColor.a * globalAlpha; outputColor = vec4(vec3(1.0, 0.3, 0.1) * alpha, alpha); }";
+			let override_program = Rc::new(ShaderProgram::new(&graphic.gl, vertex_shader_source, fragment_shader_source).unwrap());
+			fill_target(&mut graphic, BACKGROUND_BYTES);
+			graphic.begin_clip_rect(Rect::create(8.0, 0.0, 8.0, 16.0), 0.0);
+			graphic.set_blend_mode(BlendMode::Overlay);
+			graphic.set_shader_program_override(Some(override_program));
+			graphic.set_fill_color(Color::create_from_bytes(255, 255, 255, 255));
+			graphic.draw_rect(Rect::create(0.0, 0.0, 16.0, 16.0));
+			graphic.set_shader_program_override(None);
+			graphic.set_blend_mode(BlendMode::Normal);
+			graphic.end_clip_rect();
+			assert_eq!(read_pixel(&mut graphic, 3, 8), BACKGROUND_BYTES, "자르기 밖이 바탕색이 아니다");
+			assert_ne!(read_pixel(&mut graphic, 12, 8), BACKGROUND_BYTES, "자르기 안은 섞여야 한다");
+		}
+
+		/// 투명도 층을 다시 열 때 지난 층의 깊이가 남지 않는지. (층 안의 깊이를 비우지 않는 바깥 패스, 깊이 0.5 의 사각형을 LESS 로, 원본 4e05c55)
+		/// - 원본은 판 끝에 버린 깊이를 무시하는 드라이버를 흉내 낸다. 러스트는 층 칸을 버리지 않고 다시 쓰므로 지난 층의 깊이 0.5 가 그대로 남는 것으로 본다.
+		#[test]
+		fn opacity_layer_clears_depth() {
+			let Some(mut graphic) = create_test_graphic() else {
+				eprintln!("graphic: 창 없는 GL 컨텍스트를 짓지 못해 건너뜀");
+				return;
+			};
+			let (red_program, vertex_array) = {
+				let gl = graphic.get_gl();
+				let red_program = ShaderProgram::new(gl, FULLSCREEN_VERTEX_SHADER_SOURCE, RED_FRAGMENT_SHADER_SOURCE).unwrap();
+				let vertex_array = unsafe { gl.create_vertex_array().unwrap() };
+				(red_program, vertex_array)
+			};
+			fill_target(&mut graphic, BACKGROUND_BYTES);
+			for _ in 0..2 {
+				fill_target(&mut graphic, BACKGROUND_BYTES);
+				graphic.begin_opacity_layer();
+				graphic.run_external_pass(false, |gl| unsafe {
+					red_program.use_program(gl);
+					gl.bind_vertex_array(Some(vertex_array));
+					gl.disable(glow::BLEND);
+					gl.enable(glow::DEPTH_TEST);
+					gl.depth_func(glow::LESS);
+					gl.depth_mask(true);
+					crate::core::glstatecache::draw_arrays(gl, glow::TRIANGLES, 0, 3);
+				});
+				graphic.end_opacity_layer();
+				assert_eq!(read_pixel(&mut graphic, 8, 8), [255, 0, 0], "투명도 층 안의 깊이를 비우지 않는 3D 패스가 가려졌다");
+			}
+		}
+
+		/// 게임이 run_external_pass 밖에서 GlContext 로 상태를 바꿔 두고 돌아와도 다음 2D 그리기가 제 상태를 다시 거는지. (원본 db99208, externalglstatechrome)
+		#[test]
+		fn draw_after_outside_gl_change_draws_right() {
+			let Some(mut graphic) = create_test_graphic() else {
+				eprintln!("graphic: 창 없는 GL 컨텍스트를 짓지 못해 건너뜀");
+				return;
+			};
+			let red_program = ShaderProgram::new(&graphic.gl, FULLSCREEN_VERTEX_SHADER_SOURCE, RED_FRAGMENT_SHADER_SOURCE).unwrap();
+			let (other_vertex_array, other_buffer) = unsafe {
+				let gl = graphic.get_gl();
+				let vertex_array = gl.create_vertex_array().unwrap();
+				let buffer = gl.create_buffer().unwrap();
+				gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+				gl.buffer_data_size(glow::ARRAY_BUFFER, 4096, glow::DYNAMIC_DRAW);
+				(vertex_array, buffer)
+			};
+			let change_list: Vec<(&str, Box<dyn Fn(&GlContext)>)> = vec![
+				("프로그램", Box::new(|gl: &GlContext| red_program.use_program(gl))),
+				("섞기 끔", Box::new(|gl: &GlContext| unsafe { gl.disable(glow::BLEND) })),
+				("섞기 인자", Box::new(|gl: &GlContext| unsafe { gl.blend_func(glow::ZERO, glow::ONE) })),
+				("섞기 식", Box::new(|gl: &GlContext| unsafe { gl.blend_equation(glow::FUNC_REVERSE_SUBTRACT) })),
+				("깊이 시험", Box::new(|gl: &GlContext| unsafe {
+					gl.enable(glow::DEPTH_TEST);
+					gl.depth_func(glow::NEVER);
+				})),
+				("면 가리기", Box::new(|gl: &GlContext| unsafe {
+					gl.enable(glow::CULL_FACE);
+					gl.cull_face(glow::FRONT_AND_BACK);
+				})),
+				("가위", Box::new(|gl: &GlContext| unsafe {
+					gl.enable(glow::SCISSOR_TEST);
+					gl.scissor(0, 0, 1, 1);
+				})),
+				("뷰포트", Box::new(|gl: &GlContext| unsafe { gl.viewport(0, 0, 2, 2) })),
+				("버텍스 어레이", Box::new(|gl: &GlContext| unsafe { gl.bind_vertex_array(Some(other_vertex_array)) })),
+				("정점 버퍼", Box::new(|gl: &GlContext| unsafe { gl.bind_buffer(glow::ARRAY_BUFFER, Some(other_buffer)) })),
+				("활성 유닛", Box::new(|gl: &GlContext| unsafe { gl.active_texture(glow::TEXTURE3) })),
+			];
+			// 묶어 그리기와 낱장 그리기 둘 다. (오른쪽 반을 칠해 낡은 정점(칸 전체)을 그리면 왼쪽도 칠해져 잡힌다)
+			let mut failure_list: Vec<String> = Vec::new();
+			for is_batching_enabled in [true, false] {
+				graphic.set_batching_enabled(is_batching_enabled);
+				for (change_index, (change_name, change)) in change_list.iter().enumerate() {
+					fill_target(&mut graphic, BACKGROUND_BYTES);
+					graphic.flush_batch();
+					change(graphic.get_gl());
+					let color_bytes = [10 + change_index as u8 * 20, 200, 30];
+					graphic.set_fill_color(Color::create_from_bytes(color_bytes[0], color_bytes[1], color_bytes[2], 255));
+					graphic.draw_rect(Rect::create(8.0, 0.0, 8.0, 16.0));
+					let pixel_list = [read_pixel(&mut graphic, 12, 8), read_pixel(&mut graphic, 15, 0), read_pixel(&mut graphic, 3, 8)];
+					if pixel_list[0] != color_bytes || pixel_list[1] != color_bytes || pixel_list[2] != BACKGROUND_BYTES {
+						failure_list.push(format!("{}{} {:?}", if is_batching_enabled { "묶음 " } else { "낱장 " }, change_name, pixel_list));
+					}
+					// 다음 갈래가 이 갈래에 끌리지 않게 바꾼 것을 되돌린다.
+					unsafe {
+						let gl = graphic.get_gl();
+						gl.blend_equation(glow::FUNC_ADD);
+						gl.depth_func(glow::LESS);
+						gl.cull_face(glow::BACK);
+						gl.active_texture(glow::TEXTURE0);
+					}
+					graphic.restore_render_state();
+				}
+			}
+			assert!(failure_list.is_empty(), "바깥 GL 뒤 2D 그리기가 틀렸다: {:?}", failure_list);
+		}
 	}
 }
