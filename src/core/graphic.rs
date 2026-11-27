@@ -2542,15 +2542,28 @@ impl Graphic {
 	}
 
 	//==============================================================================
+	/// 지울 텍스처를 유닛에 바인드했다고 기억하면 잊기. (0 번, 떠 온 아래, 묶음의 1 번부터 유닛)
+	/// - 데스크탑 GL 은 지운 이름을 다시 쓰므로 기억이 남으면 같은 이름의 새 텍스처를 바인드하지 않게 된다. (원본 WebGLTexture 는 객체라 겹치지 않는다)
+	//==============================================================================
+	fn forget_bound_texture(&self, texture: GlTexture) {
+		if self.bound_texture.get() == Some(texture) {
+			self.bound_texture.set(None);
+		}
+		if self.bound_backdrop_texture.get() == Some(texture) {
+			self.bound_backdrop_texture.set(None);
+		}
+		for bound_texture in self.batch_bound_texture_list.iter() {
+			if bound_texture.get() == Some(texture) {
+				bound_texture.set(None);
+			}
+		}
+	}
+
+	//==============================================================================
 	/// 오프스크린 칸 지우기. (지운 텍스처를 바인드했다고 기억하면 잊는다. 데스크탑은 지운 이름을 다시 쓰므로 기억이 남으면 새 텍스처를 바인드하지 않게 된다)
 	//==============================================================================
 	fn destroy_offscreen_target(&self, offscreen_target: OffscreenTarget) {
-		if self.bound_texture.get() == Some(offscreen_target.texture) {
-			self.bound_texture.set(None);
-		}
-		if self.bound_backdrop_texture.get() == Some(offscreen_target.texture) {
-			self.bound_backdrop_texture.set(None);
-		}
+		self.forget_bound_texture(offscreen_target.texture);
 		unsafe {
 			self.gl.delete_framebuffer(offscreen_target.framebuffer);
 			self.gl.delete_texture(offscreen_target.texture);
@@ -2800,16 +2813,19 @@ impl Graphic {
 		}
 
 		// 텍스처 묶기. (0 번 유닛은 bind_main_texture 가 기억하고, 1 번 유닛은 셰이더 섞기의 떠 온 아래와 같이 쓴다)
+		// 묶음이 쓰는 칸은 기억과 같아도 다시 묶는다. 데스크탑 GL 은 지운 텍스처 이름을 다시 쓰므로(글자 캐시가 프레임 중에 지운다) 같은 이름이 같은 텍스처라는 보장이 없다. (원본 WebGLTexture 는 객체라 겹치지 않는다)
+		// 쓰지 않는 칸의 흰 텍스처는 지우지 않으므로 기억과 같으면 건너뛴다.
 		self.bind_main_texture(first_texture);
 		let mut is_texture_unit_changed = false;
 		for slot_index in 1..self.batch_texture_slot_count {
-			let texture = if slot_index < texture_count {
+			let is_used_slot = slot_index < texture_count;
+			let texture = if is_used_slot {
 				batch_texture_list[slot_index]
 			}
 			else {
 				Some(self.white_texture)
 			};
-			if self.batch_bound_texture_list[slot_index].get() == texture {
+			if !is_used_slot && self.batch_bound_texture_list[slot_index].get() == texture {
 				continue;
 			}
 			unsafe {
@@ -4710,9 +4726,7 @@ impl Graphic {
 	/// 투명도 층 칸 지우기.
 	//==============================================================================
 	fn destroy_opacity_layer_target(&self, target: OpacityLayerTarget) {
-		if self.bound_texture.get() == Some(target.texture) {
-			self.bound_texture.set(None);
-		}
+		self.forget_bound_texture(target.texture);
 		unsafe {
 			self.gl.delete_framebuffer(target.framebuffer);
 			self.gl.delete_renderbuffer(target.stencil_renderbuffer);

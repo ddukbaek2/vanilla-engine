@@ -4,6 +4,8 @@
 //   장면: 스크롤 칸(UIScrollView, 줄 40 개), 겹친 자르기, 둥근 자르기 안팎, 정점 색 쿼드, 더하기와 셰이더 섞기, 불투명도 층, 바깥 GL 패스.
 // - 씬이 그려진 다섯째 프레임을 찍고 끝낸다. (씬 draw 안에서 센다, 로딩 화면은 세지 않는다)
 //   프레임마다 드로 콜과 거른 노드 수를 표준 출력에 "drawCalls=..., culledNodes=..." 로 적는다.
+// - 창 크기와 렌더 배율은 BATCHCLIP_WINDOW_WIDTH, BATCHCLIP_WINDOW_HEIGHT, BATCHCLIP_PIXEL_RATIO 로 바꾼다. (기본 1280 x 720, 1.5)
+//   자르기 경계가 화소 경계에 놓이지 않는 배율(예: 높이 730, 배율 1)로 찍으면 멀티샘플 화면은 스텐실로 자르므로 두 길이 여전히 같아야 한다.
 // - BATCHCLIP_SCENE=settings 면 설정 창 같은 장면(창 하나, UIScrollView, 줄 50 개, 줄마다 글자와 단추와 도형)으로 드로 콜만 잰다.
 // - 실행: BATCHCLIP_OUTPUT=shots/batchclip.png [BATCHCLIP_ROTATION=1] VANILLA_CAPTURE_PATH=shots/unused.png cargo run --release --example batchclip
 //   (VANILLA_CAPTURE_PATH 는 창을 숨기려고 건다, 찍는 프레임은 이 예제가 정한다)
@@ -301,11 +303,14 @@ fn main() {
 	};
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("묶음 자르기");
-	engine_configuration.window_size = Vector2::create(VIEW_WIDTH * 2.0, VIEW_HEIGHT * 2.0);
+	let window_width = std::env::var("BATCHCLIP_WINDOW_WIDTH").ok().and_then(|value| value.parse::<f64>().ok()).unwrap_or(VIEW_WIDTH * 2.0);
+	let window_height = std::env::var("BATCHCLIP_WINDOW_HEIGHT").ok().and_then(|value| value.parse::<f64>().ok()).unwrap_or(VIEW_HEIGHT * 2.0);
+	engine_configuration.window_size = Vector2::create(window_width, window_height);
 	engine_configuration.reference_resolution_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
 	engine_configuration.view_scale_mode = ViewScaleMode::StretchShort;
 	let mut engine = Engine::new(engine_configuration);
-	engine.get_view_manager_mut().set_max_render_pixel_ratio(1.5);
+	let pixel_ratio = std::env::var("BATCHCLIP_PIXEL_RATIO").ok().and_then(|value| value.parse::<f64>().ok()).unwrap_or(1.5);
+	engine.get_view_manager_mut().set_max_render_pixel_ratio(pixel_ratio);
 	let batch_clip_scene = BatchClipScene {
 		scene_base: SceneBase::new(),
 		scene_kind,
