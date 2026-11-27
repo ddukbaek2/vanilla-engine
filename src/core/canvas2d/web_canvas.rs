@@ -21,7 +21,7 @@
 //! assert_eq!(canvas.get_image_data(6, 1, 1, 1).data, vec![0, 0, 255, 255]);
 //! ```
 //==============================================================================
-use super::{is_composite_operation_name, normalize_line_dash, premultiply_pixels, unpremultiply_pixels, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasRadius, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D, BrowserPathCommand};
+use super::{clamp_to_float, is_composite_operation_name, normalize_line_dash, premultiply_pixels, unpremultiply_pixels, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasRadius, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D, BrowserPathCommand};
 use crate::base::color::Color;
 use crate::core::image::Image;
 use crate::core::textstringtexturecache::TextMetrics;
@@ -199,7 +199,7 @@ impl Canvas2D {
 	/// - `x`: 가로 배율.
 	/// - `y`: 세로 배율.
 	//==============================================================================
-	pub fn scale(&mut self, x: f32, y: f32) {
+	pub fn scale(&mut self, x: f64, y: f64) {
 		self.transform(x, 0.0, 0.0, y, 0.0, 0.0);
 	}
 
@@ -209,7 +209,7 @@ impl Canvas2D {
 	/// # 인자
 	/// - `angle`: 돌릴 각. (라디안, 화면에서 시계 방향이 +)
 	//==============================================================================
-	pub fn rotate(&mut self, angle: f32) {
+	pub fn rotate(&mut self, angle: f64) {
 		self.transform(angle.cos(), angle.sin(), -angle.sin(), angle.cos(), 0.0, 0.0);
 	}
 
@@ -220,7 +220,7 @@ impl Canvas2D {
 	/// - `x`: 가로 이동. (지금 좌표계 단위, 픽셀)
 	/// - `y`: 세로 이동. (지금 좌표계 단위, 픽셀)
 	//==============================================================================
-	pub fn translate(&mut self, x: f32, y: f32) {
+	pub fn translate(&mut self, x: f64, y: f64) {
 		self.transform(1.0, 0.0, 0.0, 1.0, x, y);
 	}
 
@@ -235,7 +235,7 @@ impl Canvas2D {
 	/// - `e`: 가로 이동. (지금 좌표계 단위, 픽셀)
 	/// - `f`: 세로 이동. (지금 좌표계 단위, 픽셀)
 	//==============================================================================
-	pub fn transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
+	pub fn transform(&mut self, a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) {
 		let matrix = CanvasMatrix::create(a, b, c, d, e, f);
 		if !matrix.is_finite() {
 			return;
@@ -255,7 +255,7 @@ impl Canvas2D {
 	/// - `e`: 가로 이동. (픽셀)
 	/// - `f`: 세로 이동. (픽셀)
 	//==============================================================================
-	pub fn set_transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
+	pub fn set_transform(&mut self, a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) {
 		self.set_transform_matrix(CanvasMatrix::create(a, b, c, d, e, f));
 	}
 
@@ -304,8 +304,8 @@ impl Canvas2D {
 	/// # 인자
 	/// - `global_alpha`: 전체 투명도. (0 이 투명, 1 이 불투명, 처음 1)
 	//==============================================================================
-	pub fn set_global_alpha(&mut self, global_alpha: f32) {
-		self.context.set_global_alpha(global_alpha as f64);
+	pub fn set_global_alpha(&mut self, global_alpha: f64) {
+		self.context.set_global_alpha(global_alpha);
 	}
 
 	//==============================================================================
@@ -314,8 +314,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 전체 투명도. (0 ~ 1, 처음 1)
 	//==============================================================================
-	pub fn get_global_alpha(&self) -> f32 {
-		self.context.global_alpha() as f32
+	pub fn get_global_alpha(&self) -> f64 {
+		self.context.global_alpha()
 	}
 
 	//==============================================================================
@@ -484,12 +484,13 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 색 멈춤이 없는 곧은 그라데이션. (좌표는 칠할 때의 변환을 따른다)
 	//==============================================================================
-	pub fn create_linear_gradient(&self, start_x: f32, start_y: f32, end_x: f32, end_y: f32) -> CanvasGradient {
+	pub fn create_linear_gradient(&self, start_x: f64, start_y: f64, end_x: f64, end_y: f64) -> CanvasGradient {
+		// 크롬처럼 그라디언트 자리는 float 로 줄여 든다.
 		CanvasGradient::new(CanvasGradientKind::Linear {
-			start_x,
-			start_y,
-			end_x,
-			end_y,
+			start_x: clamp_to_float(start_x),
+			start_y: clamp_to_float(start_y),
+			end_x: clamp_to_float(end_x),
+			end_y: clamp_to_float(end_y),
 		})
 	}
 
@@ -507,17 +508,17 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 색 멈춤이 없는 둥근 그라데이션. 반지름이 음수면 None.
 	//==============================================================================
-	pub fn create_radial_gradient(&self, start_x: f32, start_y: f32, start_radius: f32, end_x: f32, end_y: f32, end_radius: f32) -> Option<CanvasGradient> {
+	pub fn create_radial_gradient(&self, start_x: f64, start_y: f64, start_radius: f64, end_x: f64, end_y: f64, end_radius: f64) -> Option<CanvasGradient> {
 		if start_radius < 0.0 || end_radius < 0.0 {
 			return None;
 		}
 		Some(CanvasGradient::new(CanvasGradientKind::Radial {
-			start_x,
-			start_y,
-			start_radius,
-			end_x,
-			end_y,
-			end_radius,
+			start_x: clamp_to_float(start_x),
+			start_y: clamp_to_float(start_y),
+			start_radius: clamp_to_float(start_radius),
+			end_x: clamp_to_float(end_x),
+			end_y: clamp_to_float(end_y),
+			end_radius: clamp_to_float(end_radius),
 		}))
 	}
 
@@ -532,11 +533,11 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 색 멈춤이 없는 원뿔 그라데이션.
 	//==============================================================================
-	pub fn create_conic_gradient(&self, start_angle: f32, center_x: f32, center_y: f32) -> CanvasGradient {
+	pub fn create_conic_gradient(&self, start_angle: f64, center_x: f64, center_y: f64) -> CanvasGradient {
 		CanvasGradient::new(CanvasGradientKind::Conic {
-			start_angle,
-			center_x,
-			center_y,
+			start_angle: clamp_to_float(start_angle),
+			center_x: clamp_to_float(center_x),
+			center_y: clamp_to_float(center_y),
 		})
 	}
 
@@ -592,8 +593,8 @@ impl Canvas2D {
 	/// # 인자
 	/// - `shadow_blur`: 흐림 정도. (0 이 흐리지 않음, 처음 0)
 	//==============================================================================
-	pub fn set_shadow_blur(&mut self, shadow_blur: f32) {
-		self.context.set_shadow_blur(shadow_blur as f64);
+	pub fn set_shadow_blur(&mut self, shadow_blur: f64) {
+		self.context.set_shadow_blur(shadow_blur);
 	}
 
 	//==============================================================================
@@ -602,8 +603,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 그림자 흐림. (처음 0)
 	//==============================================================================
-	pub fn get_shadow_blur(&self) -> f32 {
-		self.context.shadow_blur() as f32
+	pub fn get_shadow_blur(&self) -> f64 {
+		self.context.shadow_blur()
 	}
 
 	//==============================================================================
@@ -612,8 +613,8 @@ impl Canvas2D {
 	/// # 인자
 	/// - `offset_x`: 가로 밀림. (캔버스 픽셀, 유한하지 않으면 무시, 처음 0)
 	//==============================================================================
-	pub fn set_shadow_offset_x(&mut self, offset_x: f32) {
-		self.context.set_shadow_offset_x(offset_x as f64);
+	pub fn set_shadow_offset_x(&mut self, offset_x: f64) {
+		self.context.set_shadow_offset_x(offset_x);
 	}
 
 	//==============================================================================
@@ -622,8 +623,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 그림자 가로 밀림. (처음 0)
 	//==============================================================================
-	pub fn get_shadow_offset_x(&self) -> f32 {
-		self.context.shadow_offset_x() as f32
+	pub fn get_shadow_offset_x(&self) -> f64 {
+		self.context.shadow_offset_x()
 	}
 
 	//==============================================================================
@@ -632,8 +633,8 @@ impl Canvas2D {
 	/// # 인자
 	/// - `offset_y`: 세로 밀림. (캔버스 픽셀, 유한하지 않으면 무시, 처음 0)
 	//==============================================================================
-	pub fn set_shadow_offset_y(&mut self, offset_y: f32) {
-		self.context.set_shadow_offset_y(offset_y as f64);
+	pub fn set_shadow_offset_y(&mut self, offset_y: f64) {
+		self.context.set_shadow_offset_y(offset_y);
 	}
 
 	//==============================================================================
@@ -642,8 +643,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 그림자 세로 밀림. (처음 0)
 	//==============================================================================
-	pub fn get_shadow_offset_y(&self) -> f32 {
-		self.context.shadow_offset_y() as f32
+	pub fn get_shadow_offset_y(&self) -> f64 {
+		self.context.shadow_offset_y()
 	}
 
 	//==============================================================================
@@ -652,8 +653,8 @@ impl Canvas2D {
 	/// # 인자
 	/// - `line_width`: 선 굵기. (처음 1)
 	//==============================================================================
-	pub fn set_line_width(&mut self, line_width: f32) {
-		self.context.set_line_width(line_width as f64);
+	pub fn set_line_width(&mut self, line_width: f64) {
+		self.context.set_line_width(line_width);
 	}
 
 	//==============================================================================
@@ -662,8 +663,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 선 굵기. (처음 1)
 	//==============================================================================
-	pub fn get_line_width(&self) -> f32 {
-		self.context.line_width() as f32
+	pub fn get_line_width(&self) -> f64 {
+		self.context.line_width()
 	}
 
 	//==============================================================================
@@ -754,8 +755,8 @@ impl Canvas2D {
 	/// # 인자
 	/// - `miter_limit`: 뾰족 이음 한계. (이음 길이와 선 굵기의 비, 처음 10)
 	//==============================================================================
-	pub fn set_miter_limit(&mut self, miter_limit: f32) {
-		self.context.set_miter_limit(miter_limit as f64);
+	pub fn set_miter_limit(&mut self, miter_limit: f64) {
+		self.context.set_miter_limit(miter_limit);
 	}
 
 	//==============================================================================
@@ -764,8 +765,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 뾰족 이음 한계. (처음 10)
 	//==============================================================================
-	pub fn get_miter_limit(&self) -> f32 {
-		self.context.miter_limit() as f32
+	pub fn get_miter_limit(&self) -> f64 {
+		self.context.miter_limit()
 	}
 
 	//==============================================================================
@@ -774,13 +775,13 @@ impl Canvas2D {
 	/// # 인자
 	/// - `dash_list`: 그을 길이와 빈 길이를 번갈아 둔 목록. (빈 목록이면 곧은 선)
 	//==============================================================================
-	pub fn set_line_dash(&mut self, dash_list: &[f32]) {
+	pub fn set_line_dash(&mut self, dash_list: &[f64]) {
 		if normalize_line_dash(dash_list).is_none() {
 			return;
 		}
 		let dash_array = js_sys::Array::new();
 		for dash in dash_list {
-			dash_array.push(&JsValue::from_f64(*dash as f64));
+			dash_array.push(&JsValue::from_f64(*dash));
 		}
 		let _ = self.context.set_line_dash(&dash_array);
 	}
@@ -791,8 +792,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 점선 목록. (홀수 개로 넣었으면 두 번 이은 것, 처음 빈 목록)
 	//==============================================================================
-	pub fn get_line_dash(&self) -> Vec<f32> {
-		self.context.get_line_dash().iter().filter_map(|value| value.as_f64()).map(|value| value as f32).collect()
+	pub fn get_line_dash(&self) -> Vec<f64> {
+		self.context.get_line_dash().iter().filter_map(|value| value.as_f64()).collect()
 	}
 
 	//==============================================================================
@@ -801,8 +802,8 @@ impl Canvas2D {
 	/// # 인자
 	/// - `line_dash_offset`: 점선을 시작할 자리. (유한하지 않으면 무시, 처음 0)
 	//==============================================================================
-	pub fn set_line_dash_offset(&mut self, line_dash_offset: f32) {
-		self.context.set_line_dash_offset(line_dash_offset as f64);
+	pub fn set_line_dash_offset(&mut self, line_dash_offset: f64) {
+		self.context.set_line_dash_offset(line_dash_offset);
 	}
 
 	//==============================================================================
@@ -811,8 +812,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 점선 시작 밀림. (처음 0)
 	//==============================================================================
-	pub fn get_line_dash_offset(&self) -> f32 {
-		self.context.line_dash_offset() as f32
+	pub fn get_line_dash_offset(&self) -> f64 {
+		self.context.line_dash_offset()
 	}
 
 	//==============================================================================
@@ -956,8 +957,8 @@ impl Canvas2D {
 	/// - `width`: 폭. (음수면 x 에서 왼쪽으로)
 	/// - `height`: 높이. (음수면 y 에서 위로)
 	//==============================================================================
-	pub fn clear_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
-		self.context.clear_rect(x as f64, y as f64, width as f64, height as f64);
+	pub fn clear_rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
+		self.context.clear_rect(x, y, width, height);
 		self.revision += 1;
 	}
 
@@ -970,8 +971,8 @@ impl Canvas2D {
 	/// - `width`: 폭. (음수면 x 에서 왼쪽으로)
 	/// - `height`: 높이. (음수면 y 에서 위로)
 	//==============================================================================
-	pub fn fill_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
-		self.context.fill_rect(x as f64, y as f64, width as f64, height as f64);
+	pub fn fill_rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
+		self.context.fill_rect(x, y, width, height);
 		self.revision += 1;
 	}
 
@@ -984,8 +985,8 @@ impl Canvas2D {
 	/// - `width`: 폭. (음수면 x 에서 왼쪽으로)
 	/// - `height`: 높이. (음수면 y 에서 위로)
 	//==============================================================================
-	pub fn stroke_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
-		self.context.stroke_rect(x as f64, y as f64, width as f64, height as f64);
+	pub fn stroke_rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
+		self.context.stroke_rect(x, y, width, height);
 		self.revision += 1;
 	}
 
@@ -1010,8 +1011,8 @@ impl Canvas2D {
 	/// - `x`: 새 조각의 시작 점 x.
 	/// - `y`: 새 조각의 시작 점 y.
 	//==============================================================================
-	pub fn move_to(&mut self, x: f32, y: f32) {
-		self.context.move_to(x as f64, y as f64);
+	pub fn move_to(&mut self, x: f64, y: f64) {
+		self.context.move_to(x, y);
 	}
 
 	//==============================================================================
@@ -1021,8 +1022,8 @@ impl Canvas2D {
 	/// - `x`: 끝 점 x.
 	/// - `y`: 끝 점 y.
 	//==============================================================================
-	pub fn line_to(&mut self, x: f32, y: f32) {
-		self.context.line_to(x as f64, y as f64);
+	pub fn line_to(&mut self, x: f64, y: f64) {
+		self.context.line_to(x, y);
 	}
 
 	//==============================================================================
@@ -1034,8 +1035,8 @@ impl Canvas2D {
 	/// - `x`: 끝 점 x.
 	/// - `y`: 끝 점 y.
 	//==============================================================================
-	pub fn quadratic_curve_to(&mut self, control_x: f32, control_y: f32, x: f32, y: f32) {
-		self.context.quadratic_curve_to(control_x as f64, control_y as f64, x as f64, y as f64);
+	pub fn quadratic_curve_to(&mut self, control_x: f64, control_y: f64, x: f64, y: f64) {
+		self.context.quadratic_curve_to(control_x, control_y, x, y);
 	}
 
 	//==============================================================================
@@ -1049,8 +1050,8 @@ impl Canvas2D {
 	/// - `x`: 끝 점 x.
 	/// - `y`: 끝 점 y.
 	//==============================================================================
-	pub fn bezier_curve_to(&mut self, first_control_x: f32, first_control_y: f32, second_control_x: f32, second_control_y: f32, x: f32, y: f32) {
-		self.context.bezier_curve_to(first_control_x as f64, first_control_y as f64, second_control_x as f64, second_control_y as f64, x as f64, y as f64);
+	pub fn bezier_curve_to(&mut self, first_control_x: f64, first_control_y: f64, second_control_x: f64, second_control_y: f64, x: f64, y: f64) {
+		self.context.bezier_curve_to(first_control_x, first_control_y, second_control_x, second_control_y, x, y);
 	}
 
 	//==============================================================================
@@ -1067,8 +1068,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 반지름이 음수면 false(원본의 예외 자리), 그 밖에는 true. (유한하지 않은 값이 있으면 원본처럼 아무것도 더하지 않고 true)
 	//==============================================================================
-	pub fn arc(&mut self, x: f32, y: f32, radius: f32, start_angle: f32, end_angle: f32, is_counterclockwise: bool) -> bool {
-		self.context.arc_with_anticlockwise(x as f64, y as f64, radius as f64, start_angle as f64, end_angle as f64, is_counterclockwise).is_ok()
+	pub fn arc(&mut self, x: f64, y: f64, radius: f64, start_angle: f64, end_angle: f64, is_counterclockwise: bool) -> bool {
+		self.context.arc_with_anticlockwise(x, y, radius, start_angle, end_angle, is_counterclockwise).is_ok()
 	}
 
 	//==============================================================================
@@ -1084,8 +1085,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 반지름이 음수면 false(원본의 예외 자리), 그 밖에는 true. (유한하지 않은 값이 있으면 원본처럼 아무것도 더하지 않고 true)
 	//==============================================================================
-	pub fn arc_to(&mut self, first_x: f32, first_y: f32, second_x: f32, second_y: f32, radius: f32) -> bool {
-		self.context.arc_to(first_x as f64, first_y as f64, second_x as f64, second_y as f64, radius as f64).is_ok()
+	pub fn arc_to(&mut self, first_x: f64, first_y: f64, second_x: f64, second_y: f64, radius: f64) -> bool {
+		self.context.arc_to(first_x, first_y, second_x, second_y, radius).is_ok()
 	}
 
 	//==============================================================================
@@ -1104,8 +1105,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 반지름이 음수면 false(원본의 예외 자리), 그 밖에는 true. (유한하지 않은 값이 있으면 원본처럼 아무것도 더하지 않고 true)
 	//==============================================================================
-	pub fn ellipse(&mut self, x: f32, y: f32, radius_x: f32, radius_y: f32, rotation: f32, start_angle: f32, end_angle: f32, is_counterclockwise: bool) -> bool {
-		self.context.ellipse_with_anticlockwise(x as f64, y as f64, radius_x as f64, radius_y as f64, rotation as f64, start_angle as f64, end_angle as f64, is_counterclockwise).is_ok()
+	pub fn ellipse(&mut self, x: f64, y: f64, radius_x: f64, radius_y: f64, rotation: f64, start_angle: f64, end_angle: f64, is_counterclockwise: bool) -> bool {
+		self.context.ellipse_with_anticlockwise(x, y, radius_x, radius_y, rotation, start_angle, end_angle, is_counterclockwise).is_ok()
 	}
 
 	//==============================================================================
@@ -1117,8 +1118,8 @@ impl Canvas2D {
 	/// - `width`: 폭. (음수면 x 에서 왼쪽으로)
 	/// - `height`: 높이. (음수면 y 에서 위로)
 	//==============================================================================
-	pub fn rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
-		self.context.rect(x as f64, y as f64, width as f64, height as f64);
+	pub fn rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
+		self.context.rect(x, y, width, height);
 	}
 
 	//==============================================================================
@@ -1219,8 +1220,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 점이 안에 있으면 true.
 	//==============================================================================
-	pub fn is_point_in_path(&self, x: f32, y: f32, fill_rule: CanvasFillRule) -> bool {
-		self.context.is_point_in_path_with_f64_and_canvas_winding_rule(x as f64, y as f64, convert_fill_rule(fill_rule))
+	pub fn is_point_in_path(&self, x: f64, y: f64, fill_rule: CanvasFillRule) -> bool {
+		self.context.is_point_in_path_with_f64_and_canvas_winding_rule(x, y, convert_fill_rule(fill_rule))
 	}
 
 	//==============================================================================
@@ -1235,10 +1236,10 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 점이 안에 있으면 true.
 	//==============================================================================
-	pub fn is_point_in_path2d(&self, path: &Path2D, x: f32, y: f32, fill_rule: CanvasFillRule) -> bool {
+	pub fn is_point_in_path2d(&self, path: &Path2D, x: f64, y: f64, fill_rule: CanvasFillRule) -> bool {
 		match create_browser_path(path) {
 			Some(browser_path) => {
-				self.context.is_point_in_path_with_path_2d_and_f64_and_winding(&browser_path, x as f64, y as f64, convert_fill_rule(fill_rule))
+				self.context.is_point_in_path_with_path_2d_and_f64_and_winding(&browser_path, x, y, convert_fill_rule(fill_rule))
 			}
 			None => {
 				false
@@ -1259,13 +1260,13 @@ impl Canvas2D {
 		match self.context.measure_text(text) {
 			Ok(text_metrics) => {
 				TextMetrics {
-					width: (text_metrics.width() as f32) as f64,
-					font_ascent: (text_metrics.font_bounding_box_ascent() as f32) as f64,
-					font_descent: (text_metrics.font_bounding_box_descent() as f32) as f64,
-					actual_bounding_box_left: (text_metrics.actual_bounding_box_left() as f32) as f64,
-					actual_bounding_box_right: (text_metrics.actual_bounding_box_right() as f32) as f64,
-					actual_bounding_box_ascent: (text_metrics.actual_bounding_box_ascent() as f32) as f64,
-					actual_bounding_box_descent: (text_metrics.actual_bounding_box_descent() as f32) as f64,
+					width: text_metrics.width(),
+					font_ascent: text_metrics.font_bounding_box_ascent(),
+					font_descent: text_metrics.font_bounding_box_descent(),
+					actual_bounding_box_left: text_metrics.actual_bounding_box_left(),
+					actual_bounding_box_right: text_metrics.actual_bounding_box_right(),
+					actual_bounding_box_ascent: text_metrics.actual_bounding_box_ascent(),
+					actual_bounding_box_descent: text_metrics.actual_bounding_box_descent(),
 				}
 			}
 			Err(_) => {
@@ -1283,13 +1284,13 @@ impl Canvas2D {
 	/// - `y`: 기준 점 y. (글 기준선이 정하는 자리)
 	/// - `maximum_width`: 가장 넓은 폭. (None 이면 좁히지 않는다)
 	//==============================================================================
-	pub fn fill_text(&mut self, text: &str, x: f32, y: f32, maximum_width: Option<f32>) {
+	pub fn fill_text(&mut self, text: &str, x: f64, y: f64, maximum_width: Option<f64>) {
 		let _ = match maximum_width {
 			Some(maximum_width) => {
-				self.context.fill_text_with_max_width(text, x as f64, y as f64, maximum_width as f64)
+				self.context.fill_text_with_max_width(text, x, y, maximum_width)
 			}
 			None => {
-				self.context.fill_text(text, x as f64, y as f64)
+				self.context.fill_text(text, x, y)
 			}
 		};
 		self.revision += 1;
@@ -1304,13 +1305,13 @@ impl Canvas2D {
 	/// - `y`: 기준 점 y. (글 기준선이 정하는 자리)
 	/// - `maximum_width`: 가장 넓은 폭. (None 이면 좁히지 않는다)
 	//==============================================================================
-	pub fn stroke_text(&mut self, text: &str, x: f32, y: f32, maximum_width: Option<f32>) {
+	pub fn stroke_text(&mut self, text: &str, x: f64, y: f64, maximum_width: Option<f64>) {
 		let _ = match maximum_width {
 			Some(maximum_width) => {
-				self.context.stroke_text_with_max_width(text, x as f64, y as f64, maximum_width as f64)
+				self.context.stroke_text_with_max_width(text, x, y, maximum_width)
 			}
 			None => {
-				self.context.stroke_text(text, x as f64, y as f64)
+				self.context.stroke_text(text, x, y)
 			}
 		};
 		self.revision += 1;
@@ -1324,10 +1325,10 @@ impl Canvas2D {
 	/// - `destination_x`: 그릴 자리 왼쪽 x.
 	/// - `destination_y`: 그릴 자리 위 y.
 	//==============================================================================
-	pub fn draw_image<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, destination_x: f32, destination_y: f32) {
+	pub fn draw_image<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, destination_x: f64, destination_y: f64) {
 		let source = source.into();
 		let (width, height) = source.get_size();
-		self.draw_image_region(source, 0.0, 0.0, width as f32, height as f32, destination_x, destination_y, width as f32, height as f32);
+		self.draw_image_region(source, 0.0, 0.0, width as f64, height as f64, destination_x, destination_y, width as f64, height as f64);
 	}
 
 	//==============================================================================
@@ -1340,10 +1341,10 @@ impl Canvas2D {
 	/// - `destination_width`: 그릴 폭. (음수면 destination_x 에서 왼쪽으로)
 	/// - `destination_height`: 그릴 높이. (음수면 destination_y 에서 위로)
 	//==============================================================================
-	pub fn draw_image_scaled<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, destination_x: f32, destination_y: f32, destination_width: f32, destination_height: f32) {
+	pub fn draw_image_scaled<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, destination_x: f64, destination_y: f64, destination_width: f64, destination_height: f64) {
 		let source = source.into();
 		let (width, height) = source.get_size();
-		self.draw_image_region(source, 0.0, 0.0, width as f32, height as f32, destination_x, destination_y, destination_width, destination_height);
+		self.draw_image_region(source, 0.0, 0.0, width as f64, height as f64, destination_x, destination_y, destination_width, destination_height);
 	}
 
 	//==============================================================================
@@ -1360,7 +1361,7 @@ impl Canvas2D {
 	/// - `destination_width`: 그릴 폭. (음수면 destination_x 에서 왼쪽으로)
 	/// - `destination_height`: 그릴 높이. (음수면 destination_y 에서 위로)
 	//==============================================================================
-	pub fn draw_image_region<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, source_x: f32, source_y: f32, source_width: f32, source_height: f32, destination_x: f32, destination_y: f32, destination_width: f32, destination_height: f32) {
+	pub fn draw_image_region<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, source_x: f64, source_y: f64, source_width: f64, source_height: f64, destination_x: f64, destination_y: f64, destination_width: f64, destination_height: f64) {
 		let source = source.into();
 		let temporary_canvas;
 		let source_canvas = match source {
@@ -1387,7 +1388,7 @@ impl Canvas2D {
 				&temporary_canvas
 			}
 		};
-		let _ = self.context.draw_image_with_html_canvas_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(source_canvas, source_x as f64, source_y as f64, source_width as f64, source_height as f64, destination_x as f64, destination_y as f64, destination_width as f64, destination_height as f64);
+		let _ = self.context.draw_image_with_html_canvas_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(source_canvas, source_x, source_y, source_width, source_height, destination_x, destination_y, destination_width, destination_height);
 		self.revision += 1;
 	}
 

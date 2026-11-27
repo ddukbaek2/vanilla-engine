@@ -44,12 +44,12 @@ fn get_particle_gradient_image() -> Rc<Image> {
 			let canvas_size = PARTICLE_GRADIENT_IMAGE_SIZE as f64;
 			let half_size = canvas_size * 0.5;
 			let mut canvas = Canvas2D::new(PARTICLE_GRADIENT_IMAGE_SIZE, PARTICLE_GRADIENT_IMAGE_SIZE);
-			if let Some(mut radial_gradient) = canvas.create_radial_gradient(half_size as f32, half_size as f32, 0.0, half_size as f32, half_size as f32, half_size as f32) {
+			if let Some(mut radial_gradient) = canvas.create_radial_gradient(half_size, half_size, 0.0, half_size, half_size, half_size) {
 				radial_gradient.add_color_stop(0.0, Color::create(1.0, 1.0, 1.0, 1.0));
 				radial_gradient.add_color_stop(1.0, Color::create(1.0, 1.0, 1.0, 0.0));
 				canvas.set_fill_style(radial_gradient);
 			}
-			canvas.fill_rect(0.0, 0.0, canvas_size as f32, canvas_size as f32);
+			canvas.fill_rect(0.0, 0.0, canvas_size, canvas_size);
 			canvas.to_image()
 		});
 		gradient_image.clone()

@@ -20,7 +20,7 @@
 //! ```
 //==============================================================================
 use super::desktop_font::{parse_canvas_font, CanvasFont};
-use super::{convert_conic_to_quads, evaluate_conic, is_composite_operation_name, normalize_line_dash, premultiply_pixels, unpremultiply_pixels, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasRadius, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D, PathSegment};
+use super::{clamp_to_float, convert_conic_to_quads, saturate_to_float, evaluate_conic, is_composite_operation_name, normalize_line_dash, premultiply_pixels, unpremultiply_pixels, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasRadius, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D, PathSegment};
 use crate::base::color::Color;
 use crate::core::image::Image;
 use crate::core::textshaping::ShapingDirection;
@@ -45,9 +45,9 @@ struct CanvasState {
 	line_cap: CanvasLineCap,
 	line_join: CanvasLineJoin,
 	miter_limit: f32,
-	line_dash: Vec<f32>,
+	line_dash: Vec<f64>,
 	line_dash_offset: f32,
-	global_alpha: f32,
+	global_alpha: f64,
 	global_composite_operation: String,
 	shadow_color: Color,
 	shadow_blur: f32,
@@ -270,8 +270,10 @@ impl Canvas2D {
 	/// - `x`: 가로 배율.
 	/// - `y`: 세로 배율.
 	//==============================================================================
-	pub fn scale(&mut self, x: f32, y: f32) {
-		self.transform(x, 0.0, 0.0, y, 0.0, 0.0);
+	pub fn scale(&mut self, x: f64, y: f64) {
+		let x = clamp_to_float(x);
+		let y = clamp_to_float(y);
+		self.transform(f64::from(x), 0.0, 0.0, f64::from(y), 0.0, 0.0);
 	}
 
 	//==============================================================================
@@ -280,8 +282,9 @@ impl Canvas2D {
 	/// # 인자
 	/// - `angle`: 돌릴 각. (라디안, 화면에서 시계 방향이 +)
 	//==============================================================================
-	pub fn rotate(&mut self, angle: f32) {
-		self.transform(angle.cos(), angle.sin(), -angle.sin(), angle.cos(), 0.0, 0.0);
+	pub fn rotate(&mut self, angle: f64) {
+		let angle = clamp_to_float(angle);
+		self.transform(f64::from(angle.cos()), f64::from(angle.sin()), f64::from(-angle.sin()), f64::from(angle.cos()), 0.0, 0.0);
 	}
 
 	//==============================================================================
@@ -291,8 +294,10 @@ impl Canvas2D {
 	/// - `x`: 가로 이동. (지금 좌표계 단위, 픽셀)
 	/// - `y`: 세로 이동. (지금 좌표계 단위, 픽셀)
 	//==============================================================================
-	pub fn translate(&mut self, x: f32, y: f32) {
-		self.transform(1.0, 0.0, 0.0, 1.0, x, y);
+	pub fn translate(&mut self, x: f64, y: f64) {
+		let x = clamp_to_float(x);
+		let y = clamp_to_float(y);
+		self.transform(1.0, 0.0, 0.0, 1.0, f64::from(x), f64::from(y));
 	}
 
 	//==============================================================================
@@ -306,8 +311,14 @@ impl Canvas2D {
 	/// - `e`: 가로 이동. (지금 좌표계 단위, 픽셀)
 	/// - `f`: 세로 이동. (지금 좌표계 단위, 픽셀)
 	//==============================================================================
-	pub fn transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
-		let matrix = CanvasMatrix::create(a, b, c, d, e, f);
+	pub fn transform(&mut self, a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) {
+		let a = clamp_to_float(a);
+		let b = clamp_to_float(b);
+		let c = clamp_to_float(c);
+		let d = clamp_to_float(d);
+		let e = clamp_to_float(e);
+		let f = clamp_to_float(f);
+		let matrix = CanvasMatrix::create_float(a, b, c, d, e, f);
 		if !matrix.is_finite() {
 			return;
 		}
@@ -325,8 +336,14 @@ impl Canvas2D {
 	/// - `e`: 가로 이동. (픽셀)
 	/// - `f`: 세로 이동. (픽셀)
 	//==============================================================================
-	pub fn set_transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
-		self.set_transform_matrix(CanvasMatrix::create(a, b, c, d, e, f));
+	pub fn set_transform(&mut self, a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) {
+		let a = clamp_to_float(a);
+		let b = clamp_to_float(b);
+		let c = clamp_to_float(c);
+		let d = clamp_to_float(d);
+		let e = clamp_to_float(e);
+		let f = clamp_to_float(f);
+		self.set_transform_matrix(CanvasMatrix::create_float(a, b, c, d, e, f));
 	}
 
 	//==============================================================================
@@ -364,7 +381,7 @@ impl Canvas2D {
 	/// # 인자
 	/// - `global_alpha`: 전체 투명도. (0 이 투명, 1 이 불투명, 처음 1)
 	//==============================================================================
-	pub fn set_global_alpha(&mut self, global_alpha: f32) {
+	pub fn set_global_alpha(&mut self, global_alpha: f64) {
 		if global_alpha.is_finite() && (0.0..=1.0).contains(&global_alpha) {
 			self.state.global_alpha = global_alpha;
 		}
@@ -376,7 +393,7 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 전체 투명도. (0 ~ 1, 처음 1)
 	//==============================================================================
-	pub fn get_global_alpha(&self) -> f32 {
+	pub fn get_global_alpha(&self) -> f64 {
 		self.state.global_alpha
 	}
 
@@ -474,7 +491,11 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 색 멈춤이 없는 곧은 그라데이션. (좌표는 칠할 때의 변환을 따른다)
 	//==============================================================================
-	pub fn create_linear_gradient(&self, start_x: f32, start_y: f32, end_x: f32, end_y: f32) -> CanvasGradient {
+	pub fn create_linear_gradient(&self, start_x: f64, start_y: f64, end_x: f64, end_y: f64) -> CanvasGradient {
+		let start_x = clamp_to_float(start_x);
+		let start_y = clamp_to_float(start_y);
+		let end_x = clamp_to_float(end_x);
+		let end_y = clamp_to_float(end_y);
 		CanvasGradient::new(CanvasGradientKind::Linear {
 			start_x,
 			start_y,
@@ -497,7 +518,13 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 색 멈춤이 없는 둥근 그라데이션. 반지름이 음수면 None.
 	//==============================================================================
-	pub fn create_radial_gradient(&self, start_x: f32, start_y: f32, start_radius: f32, end_x: f32, end_y: f32, end_radius: f32) -> Option<CanvasGradient> {
+	pub fn create_radial_gradient(&self, start_x: f64, start_y: f64, start_radius: f64, end_x: f64, end_y: f64, end_radius: f64) -> Option<CanvasGradient> {
+		let start_x = clamp_to_float(start_x);
+		let start_y = clamp_to_float(start_y);
+		let start_radius = clamp_to_float(start_radius);
+		let end_x = clamp_to_float(end_x);
+		let end_y = clamp_to_float(end_y);
+		let end_radius = clamp_to_float(end_radius);
 		if start_radius < 0.0 || end_radius < 0.0 {
 			return None;
 		}
@@ -522,7 +549,10 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 색 멈춤이 없는 원뿔 그라데이션.
 	//==============================================================================
-	pub fn create_conic_gradient(&self, start_angle: f32, center_x: f32, center_y: f32) -> CanvasGradient {
+	pub fn create_conic_gradient(&self, start_angle: f64, center_x: f64, center_y: f64) -> CanvasGradient {
+		let start_angle = clamp_to_float(start_angle);
+		let center_x = clamp_to_float(center_x);
+		let center_y = clamp_to_float(center_y);
 		CanvasGradient::new(CanvasGradientKind::Conic {
 			start_angle,
 			center_x,
@@ -582,7 +612,8 @@ impl Canvas2D {
 	/// # 인자
 	/// - `shadow_blur`: 흐림 정도. (0 이 흐리지 않음, 처음 0)
 	//==============================================================================
-	pub fn set_shadow_blur(&mut self, shadow_blur: f32) {
+	pub fn set_shadow_blur(&mut self, shadow_blur: f64) {
+		let shadow_blur = clamp_to_float(shadow_blur);
 		if shadow_blur.is_finite() && shadow_blur >= 0.0 {
 			self.state.shadow_blur = shadow_blur;
 		}
@@ -594,8 +625,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 그림자 흐림. (처음 0)
 	//==============================================================================
-	pub fn get_shadow_blur(&self) -> f32 {
-		self.state.shadow_blur
+	pub fn get_shadow_blur(&self) -> f64 {
+		f64::from(self.state.shadow_blur)
 	}
 
 	//==============================================================================
@@ -604,7 +635,8 @@ impl Canvas2D {
 	/// # 인자
 	/// - `offset_x`: 가로 밀림. (캔버스 픽셀, 유한하지 않으면 무시, 처음 0)
 	//==============================================================================
-	pub fn set_shadow_offset_x(&mut self, offset_x: f32) {
+	pub fn set_shadow_offset_x(&mut self, offset_x: f64) {
+		let offset_x = clamp_to_float(offset_x);
 		if offset_x.is_finite() {
 			self.state.shadow_offset_x = offset_x;
 		}
@@ -616,8 +648,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 그림자 가로 밀림. (처음 0)
 	//==============================================================================
-	pub fn get_shadow_offset_x(&self) -> f32 {
-		self.state.shadow_offset_x
+	pub fn get_shadow_offset_x(&self) -> f64 {
+		f64::from(self.state.shadow_offset_x)
 	}
 
 	//==============================================================================
@@ -626,7 +658,8 @@ impl Canvas2D {
 	/// # 인자
 	/// - `offset_y`: 세로 밀림. (캔버스 픽셀, 유한하지 않으면 무시, 처음 0)
 	//==============================================================================
-	pub fn set_shadow_offset_y(&mut self, offset_y: f32) {
+	pub fn set_shadow_offset_y(&mut self, offset_y: f64) {
+		let offset_y = clamp_to_float(offset_y);
 		if offset_y.is_finite() {
 			self.state.shadow_offset_y = offset_y;
 		}
@@ -638,8 +671,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 그림자 세로 밀림. (처음 0)
 	//==============================================================================
-	pub fn get_shadow_offset_y(&self) -> f32 {
-		self.state.shadow_offset_y
+	pub fn get_shadow_offset_y(&self) -> f64 {
+		f64::from(self.state.shadow_offset_y)
 	}
 
 	//==============================================================================
@@ -648,7 +681,8 @@ impl Canvas2D {
 	/// # 인자
 	/// - `line_width`: 선 굵기. (처음 1)
 	//==============================================================================
-	pub fn set_line_width(&mut self, line_width: f32) {
+	pub fn set_line_width(&mut self, line_width: f64) {
+		let line_width = clamp_to_float(line_width);
 		if line_width.is_finite() && line_width > 0.0 {
 			self.state.line_width = line_width;
 		}
@@ -660,8 +694,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 선 굵기. (처음 1)
 	//==============================================================================
-	pub fn get_line_width(&self) -> f32 {
-		self.state.line_width
+	pub fn get_line_width(&self) -> f64 {
+		f64::from(self.state.line_width)
 	}
 
 	//==============================================================================
@@ -710,7 +744,8 @@ impl Canvas2D {
 	/// # 인자
 	/// - `miter_limit`: 뾰족 이음 한계. (이음 길이와 선 굵기의 비, 처음 10)
 	//==============================================================================
-	pub fn set_miter_limit(&mut self, miter_limit: f32) {
+	pub fn set_miter_limit(&mut self, miter_limit: f64) {
+		let miter_limit = clamp_to_float(miter_limit);
 		if miter_limit.is_finite() && miter_limit > 0.0 {
 			self.state.miter_limit = miter_limit;
 		}
@@ -722,8 +757,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 뾰족 이음 한계. (처음 10)
 	//==============================================================================
-	pub fn get_miter_limit(&self) -> f32 {
-		self.state.miter_limit
+	pub fn get_miter_limit(&self) -> f64 {
+		f64::from(self.state.miter_limit)
 	}
 
 	//==============================================================================
@@ -732,7 +767,7 @@ impl Canvas2D {
 	/// # 인자
 	/// - `dash_list`: 그을 길이와 빈 길이를 번갈아 둔 목록. (빈 목록이면 곧은 선)
 	//==============================================================================
-	pub fn set_line_dash(&mut self, dash_list: &[f32]) {
+	pub fn set_line_dash(&mut self, dash_list: &[f64]) {
 		if let Some(normalized_list) = normalize_line_dash(dash_list) {
 			self.state.line_dash = normalized_list;
 		}
@@ -744,7 +779,7 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 점선 목록. (홀수 개로 넣었으면 두 번 이은 것, 처음 빈 목록)
 	//==============================================================================
-	pub fn get_line_dash(&self) -> Vec<f32> {
+	pub fn get_line_dash(&self) -> Vec<f64> {
 		self.state.line_dash.clone()
 	}
 
@@ -754,7 +789,8 @@ impl Canvas2D {
 	/// # 인자
 	/// - `line_dash_offset`: 점선을 시작할 자리. (유한하지 않으면 무시, 처음 0)
 	//==============================================================================
-	pub fn set_line_dash_offset(&mut self, line_dash_offset: f32) {
+	pub fn set_line_dash_offset(&mut self, line_dash_offset: f64) {
+		let line_dash_offset = clamp_to_float(line_dash_offset);
 		if line_dash_offset.is_finite() {
 			self.state.line_dash_offset = line_dash_offset;
 		}
@@ -766,8 +802,8 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 점선 시작 밀림. (처음 0)
 	//==============================================================================
-	pub fn get_line_dash_offset(&self) -> f32 {
-		self.state.line_dash_offset
+	pub fn get_line_dash_offset(&self) -> f64 {
+		f64::from(self.state.line_dash_offset)
 	}
 
 	//==============================================================================
@@ -860,7 +896,11 @@ impl Canvas2D {
 	/// - `width`: 폭. (음수면 x 에서 왼쪽으로)
 	/// - `height`: 높이. (음수면 y 에서 위로)
 	//==============================================================================
-	pub fn clear_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
+	pub fn clear_rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
+		let x = clamp_to_float(x);
+		let y = clamp_to_float(y);
+		let width = clamp_to_float(width);
+		let height = clamp_to_float(height);
 		let path = match build_rect_path(x, y, width, height) {
 			Some(path) => {
 				path
@@ -889,7 +929,11 @@ impl Canvas2D {
 	/// - `width`: 폭. (음수면 x 에서 왼쪽으로)
 	/// - `height`: 높이. (음수면 y 에서 위로)
 	//==============================================================================
-	pub fn fill_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
+	pub fn fill_rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
+		let x = clamp_to_float(x);
+		let y = clamp_to_float(y);
+		let width = clamp_to_float(width);
+		let height = clamp_to_float(height);
 		if let Some(path) = build_rect_path(x, y, width, height) {
 			let shape = CanvasShape::Fill {
 				path,
@@ -910,9 +954,13 @@ impl Canvas2D {
 	/// - `width`: 폭. (음수면 x 에서 왼쪽으로)
 	/// - `height`: 높이. (음수면 y 에서 위로)
 	//==============================================================================
-	pub fn stroke_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
+	pub fn stroke_rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
+		let x = clamp_to_float(x);
+		let y = clamp_to_float(y);
+		let width = clamp_to_float(width);
+		let height = clamp_to_float(height);
 		let mut rect_path = Path2D::new();
-		rect_path.rect(x, y, width, height);
+		rect_path.rect(f64::from(x), f64::from(y), f64::from(width), f64::from(height));
 		self.stroke_path(&rect_path);
 	}
 
@@ -937,7 +985,9 @@ impl Canvas2D {
 	/// - `x`: 새 조각의 시작 점 x.
 	/// - `y`: 새 조각의 시작 점 y.
 	//==============================================================================
-	pub fn move_to(&mut self, x: f32, y: f32) {
+	pub fn move_to(&mut self, x: f64, y: f64) {
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
 		let matrix = self.state.transform;
 		self.path.move_to_with(&matrix, x, y);
 	}
@@ -949,7 +999,9 @@ impl Canvas2D {
 	/// - `x`: 끝 점 x.
 	/// - `y`: 끝 점 y.
 	//==============================================================================
-	pub fn line_to(&mut self, x: f32, y: f32) {
+	pub fn line_to(&mut self, x: f64, y: f64) {
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
 		let matrix = self.state.transform;
 		self.path.line_to_with(&matrix, x, y);
 	}
@@ -963,7 +1015,11 @@ impl Canvas2D {
 	/// - `x`: 끝 점 x.
 	/// - `y`: 끝 점 y.
 	//==============================================================================
-	pub fn quadratic_curve_to(&mut self, control_x: f32, control_y: f32, x: f32, y: f32) {
+	pub fn quadratic_curve_to(&mut self, control_x: f64, control_y: f64, x: f64, y: f64) {
+		let control_x = saturate_to_float(control_x);
+		let control_y = saturate_to_float(control_y);
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
 		let matrix = self.state.transform;
 		self.path.quadratic_curve_to_with(&matrix, control_x, control_y, x, y);
 	}
@@ -979,7 +1035,13 @@ impl Canvas2D {
 	/// - `x`: 끝 점 x.
 	/// - `y`: 끝 점 y.
 	//==============================================================================
-	pub fn bezier_curve_to(&mut self, first_control_x: f32, first_control_y: f32, second_control_x: f32, second_control_y: f32, x: f32, y: f32) {
+	pub fn bezier_curve_to(&mut self, first_control_x: f64, first_control_y: f64, second_control_x: f64, second_control_y: f64, x: f64, y: f64) {
+		let first_control_x = saturate_to_float(first_control_x);
+		let first_control_y = saturate_to_float(first_control_y);
+		let second_control_x = saturate_to_float(second_control_x);
+		let second_control_y = saturate_to_float(second_control_y);
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
 		let matrix = self.state.transform;
 		self.path.bezier_curve_to_with(&matrix, first_control_x, first_control_y, second_control_x, second_control_y, x, y);
 	}
@@ -998,7 +1060,12 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 반지름이 음수면 false(원본의 예외 자리), 그 밖에는 true. (유한하지 않은 값이 있으면 원본처럼 아무것도 더하지 않고 true)
 	//==============================================================================
-	pub fn arc(&mut self, x: f32, y: f32, radius: f32, start_angle: f32, end_angle: f32, is_counterclockwise: bool) -> bool {
+	pub fn arc(&mut self, x: f64, y: f64, radius: f64, start_angle: f64, end_angle: f64, is_counterclockwise: bool) -> bool {
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
+		let radius = saturate_to_float(radius);
+		let start_angle = saturate_to_float(start_angle);
+		let end_angle = saturate_to_float(end_angle);
 		let matrix = self.state.transform;
 		self.path.arc_with(&matrix, x, y, radius, start_angle, end_angle, is_counterclockwise)
 	}
@@ -1016,7 +1083,12 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 반지름이 음수면 false(원본의 예외 자리), 그 밖에는 true. (유한하지 않은 값이 있으면 원본처럼 아무것도 더하지 않고 true)
 	//==============================================================================
-	pub fn arc_to(&mut self, first_x: f32, first_y: f32, second_x: f32, second_y: f32, radius: f32) -> bool {
+	pub fn arc_to(&mut self, first_x: f64, first_y: f64, second_x: f64, second_y: f64, radius: f64) -> bool {
+		let first_x = saturate_to_float(first_x);
+		let first_y = saturate_to_float(first_y);
+		let second_x = saturate_to_float(second_x);
+		let second_y = saturate_to_float(second_y);
+		let radius = saturate_to_float(radius);
 		let matrix = self.state.transform;
 		self.path.arc_to_with(&matrix, first_x, first_y, second_x, second_y, radius)
 	}
@@ -1037,7 +1109,14 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 반지름이 음수면 false(원본의 예외 자리), 그 밖에는 true. (유한하지 않은 값이 있으면 원본처럼 아무것도 더하지 않고 true)
 	//==============================================================================
-	pub fn ellipse(&mut self, x: f32, y: f32, radius_x: f32, radius_y: f32, rotation: f32, start_angle: f32, end_angle: f32, is_counterclockwise: bool) -> bool {
+	pub fn ellipse(&mut self, x: f64, y: f64, radius_x: f64, radius_y: f64, rotation: f64, start_angle: f64, end_angle: f64, is_counterclockwise: bool) -> bool {
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
+		let radius_x = saturate_to_float(radius_x);
+		let radius_y = saturate_to_float(radius_y);
+		let rotation = saturate_to_float(rotation);
+		let start_angle = saturate_to_float(start_angle);
+		let end_angle = saturate_to_float(end_angle);
 		let matrix = self.state.transform;
 		self.path.ellipse_with(&matrix, x, y, radius_x, radius_y, rotation, start_angle, end_angle, is_counterclockwise)
 	}
@@ -1051,7 +1130,11 @@ impl Canvas2D {
 	/// - `width`: 폭. (음수면 x 에서 왼쪽으로)
 	/// - `height`: 높이. (음수면 y 에서 위로)
 	//==============================================================================
-	pub fn rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
+	pub fn rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
+		let width = saturate_to_float(width);
+		let height = saturate_to_float(height);
 		let matrix = self.state.transform;
 		self.path.rect_with(&matrix, x, y, width, height);
 	}
@@ -1196,7 +1279,7 @@ impl Canvas2D {
 				}
 			}
 		};
-		let resolution_scale = calculate_resolution_scale(&CanvasMatrix::create(transform.sx, transform.ky, transform.kx, transform.sy, transform.tx, transform.ty));
+		let resolution_scale = calculate_resolution_scale(&CanvasMatrix::create_float(transform.sx, transform.ky, transform.kx, transform.sy, transform.tx, transform.ty));
 		match build_skia_path(path, CONIC_TOLERANCE / resolution_scale) {
 			Some(skia_path) => {
 				clip_mask.intersect_path(&skia_path, convert_fill_rule(fill_rule), true, transform);
@@ -1219,7 +1302,9 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 점이 안에 있으면 true.
 	//==============================================================================
-	pub fn is_point_in_path(&self, x: f32, y: f32, fill_rule: CanvasFillRule) -> bool {
+	pub fn is_point_in_path(&self, x: f64, y: f64, fill_rule: CanvasFillRule) -> bool {
+		let x = clamp_to_float(x);
+		let y = clamp_to_float(y);
 		is_point_inside(&self.path, &CanvasMatrix::IDENTITY, x, y, fill_rule)
 	}
 
@@ -1235,7 +1320,9 @@ impl Canvas2D {
 	/// # 돌려줌
 	/// 점이 안에 있으면 true.
 	//==============================================================================
-	pub fn is_point_in_path2d(&self, path: &Path2D, x: f32, y: f32, fill_rule: CanvasFillRule) -> bool {
+	pub fn is_point_in_path2d(&self, path: &Path2D, x: f64, y: f64, fill_rule: CanvasFillRule) -> bool {
+		let x = clamp_to_float(x);
+		let y = clamp_to_float(y);
 		is_point_inside(path, &self.state.transform, x, y, fill_rule)
 	}
 
@@ -1261,7 +1348,10 @@ impl Canvas2D {
 	/// - `y`: 기준 점 y. (글 기준선이 정하는 자리)
 	/// - `maximum_width`: 가장 넓은 폭. (None 이면 좁히지 않는다)
 	//==============================================================================
-	pub fn fill_text(&mut self, text: &str, x: f32, y: f32, maximum_width: Option<f32>) {
+	pub fn fill_text(&mut self, text: &str, x: f64, y: f64, maximum_width: Option<f64>) {
+		let x = clamp_to_float(x);
+		let y = clamp_to_float(y);
+		let maximum_width = maximum_width.map(clamp_to_float);
 		self.draw_text(text, x, y, maximum_width, false);
 	}
 
@@ -1274,7 +1364,10 @@ impl Canvas2D {
 	/// - `y`: 기준 점 y. (글 기준선이 정하는 자리)
 	/// - `maximum_width`: 가장 넓은 폭. (None 이면 좁히지 않는다)
 	//==============================================================================
-	pub fn stroke_text(&mut self, text: &str, x: f32, y: f32, maximum_width: Option<f32>) {
+	pub fn stroke_text(&mut self, text: &str, x: f64, y: f64, maximum_width: Option<f64>) {
+		let x = clamp_to_float(x);
+		let y = clamp_to_float(y);
+		let maximum_width = maximum_width.map(clamp_to_float);
 		self.draw_text(text, x, y, maximum_width, true);
 	}
 
@@ -1286,10 +1379,12 @@ impl Canvas2D {
 	/// - `destination_x`: 그릴 자리 왼쪽 x.
 	/// - `destination_y`: 그릴 자리 위 y.
 	//==============================================================================
-	pub fn draw_image<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, destination_x: f32, destination_y: f32) {
+	pub fn draw_image<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, destination_x: f64, destination_y: f64) {
+		let destination_x = clamp_to_float(destination_x);
+		let destination_y = clamp_to_float(destination_y);
 		let source = source.into();
 		let (width, height) = source.get_size();
-		self.draw_image_region(source, 0.0, 0.0, width as f32, height as f32, destination_x, destination_y, width as f32, height as f32);
+		self.draw_image_region(source, 0.0, 0.0, width as f64, height as f64, f64::from(destination_x), f64::from(destination_y), width as f64, height as f64);
 	}
 
 	//==============================================================================
@@ -1302,10 +1397,14 @@ impl Canvas2D {
 	/// - `destination_width`: 그릴 폭. (음수면 destination_x 에서 왼쪽으로)
 	/// - `destination_height`: 그릴 높이. (음수면 destination_y 에서 위로)
 	//==============================================================================
-	pub fn draw_image_scaled<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, destination_x: f32, destination_y: f32, destination_width: f32, destination_height: f32) {
+	pub fn draw_image_scaled<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, destination_x: f64, destination_y: f64, destination_width: f64, destination_height: f64) {
+		let destination_x = clamp_to_float(destination_x);
+		let destination_y = clamp_to_float(destination_y);
+		let destination_width = clamp_to_float(destination_width);
+		let destination_height = clamp_to_float(destination_height);
 		let source = source.into();
 		let (width, height) = source.get_size();
-		self.draw_image_region(source, 0.0, 0.0, width as f32, height as f32, destination_x, destination_y, destination_width, destination_height);
+		self.draw_image_region(source, 0.0, 0.0, width as f64, height as f64, f64::from(destination_x), f64::from(destination_y), f64::from(destination_width), f64::from(destination_height));
 	}
 
 	//==============================================================================
@@ -1322,7 +1421,15 @@ impl Canvas2D {
 	/// - `destination_width`: 그릴 폭. (음수면 destination_x 에서 왼쪽으로)
 	/// - `destination_height`: 그릴 높이. (음수면 destination_y 에서 위로)
 	//==============================================================================
-	pub fn draw_image_region<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, source_x: f32, source_y: f32, source_width: f32, source_height: f32, destination_x: f32, destination_y: f32, destination_width: f32, destination_height: f32) {
+	pub fn draw_image_region<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, source_x: f64, source_y: f64, source_width: f64, source_height: f64, destination_x: f64, destination_y: f64, destination_width: f64, destination_height: f64) {
+		let source_x = clamp_to_float(source_x);
+		let source_y = clamp_to_float(source_y);
+		let source_width = clamp_to_float(source_width);
+		let source_height = clamp_to_float(source_height);
+		let destination_x = clamp_to_float(destination_x);
+		let destination_y = clamp_to_float(destination_y);
+		let destination_width = clamp_to_float(destination_width);
+		let destination_height = clamp_to_float(destination_height);
 		let source = source.into();
 		let value_list = [source_x, source_y, source_width, source_height, destination_x, destination_y, destination_width, destination_height];
 		if value_list.iter().any(|value| !value.is_finite()) || source_width == 0.0 || source_height == 0.0 || destination_width == 0.0 || destination_height == 0.0 {
@@ -1577,7 +1684,7 @@ impl Canvas2D {
 			None
 		}
 		else {
-			StrokeDash::new(self.state.line_dash.clone(), self.state.line_dash_offset)
+			StrokeDash::new(self.state.line_dash.iter().map(|&dash| dash as f32).collect(), self.state.line_dash_offset)
 		};
 		Stroke {
 			width: self.state.line_width,
@@ -1623,7 +1730,7 @@ impl Canvas2D {
 			return;
 		}
 		let blend_mode = convert_blend_mode(&self.state.global_composite_operation);
-		let global_alpha = self.state.global_alpha;
+		let global_alpha = self.state.global_alpha as f32;
 		let pattern_pixmap = style.and_then(build_pattern_pixmap);
 		let clip_mask = self.build_drawing_mask(style);
 		let has_shadow = self.has_shadow();
@@ -1840,7 +1947,7 @@ impl Canvas2D {
 		};
 		let quad_x = x + align_offset - text_raster.origin_x as f32 / text_scale * condense_scale;
 		let quad_y = y + baseline_offset - text_raster.baseline_y as f32 / text_scale;
-		let text_matrix = matrix.multiply(&CanvasMatrix::create(condense_scale / text_scale, 0.0, 0.0, 1.0 / text_scale, quad_x, quad_y));
+		let text_matrix = matrix.multiply(&CanvasMatrix::create_float(condense_scale / text_scale, 0.0, 0.0, 1.0 / text_scale, quad_x, quad_y));
 
 		// 글 그림. (칠할 것을 글 좌표로 채우고 덮인 정도로 깎는다)
 		let width = text_raster.width as u32;
@@ -2126,8 +2233,8 @@ fn is_point_inside(path: &Path2D, matrix: &CanvasMatrix, x: f32, y: f32, fill_ru
 	for segment in path.get_segment_list() {
 		match *segment {
 			PathSegment::ConicTo(control_x, control_y, point_x, point_y, weight) => {
-				let control = matrix.transform_point(control_x, control_y);
-				let end = matrix.transform_point(point_x, point_y);
+				let control = matrix.transform_point_float(control_x, control_y);
+				let end = matrix.transform_point_float(point_x, point_y);
 				for step_index in 1..=curve_step_count {
 					let time = step_index as f32 / curve_step_count as f32;
 					current_polygon.push(evaluate_conic(last_point, control, end, weight, time));
@@ -2139,16 +2246,16 @@ fn is_point_inside(path: &Path2D, matrix: &CanvasMatrix, x: f32, y: f32, fill_ru
 					polygon_list.push(std::mem::take(&mut current_polygon));
 				}
 				current_polygon.clear();
-				last_point = matrix.transform_point(point_x, point_y);
+				last_point = matrix.transform_point_float(point_x, point_y);
 				current_polygon.push(last_point);
 			}
 			PathSegment::LineTo(point_x, point_y) => {
-				last_point = matrix.transform_point(point_x, point_y);
+				last_point = matrix.transform_point_float(point_x, point_y);
 				current_polygon.push(last_point);
 			}
 			PathSegment::QuadraticTo(control_x, control_y, point_x, point_y) => {
-				let control = matrix.transform_point(control_x, control_y);
-				let end = matrix.transform_point(point_x, point_y);
+				let control = matrix.transform_point_float(control_x, control_y);
+				let end = matrix.transform_point_float(point_x, point_y);
 				for step_index in 1..=curve_step_count {
 					let time = step_index as f32 / curve_step_count as f32;
 					let inverse_time = 1.0 - time;
@@ -2157,9 +2264,9 @@ fn is_point_inside(path: &Path2D, matrix: &CanvasMatrix, x: f32, y: f32, fill_ru
 				last_point = end;
 			}
 			PathSegment::CubicTo(first_control_x, first_control_y, second_control_x, second_control_y, point_x, point_y) => {
-				let first_control = matrix.transform_point(first_control_x, first_control_y);
-				let second_control = matrix.transform_point(second_control_x, second_control_y);
-				let end = matrix.transform_point(point_x, point_y);
+				let first_control = matrix.transform_point_float(first_control_x, first_control_y);
+				let second_control = matrix.transform_point_float(second_control_x, second_control_y);
+				let end = matrix.transform_point_float(point_x, point_y);
 				for step_index in 1..=curve_step_count {
 					let time = step_index as f32 / curve_step_count as f32;
 					let inverse_time = 1.0 - time;
@@ -2529,7 +2636,7 @@ mod tests {
 	fn path_fill_clip_and_stroke() {
 		let mut canvas = Canvas2D::new(40, 40);
 		canvas.begin_path();
-		assert!(canvas.arc(20.0, 20.0, 10.0, 0.0, 2.0 * std::f32::consts::PI, false));
+		assert!(canvas.arc(20.0, 20.0, 10.0, 0.0, 2.0 * std::f64::consts::PI, false));
 		assert!(!canvas.arc(20.0, 20.0, -1.0, 0.0, 1.0, false));
 		assert!(canvas.is_point_in_path(20.0, 20.0, CanvasFillRule::NonZero));
 		assert!(!canvas.is_point_in_path(2.0, 2.0, CanvasFillRule::NonZero));

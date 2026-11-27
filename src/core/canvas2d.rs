@@ -27,7 +27,7 @@
 //! let mut canvas = Canvas2D::new(64, 64);
 //! canvas.set_fill_style("#ff0000");
 //! canvas.begin_path();
-//! canvas.arc(32.0, 32.0, 24.0, 0.0, std::f32::consts::PI * 2.0, false);
+//! canvas.arc(32.0, 32.0, 24.0, 0.0, std::f64::consts::PI * 2.0, false);
 //! canvas.fill(CanvasFillRule::NonZero);
 //! assert_eq!(canvas.get_image_data(32, 32, 1, 1).data, vec![255, 0, 0, 255]);
 //! assert_eq!(canvas.get_image_data(2, 2, 1, 1).data, vec![0, 0, 0, 0]);
@@ -102,7 +102,27 @@ impl CanvasMatrix {
 	/// # 돌려줌
 	/// 그 여섯 값의 행렬.
 	//==============================================================================
-	pub fn create(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> CanvasMatrix {
+	pub fn create(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> CanvasMatrix {
+		let a = clamp_to_float(a);
+		let b = clamp_to_float(b);
+		let c = clamp_to_float(c);
+		let d = clamp_to_float(d);
+		let e = clamp_to_float(e);
+		let f = clamp_to_float(f);
+		CanvasMatrix {
+			a,
+			b,
+			c,
+			d,
+			e,
+			f,
+		}
+	}
+
+	//==============================================================================
+	/// f32 여섯 칸으로 만들기. (엔진 안에서 이미 줄인 값으로 행렬을 지을 때)
+	//==============================================================================
+	pub(crate) fn create_float(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> CanvasMatrix {
 		CanvasMatrix {
 			a,
 			b,
@@ -141,9 +161,24 @@ impl CanvasMatrix {
 	/// - `y`: 점 y.
 	///
 	/// # 돌려줌
+	/// 옮긴 점 (x', y'). (칸을 f64 로 넓혀 셈한다, 원본 DOMMatrix.transformPoint 처럼 double)
+	//==============================================================================
+	pub fn transform_point(&self, x: f64, y: f64) -> (f64, f64) {
+		let (a, b, c, d, e, f) = (self.a as f64, self.b as f64, self.c as f64, self.d as f64, self.e as f64, self.f as f64);
+		(a * x + c * y + e, b * x + d * y + f)
+	}
+
+	//==============================================================================
+	/// 점 옮기기를 f32 로. (스키아 SkMatrix::mapPoints 처럼 float 셈, 경로 점을 기기 좌표로 옮길 때)
+	///
+	/// # 인자
+	/// - `x`: 점 x.
+	/// - `y`: 점 y.
+	///
+	/// # 돌려줌
 	/// 옮긴 점 (x', y').
 	//==============================================================================
-	pub fn transform_point(&self, x: f32, y: f32) -> (f32, f32) {
+	pub(crate) fn transform_point_float(&self, x: f32, y: f32) -> (f32, f32) {
 		(self.a * x + self.c * y + self.e, self.b * x + self.d * y + self.f)
 	}
 
@@ -204,6 +239,54 @@ pub(crate) enum PathSegment {
 }
 
 //==============================================================================
+/// f64 인자를 f32 로 줄인다. (크롬 블링크 ClampTo<float>, 사각형, 변환, 그라디언트, 선 굵기 같은 문맥 함수)
+/// f32 끝값 밖의 유한한 수는 ±f32::MAX 로 자른다. 블링크는 이 함수들에서 유한 검사를 double 로 먼저 하므로,
+/// 무한과 NaN 은 그대로 넘겨 뒤의 유한 검사가 원본처럼 버리게 한다.
+///
+/// # 인자
+/// - `value`: 받은 수.
+///
+/// # 돌려줌
+/// 스키아가 셈할 f32.
+//==============================================================================
+pub(crate) fn clamp_to_float(value: f64) -> f32 {
+	if !value.is_finite() {
+		return value as f32;
+	}
+	if value >= f32::MAX as f64 {
+		f32::MAX
+	}
+	else if value <= f32::MIN as f64 {
+		f32::MIN
+	}
+	else {
+		value as f32
+	}
+}
+
+//==============================================================================
+/// f64 인자를 f32 로 줄인다. (크롬 블링크 경로 함수의 base::saturated_cast<float>, moveTo, lineTo, arc, rect 같은 것)
+/// f32 끝값을 넘는 수는 무한이 되어 경로 함수의 유한 검사가 버린다. NaN 은 NaN.
+///
+/// # 인자
+/// - `value`: 받은 수.
+///
+/// # 돌려줌
+/// 경로에 넣을 f32.
+//==============================================================================
+pub(crate) fn saturate_to_float(value: f64) -> f32 {
+	if value > f32::MAX as f64 {
+		f32::INFINITY
+	}
+	else if value < f32::MIN as f64 {
+		f32::NEG_INFINITY
+	}
+	else {
+		value as f32
+	}
+}
+
+//==============================================================================
 /// 둥근 사각형 모서리 반지름. (원본 roundRect 의 수 또는 DOMPointInit {x, y})
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -217,23 +300,23 @@ pub enum CanvasRadius {
 	},
 }
 
-impl From<f32> for CanvasRadius {
+impl From<f64> for CanvasRadius {
 	//==============================================================================
-	/// 수 하나로 원 모서리. (Circular)
+	/// 수 하나로 원 모서리. (Circular, 블링크처럼 받자마자 f32 로 줄인다)
 	//==============================================================================
-	fn from(radius: f32) -> CanvasRadius {
-		CanvasRadius::Circular(radius)
+	fn from(radius: f64) -> CanvasRadius {
+		CanvasRadius::Circular(saturate_to_float(radius))
 	}
 }
 
-impl From<(f32, f32)> for CanvasRadius {
+impl From<(f64, f64)> for CanvasRadius {
 	//==============================================================================
-	/// (x, y) 로 타원 모서리. (Elliptical)
+	/// (x, y) 로 타원 모서리. (Elliptical, 블링크처럼 받자마자 f32 로 줄인다)
 	//==============================================================================
-	fn from(radius: (f32, f32)) -> CanvasRadius {
+	fn from(radius: (f64, f64)) -> CanvasRadius {
 		CanvasRadius::Elliptical {
-			x: radius.0,
-			y: radius.1,
+			x: saturate_to_float(radius.0),
+			y: saturate_to_float(radius.1),
 		}
 	}
 }
@@ -373,7 +456,9 @@ impl Path2D {
 	/// - `x`: 새 조각의 시작 점 x.
 	/// - `y`: 새 조각의 시작 점 y.
 	//==============================================================================
-	pub fn move_to(&mut self, x: f32, y: f32) {
+	pub fn move_to(&mut self, x: f64, y: f64) {
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
 		self.move_to_with(&CanvasMatrix::IDENTITY, x, y);
 		self.record_browser_command(BrowserPathCommand::MoveTo(x, y));
 	}
@@ -385,7 +470,9 @@ impl Path2D {
 	/// - `x`: 끝 점 x.
 	/// - `y`: 끝 점 y.
 	//==============================================================================
-	pub fn line_to(&mut self, x: f32, y: f32) {
+	pub fn line_to(&mut self, x: f64, y: f64) {
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
 		self.line_to_with(&CanvasMatrix::IDENTITY, x, y);
 		self.record_browser_command(BrowserPathCommand::LineTo(x, y));
 	}
@@ -399,7 +486,11 @@ impl Path2D {
 	/// - `x`: 끝 점 x.
 	/// - `y`: 끝 점 y.
 	//==============================================================================
-	pub fn quadratic_curve_to(&mut self, control_x: f32, control_y: f32, x: f32, y: f32) {
+	pub fn quadratic_curve_to(&mut self, control_x: f64, control_y: f64, x: f64, y: f64) {
+		let control_x = saturate_to_float(control_x);
+		let control_y = saturate_to_float(control_y);
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
 		self.quadratic_curve_to_with(&CanvasMatrix::IDENTITY, control_x, control_y, x, y);
 		self.record_browser_command(BrowserPathCommand::QuadraticCurveTo(control_x, control_y, x, y));
 	}
@@ -415,7 +506,13 @@ impl Path2D {
 	/// - `x`: 끝 점 x.
 	/// - `y`: 끝 점 y.
 	//==============================================================================
-	pub fn bezier_curve_to(&mut self, first_control_x: f32, first_control_y: f32, second_control_x: f32, second_control_y: f32, x: f32, y: f32) {
+	pub fn bezier_curve_to(&mut self, first_control_x: f64, first_control_y: f64, second_control_x: f64, second_control_y: f64, x: f64, y: f64) {
+		let first_control_x = saturate_to_float(first_control_x);
+		let first_control_y = saturate_to_float(first_control_y);
+		let second_control_x = saturate_to_float(second_control_x);
+		let second_control_y = saturate_to_float(second_control_y);
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
 		self.bezier_curve_to_with(&CanvasMatrix::IDENTITY, first_control_x, first_control_y, second_control_x, second_control_y, x, y);
 		self.record_browser_command(BrowserPathCommand::BezierCurveTo(first_control_x, first_control_y, second_control_x, second_control_y, x, y));
 	}
@@ -434,7 +531,12 @@ impl Path2D {
 	/// # 돌려줌
 	/// 반지름이 음수면 false(원본의 예외 자리), 그 밖에는 true. (유한하지 않은 값이 있으면 원본처럼 아무것도 더하지 않고 true)
 	//==============================================================================
-	pub fn arc(&mut self, x: f32, y: f32, radius: f32, start_angle: f32, end_angle: f32, is_counterclockwise: bool) -> bool {
+	pub fn arc(&mut self, x: f64, y: f64, radius: f64, start_angle: f64, end_angle: f64, is_counterclockwise: bool) -> bool {
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
+		let radius = saturate_to_float(radius);
+		let start_angle = saturate_to_float(start_angle);
+		let end_angle = saturate_to_float(end_angle);
 		let is_accepted = self.arc_with(&CanvasMatrix::IDENTITY, x, y, radius, start_angle, end_angle, is_counterclockwise);
 		if is_accepted {
 			self.record_browser_command(BrowserPathCommand::Arc(x, y, radius, start_angle, end_angle, is_counterclockwise));
@@ -455,7 +557,12 @@ impl Path2D {
 	/// # 돌려줌
 	/// 반지름이 음수면 false(원본의 예외 자리), 그 밖에는 true. (유한하지 않은 값이 있으면 원본처럼 아무것도 더하지 않고 true)
 	//==============================================================================
-	pub fn arc_to(&mut self, first_x: f32, first_y: f32, second_x: f32, second_y: f32, radius: f32) -> bool {
+	pub fn arc_to(&mut self, first_x: f64, first_y: f64, second_x: f64, second_y: f64, radius: f64) -> bool {
+		let first_x = saturate_to_float(first_x);
+		let first_y = saturate_to_float(first_y);
+		let second_x = saturate_to_float(second_x);
+		let second_y = saturate_to_float(second_y);
+		let radius = saturate_to_float(radius);
 		let is_accepted = self.arc_to_with(&CanvasMatrix::IDENTITY, first_x, first_y, second_x, second_y, radius);
 		if is_accepted {
 			self.record_browser_command(BrowserPathCommand::ArcTo(first_x, first_y, second_x, second_y, radius));
@@ -479,7 +586,14 @@ impl Path2D {
 	/// # 돌려줌
 	/// 반지름이 음수면 false(원본의 예외 자리), 그 밖에는 true. (유한하지 않은 값이 있으면 원본처럼 아무것도 더하지 않고 true)
 	//==============================================================================
-	pub fn ellipse(&mut self, x: f32, y: f32, radius_x: f32, radius_y: f32, rotation: f32, start_angle: f32, end_angle: f32, is_counterclockwise: bool) -> bool {
+	pub fn ellipse(&mut self, x: f64, y: f64, radius_x: f64, radius_y: f64, rotation: f64, start_angle: f64, end_angle: f64, is_counterclockwise: bool) -> bool {
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
+		let radius_x = saturate_to_float(radius_x);
+		let radius_y = saturate_to_float(radius_y);
+		let rotation = saturate_to_float(rotation);
+		let start_angle = saturate_to_float(start_angle);
+		let end_angle = saturate_to_float(end_angle);
 		let is_accepted = self.ellipse_with(&CanvasMatrix::IDENTITY, x, y, radius_x, radius_y, rotation, start_angle, end_angle, is_counterclockwise);
 		if is_accepted {
 			self.record_browser_command(BrowserPathCommand::Ellipse(x, y, radius_x, radius_y, rotation, start_angle, end_angle, is_counterclockwise));
@@ -496,7 +610,11 @@ impl Path2D {
 	/// - `width`: 폭. (음수면 x 에서 왼쪽으로)
 	/// - `height`: 높이. (음수면 y 에서 위로)
 	//==============================================================================
-	pub fn rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
+	pub fn rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
+		let x = saturate_to_float(x);
+		let y = saturate_to_float(y);
+		let width = saturate_to_float(width);
+		let height = saturate_to_float(height);
 		self.rect_with(&CanvasMatrix::IDENTITY, x, y, width, height);
 		self.record_browser_command(BrowserPathCommand::Rect(x, y, width, height));
 	}
@@ -579,7 +697,7 @@ impl Path2D {
 		if !x.is_finite() || !y.is_finite() {
 			return None;
 		}
-		let (mapped_x, mapped_y) = matrix.transform_point(x, y);
+		let (mapped_x, mapped_y) = matrix.transform_point_float(x, y);
 		if !mapped_x.is_finite() || !mapped_y.is_finite() {
 			return None;
 		}
@@ -809,7 +927,7 @@ impl Path2D {
 	//==============================================================================
 	fn add_ellipse(&mut self, matrix: &CanvasMatrix, center_x: f32, center_y: f32, radius_x: f32, radius_y: f32, rotation: f32, start_angle: f32, end_angle: f32) {
 		let (ellipse_matrix, oval) = if rotation != 0.0 {
-			let ellipse_matrix = matrix.multiply(&CanvasMatrix::create(rotation.cos(), rotation.sin(), -rotation.sin(), rotation.cos(), center_x, center_y));
+			let ellipse_matrix = matrix.multiply(&CanvasMatrix::create_float(rotation.cos(), rotation.sin(), -rotation.sin(), rotation.cos(), center_x, center_y));
 			(ellipse_matrix, (-radius_x, -radius_y, radius_x, radius_y))
 		}
 		else {
@@ -916,7 +1034,7 @@ impl Path2D {
 		}
 		let (current_x, current_y) = match (self.current_point, matrix.invert()) {
 			(Some(current_point), Some(inverse_matrix)) => {
-				inverse_matrix.transform_point(current_point.0, current_point.1)
+				inverse_matrix.transform_point_float(current_point.0, current_point.1)
 			}
 			(None, _) => {
 				self.move_to_with(matrix, first_x, first_y);
@@ -1643,7 +1761,8 @@ impl CanvasGradient {
 	/// # 돌려줌
 	/// 더했으면 true. 자리가 0 ~ 1 밖이면 false.
 	//==============================================================================
-	pub fn add_color_stop(&mut self, offset: f32, color: impl Into<Color>) -> bool {
+	pub fn add_color_stop(&mut self, offset: f64, color: impl Into<Color>) -> bool {
+		let offset = clamp_to_float(offset);
 		if !(0.0..=1.0).contains(&offset) {
 			return false;
 		}
@@ -2097,9 +2216,10 @@ pub(crate) fn is_composite_operation_name(name: &str) -> bool {
 }
 
 //==============================================================================
-/// 선 점선 목록이 받을 수 있는지와 짝 맞추기. (원본 setLineDash: 음수나 유한하지 않은 값이 있으면 무시, 홀수 개면 두 번 잇는다)
+/// 선 점선 목록이 받을 수 있는지와 짝 맞추기. (원본 setLineDash: 음수나 유한하지 않은 값이 있으면 무시, 홀수 개면 두 번 잇는다.
+/// 블링크처럼 double 그대로 든다)
 //==============================================================================
-pub(crate) fn normalize_line_dash(dash_list: &[f32]) -> Option<Vec<f32>> {
+pub(crate) fn normalize_line_dash(dash_list: &[f64]) -> Option<Vec<f64>> {
 	if dash_list.iter().any(|dash| !dash.is_finite() || *dash < 0.0) {
 		return None;
 	}
@@ -2127,6 +2247,7 @@ pub use web_canvas::Canvas2D;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
 	use super::*;
+	use std::f64::consts::PI;
 
 	// 조각이 기대와 가까운지. (단정밀도 반올림만큼)
 	fn assert_segments_near(actual: &[PathSegment], expected: &[PathSegment]) {
@@ -2185,7 +2306,7 @@ mod tests {
 		assert_eq!(segment_list.len(), 5);
 		if let PathSegment::ConicTo(_, _, end_x, end_y, last_weight) = segment_list[4] {
 			assert!((end_x - 5.0).abs() < 1e-3 && (end_y - 8.660254).abs() < 1e-3);
-			assert!((last_weight - (PI / 12.0).cos()).abs() < 1e-5);
+			assert!((f64::from(last_weight) - (PI / 12.0).cos()).abs() < 1e-5);
 		}
 		else {
 			panic!("{:?}", segment_list);
@@ -2259,7 +2380,7 @@ mod tests {
 
 		// 틀린 반지름.
 		assert!(!path.round_rect(0.0, 0.0, 10.0, 10.0, &[-1.0]));
-		assert!(!path.round_rect::<f32>(0.0, 0.0, 10.0, 10.0, &[]));
+		assert!(!path.round_rect::<f64>(0.0, 0.0, 10.0, 10.0, &[]));
 		assert!(!path.round_rect(0.0, 0.0, 10.0, 10.0, &[CanvasRadius::Elliptical { x: 1.0, y: -1.0 }]));
 	}
 
