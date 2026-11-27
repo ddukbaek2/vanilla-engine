@@ -9,6 +9,7 @@
 //! - 넓히기: 경계 토막까지의 거리를 점프 플러딩으로 퍼뜨린다. 굵기에 상관없이 걸음 수는 log2 이고, 바깥 선과 꺾임 선은 따로 퍼뜨려 굵기를 따로 준다.
 //! - 섞기: 그리는 영역의 화소마다 가장 가까운 경계까지의 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 덮는다. (가장자리가 부드럽고, 선의 판을 줄여도 늘인 선이 점선이 되지 않는다)
 //! - 모형마다: ToonLineDrawOptions 의 has_screen_outline 이 false 면 그 모형은 선을 내지 않고 뒤의 선만 가린다. has_crease_line 이 false 면 꺾임 선만 끈다.
+//! - 번호마다 색: set_line_color 로 번호마다 선 색을 준다. (언리얼 Custom Stencil 꼴, 맞닿은 선은 앞쪽 번호의 색, 표에 없는 번호와 표가 빈 때는 set_color 의 색 그대로)
 //! - 굵기: set_width 와 set_crease 의 굵기는 선 하나의 굵기다. (경계를 가운데로 양쪽에 반씩) 단위는 ToonOutlineWidthUnit, 한 픽셀 밑으로 내리지 않는다.
 //! - 깊이: 투영 행렬로 직교와 원근을 가리고, 깊이를 보기 공간 자리로 풀어 견준다. (화면 사각형처럼 클립 x, y 를 옮긴 투영도 된다)
 //! - 값: set_resolution_scale 로 넓히기(점프 플러딩) 판을 줄인다. (폰의 가벼운 길) 선의 판과 씨앗은 그리는 영역 해상도라 줄여도 선 자리는 그대로다.
@@ -58,9 +59,15 @@ use crate::graphics3d::GlFramebuffer;
 /// 선 번호의 상한. (선의 판에 14 비트로 쓴다, 0 은 빈 곳)
 pub const TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID: u32 = 16383;
 
-/// 선의 판과 씨앗 판을 묶는 텍스처 유닛. (툰 렌더러의 그림자 유닛 3 과 겹치지 않게)
+/// 선의 판과 씨앗 판을 묶는 텍스처 유닛. (툰 렌더러의 그림자 유닛 3 과 겹치지 않게, 섞기는 번호 색 표를 4, 선의 판을 6, 깊이를 7 에)
 const LINE_TEXTURE_UNIT: u32 = 5;
 const DEPTH_TEXTURE_UNIT: u32 = 6;
+const LINE_COLOR_TEXTURE_UNIT: u32 = 4;
+const COMPOSITE_LINE_TEXTURE_UNIT: u32 = 6;
+const COMPOSITE_DEPTH_TEXTURE_UNIT: u32 = 7;
+
+/// 번호 색 표 텍스처의 너비. (선 번호 0 ~ TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID 를 128 x 128 칸에 하나씩, 번호 % 128 이 x, 번호 / 128 이 y)
+const LINE_COLOR_TABLE_WIDTH: u32 = 128;
 
 //==============================================================================
 /// 굵기의 단위.
@@ -246,6 +253,10 @@ pub struct ToonScreenOutline {
 	drawn_distance_sum: f64,
 	drawn_distance_count: u32,
 	line_widths: [f64; 2],
+	line_color_table: Vec<u8>,
+	line_color_count: u32,
+	line_color_texture: Option<GlTexture>,
+	is_line_color_table_dirty: bool,
 }
 
 //==============================================================================
@@ -379,6 +390,10 @@ impl ToonScreenOutline {
 			drawn_distance_sum: 0.0,
 			drawn_distance_count: 0,
 			line_widths: [2.0, 1.0],
+			line_color_table: vec![0; (TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID as usize + 1) * 4],
+			line_color_count: 0,
+			line_color_texture: None,
+			is_line_color_table_dirty: false,
 		})
 	}
 
@@ -390,6 +405,113 @@ impl ToonScreenOutline {
 	//==============================================================================
 	pub fn set_color(&mut self, color: [f64; 4]) {
 		self.color = color;
+	}
+
+	//==============================================================================
+	/// 번호마다 선 색 설정. (그 번호의 모형이 앞에 선 바깥 선과 꺾임 선을 이 색으로, 표에 없는 번호는 set_color 의 색 그대로)
+	/// - 언리얼 Custom Stencil 의 후처리 바깥선처럼 선의 판에 이미 있는 번호로 색을 고른다. 고른 모형을 강조하거나 편마다 색을 달리할 때.
+	/// - 표는 선 번호 전부(1 ~ TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID)를 덮는 128 x 128 찾기 텍스처다. 넣는 번호 수에 상한이 없고, 화소마다 한 번 읽는다.
+	/// - 두 번호가 맞닿은 선은 앞(카메라에 가까운) 쪽 번호의 색이다. 색은 sRGB 8 비트로 담고, 알파 0 은 1/255 로 담는다. (표에 없음과 가르려고, 보이지 않는 것은 같다)
+	///
+	/// # 인자
+	/// - `line_id`: 1 ~ TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID. (draw_mesh 와 draw_mesh_instanced 에 준 번호, 범위 밖이면 하지 않는다)
+	/// - `color`: [r, g, b, a] 의 sRGB 0 ~ 1.
+	///
+	/// # 예제
+	/// 가리킨 바위 하나의 선만 노랗게
+	/// ```rust,no_run
+	/// use vanilla::{create_octahedron_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonInstance, ToonLineDrawOptions, ToonPartOptions, ToonRenderer, ToonScreenOutline, Vector3};
+	///
+	/// fn draw_picked_rock(gl: &glow::Context) -> Result<(), String> {
+	/// 	let mut renderer = ToonRenderer::new(gl)?;
+	/// 	let mut outline = ToonScreenOutline::new(gl)?;
+	/// 	let mut builder = MeshBuilder::new();
+	/// 	builder.add_part(&create_octahedron_geometry(0.3), &Matrix4::create_identity(), "#a89880", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
+	/// 	let rock_mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("mesh failed")?;
+	/// 	let instance_list: Vec<ToonInstance> = (0..3).map(|index| ToonInstance { model_matrix: Matrix4::create_translation(index as f64 * 0.7, 0.0, 0.0), line_id: Some(10 + index), ..ToonInstance::default() }).collect();
+	/// 	outline.set_line_color(11, [1.0, 0.85, 0.2, 1.0]);
+	/// 	let view_matrix = Matrix4::create_look_at(Vector3::create(0.7, 2.0, 3.0), Vector3::create(0.7, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
+	/// 	let projection_matrix = Matrix4::create_perspective(std::f64::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+	/// 	if outline.begin_line_ids(gl, &view_matrix, &projection_matrix) {
+	/// 		outline.draw_mesh_instanced(gl, &rock_mesh, &instance_list, 10, ToonLineDrawOptions::default());
+	/// 		outline.end_line_ids(gl);
+	/// 	}
+	/// 	renderer.begin_frame_with_matrices(gl, &view_matrix, &projection_matrix);
+	/// 	renderer.draw_mesh_instanced(gl, &rock_mesh, &instance_list, ToonDrawOptions::default());
+	/// 	renderer.end_frame(gl);
+	/// 	outline.draw_outline(gl);
+	/// 	Ok(())
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn set_line_color(&mut self, line_id: u32, color: [f64; 4]) {
+		if !(1..=TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID).contains(&line_id) {
+			return;
+		}
+		let offset = line_id as usize * 4;
+		if self.line_color_table[offset + 3] == 0 {
+			self.line_color_count += 1;
+		}
+		let to_byte = |value: f64| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+		self.line_color_table[offset] = to_byte(color[0]);
+		self.line_color_table[offset + 1] = to_byte(color[1]);
+		self.line_color_table[offset + 2] = to_byte(color[2]);
+		self.line_color_table[offset + 3] = to_byte(color[3]).max(1);
+		self.is_line_color_table_dirty = true;
+	}
+
+	//==============================================================================
+	/// 번호 하나를 색 표에서 빼기. (그 번호의 선은 set_color 의 색으로 돌아간다)
+	///
+	/// # 인자
+	/// - `line_id`: set_line_color 에 준 번호.
+	//==============================================================================
+	pub fn remove_line_color(&mut self, line_id: u32) {
+		if !(1..=TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID).contains(&line_id) {
+			return;
+		}
+		let offset = line_id as usize * 4;
+		if self.line_color_table[offset + 3] == 0 {
+			return;
+		}
+		self.line_color_table[offset..offset + 4].fill(0);
+		self.line_color_count -= 1;
+		self.is_line_color_table_dirty = true;
+	}
+
+	//==============================================================================
+	/// 색 표 비우기. (모든 선이 set_color 의 색으로 돌아간다)
+	///
+	/// # 예제
+	/// 프레임마다 강조할 번호를 다시 넣기
+	/// ```rust,no_run
+	/// use vanilla::ToonScreenOutline;
+	///
+	/// fn mark_lines(outline: &mut ToonScreenOutline) -> u32 {
+	/// 	outline.clear_line_colors();
+	/// 	outline.set_line_color(3, [1.0, 1.0, 1.0, 1.0]);
+	/// 	outline.set_line_color(7, [1.0, 0.3, 0.2, 1.0]);
+	/// 	outline.get_line_color_count()
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn clear_line_colors(&mut self) {
+		if self.line_color_count == 0 {
+			return;
+		}
+		self.line_color_table.fill(0);
+		self.line_color_count = 0;
+		self.is_line_color_table_dirty = true;
+	}
+
+	//==============================================================================
+	/// 색 표에 든 번호 수 반환.
+	///
+	/// # 돌려줌
+	/// set_line_color 로 넣고 빼지 않은 번호 수.
+	//==============================================================================
+	pub fn get_line_color_count(&self) -> u32 {
+		self.line_color_count
 	}
 
 	//==============================================================================
@@ -768,15 +890,17 @@ impl ToonScreenOutline {
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn draw_outline(&mut self, gl: &glow::Context) {
-		let (frame, seed_texture, point_scale) = match (self.frame, self.line_target.as_ref()) {
+		let (frame, seed_texture, line_texture, depth_texture, point_scale) = match (self.frame, self.line_target.as_ref()) {
 			(Some(frame), Some(line_target)) => {
-				(frame, line_target.jump_flood_textures[line_target.jump_flood_index], [line_target.width as f64 / line_target.jump_flood_width as f64, line_target.height as f64 / line_target.jump_flood_height as f64])
+				(frame, line_target.jump_flood_textures[line_target.jump_flood_index], line_target.line_texture, line_target.depth_texture, [line_target.width as f64 / line_target.jump_flood_width as f64, line_target.height as f64 / line_target.jump_flood_height as f64])
 			}
 			_ => {
 				return;
 			}
 		};
 		self.save_state(gl);
+		let is_line_color_enabled = self.line_color_count > 0 && self.upload_line_color_table(gl);
+		let line_color_texture = if is_line_color_enabled { self.line_color_texture } else { None };
 		let composite_program = &self.composite_program;
 		let viewport = frame.viewport;
 		let color = self.color;
@@ -791,9 +915,19 @@ impl ToonScreenOutline {
 			composite_program.use_program(gl);
 			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + LINE_TEXTURE_UNIT);
 			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(seed_texture));
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + COMPOSITE_LINE_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(line_texture));
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + COMPOSITE_DEPTH_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(depth_texture));
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + LINE_COLOR_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, line_color_texture);
 			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 			let location = |name: &str| composite_program.get_uniform_location(gl, name);
 			gl.uniform_1_i32(location("seedTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
+			gl.uniform_1_i32(location("lineTexture").as_ref(), COMPOSITE_LINE_TEXTURE_UNIT as i32);
+			gl.uniform_1_i32(location("depthTexture").as_ref(), COMPOSITE_DEPTH_TEXTURE_UNIT as i32);
+			gl.uniform_1_i32(location("lineColorTexture").as_ref(), LINE_COLOR_TEXTURE_UNIT as i32);
+			gl.uniform_1_f64(location("lineColorEnabled").as_ref(), if is_line_color_enabled { 1.0 } else { 0.0 });
 			gl.uniform_4_f64(location("viewportRect").as_ref(), viewport[0] as f64, viewport[1] as f64, viewport[2].max(1) as f64, viewport[3].max(1) as f64);
 			gl.uniform_2_f64(location("pointScale").as_ref(), point_scale[0], point_scale[1]);
 			gl.uniform_2_f64(location("lineWidths").as_ref(), line_widths[0], line_widths[1]);
@@ -803,11 +937,57 @@ impl ToonScreenOutline {
 			crate::core::glstatecache::bind_vertex_array(gl, Some(self.empty_vertex_array));
 			crate::core::glstatecache::draw_arrays(gl, glow::TRIANGLES, 0, 3);
 			crate::core::glstatecache::bind_vertex_array(gl, None);
-			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + LINE_TEXTURE_UNIT);
-			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
+			for texture_unit in [LINE_TEXTURE_UNIT, COMPOSITE_LINE_TEXTURE_UNIT, COMPOSITE_DEPTH_TEXTURE_UNIT, LINE_COLOR_TEXTURE_UNIT] {
+				crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + texture_unit);
+				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
+			}
 			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 		}
 		self.restore_state(gl);
+	}
+
+	//==============================================================================
+	/// 번호 색 표를 텍스처에 올리기. (처음이면 짓고, 바뀐 때만 통째로 64 KB 를 올린다)
+	///
+	/// # 돌려줌
+	/// 텍스처가 있으면 true.
+	//==============================================================================
+	fn upload_line_color_table(&mut self, gl: &glow::Context) -> bool {
+		let texture = match self.line_color_texture {
+			Some(texture) => {
+				texture
+			}
+			None => {
+				match unsafe { crate::core::glstatecache::create_texture(gl) } {
+					Ok(texture) => {
+						self.line_color_texture = Some(texture);
+						self.is_line_color_table_dirty = true;
+						texture
+					}
+					Err(_) => {
+						return false;
+					}
+				}
+			}
+		};
+		if !self.is_line_color_table_dirty {
+			return true;
+		}
+		unsafe {
+			let unpack_alignment = crate::core::glstatecache::get_parameter_i32(gl, glow::UNPACK_ALIGNMENT);
+			crate::core::glstatecache::pixel_store_i32(gl, glow::UNPACK_ALIGNMENT, 4);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + LINE_COLOR_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
+			let height = (TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID + 1) / LINE_COLOR_TABLE_WIDTH;
+			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, LINE_COLOR_TABLE_WIDTH as i32, height as i32, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&self.line_color_table)));
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+			crate::core::glstatecache::pixel_store_i32(gl, glow::UNPACK_ALIGNMENT, unpack_alignment);
+		}
+		self.is_line_color_table_dirty = false;
+		true
 	}
 
 	//==============================================================================
@@ -1024,6 +1204,9 @@ impl ToonScreenOutline {
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		self.delete_line_target(gl);
 		unsafe {
+			if let Some(line_color_texture) = self.line_color_texture.take() {
+				crate::core::glstatecache::delete_texture(gl, line_color_texture);
+			}
 			crate::core::glstatecache::delete_vertex_array(gl, self.empty_vertex_array);
 			crate::core::glstatecache::delete_program(gl, self.line_program.get_program());
 			crate::core::glstatecache::delete_program(gl, self.seed_program.get_program());
@@ -1109,7 +1292,7 @@ mat4 readSkinMatrix() {
 }
 void main() {
 	mat4 skinMatrix = readSkinMatrix();
-	mat4 objectMatrix = instanced > 0.5 ? mat4(instanceMatrix0, instanceMatrix1, instanceMatrix2, instanceMatrix3) : modelMatrix;
+	mat4 objectMatrix = instanced > 0.5 ? mat4(vec4(instanceMatrix0.xyz, 0.0), vec4(instanceMatrix1.xyz, 0.0), vec4(instanceMatrix2.xyz, 0.0), vec4(instanceMatrix3.xyz, 1.0)) : modelMatrix;
 	worldNormal = transpose(inverse(mat3(objectMatrix) * mat3(skinMatrix))) * vertexNormal;
 	surfaceLineId = instanced > 0.5 && instanceLineIds > 0.5 ? instanceTint.x : lineId;
 	gl_Position = viewProjectionMatrix * objectMatrix * skinMatrix * vec4(vertexPosition, 1.0);
@@ -1354,6 +1537,10 @@ const COMPOSITE_FRAGMENT_SHADER: &str = "#version 300 es
 precision highp float;
 precision highp int;
 uniform highp usampler2D seedTexture;
+uniform highp sampler2D lineTexture;
+uniform highp sampler2D depthTexture;
+uniform highp sampler2D lineColorTexture;
+uniform float lineColorEnabled;
 uniform vec4 viewportRect;
 uniform vec2 pointScale;
 uniform vec2 lineWidths;
@@ -1362,6 +1549,24 @@ uniform vec4 outlineColor;
 uniform float hdrOutput;
 out vec4 fragmentColor;
 const uint NO_SEED = 65535u;
+float readLineId(ivec2 pixel) {
+	vec4 value = texelFetch(lineTexture, pixel, 0);
+	return floor(value.b * 255.0 + 0.5) + mod(floor(value.a * 255.0 + 0.5), 64.0) * 256.0;
+}
+vec4 readSeedColor(uvec2 seed) {
+	if (seed.x == NO_SEED) {
+		return outlineColor;
+	}
+	ivec2 size = textureSize(lineTexture, 0);
+	ivec2 firstPixel = clamp(ivec2(seed >> 1u), ivec2(0), size - 1);
+	ivec2 secondPixel = clamp(ivec2((seed + 1u) >> 1u), ivec2(0), size - 1);
+	float firstId = readLineId(firstPixel);
+	float secondId = readLineId(secondPixel);
+	bool isFirstNearer = secondId < 0.5 || (firstId > 0.5 && texelFetch(depthTexture, firstPixel, 0).r <= texelFetch(depthTexture, secondPixel, 0).r);
+	int id = int(isFirstNearer ? firstId : secondId);
+	vec4 tableColor = texelFetch(lineColorTexture, ivec2(id % 128, id / 128), 0);
+	return tableColor.a > 0.0 ? tableColor : outlineColor;
+}
 float readSeedDistance(vec2 point, uvec2 seed, vec2 toOutput) {
 	if (seed.x == NO_SEED) {
 		return 1.0e9;
@@ -1382,21 +1587,40 @@ void main() {
 	ivec2 basePixel = ivec2(floor((point + 0.5) / pointScale - 0.5));
 	float contourDistance = 1.0e9;
 	float creaseDistance = 1.0e9;
+	uvec2 contourSeed = uvec2(NO_SEED);
+	uvec2 creaseSeed = uvec2(NO_SEED);
 	for (int offsetY = 0; offsetY <= 1; ++offsetY) {
 		for (int offsetX = 0; offsetX <= 1; ++offsetX) {
 			ivec2 samplePixel = clamp(basePixel + ivec2(offsetX, offsetY), ivec2(0), size - 1);
 			uvec4 seed = texelFetch(seedTexture, samplePixel, 0);
-			contourDistance = min(contourDistance, readSeedDistance(point, seed.xy, toOutput));
-			creaseDistance = min(creaseDistance, readSeedDistance(point, seed.zw, toOutput));
+			float sampleContourDistance = readSeedDistance(point, seed.xy, toOutput);
+			if (sampleContourDistance < contourDistance) {
+				contourDistance = sampleContourDistance;
+				contourSeed = seed.xy;
+			}
+			float sampleCreaseDistance = readSeedDistance(point, seed.zw, toOutput);
+			if (sampleCreaseDistance < creaseDistance) {
+				creaseDistance = sampleCreaseDistance;
+				creaseSeed = seed.zw;
+			}
 		}
 	}
 	float contour = lineWidths.x > 0.0 ? clamp(lineWidths.x * 0.5 - contourDistance + 0.5, 0.0, 1.0) : 0.0;
 	float crease = lineWidths.y > 0.0 ? clamp(lineWidths.y * 0.5 - creaseDistance + 0.5, 0.0, 1.0) * creaseOpacity : 0.0;
+	vec4 lineColor = outlineColor;
 	float strength = max(contour, crease) * outlineColor.a;
+	if (lineColorEnabled > 0.5 && max(contour, crease) > 0.0) {
+		vec4 contourColor = contour > 0.0 ? readSeedColor(contourSeed) : outlineColor;
+		vec4 creaseColor = crease > 0.0 ? readSeedColor(creaseSeed) : outlineColor;
+		float contourStrength = contour * contourColor.a;
+		float creaseStrength = crease * creaseColor.a;
+		lineColor = contourStrength >= creaseStrength ? contourColor : creaseColor;
+		strength = max(contourStrength, creaseStrength);
+	}
 	if (strength < 0.004) {
 		discard;
 	}
-	vec3 color = hdrOutput > 0.5 ? pow(outlineColor.rgb, vec3(2.2)) : outlineColor.rgb;
+	vec3 color = hdrOutput > 0.5 ? pow(lineColor.rgb, vec3(2.2)) : lineColor.rgb;
 	fragmentColor = vec4(color * strength, strength);
 }
 ";

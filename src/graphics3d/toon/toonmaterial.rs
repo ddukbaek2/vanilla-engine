@@ -11,7 +11,7 @@
 //!     ToonLighting { vec3 irradiance (바탕색에 곱할 빛, 그늘 램프를 거친 것), vec3 specular (더할 하이라이트), vec3 rim (더할 림 빛), float shadow (0 ~ 1), float sunLevel (해를 받는 밝기 단계 0 ~ 1) }
 //!   합치기는 바탕색 x irradiance + specular x specularMask + rim x rimMask + 빛남 이다.
 //!   - vertex_chunk: 정점 셰이더(몸, 바깥선, 그림자 깊이 셋 모두)의 맨 위 칸에 들어가고 void applyVertex(inout ToonVertex vertex) 를 정의한다. 월드로 옮기기 전에 부른다.
-//!     ToonVertex { vec3 localPosition, vec3 localNormal, vec3 color, vec2 material, vec4 detail, vec2 uv, vec2 uv1, vec4 tint, mat4 modelMatrix }
+//!     ToonVertex { vec3 localPosition, vec3 localNormal, vec3 color, vec2 material, vec4 detail, vec2 uv, vec2 uv1, vec4 tint, vec4 emissive, mat4 modelMatrix }
 //!     인스턴스 꼴(ToonInstanceLayout)의 사용자 어트리뷰트는 그 이름의 in 으로 읽는다. 셋 모두에 들어가므로 몸에만 있는 out 은 쓰지 않는다. (꼭짓점 어트리뷰트 이름 대신 vertex 의 칸을 쓴다)
 //!     노멀은 mat3(modelMatrix) 로 옮긴다. 크기가 고르지 않으면 localNormal 을 그 크기의 제곱으로 나눠 둔다.
 //!   - 셰이더에는 엔진의 toLinear(vec3) 와 RECIPROCAL_PI 가 있다.
@@ -19,6 +19,7 @@
 //!   - 그리기마다 다른 유니폼은 on_before_draw(program, gl, ToonProgramKind) 에서 쓴다. 엔진의 유니폼은 엔진이 다시 쓰므로 머티리얼의 것만 쓴다.
 //! - ToonInstanceLayout: 인스턴스 하나의 어트리뷰트 차례. (ToonRenderer::create_instance_buffer 와 draw_mesh_instance_buffer 가 쓴다)
 //!   어트리뷰트마다 (이름, 크기). 이름이 instanceMatrix(16) 면 모형 행렬, instanceTint(4) 면 곱하는 색으로 엔진이 읽는다.
+//!   instanceMatrix 는 아핀 3x4 로 읽고 아래 줄 네 칸(원소 3, 7, 11, 15)은 그 인스턴스의 빛남(sRGB r, g, b 와 선형 세기, vertex.emissive)이다. Matrix4 원소를 그대로 담으면 빛남이 없다.
 //!   그 밖의 이름은 사용자 어트리뷰트다. TOON_MAXIMUM_INSTANCE_ATTRIBUTES 개까지, 크기 1 ~ 4. 정점 조각이 그 이름의 in 으로 읽는다. (자리 13 부터)
 //!   instanceMatrix 가 없으면 모형 행렬은 단위 행렬이다. 정점 조각이 vertex.modelMatrix 를 지어 넣는다. instanceTint 가 없으면 틴트는 1 이다.
 //! - 원본은 머티리얼을 꼴 객체({ uniformChunk, ... })로 짓는다. 러스트 판은 ToonMaterialChunks 를 넘긴다.

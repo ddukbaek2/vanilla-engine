@@ -29,6 +29,11 @@ members = ["macros", "tools/apidoc", "tools/licenses"]
 # 저장소에 둔 남의 크레이트는 워크스페이스 시험과 문서에서 뺀다. (엔진이 경로로 의존한다)
 exclude = ["third_party/rustybuzz", "third_party/ttf-parser"]
 
+# 툰 강조 찍기 시험. (숨긴 창의 GL 컨텍스트는 주 스레드에서만 지어져 시험 틀 없이 main 으로 돈다, 원본 tests/graphics3d/toonhighlightchrome.test.mjs 와 같은 장면)
+[[test]]
+name = "toonhighlight"
+harness = false
+
 [dependencies]
 # 반사 매크로. (#[reflect], 원본 vanilla.js 의 실행 중 반사를 컴파일 때 지은 코드로 한다)
 vanilla-engine-macros = { version = "0.3.2", path = "macros" }

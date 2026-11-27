@@ -82,6 +82,8 @@ use crate::graphics3d::toon::toonmaterial::{ToonBlendMode, ToonBufferUsage, Toon
 pub const TOON_MAXIMUM_JOINTS: usize = 96;
 
 /// 인스턴스 하나의 수 개수. (행렬 16, 틴트 4)
+/// - 행렬은 아핀 3x4 로 읽는다. 아래 줄 네 칸(원소 3, 7, 11, 15)은 인스턴스 빛남(sRGB r, g, b 와 선형 세기)이다. (Godot MultiMesh, 유니티 BatchRendererGroup 의 3x4 행렬 꼴)
+///   Matrix4 원소를 그대로 담으면 아래 줄이 0, 0, 0, 1 이라 빛남이 없다.
 pub const TOON_INSTANCE_FLOAT_COUNT: usize = 20;
 
 /// 텍스처 유닛. (점광 그림자 아틀라스 0, 램프, 매트캡, 해 그림자, 바탕색, 빛남, 데칼, 천사 고리, 머티리얼 텍스처는 8 부터 15 까지)
@@ -165,6 +167,7 @@ in vec4 vertexUv;
 
 /// 꼭짓점을 본으로 움직이고 인스턴스 행렬을 고르는 셰이더 조각.
 /// - instanced: 0 이면 인스턴스 아님, 1 이면 인스턴스 행렬과 틴트, 2 면 인스턴스 틴트만(모형 행렬은 유니폼).
+/// - 인스턴스 행렬은 아핀 3x4 로 짓고, 네 열의 w(행렬의 아래 줄)는 인스턴스 빛남으로 읽는다. (TOON_INSTANCE_FLOAT_COUNT 머리말)
 const VERTEX_COMMON_CHUNK: &str = "in vec4 vertexJoints;
 in vec4 vertexWeights;
 in vec4 instanceMatrix0;
@@ -187,13 +190,19 @@ mat4 readModelMatrix() {
 	if (instanced < 0.5 || instanced > 1.5) {
 		return modelMatrix;
 	}
-	return mat4(instanceMatrix0, instanceMatrix1, instanceMatrix2, instanceMatrix3);
+	return mat4(vec4(instanceMatrix0.xyz, 0.0), vec4(instanceMatrix1.xyz, 0.0), vec4(instanceMatrix2.xyz, 0.0), vec4(instanceMatrix3.xyz, 1.0));
 }
 vec4 readInstanceTint() {
 	if (instanced < 0.5) {
 		return vec4(1.0);
 	}
 	return instanceTint;
+}
+vec4 readInstanceEmissive() {
+	if (instanced < 0.5 || instanced > 1.5) {
+		return vec4(0.0);
+	}
+	return vec4(instanceMatrix0.w, instanceMatrix1.w, instanceMatrix2.w, instanceMatrix3.w);
 }
 ";
 
@@ -207,6 +216,7 @@ const VERTEX_STRUCT_CHUNK: &str = "struct ToonVertex {
 	vec2 uv;
 	vec2 uv1;
 	vec4 tint;
+	vec4 emissive;
 	mat4 modelMatrix;
 };
 ToonVertex readVertex() {
@@ -219,6 +229,7 @@ ToonVertex readVertex() {
 	vertex.uv = vertexUv.xy;
 	vertex.uv1 = vertexUv.zw;
 	vertex.tint = readInstanceTint();
+	vertex.emissive = readInstanceEmissive();
 	vertex.modelMatrix = readModelMatrix();
 	return vertex;
 }
@@ -248,6 +259,7 @@ out vec4 surfaceDetail;
 out vec2 surfaceUv;
 out vec2 surfaceUv1;
 out vec4 surfaceTint;
+out vec4 surfaceEmissive;
 out vec4 lightSpacePosition;
 void main() {
 	ToonVertex vertex = readVertex();
@@ -264,6 +276,7 @@ void main() {
 	surfaceUv = vertex.uv;
 	surfaceUv1 = vertex.uv1;
 	surfaceTint = vertex.tint;
+	surfaceEmissive = vertex.emissive;
 	lightSpacePosition = lightViewProjectionMatrix * vec4(position.xyz + worldNormal * 0.02, 1.0);
 	gl_Position = viewProjectionMatrix * position;
 }
@@ -282,6 +295,7 @@ in vec4 surfaceDetail;
 in vec2 surfaceUv;
 in vec2 surfaceUv1;
 in vec4 surfaceTint;
+in vec4 surfaceEmissive;
 in vec4 lightSpacePosition;
 uniform vec3 sunDirection;
 uniform vec3 sunColor;
@@ -551,7 +565,7 @@ const SOLID_FRAGMENT_BODY: &str = "ToonSurface readSurface() {
 	}
 	surface.baseColor = color;
 	surface.alpha = opacity;
-	surface.emission = emission;
+	surface.emission = emission + toLinear(surfaceEmissive.rgb) * surfaceEmissive.a;
 	surface.normal = normalize(worldNormal);
 	surface.glow = surfaceMaterial.x;
 	surface.isUnlit = surfaceMaterial.y > 0.5;
@@ -1268,6 +1282,8 @@ impl std::fmt::Debug for ToonDrawOptions<'_> {
 
 //==============================================================================
 /// 인스턴스 하나. (모형 행렬과 틴트, 틴트의 알파는 바깥선에도 곱한다)
+/// - emissive_color 는 그 인스턴스에 더하는 빛남 sRGB(None 이면 없음, 명암과 무늬 위에 더해 그 인스턴스만 밝힌다), emissive_intensity 는 빛남의 선형 배(원본 기본 1)다.
+///   모형 행렬은 아핀으로 읽는다. (TOON_INSTANCE_FLOAT_COUNT 머리말, 빛남은 행렬의 아래 줄에 싣는다)
 /// - line_id 는 ToonScreenOutline::draw_mesh_instanced 가 읽는 이 인스턴스의 선 번호다. (원본 lineId, None 이면 공통 번호, ToonRenderer 는 읽지 않는다)
 ///
 /// # 예제
@@ -1281,7 +1297,7 @@ impl std::fmt::Debug for ToonDrawOptions<'_> {
 /// 		ToonInstance {
 /// 			model_matrix: Matrix4::create_translation((index % 5) as f64 * 1.5, 0.0, (index / 5) as f64 * 1.5),
 /// 			tint_color: [shade, shade, shade, 1.0],
-/// 			line_id: None,
+/// 			..ToonInstance::default()
 /// 		}
 /// 	}).collect();
 /// 	renderer.begin_frame(gl, view_projection_matrix);
@@ -1298,6 +1314,10 @@ pub struct ToonInstance {
 	pub tint_color: [f64; 4],
 	/// 화면 공간 바깥선의 선 번호. (None 이면 공통 번호, ToonRenderer 는 읽지 않는다)
 	pub line_id: Option<u32>,
+	/// 더하는 빛남 색. ([r, g, b] sRGB, None 이면 빛남 없음)
+	pub emissive_color: Option<[f64; 3]>,
+	/// 빛남의 선형 배. (원본 기본 1, emissive_color 가 None 이면 읽지 않는다)
+	pub emissive_intensity: f64,
 }
 
 impl Default for ToonInstance {
@@ -1305,7 +1325,7 @@ impl Default for ToonInstance {
 	/// 기본값. (원본의 기본 꼴과 같다)
 	//==============================================================================
 	fn default() -> Self {
-		ToonInstance { model_matrix: Matrix4::create_identity(), tint_color: [1.0, 1.0, 1.0, 1.0], line_id: None }
+		ToonInstance { model_matrix: Matrix4::create_identity(), tint_color: [1.0, 1.0, 1.0, 1.0], line_id: None, emissive_color: None, emissive_intensity: 1.0 }
 	}
 }
 
@@ -2891,8 +2911,29 @@ impl ToonRenderer {
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	/// - `mesh`: create_mesh 의 결과.
-	/// - `instance_list`: 인스턴스마다의 모형 행렬과 틴트.
+	/// - `instance_list`: 인스턴스마다의 모형 행렬, 틴트, 빛남. (틴트는 곱하는 sRGB 와 알파, 빛남은 더하는 sRGB 와 선형 배, 모형 행렬은 아핀으로 읽는다)
 	/// - `options`: draw_mesh 와 같다. (모든 인스턴스에 같게 건다)
+	///
+	/// # 예제
+	/// 인스턴스 하나만 빛남을 더해 밝히기
+	/// ```rust,no_run
+	/// use vanilla::{create_octahedron_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonInstance, ToonPartOptions, ToonRenderer, Vector3};
+	///
+	/// fn draw_glowing_rock(gl: &glow::Context) -> Result<(), String> {
+	/// 	let mut renderer = ToonRenderer::new(gl)?;
+	/// 	let mut builder = MeshBuilder::new();
+	/// 	builder.add_part(&create_octahedron_geometry(0.3), &Matrix4::create_identity(), "#909098", ToonPartOptions { has_outline: true, ..ToonPartOptions::default() });
+	/// 	let rock_mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("mesh failed")?;
+	/// 	let mut instance_list: Vec<ToonInstance> = (0..3).map(|index| ToonInstance { model_matrix: Matrix4::create_translation(index as f64 - 1.0, 0.0, 0.0), ..ToonInstance::default() }).collect();
+	/// 	instance_list[1].emissive_color = Some([1.0, 0.85, 0.3]);
+	/// 	instance_list[1].emissive_intensity = 0.35;
+	/// 	let view_matrix = Matrix4::create_look_at(Vector3::create(0.0, 2.0, 3.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
+	/// 	renderer.begin_frame_with_matrices(gl, &view_matrix, &Matrix4::create_perspective(0.8, 1.0, 0.1, 30.0));
+	/// 	renderer.draw_mesh_instanced(gl, &rock_mesh, &instance_list, ToonDrawOptions::default());
+	/// 	renderer.end_frame(gl);
+	/// 	Ok(())
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn draw_mesh_instanced(&mut self, gl: &glow::Context, mesh: &ToonMesh, instance_list: &[ToonInstance], options: ToonDrawOptions) {
 		let mut instance_data = std::mem::take(&mut self.instance_data);
@@ -2907,7 +2948,13 @@ impl ToonRenderer {
 			if instance_count == 0 {
 				first_matrix = instance.model_matrix;
 			}
+			let offset = instance_data.len();
 			instance_data.extend_from_slice(&instance.model_matrix.elements);
+			let emissive_color = instance.emissive_color.unwrap_or([0.0, 0.0, 0.0]);
+			instance_data[offset + 3] = emissive_color[0] as f32;
+			instance_data[offset + 7] = emissive_color[1] as f32;
+			instance_data[offset + 11] = emissive_color[2] as f32;
+			instance_data[offset + 15] = if instance.emissive_color.is_some() { instance.emissive_intensity as f32 } else { 1.0 };
 			instance_data.extend_from_slice(&instance.tint_color.map(|value| value as f32));
 			instance_count += 1;
 		}
