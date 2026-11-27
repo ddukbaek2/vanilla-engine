@@ -30486,8 +30486,8 @@
 				"name": "unload"
 			},
 			"vanilla.js": {
-				"module": "core/asset",
-				"class": "Asset",
+				"module": "resource/imageasset",
+				"class": "ImageAsset",
 				"name": "unload"
 			}
 		},
