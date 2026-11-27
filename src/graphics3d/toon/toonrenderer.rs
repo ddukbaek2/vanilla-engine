@@ -1830,13 +1830,13 @@ pub fn create_reflection_matrix(plane_point: [f64; 3], plane_normal: [f64; 3]) -
 }
 
 //==============================================================================
-/// 행렬의 가장 큰 크기. (세 축 길이 가운데 큰 것)
+/// 행렬의 가장 큰 크기. (세 축 길이 가운데 큰 것, 원본 readMaximumScale 의 Math.hypot 과 같은 hypot_list)
 //==============================================================================
 fn read_maximum_scale(matrix: &Matrix4) -> f64 {
 	let elements = matrix.read_elements();
-	let scale_x = (elements[0] * elements[0] + elements[1] * elements[1] + elements[2] * elements[2]).sqrt();
-	let scale_y = (elements[4] * elements[4] + elements[5] * elements[5] + elements[6] * elements[6]).sqrt();
-	let scale_z = (elements[8] * elements[8] + elements[9] * elements[9] + elements[10] * elements[10]).sqrt();
+	let scale_x = crate::base::trigonometry::hypot_list(&[elements[0], elements[1], elements[2]]);
+	let scale_y = crate::base::trigonometry::hypot_list(&[elements[4], elements[5], elements[6]]);
+	let scale_z = crate::base::trigonometry::hypot_list(&[elements[8], elements[9], elements[10]]);
 	scale_x.max(scale_y).max(scale_z)
 }
 
@@ -4014,6 +4014,18 @@ mod tests {
 		let mut light_matrix = Matrix4::create_orthographic(-8.0, 8.0, -8.0, 8.0, 1.0, 100.0);
 		light_matrix.multiply(&Matrix4::create_look_at(Vector3::create(5.0, 50.0, 15.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0)));
 		assert_eq!(read_shadow_bias(&light_matrix, 2048, 1.0, 1.0), [0.00011837121009714387, 0.011718749747447212, 0.00019728535016190642, 10.0]);
+	}
+
+	//==============================================================================
+	/// 모형 행렬의 가장 큰 크기가 원본 readMaximumScale(Math.hypot)과 비트까지 같다. (제곱 합의 제곱근과 끝자리가 갈리는 축, 값은 원본을 node 로 돌려 얻음)
+	//==============================================================================
+	#[test]
+	fn maximum_scale_matches_original_hypot() {
+		let mut matrix = Matrix4::create_identity();
+		matrix.elements[0] = -1.630171298980713;
+		matrix.elements[1] = 0.8789288401603699;
+		matrix.elements[2] = -0.4209398627281189;
+		assert_eq!(read_maximum_scale(&matrix), 1.8992537318956846);
 	}
 
 	//==============================================================================

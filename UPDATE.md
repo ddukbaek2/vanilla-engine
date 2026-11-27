@@ -817,7 +817,7 @@
 - docs/api/0.4.0.json(모듈 216, 클래스 496, 멤버 4930, 함수와 상수 354, 열거 89), 영어 번역 표 docs/api/translation.en.json, vanilla.js 와 같은 항목의 짝 표 docs/api/counterpart.0.4.0.json(vanilla.js 쪽 자료가 러스트 짝을 채울 때도 쓴다)
 - 가이드 docs/guide/0.4.0/ko, en: 개요, 빠른 시작, 구조, 도구와 05 프로젝트 시작부터 19 저작 도구까지(원본 vanilla.js 가이드와 같은 장), 러스트 판만의 20 반사 매크로, 21 async/await, 22 원본에서 옮겨 오기. 코드 칸 216 개 가운데 rust 칸은 tools/apidoc 의 라이브러리 자리가 doctest 로 컴파일하고 돌린다. (장 목록 tools/apidoc/src/guide.rs 는 apidoc 이 장 파일마다 include_str 문서 속성으로 다시 쓴다) 업데이트 문서 docs/update/0.4.0.ko.md, .en.md
 - 천사 고리: 카메라 기울임만큼 UV 를 되돌려 돌린다. (vanilla.js 와 같은 셈, read_camera_roll) 카메라를 기울여도 고리가 머리에 붙어 있다
-- 빛 세기 막기: ToonLightSet::set_light_intensity_limited, is_light_intensity_limited (렌더러에도 set_light_intensity_limited). 유니티 툰 셰이더의 Limit Light Intensity 와 같은 셈, 기본 켬. 지금까지 모습은 set_light_intensity_limited(false). 빛 색 쓰기를 끈 색의 세기와 껍데기 바깥선의 해 색도 유니티 툰 셰이더와 같게
+- 빛 세기 막기: ToonLightSet::set_light_intensity_limited, is_light_intensity_limited (렌더러에도 set_light_intensity_limited). 유니티 툰 셰이더의 Limit Light Intensity 와 같은 셈, 기본 켬. 지금까지 모습은 set_light_intensity_limited(false). 옛 게임 셰이더(빛 세기를 막지 않던 것)를 옮길 때나 세기 1 을 넘는 점광, HDR 블룸을 쓸 때는 set_light_intensity_limited(false). 빛 색 쓰기를 끈 색의 세기와 껍데기 바깥선의 해 색도 유니티 툰 셰이더와 같게
 - ShadowAtlas::new(gl, 해상도, 칸 해상도): 칸 크기를 유니티 URP 기본과 같게 칸마다 1024 를 바라고 다 들어가지 않으면 반씩 줄인다. DEFAULT_SHADOW_ATLAS_RESOLUTION (2048), DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION (1024), get_tile_resolution. (new 에 인자가 하나 늘었다)
 - 예제 toonstyle: TOON_STYLE_ROLL 로 카메라를 기울인다. 원본과 견주면 화소 차이 평균 0.005 (기울인 장면 0.005)
 
