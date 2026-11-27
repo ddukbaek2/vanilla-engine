@@ -1,14 +1,15 @@
 //==============================================================================
 //! 하위 트리째 그리기 건너뛰기 찍기 시험과 재기. (원본 tests/ui/subtreecullchrome.test.mjs, subtreecullparentchrome.test.mjs, scrolllistbench.mjs 의 장면)
-//! - SUBTREECULL_SCENE: engine(재기 도구의 엔진 장면, 스크롤 목록 120 줄), parent(묶음 노드 바로 아래 자식 300 개 + 둥근 마스크 > 배율 > 돌림 > 스크롤 칸 144 개).
+//! - SUBTREECULL_SCENE: engine(재기 도구의 엔진 장면, 스크롤 목록 120 줄), parent(묶음 노드 바로 아래 자식 300 개 + 둥근 마스크 > 배율 > 돌림 > 스크롤 칸 144 개),
+//!   rimminer(재기 도구의 광부 설정 창 꼴, 1280 x 720, 묶음 노드 바로 아래 줄 조각 120 줄 몫).
 //! - SUBTREECULL_MODE: on(하위 트리 거르기 켬), off(끔), alloff(화면 밖 거르기 모두 끔).
 //! - SUBTREECULL_OUTPUT: 찍은 화면과 셈을 둘 폴더. (없으면 찍지 않는다)
 //! - SUBTREECULL_CHECK=1: 이 예제를 장면마다 세 길로 다시 돌려 찍은 화면 바이트, 프레임마다 그린 수가 같은지 보고 셈을 찍는다. (숨긴 창)
 //! - 기즈모나 창을 보이지 않는다. 시험은 VANILLA_CAPTURE_PATH 를 걸어 창을 숨긴다.
 //==============================================================================
 use std::sync::atomic::{AtomicU32, Ordering};
-use vanilla::core::graphic::TextAlign;
-use vanilla::{Color, Component, ComponentBase, Engine, EngineConfiguration, Graphic, Mask, NodeId, NodeTransform, NodeTree, Outline, Paint, ParticleSystem, Pivot, Scene, SceneBase, UIButton, UILabel, UILineChart, UIScrollView, UISlider, UIView, TrailRenderer, Vector2, ViewScaleMode};
+use vanilla::core::graphic::{TextAlign, TextBaseline};
+use vanilla::{ButtonMotion, Color, Component, ComponentBase, Engine, EngineConfiguration, Graphic, Mask, NodeId, NodeTransform, NodeTree, Outline, Paint, ParticleSystem, Pivot, Scene, SceneBase, Sprite, UIButton, UILabel, UILineChart, UIScrollView, UISlider, UIView, TrailRenderer, Vector2, ViewScaleMode};
 
 const VIEW_WIDTH: f64 = 640.0;
 const VIEW_HEIGHT: f64 = 360.0;
@@ -122,6 +123,39 @@ fn add_push_counters(node_tree: &mut NodeTree, node_id: NodeId) {
 enum SceneKind {
 	Engine,
 	Parent,
+	Rimminer,
+}
+
+// 광부 설정 창 꼴의 줄 높이, 줄 사이, 보이는 칸 높이, 줄 종류. (원본 scrolllistbench.mjs 의 RIMMINER_)
+const RIMMINER_WIDTH: f64 = 1280.0;
+const RIMMINER_HEIGHT: f64 = 720.0;
+const RIMMINER_ROW_HEIGHT: f64 = 56.0;
+const RIMMINER_ROW_GAP: f64 = 12.0;
+const RIMMINER_VIEWPORT_HEIGHT: f64 = (RIMMINER_ROW_HEIGHT + RIMMINER_ROW_GAP) * 8.0 + RIMMINER_ROW_HEIGHT * 0.5;
+const RIMMINER_KIND_LIST: [&str; 7] = ["slider", "slider", "segment", "language", "account", "version", "group"];
+
+fn create_rimminer_label_node(node_tree: &mut NodeTree, parent_id: NodeId, x: f64, y: f64, width: f64, height: f64, text: &str, font_size: f64, text_align: TextAlign, is_bold: bool) -> NodeId {
+	let node_id = create_box_node(node_tree, parent_id, x, y, width, height);
+	let label = node_tree.add_component(node_id, UILabel::new()).expect("label");
+	label.set_font_size(font_size);
+	label.set_text_color("#f1e9d8");
+	label.set_text_align(text_align);
+	label.set_text_baseline(TextBaseline::Middle);
+	label.set_bold(is_bold);
+	label.set_text(text);
+	node_id
+}
+
+fn create_rimminer_text_button_node(node_tree: &mut NodeTree, parent_id: NodeId, x: f64, y: f64, width: f64, height: f64, text: &str) -> NodeId {
+	let node_id = create_box_node(node_tree, parent_id, x, y, width, height);
+	node_tree[node_id].add_component(Paint::create_with_color("#3a3f4a")).set_round_size(12.0);
+	node_tree.add_component(node_id, UIButton::new()).expect("button").set_pressed_tint_color(Color::create_from_hex("#c0c0c0"));
+	node_tree.add_component(node_id, ButtonMotion::new());
+	create_rimminer_label_node(node_tree, node_id, 0.0, 0.0, width, height, text, 16.0, TextAlign::Center, true);
+	// 누름 자리. (단추 뒤 형제, attachHitArea)
+	let hit_id = create_box_node(node_tree, parent_id, x - 4.0, y - 4.0, width + 8.0, height + 8.0);
+	node_tree.add_component(hit_id, UIButton::new());
+	node_id
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -218,6 +252,90 @@ impl SubtreeCullScene {
 		slider.set_value(0.3);
 		self.scroll_view_id = Some(scroll_id);
 		self.mover_id = Some(mover_id);
+		add_push_counters(node_tree, root_id);
+	}
+
+	//==============================================================================
+	// 재기 도구의 광부 설정 창 꼴. (광부 키우기 settingswindow.js, widgets.js 의 엔진 컴포넌트만, 기준 해상도 1280 x 720)
+	//==============================================================================
+	fn create_rimminer_scene(&mut self) {
+		let root_id = self.scene_base.get_root_id();
+		self.scene_base.get_root_mut().set_content_size(Vector2::create(RIMMINER_WIDTH, RIMMINER_HEIGHT));
+		let node_tree = self.scene_base.get_node_tree_mut();
+		let scroll_id = create_box_node(node_tree, root_id, 340.0, 74.0, 600.0, RIMMINER_VIEWPORT_HEIGHT);
+		let content_id = {
+			let scroll_view = node_tree.add_component(scroll_id, UIScrollView::new()).expect("scroll view");
+			scroll_view.set_background_color(Color::create_from_hex("#1d1814"));
+			scroll_view.set_horizontal(false);
+			scroll_view.get_content().expect("content")
+		};
+		let rows_id = create_box_node(node_tree, content_id, 0.0, 0.0, 600.0, 1.0);
+		let mut row_top = 0.0;
+		for row_index in 0..ROW_COUNT {
+			let kind = RIMMINER_KIND_LIST[row_index % RIMMINER_KIND_LIST.len()];
+			if kind == "group" {
+				create_rimminer_label_node(node_tree, rows_id, 16.0, row_top, 568.0, 36.5, &format!("무리 {}", row_index), 15.0, TextAlign::Left, true);
+				let line_id = create_box_node(node_tree, rows_id, 16.0, row_top + 36.5, 568.0, 1.5);
+				node_tree[line_id].add_component(Paint::create_with_color("#5a4a3c"));
+				create_box_node(node_tree, rows_id, 16.0, row_top, 1.0, 38.0);
+				row_top += 38.0 + RIMMINER_ROW_GAP;
+				continue;
+			}
+			let name_id = create_rimminer_label_node(node_tree, rows_id, 16.0, row_top, 110.0, RIMMINER_ROW_HEIGHT, &format!("설정 {}", row_index), 19.0, TextAlign::Left, false);
+			let control_id = create_box_node(node_tree, rows_id, 138.0, row_top, 446.0, RIMMINER_ROW_HEIGHT);
+			match kind {
+				"slider" => {
+					let slider_id = create_box_node(node_tree, control_id, 0.0, (RIMMINER_ROW_HEIGHT - 36.0) * 0.5, 386.0, 36.0);
+					let slider = node_tree.add_component(slider_id, UISlider::new()).expect("slider");
+					slider.set_range(0.0, 1.0);
+					slider.set_value((row_index % 9) as f64 / 8.0);
+					slider.set_track_color(Color::create_from_hex("#3a3f4a"));
+					slider.set_fill_color(Color::create_from_hex("#e0a040"));
+					slider.set_thumb_color(Color::create_from_hex("#f1e9d8"));
+					slider.set_thumb_radius(13.0);
+					slider.set_track_thickness(8.0);
+					slider.set_corner_radius(4.0);
+					let check_id = create_rimminer_text_button_node(node_tree, control_id, 406.0, 8.0, 40.0, 40.0, "");
+					let icon_id = create_box_node(node_tree, check_id, 6.0, 6.0, 28.0, 28.0);
+					node_tree[icon_id].add_component(Sprite::new()).set_color(Color::create_from_hex("#1d1814"));
+				}
+				"segment" => {
+					for segment_index in 0..3 {
+						create_rimminer_text_button_node(node_tree, control_id, segment_index as f64 * 150.0, 6.0, 146.0, 44.0, ["30", "60", "120"][segment_index]);
+					}
+				}
+				"language" => {
+					create_rimminer_text_button_node(node_tree, control_id, 0.0, 6.0, 446.0, 44.0, "한국어");
+				}
+				"account" => {
+					create_rimminer_label_node(node_tree, control_id, 0.0, 0.0, 360.0, RIMMINER_ROW_HEIGHT, "뚝백이", 19.0, TextAlign::Left, false);
+					create_rimminer_text_button_node(node_tree, control_id, 370.0, 6.0, 76.0, 44.0, "로그인");
+				}
+				_ => {
+					create_rimminer_label_node(node_tree, control_id, 0.0, 0.0, 446.0, RIMMINER_ROW_HEIGHT, &format!("1.2.0 ({})", row_index), 19.0, TextAlign::Left, false);
+				}
+			}
+			// 들어오는 줄 셈. (2 번 줄은 처음부터 보이고, 12 번 줄은 스크롤로 들어오고, 110 번 줄은 끝까지 화면 밖)
+			match row_index {
+				2 => {
+					add_probe(node_tree, name_id, 0);
+				}
+				12 => {
+					add_probe(node_tree, name_id, 1);
+				}
+				110 => {
+					add_probe(node_tree, name_id, 2);
+				}
+				_ => {
+				}
+			}
+			row_top += RIMMINER_ROW_HEIGHT + RIMMINER_ROW_GAP;
+		}
+		node_tree[rows_id].set_content_size(Vector2::create(600.0, row_top));
+		if let Some(scroll_view) = node_tree[scroll_id].get_component_mut::<UIScrollView>() {
+			scroll_view.set_scroll_content_size(Vector2::create(600.0, row_top));
+		}
+		self.scroll_view_id = Some(scroll_id);
 		add_push_counters(node_tree, root_id);
 	}
 
@@ -328,6 +446,13 @@ impl SubtreeCullScene {
 					UIScrollView::set_scroll_offset_in_tree(node_tree, scroll_view_id, Vector2::create(0.0, offset_y));
 				}
 			}
+			SceneKind::Rimminer => {
+				if frame_number >= SCROLL_FIRST_FRAME {
+					let offset_y = -((frame_number - SCROLL_FIRST_FRAME) as f64) * 4.37;
+					UIScrollView::set_scroll_offset_in_tree(node_tree, scroll_view_id, Vector2::create(0.0, offset_y));
+				}
+				return;
+			}
 			SceneKind::Parent => {
 				if frame_number >= STATIC_FIRST_FRAME {
 					let offset_y = -((frame_number - STATIC_FIRST_FRAME) as f64) * 3.1;
@@ -384,6 +509,9 @@ impl Scene for SubtreeCullScene {
 			}
 			SceneKind::Parent => {
 				self.create_parent_scene();
+			}
+			SceneKind::Rimminer => {
+				self.create_rimminer_scene();
 			}
 		}
 	}
@@ -453,7 +581,7 @@ fn run_child(scene_name: &str, mode_name: &str, output_directory: &str) -> Resul
 fn run_check() -> bool {
 	let base_directory = std::env::var("SUBTREECULL_CHECK_DIRECTORY").unwrap_or_else(|_| String::from("target/subtreecull"));
 	let mut is_passed = true;
-	for scene_name in ["engine", "parent"] {
+	for scene_name in ["engine", "parent", "rimminer"] {
 		let mut result_list: Vec<(String, String)> = Vec::new();
 		for mode_name in ["on", "off", "alloff"] {
 			let output_directory = format!("{}/{}_{}", base_directory, scene_name, mode_name);
@@ -530,6 +658,17 @@ fn run_check() -> bool {
 			}
 		}
 
+		// 광부 설정 창 꼴에는 들어오는 노드가 없다. 2 번 줄은 처음부터, 12 번 줄은 스크롤로 들어와 그려지고 110 번 줄은 그려지지 않는다.
+		if scene_name == "rimminer" {
+			let first_drawn_list: Vec<Option<usize>> = (0..3).map(|probe_index| read_probe(&result_list[0].1, probe_index).iter().position(|count| *count > 0).map(|frame_index| frame_index + 1)).collect();
+			println!("{} 셈 줄이 처음 그려진 프레임 {:?}", scene_name, first_drawn_list);
+			if first_drawn_list[0] != Some(1) || first_drawn_list[1].map(|frame_number| frame_number <= SCROLL_FIRST_FRAME as usize).unwrap_or(true) || first_drawn_list[2].is_some() {
+				println!("실패: {} 셈 줄이 들어온 때 그려지지 않았거나 화면 밖에서 그려졌다", scene_name);
+				is_passed = false;
+			}
+			continue;
+		}
+
 		// 들어오는 노드는 85 번 프레임부터 그려지고 그 앞은 켬에서 그려지지 않는다.
 		let mover_list = read_probe(&result_list[0].1, 3);
 		let first_drawn_frame = mover_list.iter().position(|count| *count > 0).map(|frame_index| frame_index + 1);
@@ -557,6 +696,9 @@ fn main() {
 		Ok("parent") => {
 			SceneKind::Parent
 		}
+		Ok("rimminer") => {
+			SceneKind::Rimminer
+		}
 		_ => {
 			SceneKind::Engine
 		}
@@ -574,8 +716,14 @@ fn main() {
 	};
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("하위 트리 거르기");
-	engine_configuration.window_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
-	engine_configuration.reference_resolution_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
+	let view_size = if scene_kind == SceneKind::Rimminer {
+		Vector2::create(RIMMINER_WIDTH, RIMMINER_HEIGHT)
+	}
+	else {
+		Vector2::create(VIEW_WIDTH, VIEW_HEIGHT)
+	};
+	engine_configuration.window_size = view_size;
+	engine_configuration.reference_resolution_size = view_size;
 	engine_configuration.view_scale_mode = ViewScaleMode::StretchShort;
 	let engine = Engine::new(engine_configuration);
 	engine.get_view_manager_mut().set_max_render_pixel_ratio(1.0);
