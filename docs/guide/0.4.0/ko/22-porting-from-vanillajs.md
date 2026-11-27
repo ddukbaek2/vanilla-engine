@@ -14,7 +14,7 @@
 | 열거 값 | `ButtonState.normal` | `ButtonState::Normal` (UpperCamelCase) |
 | 상수, 연관 상수 | `Colors.white`, `Pivot.topLeft` | `Colors::WHITE`, `Pivot::TOP_LEFT` (SCREAMING_SNAKE_CASE) |
 | 생성자 | `new Engine(configuration)`, `Vector2.create(1, 2)` | `Engine::new(engine_configuration)`, `Vector2::create(1.0, 2.0)` |
-| 러스트 예약어 | `cooldown.use()`, `fullscreenPass.use()`, `shaderProgram.use()` | `cooldown.r#use()` 들 (같은 일을 하는 `activate`, `use_program` 도 있습니다) |
+| 예약어 이름 | 두 엔진 모두 예약어를 이름으로 쓰지 않습니다 | `cooldown.activate()`, `use_program(gl)`, `move_pointer(x, y)`, `repeat_while(..)`, `quadratic::ease_in` (원본 `activate()`, `useProgram()`, `movePointer(x, y)`, `repeatWhile(..)`, `quadratic.easeIn`) |
 | 노드 객체를 돌려주던 함수 | `getParent()`, `getChildren()`, `getSiblings()` | `get_parent_id`, `get_child_ids`, `get_sibling_ids` (핸들을 돌려줍니다) |
 
 ```rust
@@ -25,8 +25,8 @@ assert_eq!(Pivot::TOP_LEFT, Vector2::create(0.0, 0.0));
 assert_eq!(Pivot::MIDDLE_CENTER, Vector2::create(0.5, 0.5));
 
 let mut cooldown = Cooldown::new(0.5);
-assert!(cooldown.r#use());
-assert!(!cooldown.r#use());
+assert!(cooldown.activate());
+assert!(!cooldown.activate());
 cooldown.tick(0.5);
 assert!(cooldown.activate());
 ```

@@ -1,7 +1,7 @@
 //==============================================================================
 //! 쿨다운과 반복 타이머. (원본 base/timer.js 의 Cooldown, RepeatTimer)
 //! - 시간은 초 단위 f64 다. (엔진 TimeManager::get_time_delta 와 같은 타입)
-//! - 원본 Cooldown.use() 는 러스트 예약어(use)라 r#use() 로 부른다. (이름은 원본 그대로, r#loop, r#move 와 같다) 원본처럼 activate() 도 같은 일을 한다.
+//! - 발동은 두 엔진 모두 activate() 다. (예약어 use 를 이름으로 쓰지 않는다)
 //! - 원본 기본 인자(duration = 1, interval = 1, elapsed_event = null)는 Default 와 new 의 인자로 옮겼다.
 //! - RepeatTimer 의 콜백은 `Box<dyn FnMut()>` 다. (씬의 set_first_touch_callback 과 같은 꼴) 게임 상태를 바꾸려면
 //!   `Rc<Cell>` / `Rc<RefCell>` 을 잡아 넣는다.
@@ -13,7 +13,7 @@ const MINIMUM_INTERVAL: f64 = 0.000001;
 //==============================================================================
 /// 쿨다운.
 /// - "timer -= dt; if (timer <= 0) ..." 를 매번 손으로 쓰던 것을 표준화했다.
-/// - r#use() 로 발동하면 지정한 시간 동안 is_ready() 가 거짓이 된다.
+/// - activate() 로 발동하면 지정한 시간 동안 is_ready() 가 거짓이 된다.
 ///
 /// # 예제
 /// 발동하고 시간이 지나 다시 준비되기
@@ -21,9 +21,9 @@ const MINIMUM_INTERVAL: f64 = 0.000001;
 /// use vanilla::Cooldown;
 ///
 /// let mut cooldown = Cooldown::new(0.5);
-/// assert!(cooldown.r#use());
+/// assert!(cooldown.activate());
 /// assert!(!cooldown.is_ready());
-/// assert!(!cooldown.r#use());
+/// assert!(!cooldown.activate());
 /// cooldown.tick(0.25);
 /// assert_eq!(cooldown.get_remain_seconds(), 0.25);
 /// assert_eq!(cooldown.get_progress(), 0.5);
@@ -83,27 +83,17 @@ impl Cooldown {
 	}
 
 	//==============================================================================
-	/// 발동한다. (원본 use, 준비되어 있으면 쿨다운을 시작하고 참을 돌려준다)
+	/// 발동한다. (원본 activate, 준비되어 있으면 쿨다운을 시작하고 참을 돌려준다)
 	///
 	/// # 돌려줌
 	/// 발동했으면 true. 아직 쿨다운 중이면 false. (쿨다운 시간이 0 이면 발동해도 곧바로 준비 상태다)
 	//==============================================================================
-	pub fn r#use(&mut self) -> bool {
+	pub fn activate(&mut self) -> bool {
 		if !self.is_ready() {
 			return false;
 		}
 		self.remain_seconds = self.duration;
 		true
-	}
-
-	//==============================================================================
-	/// 발동한다. (원본 activate, r#use 와 같다)
-	///
-	/// # 돌려줌
-	/// 발동했으면 true. 아직 쿨다운 중이면 false.
-	//==============================================================================
-	pub fn activate(&mut self) -> bool {
-		self.r#use()
 	}
 
 	//==============================================================================
@@ -315,7 +305,7 @@ mod tests {
 		let mut cooldown = Cooldown::new(0.5);
 		assert!(cooldown.is_ready());
 		assert_eq!(cooldown.get_progress(), 1.0);
-		assert!(cooldown.r#use());
+		assert!(cooldown.activate());
 		assert!(!cooldown.is_ready());
 		assert!(!cooldown.activate());
 		assert_eq!(cooldown.get_remain_seconds(), 0.5);

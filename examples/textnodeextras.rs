@@ -200,7 +200,7 @@ impl MainScene {
 			let shadow_id = create_box_node(node_tree, root_id, "shadowText", 460.0, 474.0 + shadow_index as f64 * 40.0, 300.0, 36.0);
 			let shadow_text = node_tree[shadow_id].add_component(ShadowText::create_with_text(text, 24.0));
 			shadow_text.set_text_style(24.0, true, TEXT_COLOR);
-			shadow_text.set_shadow("#000000", 2.0, 3.0);
+			shadow_text.set_shadow("#000000", 1.0, 2.0, 3.0);
 		}
 	}
 

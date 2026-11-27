@@ -4,7 +4,7 @@
 //! - 사용: press(x, y) → move(x, y) → tick(time_delta) → release() 순으로 넘기고,
 //!   콜백(set_tap_event / set_drag_event / set_drag_end_event / set_long_press_event)으로 결과를 받는다.
 //! - 원본과 다른 점:
-//!   이름 move 는 러스트 예약어라 r#move 로 부른다. (pointer_gesture.r#move(x, y))
+//!   이동은 두 엔진 모두 move_pointer 다. (원본 movePointer, 예약어 move 를 이름으로 쓰지 않는다)
 //!   options 객체는 PointerGestureOptions 구조체다. 콜백은 Vector2 를 받는 FnMut 이다.
 //==============================================================================
 use crate::base::vector2::Vector2;
@@ -53,7 +53,7 @@ type DragEvent = Box<dyn FnMut(Vector2, Vector2)>;
 
 //==============================================================================
 /// 포인터 제스처 인식기.
-/// - press, r#move, tick, release 차례로 넘기고 콜백으로 탭, 드래그, 드래그 끝, 롱프레스를 받는다.
+/// - press, move_pointer, tick, release 차례로 넘기고 콜백으로 탭, 드래그, 드래그 끝, 롱프레스를 받는다.
 ///
 /// # 예제
 /// 탭과 드래그 가르기
@@ -74,12 +74,12 @@ type DragEvent = Box<dyn FnMut(Vector2, Vector2)>;
 /// });
 ///
 /// pointer_gesture.press(10.0, 10.0);
-/// pointer_gesture.r#move(14.0, 10.0);
+/// pointer_gesture.move_pointer(14.0, 10.0);
 /// pointer_gesture.tick(0.1);
 /// pointer_gesture.release();
 ///
 /// pointer_gesture.press(10.0, 10.0);
-/// pointer_gesture.r#move(40.0, 10.0);
+/// pointer_gesture.move_pointer(40.0, 10.0);
 /// assert!(pointer_gesture.is_dragging());
 /// pointer_gesture.release();
 ///
@@ -153,7 +153,7 @@ impl PointerGesture {
 	/// - `x`: 지금 위치 x. (픽셀, press 와 같은 좌표계)
 	/// - `y`: 지금 위치 y. (픽셀)
 	//==============================================================================
-	pub fn r#move(&mut self, x: f64, y: f64) {
+	pub fn move_pointer(&mut self, x: f64, y: f64) {
 		if !self.is_pressed {
 			return;
 		}
@@ -393,16 +393,16 @@ mod tests {
 
 		// 탭. (임계값 안의 움직임)
 		pointer_gesture.press(10.0, 10.0);
-		pointer_gesture.r#move(15.0, 10.0);
+		pointer_gesture.move_pointer(15.0, 10.0);
 		pointer_gesture.tick(0.3);
 		assert!((pointer_gesture.get_long_press_ratio() - 0.5).abs() < 0.0001);
 		pointer_gesture.release();
 
 		// 드래그.
 		pointer_gesture.press(0.0, 0.0);
-		pointer_gesture.r#move(12.0, 0.0);
+		pointer_gesture.move_pointer(12.0, 0.0);
 		assert!(pointer_gesture.is_dragging());
-		pointer_gesture.r#move(20.0, 0.0);
+		pointer_gesture.move_pointer(20.0, 0.0);
 		pointer_gesture.tick(1.0);
 		pointer_gesture.release();
 

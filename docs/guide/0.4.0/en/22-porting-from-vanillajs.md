@@ -14,7 +14,7 @@ Names follow the Rust rules (Rust API Guidelines C-CASE). Converting an original
 | Enum values | `ButtonState.normal` | `ButtonState::Normal` (UpperCamelCase) |
 | Constants, associated constants | `Colors.white`, `Pivot.topLeft` | `Colors::WHITE`, `Pivot::TOP_LEFT` (SCREAMING_SNAKE_CASE) |
 | Constructors | `new Engine(configuration)`, `Vector2.create(1, 2)` | `Engine::new(engine_configuration)`, `Vector2::create(1.0, 2.0)` |
-| Rust keywords | `cooldown.use()`, `fullscreenPass.use()`, `shaderProgram.use()` | `cooldown.r#use()` and so on (`activate` and `use_program`, which do the same, also exist) |
+| Reserved-word names | Neither engine uses a reserved word as a name | `cooldown.activate()`, `use_program(gl)`, `move_pointer(x, y)`, `repeat_while(..)`, `quadratic::ease_in` (original `activate()`, `useProgram()`, `movePointer(x, y)`, `repeatWhile(..)`, `quadratic.easeIn`) |
 | Functions that returned node objects | `getParent()`, `getChildren()`, `getSiblings()` | `get_parent_id`, `get_child_ids`, `get_sibling_ids` (they return handles) |
 
 ```rust
@@ -25,8 +25,8 @@ assert_eq!(Pivot::TOP_LEFT, Vector2::create(0.0, 0.0));
 assert_eq!(Pivot::MIDDLE_CENTER, Vector2::create(0.5, 0.5));
 
 let mut cooldown = Cooldown::new(0.5);
-assert!(cooldown.r#use());
-assert!(!cooldown.r#use());
+assert!(cooldown.activate());
+assert!(!cooldown.activate());
 cooldown.tick(0.5);
 assert!(cooldown.activate());
 ```

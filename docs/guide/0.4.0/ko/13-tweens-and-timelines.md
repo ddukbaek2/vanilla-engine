@@ -23,7 +23,7 @@ let complete_count = Rc::new(Cell::new(0));
 let complete_count_in_callback = complete_count.clone();
 let mut tween = Tween::new(TweenValues::new().with("x", 0.0).with("alpha", 1.0))
 	.to(TweenValues::new().with("x", 100.0).with("alpha", 0.0), 0.5)
-	.easing(easing_function::quadratic::out)
+	.easing(easing_function::quadratic::ease_out)
 	.set_update(move |values, _node_tree| {
 		last_x_in_update.set(values.get_number("x").unwrap());
 	})
@@ -41,15 +41,15 @@ assert_eq!(complete_count.get(), 1);
 
 ### 이징
 
-`easing_function` 모듈에 `linear` 와 `quadratic`, `cubic`, `quartic`, `quintic`, `sinusoidal`, `exponential`, `circular`, `elastic`, `back`, `bounce` 모듈이 있고, `linear` 를 뺀 것은 저마다 `r#in`, `out`, `in_out` 함수를 가집니다(`easing_function::back::out` 처럼). `in` 은 러스트 예약어라 `r#in` 으로 부릅니다. 진행률(0 ~ 1)을 받아 바뀐 진행률을 돌려주는 함수나 클로저면 무엇이든 `easing` 에 줄 수 있습니다. `back` 과 `elastic` 은 0 ~ 1 밖으로 넘칩니다.
+`easing_function` 모듈에 `linear` 와 `quadratic`, `cubic`, `quartic`, `quintic`, `sinusoidal`, `exponential`, `circular`, `elastic`, `back`, `bounce` 모듈이 있고, `linear` 를 뺀 것은 저마다 `ease_in`, `ease_out`, `ease_in_out` 함수를 가집니다(원본 `easeIn`, `easeOut`, `easeInOut`)(`easing_function::back::ease_out` 처럼). 진행률(0 ~ 1)을 받아 바뀐 진행률을 돌려주는 함수나 클로저면 무엇이든 `easing` 에 줄 수 있습니다. `back` 과 `elastic` 은 0 ~ 1 밖으로 넘칩니다.
 
 ```rust
 use vanilla::easing_function;
 
 assert_eq!(easing_function::linear(0.25), 0.25);
-assert_eq!(easing_function::quadratic::r#in(0.5), 0.25);
-assert_eq!(easing_function::quadratic::out(0.5), 0.75);
-assert_eq!(easing_function::cubic::in_out(0.5), 0.5);
+assert_eq!(easing_function::quadratic::ease_in(0.5), 0.25);
+assert_eq!(easing_function::quadratic::ease_out(0.5), 0.75);
+assert_eq!(easing_function::cubic::ease_in_out(0.5), 0.5);
 let four_steps = |progress: f64| (progress * 4.0).floor() / 4.0;
 assert_eq!(four_steps(0.6), 0.5);
 ```
@@ -141,7 +141,7 @@ impl TweenScene {
 			else {
 				(1.4, 1.0)
 			};
-			let pulse_tween = Tween::create_node_tween(box_id, TweenProperty::LocalScale, start_scale, end_scale, 0.4).easing(easing_function::sinusoidal::in_out);
+			let pulse_tween = Tween::create_node_tween(box_id, TweenProperty::LocalScale, start_scale, end_scale, 0.4).easing(easing_function::sinusoidal::ease_in_out);
 			self.pulse_tween_id = Some(self.scene_base.start_tween(pulse_tween));
 			self.is_pulse_growing = !self.is_pulse_growing;
 		}
@@ -174,7 +174,7 @@ impl Scene for TweenScene {
 			let move_tween = Tween::new(TweenValues::new().with("localPosition", Vector2::create(160.0, 360.0)).with("localOpacity", 0.0))
 				.to(TweenValues::new().with("localPosition", Vector2::create(1120.0, 360.0)).with("localOpacity", 1.0), 1.5)
 				.delay(0.2)
-				.easing(easing_function::cubic::in_out)
+				.easing(easing_function::cubic::ease_in_out)
 				.set_target(box_id);
 			self.move_tween_id = Some(self.scene_base.start_tween(move_tween));
 		}
@@ -817,7 +817,7 @@ fn main() {
 - `wait(duration, ActionCallbacks::new().started(..).updated(|progress, target| ..).completed(..))`: 정한 시간(초) 동안 기다리며 진행률(0 ~ 1)을 넘깁니다. 0 이하면 첫 `step` 에서 진행률 1 로 끝납니다.
 - `condition(|target| bool, ActionConditionCallbacks::new())`: 조건이 참이 될 때까지 기다립니다.
 - `call(|target| ..)`: 닿자마자 부르고 같은 프레임에 다음 스텝으로 넘어갑니다.
-- `repeat(times, inner_action)`, `forever(inner_action)`, `r#loop(|target| bool, inner_action)`(`loop` 는 러스트 예약어): 안쪽 액션을 반복합니다. `forever` 뒤의 스텝에는 닿지 않으므로 멈추려면 `stop()` 을 부릅니다.
+- `repeat(times, inner_action)`, `forever(inner_action)`, `repeat_while(|target| bool, inner_action)`(원본 `repeatWhile`): 안쪽 액션을 반복합니다. `forever` 뒤의 스텝에는 닿지 않으므로 멈추려면 `stop()` 을 부릅니다.
 - `is_running()`, `is_done()`. `step` 은 한 번에 스텝 하나만 진행하고, 끝난 스텝 뒤의 `call` 스텝은 같은 프레임에 돕니다.
 
 ```rust

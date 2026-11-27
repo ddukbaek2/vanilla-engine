@@ -44,7 +44,7 @@ const BAKE_PADDING: i32 = 2;
 /// node_tree[icon_id].set_content_size(Vector2::create(64.0, 64.0));
 /// let shadow_image = node_tree.add_component(icon_id, ShadowImage::new()).unwrap();
 /// shadow_image.set_image(Some(icon.clone()), None);
-/// shadow_image.set_shadow(Color::black().with_alpha(0.5), 2.0, 4.0);
+/// shadow_image.set_shadow(Color::black(), 0.5, 2.0, 4.0);
 ///
 /// let shadow_image = node_tree[icon_id].get_component::<ShadowImage>().unwrap();
 /// assert!(shadow_image.get_image().is_some());
@@ -386,15 +386,18 @@ impl ShadowImage {
 	}
 
 	//==============================================================================
-	/// 그림자 설정. (색과 불투명도는 색의 알파로, 아래로 내려가는 만큼, 번지는 만큼, 둘 다 내용 크기 단위)
+	/// 그림자 설정. (색, 불투명도, 아래로 내려가는 만큼, 번지는 만큼, 원본 setShadow(색, 불투명도, 내려가는 만큼, 번지는 만큼) 과 같다)
 	///
 	/// # 인자
-	/// - `shadow_color`: 그림자 색. (Color 또는 "#rrggbb" 같은 문자열, 알파가 불투명도, 처음 검정)
+	/// - `shadow_color`: 그림자 색. (Color 또는 "#rrggbb" 같은 문자열, 색의 알파는 읽지 않는다, 처음 검정)
+	/// - `shadow_opacity`: 그림자 불투명도. (0 ~ 1, 처음 1)
 	/// - `shadow_offset`: 그림자가 아래로 내려가는 만큼. (노드 좌표, 처음 0)
 	/// - `shadow_blur`: 그림자가 번지는 만큼. (노드 좌표, 0 보다 작으면 0, 처음 0)
 	//==============================================================================
-	pub fn set_shadow(&mut self, shadow_color: impl Into<Color>, shadow_offset: f64, shadow_blur: f64) {
-		self.shadow_color = shadow_color.into();
+	pub fn set_shadow(&mut self, shadow_color: impl Into<Color>, shadow_opacity: f64, shadow_offset: f64, shadow_blur: f64) {
+		let mut shadow_color: Color = shadow_color.into();
+		shadow_color.alpha = shadow_opacity.clamp(0.0, 1.0);
+		self.shadow_color = shadow_color;
 		self.shadow_offset = shadow_offset;
 		self.shadow_blur = shadow_blur.max(0.0);
 	}

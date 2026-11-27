@@ -447,11 +447,11 @@ Wrapping with `push_state` and `pop_state` restores the blend mode too. Unlike C
 | --- | --- | --- |
 | `Mask` | Clips the drawing of children to the node's content area. It clips rotated nodes correctly, and clipped children do not receive touches | `set_round_size` (0) |
 | `Outline` | Draws only a border. A rounded rectangle or a circle (the line stays inside the content area) | `set_color` (white), `set_line_width` (1), `set_round_size` (0), `set_circle` (false) |
-| `ShadowText` | Bakes single line text with a shadow into one image and draws it. When the node fades, text and shadow fade as one image. Shrinks to fit when it overflows | `set_text`, `set_text_style(font_size, is_bold, text_color)` (16, false, white), `set_shadow(color, offset, blur)` (black, 0, 0), `set_fit_minimum_ratio` (0.6) |
+| `ShadowText` | Bakes single line text with a shadow into one image and draws it. When the node fades, text and shadow fade as one image. Shrinks to fit when it overflows | `set_text`, `set_text_style(font_size, is_bold, text_color)` (16, false, white), `set_shadow(color, opacity, offset, blur)` (black, 1, 0, 0), `set_fit_minimum_ratio` (0.6) |
 | `SoftShade` | A soft shade that darkens the area behind text | `set_shade(shape, color, opacity, fade_width)` (`SoftShadeShape::Band`, black, 0.5, 0) |
-| `ShadowImage` | An image with a shadow. As large as possible inside the node, keeping its ratio, centered | `set_image(image, image_rect)`, `set_image_color`, `set_shadow(color, offset, blur)` |
+| `ShadowImage` | An image with a shadow. As large as possible inside the node, keeping its ratio, centered | `set_image(image, image_rect)`, `set_image_color`, `set_shadow(color, opacity, offset, blur)` |
 
-`SoftShadeShape::Band` is a band that is darkest along the middle line and fades upward and downward; `SoftShadeShape::Bottom` is a vertical gradient that is darkest at the bottom edge. The original `setShadow(color, opacity, offset, blur)` takes the opacity as the color's alpha in the Rust version, making it `set_shadow(color, offset, blur)`.
+`SoftShadeShape::Band` is a band that is darkest along the middle line and fades upward and downward; `SoftShadeShape::Bottom` is a vertical gradient that is darkest at the bottom edge. The original `setShadow(color, opacity, offset, blur)` has the same arguments (the color's alpha is ignored and the opacity is used).
 
 ```rust,no_run
 use vanilla::{Color, Engine, EngineConfiguration, Graphic, Mask, Outline, Paint, Rect, Scene, SceneBase, ShadowText, SoftShade, SoftShadeShape, Vector2};
@@ -502,7 +502,7 @@ impl Scene for DecorationScene {
 		node_tree[caption_id].set_local_position(Vector2::create(960.0, 360.0));
 		let shadow_text = node_tree[caption_id].add_component(ShadowText::create_with_text("Shadow Text", 48.0));
 		shadow_text.set_text_style(48.0, true, Color::white());
-		shadow_text.set_shadow(Color::create(0.0, 0.0, 0.0, 0.8), 4.0, 6.0);
+		shadow_text.set_shadow("#000000", 0.8, 4.0, 6.0);
 	}
 
 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {

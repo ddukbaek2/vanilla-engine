@@ -24,7 +24,7 @@
 //!   - 콜백 객체({ started, updated, completed })는 wait 스텝이 ActionCallbacks(updated 가 (진행률, 대상)),
 //!     condition 스텝이 ActionConditionCallbacks(updated 가 (대상))다. 원본은 한 객체 꼴에 인자 수만 다르지만,
 //!     러스트는 콜백의 인자 꼴을 타입으로 정해야 해서 둘로 나눴다.
-//!   - loop 는 러스트 예약어라 r#loop 로 부른다. (Tween 의 r#in 과 같다)
+//!   - 조건 반복은 두 엔진 모두 repeat_while 이다. (원본 repeatWhile, 예약어 loop 를 이름으로 쓰지 않는다)
 //!   - call 스텝이 이어지면 원본은 재귀로, 러스트 판은 반복문으로 넘긴다. (결과는 같다)
 //! - 조건 함수는 원본처럼 대상을 받는다(러스트는 &T). wait 은 duration 이 0 이하이면 진행률 1 로 끝낸다.
 //!   repeat 은 횟수가 0 이면 돌지 않고 넘어간다. (원본과 같다)
@@ -535,7 +535,6 @@ impl<T> Action<T> {
 
 	//==============================================================================
 	/// 조건이 참인 동안 안쪽 액션을 반복. (시작할 때와 안쪽이 끝날 때마다 묻는다)
-	/// - loop 는 러스트 예약어라 r#loop 로 부른다.
 	///
 	/// # 인자
 	/// - `condition_function`: 대상을 받아 참이면 안쪽을 (다시) 돌리는 함수. 처음부터 거짓이면 안쪽을 건너뛴다.
@@ -551,7 +550,7 @@ impl<T> Action<T> {
 	///
 	/// let mut count: u32 = 0;
 	/// let inner_action: Action<u32> = Action::new().wait(0.1, ActionCallbacks::new().completed(|count: &mut u32| *count += 1));
-	/// let mut action: Action<u32> = Action::new().r#loop(|count: &u32| *count < 3, inner_action);
+	/// let mut action: Action<u32> = Action::new().repeat_while(|count: &u32| *count < 3, inner_action);
 	/// action.start_with(&mut count);
 	/// for _ in 0..10 {
 	/// 	action.step_with(&mut count, 0.1);
@@ -560,7 +559,7 @@ impl<T> Action<T> {
 	/// assert!(action.is_done());
 	/// ```
 	//==============================================================================
-	pub fn r#loop(mut self, condition_function: impl FnMut(&T) -> bool + 'static, inner_action: Action<T>) -> Action<T> {
+	pub fn repeat_while(mut self, condition_function: impl FnMut(&T) -> bool + 'static, inner_action: Action<T>) -> Action<T> {
 		self.steps.push(ActionStep::WhileLoop { condition_function: Box::new(condition_function), inner_action: Box::new(inner_action) });
 		self
 	}
@@ -902,8 +901,8 @@ mod tests {
 	fn loop_forever_and_stop() {
 		let mut recorder = Recorder::default();
 		let mut loop_action: Action<Recorder> = Action::new()
-			.r#loop(|recorder: &Recorder| recorder.counter < 2, Action::new().wait(0.1, ActionCallbacks::new().completed(|recorder: &mut Recorder| recorder.counter += 1)))
-			.r#loop(|_recorder: &Recorder| false, Action::new().call(|recorder: &mut Recorder| recorder.counter += 1000))
+			.repeat_while(|recorder: &Recorder| recorder.counter < 2, Action::new().wait(0.1, ActionCallbacks::new().completed(|recorder: &mut Recorder| recorder.counter += 1)))
+			.repeat_while(|_recorder: &Recorder| false, Action::new().call(|recorder: &mut Recorder| recorder.counter += 1000))
 			.call(|recorder: &mut Recorder| recorder.log.push(String::from("after loop")));
 		loop_action.start_with(&mut recorder);
 		loop_action.step_with(&mut recorder, 0.1);

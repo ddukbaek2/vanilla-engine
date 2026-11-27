@@ -4289,6 +4289,28 @@ impl Graphic {
 	}
 
 	//==============================================================================
+	/// 글자 안티앨리어싱 켬 / 끔. (원본 Graphic.setTextAntialiasEnabled)
+	/// - 끄면 구운 글자의 알파를 문턱값 128 로 0 과 255 로 가르고 텍스처를 NEAREST 로 뽑는다. (도트 글꼴용)
+	/// - 켜고 끈 다음에 굽는 글자부터 적용된다. 이미 구워 둔 글자는 그대로다.
+	///
+	/// # 인자
+	/// - `is_text_antialias_enabled`: true 면 켠다. (처음 true)
+	//==============================================================================
+	pub fn set_text_antialias_enabled(&mut self, is_text_antialias_enabled: bool) {
+		self.text_string_texture_cache.set_text_antialias_enabled(is_text_antialias_enabled);
+	}
+
+	//==============================================================================
+	/// 글자 안티앨리어싱이 켜져 있는지. (원본 Graphic.isTextAntialiasEnabled)
+	///
+	/// # 돌려줌
+	/// 켜져 있으면 true.
+	//==============================================================================
+	pub fn is_text_antialias_enabled(&self) -> bool {
+		self.text_string_texture_cache.is_text_antialias_on()
+	}
+
+	//==============================================================================
 	/// 텍스트 베이크 스케일 계산. (현재 변환 행렬 기반, 양자화 단위는 set_text_bake_scale_step)
 	///
 	/// # 돌려줌

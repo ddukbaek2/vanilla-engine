@@ -437,7 +437,7 @@ impl DissolveScene {
 		};
 		let tween = Tween::new(TweenValues::new().with("progress", start_progress))
 			.to(TweenValues::new().with("progress", end_progress), 1.5)
-			.easing(easing_function::sinusoidal::in_out)
+			.easing(easing_function::sinusoidal::ease_in_out)
 			.set_update(move |values, node_tree| {
 				let progress = values.get_number("progress").unwrap_or(0.0);
 				if let Some(shader_sprite) = node_tree[sprite_id].get_component_mut::<ShaderSprite>() {
