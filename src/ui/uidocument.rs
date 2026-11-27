@@ -3336,195 +3336,19 @@ mod tests {
 	use crate::core::graphic::TextDirection;
 
 	/// vanilla.js UIDocument.toJsonText(뿌리, true) 가 낸 글. (에디터 처음 씬처럼 Panel 아래 Title 글, 그림 Sprite 하나)
-	const EDITOR_SCENE_TEXT: &str = r#"{
-	"version": 1,
-	"root": {
-		"type": "WorldNode",
-		"name": "sceneRoot",
-		"active": true,
-		"position": [
-			0,
-			0
-		],
-		"scale": [
-			1,
-			1
-		],
-		"rotation": 0,
-		"opacity": 1,
-		"pivot": [
-			0,
-			0
-		],
-		"anchor": [
-			0.5,
-			0.5
-		],
-		"contentSize": [
-			0,
-			0
-		],
-		"interactable": false,
-		"components": [],
-		"children": [
-			{
-				"type": "WorldNode",
-				"name": "Panel",
-				"active": true,
-				"position": [
-					640,
-					360
-				],
-				"scale": [
-					1,
-					1
-				],
-				"rotation": 0,
-				"opacity": 1,
-				"pivot": [
-					0.5,
-					0.5
-				],
-				"anchor": [
-					0.5,
-					0.5
-				],
-				"contentSize": [
-					520,
-					300
-				],
-				"interactable": false,
-				"components": [
-					{
-						"color": [
-							0.22,
-							0.4,
-							0.75,
-							1
-						],
-						"roundSize": 24,
-						"type": "Paint"
-					}
-				],
-				"children": [
-					{
-						"type": "WorldNode",
-						"name": "Title",
-						"active": true,
-						"position": [
-							260,
-							110
-						],
-						"scale": [
-							1,
-							1
-						],
-						"rotation": 0,
-						"opacity": 1,
-						"pivot": [
-							0.5,
-							0.5
-						],
-						"anchor": [
-							0.5,
-							0.5
-						],
-						"contentSize": [
-							440,
-							60
-						],
-						"interactable": false,
-						"components": [
-							{
-								"text": "vanilla.js",
-								"fontSize": 48,
-								"textColor": [
-									1,
-									1,
-									1,
-									1
-								],
-								"strokeColor": [
-									1,
-									1,
-									1,
-									1
-								],
-								"strokeWidth": 0,
-								"textAlign": "center",
-								"textBaseline": "middle",
-								"type": "Text"
-							}
-						],
-						"children": []
-					},
-					{
-						"type": "WorldNode",
-						"name": "emblem",
-						"active": true,
-						"position": [
-							260,
-							210
-						],
-						"scale": [
-							1.5,
-							1.5
-						],
-						"rotation": 15,
-						"opacity": 0.75,
-						"pivot": [
-							0.5,
-							0.5
-						],
-						"anchor": [
-							0,
-							1
-						],
-						"contentSize": [
-							96,
-							96
-						],
-						"interactable": false,
-						"components": [
-							{
-								"color": [
-									0,
-									0,
-									0,
-									0
-								],
-								"roundSize": 0,
-								"imagePath": "emblem.png",
-								"nineSlice": [
-									0,
-									0,
-									0,
-									0
-								],
-								"spriteDrawMode": "simple",
-								"spriteBlendMode": "source-over",
-								"type": "Sprite"
-							}
-						],
-						"children": []
-					}
-				]
-			}
-		]
-	}
-}"#;
+	const EDITOR_SCENE_TEXT: &str = include_str!("testdata/uidocument/editor_scene.json");
 
 	/// vanilla.js UIDocument.toJsonText(뿌리, false) 가 낸 글. (반사 저장 종류, 위젯, content 안의 자식, 노드 참조)
-	const WIDGET_SCENE_TEXT: &str = r#"{"version":1,"root":{"type":"WorldNode","name":"widgetRoot","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[0,0],"interactable":false,"components":[],"children":[{"type":"WorldNode","name":"outline","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"Color":[1,0.5,0.25,1],"LineWidth":3,"RoundSize":12,"Circle":true,"GizmoVisible":false,"Enable":true,"ComponentType":"Outline","type":"Outline"}],"children":[]},{"type":"WorldNode","name":"ring","active":false,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":true,"components":[{"Ratio":0.25,"RoundSize":20,"LineWidth":4,"FillColor":[0.5,1,0.5,1],"TrackColor":[0.2,0.2,0.25,1],"GizmoVisible":false,"Enable":true,"ComponentType":"UIProgressRing","type":"UIProgressRing"}],"children":[]},{"type":"WorldNode","name":"shade","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"GizmoVisible":false,"Enable":false,"ComponentType":"SoftShade","type":"SoftShade"}],"children":[]},{"type":"WorldNode","name":"mask","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"type":"Mask"}],"children":[]},{"type":"WorldNode","name":"rich","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"text":"<b>굵게</b> 보통","fontSize":20,"textColor":[1,1,1,1],"strokeColor":[0,0,0,1],"strokeWidth":2,"textAlign":"left","textBaseline":"top","type":"RichText"}],"children":[]},{"type":"WorldNode","name":"label","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"text":"라벨","fontSize":24,"textColor":[1,1,1,1],"backgroundColor":[0,0,0,0.5],"textAlign":"right","textBaseline":"middle","type":"UILabel"}],"children":[]},{"type":"WorldNode","name":"button","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":true,"components":[{"pressedTintColor":[0,0,0,0.5],"type":"UIButton"}],"children":[],"contentChildren":[{"type":"WorldNode","name":"caption","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"text":"눌러","fontSize":32,"textColor":[1,1,1,1],"strokeColor":[1,1,1,1],"strokeWidth":0,"textAlign":"center","textBaseline":"middle","type":"Text"}],"children":[]}]},{"type":"WorldNode","name":"toggle","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":true,"components":[{"pressedTintColor":[0,0,0,0.3],"type":"UIToggleButton"}],"children":[]},{"type":"WorldNode","name":"progress","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"value":50,"minValue":0,"maxValue":200,"type":"UIProgressView"}],"children":[]},{"type":"WorldNode","name":"slider","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":true,"components":[{"value":0.75,"thumbRadius":12,"trackThickness":6,"ThumbNode":{"$nodeRef":"/slider/thumb"},"type":"UISlider"}],"children":[{"type":"WorldNode","name":"thumb","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[],"children":[]}]},{"type":"WorldNode","name":"scroll","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":true,"components":[{"scrollContentSize":[200,600],"scrollMode":"elastic","dragSensitivity":1.5,"horizontal":false,"vertical":true,"backgroundColor":[1,1,1,0],"type":"UIScrollView"}],"children":[],"contentChildren":[{"type":"WorldNode","name":"item","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"color":[0.25,0.25,0.25,1],"roundSize":0,"type":"Paint"}],"children":[]}]},{"type":"WorldNode","name":"image","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"imagePath":"star.png","type":"UIImageView"},{"color":[0,0,0,0],"roundSize":0,"imagePath":"","nineSlice":[0,0,0,0],"spriteDrawMode":"simple","spriteBlendMode":"source-over","type":"Sprite"}],"children":[]}]}}"#;
+	const WIDGET_SCENE_TEXT: &str = include_str!("testdata/uidocument/widget_scene.json");
 
 	/// vanilla.js UIDocument.toJsonText(뿌리, false) 가 낸 글. (ShadowText 하나)
-	const SHADOW_TEXT_SCENE_TEXT: &str = r#"{"version":1,"root":{"type":"WorldNode","name":"shadowRoot","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[0,0],"interactable":false,"components":[],"children":[{"type":"WorldNode","name":"shadowText","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[0,0],"interactable":false,"components":[{"Text":"그림자","TextAlign":"left","TextDirection":"rtl","Italic":true,"Underline":false,"Strikethrough":true,"FitMinimumRatio":0.5,"GizmoVisible":false,"Enable":true,"ComponentType":"ShadowText","type":"ShadowText"}],"children":[]}]}}"#;
+	const SHADOW_TEXT_SCENE_TEXT: &str = include_str!("testdata/uidocument/shadow_text_scene.json");
 
 	/// vanilla.js 가 처음 값의 Outline, SoftShade, ShadowText, UIProgressRing, ShadowImage 를 반사로 적은 컴포넌트 목록. (UIDocument.serializeNode 의 components)
-	const REFLECTED_DEFAULTS_TEXT: &str = r#"[{"Color":[1,1,1,1],"LineWidth":1,"RoundSize":0,"Circle":false,"GizmoVisible":false,"Enable":true,"ComponentType":"Outline","type":"Outline"},{"GizmoVisible":false,"Enable":true,"ComponentType":"SoftShade","type":"SoftShade"},{"Text":"","TextAlign":"center","TextDirection":"ltr","Italic":false,"Underline":false,"Strikethrough":false,"FitMinimumRatio":0.6,"GizmoVisible":false,"Enable":true,"ComponentType":"ShadowText","type":"ShadowText"},{"Ratio":0,"RoundSize":0,"LineWidth":2,"FillColor":[1,1,1,1],"TrackColor":[0.2,0.2,0.25,1],"GizmoVisible":false,"Enable":true,"ComponentType":"UIProgressRing","type":"UIProgressRing"},{"GizmoVisible":false,"Enable":true,"ComponentType":"ShadowImage","type":"ShadowImage"}]"#;
+	const REFLECTED_DEFAULTS_TEXT: &str = include_str!("testdata/uidocument/reflected_defaults.json");
 
 	/// vanilla.js 에디터(tools/uieditor/uieditor.js addWidgetNode)와 같은 단계로 지은 inputField, scrollBar, snapScrollView 를 한 번 tick 하고 toJsonText(뿌리, false) 가 낸 글.
-	const EDITOR_TYPES_SCENE_TEXT: &str = r#"{"version":1,"root":{"type":"WorldNode","name":"editorRoot","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[0,0],"interactable":false,"components":[],"children":[{"type":"UIInputField","name":"InputField1","active":true,"position":[60,60],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[260,40],"interactable":true,"components":[{"color":[1,1,1,1],"roundSize":8,"type":"Paint"},{"GizmoVisible":false,"Enable":true,"ComponentType":"UIInputFieldBgLayer","type":"BackgroundLayerRenderer"}],"children":[{"type":"WorldNode","name":"","active":true,"position":[16,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[228,40],"interactable":false,"components":[{"text":"","fontSize":28,"textColor":[0.6,0.6,0.6,1],"backgroundColor":[0,0,0,0],"textAlign":"left","textBaseline":"middle","type":"UILabel"}],"children":[]},{"type":"WorldNode","name":"","active":false,"position":[16,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[228,40],"interactable":false,"components":[{"text":"","fontSize":28,"textColor":[0.13333333333333333,0.13333333333333333,0.13333333333333333,1],"backgroundColor":[0,0,0,0],"textAlign":"left","textBaseline":"middle","type":"UILabel"}],"children":[]},{"type":"WorldNode","name":"","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[260,40],"interactable":false,"components":[{"GizmoVisible":false,"Enable":true,"ComponentType":"UIInputFieldOverlayLayer","type":"OverlayLayerRenderer"}],"children":[]}]},{"type":"UIScrollBar","name":"ScrollBar2","active":true,"position":[60,60],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[12,220],"interactable":true,"components":[{"color":[0,0,0,0.15],"roundSize":4,"type":"Paint"}],"children":[{"type":"WorldNode","name":"thumb","active":false,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[0,0],"interactable":false,"components":[{"color":[1,1,1,0.6],"roundSize":4,"type":"Paint"}],"children":[]}]},{"type":"WorldNode","name":"SnapScrollView3","active":true,"position":[60,60],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[320,220],"interactable":true,"components":[{"color":[0.965,0.965,0.965,1],"roundSize":16,"type":"Paint"},{"SnapToNearest":false,"VelocityThreshold":200,"PageChangeThreshold":0.35,"SnapCurrentIndex":0,"ScrollOffset":[0,0],"Horizontal":true,"Vertical":false,"DragSensitivity":1,"ScrollMode":"clamp","ScrollContentSize":[960,220],"BackgroundColor":[1,1,1,0],"GizmoVisible":false,"Enable":true,"ComponentType":"SnapScrollView","type":"UISnapScrollView"}],"children":[],"contentChildren":[{"type":"WorldNode","name":"page","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[320,220],"interactable":false,"components":[],"children":[]}]}]}}"#;
+	const EDITOR_TYPES_SCENE_TEXT: &str = include_str!("testdata/uidocument/editor_types_scene.json");
 
 	/// vanilla.js 를 node 로 돌려 뽑은 기대값. (testdata/uidocument/generate.mjs 가 원본 저장소에서 다시 뽑는다)
 	const EDITOR_COMPONENTS_TEXT: &str = include_str!("testdata/uidocument/editor_components.json");
@@ -3535,7 +3359,7 @@ mod tests {
 	const REFLECTED_PROPERTIES_TEXT: &str = include_str!("testdata/uidocument/reflected_properties.json");
 
 	/// 위와 같되 안내 글, 값, 글 크기, 둥근 크기, 색, 트랙과 썸 색, 스냅 설정을 바꾼 것.
-	const EDITOR_TYPES_CUSTOM_SCENE_TEXT: &str = r#"{"version":1,"root":{"type":"WorldNode","name":"editorRoot","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[0,0],"interactable":false,"components":[],"children":[{"type":"UIInputField","name":"InputField1","active":true,"position":[60,60],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[260,40],"interactable":true,"components":[{"color":[0.9,0.95,1,1],"roundSize":4,"type":"Paint"},{"GizmoVisible":false,"Enable":true,"ComponentType":"UIInputFieldBgLayer","type":"BackgroundLayerRenderer"}],"children":[{"type":"WorldNode","name":"","active":false,"position":[16,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[228,40],"interactable":false,"components":[{"text":"이름을 넣어요","fontSize":20,"textColor":[0.5,0.5,0.5,1],"backgroundColor":[0,0,0,0],"textAlign":"left","textBaseline":"middle","type":"UILabel"}],"children":[]},{"type":"WorldNode","name":"","active":true,"position":[16,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[228,40],"interactable":false,"components":[{"text":"뚝백","fontSize":20,"textColor":[0.1,0.2,0.3,1],"backgroundColor":[0,0,0,0],"textAlign":"left","textBaseline":"middle","type":"UILabel"}],"children":[]},{"type":"WorldNode","name":"","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[260,40],"interactable":false,"components":[{"GizmoVisible":false,"Enable":true,"ComponentType":"UIInputFieldOverlayLayer","type":"OverlayLayerRenderer"}],"children":[]}]},{"type":"UIScrollBar","name":"ScrollBar2","active":true,"position":[60,60],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[12,220],"interactable":true,"components":[{"color":[0.2,0.2,0.2,0.5],"roundSize":4,"type":"Paint"}],"children":[{"type":"WorldNode","name":"thumb","active":false,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[0,0],"interactable":false,"components":[{"color":[1,0.5,0,1],"roundSize":4,"type":"Paint"}],"children":[]}]},{"type":"WorldNode","name":"SnapScrollView3","active":true,"position":[60,60],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[320,220],"interactable":true,"components":[{"color":[0.965,0.965,0.965,1],"roundSize":16,"type":"Paint"},{"SnapToNearest":true,"VelocityThreshold":300,"PageChangeThreshold":0.5,"SnapCurrentIndex":0,"ScrollOffset":[0,0],"Horizontal":true,"Vertical":false,"DragSensitivity":1.5,"ScrollMode":"clamp","ScrollContentSize":[960,220],"BackgroundColor":[1,1,1,0],"GizmoVisible":false,"Enable":true,"ComponentType":"SnapScrollView","type":"UISnapScrollView"}],"children":[],"contentChildren":[{"type":"WorldNode","name":"page","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[320,220],"interactable":false,"components":[],"children":[]}]}]}}"#;
+	const EDITOR_TYPES_CUSTOM_SCENE_TEXT: &str = include_str!("testdata/uidocument/editor_types_custom_scene.json");
 
 	//==============================================================================
 	/// 에디터 씬 파일(frameSize 를 얹은 것)을 읽어 다시 쓰면 원본이 낸 글과 한 글자도 다르지 않다.

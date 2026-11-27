@@ -57,11 +57,24 @@ jobs:
         with:
           path: vanilla-engine
 
+      - name: 원본 갈래 고르기 (엔진과 같은 이름의 갈래가 원본에 있으면 그것, 없으면 dev)
+        id: original
+        env:
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if git ls-remote --exit-code --heads https://github.com/ddukbaek2/vanilla.js.git "$BRANCH_NAME" > /dev/null; then
+            ref="$BRANCH_NAME"
+          else
+            ref=dev
+          fi
+          echo "원본 갈래: $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
       - name: 원본 vanilla.js 받기 (예제 애셋과 견줄 페이지)
         uses: actions/checkout@v7
         with:
           repository: ddukbaek2/vanilla.js
-          ref: dev
+          ref: ${{ steps.original.outputs.ref }}
           path: vanilla.js
 
       - name: 러스트

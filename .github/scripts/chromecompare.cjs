@@ -182,7 +182,19 @@ async function main() {
 			});
 			await page.setViewport({ width: pair.width, height: pair.height, deviceScaleFactor });
 			const queryText = (pair.query ? pair.query + "&" : "?") + `capture=${pair.frame}`;
-			await page.goto(`http://127.0.0.1:${port}/${pair.page}${queryText}`, { waitUntil: "load", timeout: 120000 });
+			// 윈도우의 크롬은 막 띄운 브라우저의 첫 탐색을 요청이 서버에 닿기 전에 취소할 때가 있어(net::ERR_ABORTED, 다음 탐색부터는 된다) 세 번까지 다시 연다.
+			for (let attempt = 1; ; attempt++) {
+				try {
+					await page.goto(`http://127.0.0.1:${port}/${pair.page}${queryText}`, { waitUntil: "load", timeout: 120000 });
+					break;
+				}
+				catch (error) {
+					if (attempt >= 3 || !String(error.message).includes("net::ERR_ABORTED")) {
+						throw error;
+					}
+					console.log(`${pair.name}: 다시 열기 ${attempt}/3 (${error.message.split("\n")[0]})`);
+				}
+			}
 			await page.waitForFunction(() => globalThis.vanillaCaptureList && globalThis.vanillaCaptureList.length > 0, { timeout: CAPTURE_TIMEOUT_MILLISECONDS, polling: 100 });
 			const captureDataUrl = await page.evaluate(() => globalThis.vanillaCaptureList[0]);
 			result.webGLRenderer = await page.evaluate(() => {

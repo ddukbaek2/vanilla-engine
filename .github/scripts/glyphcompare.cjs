@@ -31,18 +31,21 @@ const REGION_LIST = [
 const contentTypeTable = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".map": "application/json" };
 
 //==============================================================================
-// 폴더를 뿌리로 정적 서버를 띄운다.
+// 폴더를 뿌리로 정적 서버를 띄운다. (요청마다 응답을 찍는다)
 //==============================================================================
 function startStaticServer(rootDirectory) {
 	const server = http.createServer((request, response) => {
 		const filePath = path.join(rootDirectory, decodeURIComponent(request.url.split("?")[0]));
 		fs.readFile(filePath, (error, data) => {
 			if (error) {
+				console.log(`서버: 404 ${request.url} (${error.code})`);
 				response.writeHead(404);
 				response.end();
 				return;
 			}
-			response.writeHead(200, { "Content-Type": contentTypeTable[path.extname(filePath)] || "application/octet-stream", "Cache-Control": "no-store" });
+			const contentType = contentTypeTable[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+			console.log(`서버: 200 ${contentType} ${request.url} (${data.length} 바이트)`);
+			response.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-store" });
 			response.end(data);
 		});
 	});
@@ -100,6 +103,41 @@ function compareRegions(chromePng, rustPng, diffPath) {
 }
 
 //==============================================================================
+// 새 페이지로 장면을 연다. (본문 응답, 실패한 요청, 내려받기를 찍고, 열기가 실패하면 새 페이지로 세 번까지 다시 연다)
+// - 윈도우의 크롬은 막 띄운 브라우저의 첫 탐색을 요청이 서버에 닿기 전에 취소할 때가 있다. (net::ERR_ABORTED, 다음 탐색부터는 된다, 원본 tests/chromepage.mjs 와 같은 까닭)
+//==============================================================================
+async function openPage(browser, url) {
+	const ATTEMPT_COUNT = 3;
+	for (let attempt = 1; attempt <= ATTEMPT_COUNT; attempt++) {
+		const page = await browser.newPage();
+		page.on("console", (message) => console.log("console: " + message.text()));
+		page.on("pageerror", (error) => console.log("pageerror: " + error.message));
+		page.on("requestfailed", (request) => console.log(`requestfailed: ${request.url()} ${request.failure() ? request.failure().errorText : ""}`));
+		page.on("response", (response) => {
+			if (response.request().isNavigationRequest()) {
+				console.log(`본문 응답: ${response.status()} ${response.headers()["content-type"] || ""} ${response.url()}`);
+			}
+		});
+		const session = await page.createCDPSession();
+		session.on("Page.downloadWillBegin", (event) => console.log(`내려받기: ${event.url} ${event.suggestedFilename}`));
+		await session.send("Page.enable");
+		try {
+			await page.setViewport({ width: 960, height: 720, deviceScaleFactor: 1 });
+			await page.goto(url, { waitUntil: "load" });
+			return page;
+		}
+		catch (error) {
+			console.log(`열기 ${attempt}/${ATTEMPT_COUNT} 실패: ${error.message}`);
+			await page.close().catch(() => {});
+			if (attempt === ATTEMPT_COUNT) {
+				throw error;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 2000));
+		}
+	}
+}
+
+//==============================================================================
 // 시작.
 //==============================================================================
 async function main() {
@@ -114,12 +152,8 @@ async function main() {
 	const server = await startStaticServer(rootDirectory);
 	const browser = await puppeteer.launch({ executablePath: chromePath, headless: true, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--force-color-profile=srgb", "--hide-scrollbars", "--lang=en-US"] });
 	try {
-		const page = await browser.newPage();
-		page.on("console", (message) => console.log("console: " + message.text()));
-		page.on("pageerror", (error) => console.log("pageerror: " + error.message));
-		await page.setViewport({ width: 960, height: 720, deviceScaleFactor: 1 });
 		const pagePath = path.relative(rootDirectory, path.join(engineDirectory, "tests", "assets", "glyphparity", "index.html")).split(path.sep).join("/");
-		await page.goto(`http://127.0.0.1:${server.address().port}/${pagePath}`, { waitUntil: "load" });
+		const page = await openPage(browser, `http://127.0.0.1:${server.address().port}/${pagePath}`);
 		// 원본 엔진이 20 프레임을 그린 뒤(requestFrameCapture 가 끝남) 페이지를 찍는다. (SwiftShader 의 WebGL 되읽기는 검게 나와 chromecompare.cjs 처럼 화면을 찍는다)
 		await page.waitForFunction(() => window.__captureDataUrl !== undefined, { timeout: 60000 });
 		await new Promise((resolve) => setTimeout(resolve, 500));
