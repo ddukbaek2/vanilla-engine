@@ -1,0 +1,1149 @@
+//==============================================================================
+//! GL 상태 캐시. (원본 WebGLStateCache)
+//! - 원본은 컨텍스트 객체의 상태 함수(bindFramebuffer, viewport, enable, useProgram, bindTexture 같은 것)를 가로채 바뀐 값을 기억하고,
+//!   getParameter, isEnabled 를 기억한 값으로 답한다. glow 는 가로챌 수 없어, 컨텍스트마다 하나인 캐시를 두고
+//!   엔진의 상태 함수 호출이 이 모듈의 같은 이름 함수(첫 인자 gl)를 거쳐 GL 을 부른다.
+//! - 상태를 바꾸는 함수는 늘 GL 을 부르고 바뀐 값을 기억한다. 같은 값이면 건너뛰는 것은 부르는 쪽이 is_program_in_use 같은 것으로 물어 한다. (원본과 같음)
+//! - 읽는 함수(get_parameter_*, is_enabled, read_*)는 기억한 값으로 답한다. 모르는 값(처음, reset 뒤, 검사하지 못한 인자를 받은 뒤)만 GL 에 한 번 묻고 기억한다.
+//! - 기억하지 않는 값(스텐실 함수, 버퍼 묶음 같은 것)은 GL 에 그대로 묻는다. 바뀌지 않는 한도 값(MAX_SAMPLES 같은 것)은 한 번 묻고 기억한다.
+//! - 이 모듈을 거치지 않고 glow 로 상태를 바꾸면 reset 을 부른다. (Graphic::reset_gl_state_cache, Graphic::get_gl 은 받은 쪽이 바꿀 수 있어 스스로 부른다)
+//! - 캐시를 걸지 않은 컨텍스트(Graphic 밖에서 만든 것)는 기억 없이 GL 을 그대로 부르고 묻는다.
+//==============================================================================
+use crate::core::graphic::{GlFramebuffer, GlProgram, GlTexture, GlVertexArray};
+use glow::HasContext;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
+use std::rc::{Rc, Weak};
+
+//==============================================================================
+// 상수 목록.
+//==============================================================================
+/// 켜고 끄는 기능 가운데 기억하는 것. (WebGL2 의 enable, disable 이 받는 것 모두, 차례가 칸 번호)
+const CAPABILITY_LIST: [u32; 10] = [glow::BLEND, glow::CULL_FACE, glow::DEPTH_TEST, glow::DITHER, glow::POLYGON_OFFSET_FILL, glow::SAMPLE_ALPHA_TO_COVERAGE, glow::SAMPLE_COVERAGE, glow::SCISSOR_TEST, glow::STENCIL_TEST, glow::RASTERIZER_DISCARD];
+
+/// 텍스처 대상. (차례가 칸 번호)
+const TEXTURE_TARGET_LIST: [u32; 4] = [glow::TEXTURE_2D, glow::TEXTURE_CUBE_MAP, glow::TEXTURE_3D, glow::TEXTURE_2D_ARRAY];
+
+/// 섞기 인자로 받는 값.
+const BLEND_FACTOR_LIST: [u32; 15] = [glow::ZERO, glow::ONE, glow::SRC_COLOR, glow::ONE_MINUS_SRC_COLOR, glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::DST_ALPHA, glow::ONE_MINUS_DST_ALPHA, glow::DST_COLOR, glow::ONE_MINUS_DST_COLOR, glow::SRC_ALPHA_SATURATE, glow::CONSTANT_COLOR, glow::ONE_MINUS_CONSTANT_COLOR, glow::CONSTANT_ALPHA, glow::ONE_MINUS_CONSTANT_ALPHA];
+
+
+/// 바뀌지 않는 한도 값 가운데 i32 하나로 읽는 것. (처음 읽을 때 한 번 묻고 기억한다)
+const CONSTANT_PARAMETER_LIST: [u32; 17] = [glow::MAX_TEXTURE_SIZE, glow::MAX_CUBE_MAP_TEXTURE_SIZE, glow::MAX_3D_TEXTURE_SIZE, glow::MAX_ARRAY_TEXTURE_LAYERS, glow::MAX_RENDERBUFFER_SIZE, glow::MAX_SAMPLES, glow::MAX_TEXTURE_IMAGE_UNITS, glow::MAX_VERTEX_TEXTURE_IMAGE_UNITS, glow::MAX_COMBINED_TEXTURE_IMAGE_UNITS, glow::MAX_VERTEX_ATTRIBS, glow::MAX_VERTEX_UNIFORM_VECTORS, glow::MAX_FRAGMENT_UNIFORM_VECTORS, glow::MAX_VARYING_VECTORS, glow::MAX_DRAW_BUFFERS, glow::MAX_COLOR_ATTACHMENTS, glow::MAX_UNIFORM_BUFFER_BINDINGS, glow::MAX_UNIFORM_BLOCK_SIZE];
+
+thread_local! {
+	/// 컨텍스트마다 하나인 상태 캐시. (원본 stateCacheTable, 컨텍스트가 사라지면 다음에 걸 때 치운다)
+	static STATE_CACHE_LIST: RefCell<Vec<(Weak<glow::Context>, Rc<GlStateCache>)>> = const { RefCell::new(Vec::new()) };
+}
+
+//==============================================================================
+/// GL 상태 캐시. (원본 WebGLStateCache, 칸마다 None 이면 모른다)
+//==============================================================================
+pub(crate) struct GlStateCache {
+	draw_framebuffer: Cell<Option<Option<GlFramebuffer>>>,
+	read_framebuffer: Cell<Option<Option<GlFramebuffer>>>,
+	viewport: Cell<Option<[i32; 4]>>,
+	scissor_box: Cell<Option<[i32; 4]>>,
+	clear_color: Cell<Option<[f32; 4]>>,
+	color_write_mask: Cell<Option<[bool; 4]>>,
+	blend_factors: Cell<Option<[u32; 4]>>,
+	blend_equations: Cell<Option<[u32; 2]>>,
+	depth_write_mask: Cell<Option<bool>>,
+	depth_function: Cell<Option<u32>>,
+	front_face: Cell<Option<u32>>,
+	cull_face_mode: Cell<Option<u32>>,
+	program: Cell<Option<Option<GlProgram>>>,
+	vertex_array: Cell<Option<Option<GlVertexArray>>>,
+	active_texture: Cell<Option<u32>>,
+	capability_list: [Cell<Option<bool>>; 10],
+	texture_binding_table: RefCell<HashMap<u32, Option<GlTexture>>>, // 키 유닛 * 4 + 대상 칸. (없으면 모른다)
+	pixel_store_table: RefCell<HashMap<u32, i32>>,
+	constant_parameter_table: RefCell<HashMap<u32, i32>>,
+	maximum_viewport_size: Cell<Option<[i32; 2]>>,
+	texture_target_table: RefCell<HashMap<GlTexture, usize>>, // 텍스처마다 처음 묶은 대상 칸. (다른 대상으로 묶으면 GL 이 무시한다)
+	program_link_status_table: RefCell<HashMap<GlProgram, bool>>, // 링크에 실패한 프로그램은 쓰게 해도 GL 이 무시한다.
+	deleted_framebuffer_set: RefCell<HashSet<GlFramebuffer>>, // 지운 것. (묶으면 GL 이 무시한다, 이 모듈의 create_* 로 같은 이름을 다시 받으면 뺀다)
+	deleted_texture_set: RefCell<HashSet<GlTexture>>,
+	deleted_vertex_array_set: RefCell<HashSet<GlVertexArray>>,
+}
+
+impl GlStateCache {
+	//==============================================================================
+	/// 생성. (모두 모름)
+	//==============================================================================
+	fn new() -> GlStateCache {
+		GlStateCache {
+			draw_framebuffer: Cell::new(None),
+			read_framebuffer: Cell::new(None),
+			viewport: Cell::new(None),
+			scissor_box: Cell::new(None),
+			clear_color: Cell::new(None),
+			color_write_mask: Cell::new(None),
+			blend_factors: Cell::new(None),
+			blend_equations: Cell::new(None),
+			depth_write_mask: Cell::new(None),
+			depth_function: Cell::new(None),
+			front_face: Cell::new(None),
+			cull_face_mode: Cell::new(None),
+			program: Cell::new(None),
+			vertex_array: Cell::new(None),
+			active_texture: Cell::new(None),
+			capability_list: Default::default(),
+			texture_binding_table: RefCell::new(HashMap::new()),
+			pixel_store_table: RefCell::new(HashMap::new()),
+			constant_parameter_table: RefCell::new(HashMap::new()),
+			maximum_viewport_size: Cell::new(None),
+			texture_target_table: RefCell::new(HashMap::new()),
+			program_link_status_table: RefCell::new(HashMap::new()),
+			deleted_framebuffer_set: RefCell::new(HashSet::new()),
+			deleted_texture_set: RefCell::new(HashSet::new()),
+			deleted_vertex_array_set: RefCell::new(HashSet::new()),
+		}
+	}
+
+	//==============================================================================
+	/// 기억 모두 잊기. (원본 reset, 다음에 읽을 때 GL 에 한 번씩 묻는다, 바뀌지 않는 한도 값과 객체마다의 기억은 그대로 둔다)
+	//==============================================================================
+	pub(crate) fn reset(&self) {
+		self.draw_framebuffer.set(None);
+		self.read_framebuffer.set(None);
+		self.viewport.set(None);
+		self.scissor_box.set(None);
+		self.clear_color.set(None);
+		self.color_write_mask.set(None);
+		self.blend_factors.set(None);
+		self.blend_equations.set(None);
+		self.depth_write_mask.set(None);
+		self.depth_function.set(None);
+		self.front_face.set(None);
+		self.cull_face_mode.set(None);
+		self.program.set(None);
+		self.vertex_array.set(None);
+		self.active_texture.set(None);
+		for capability in &self.capability_list {
+			capability.set(None);
+		}
+		self.texture_binding_table.borrow_mut().clear();
+		self.pixel_store_table.borrow_mut().clear();
+	}
+
+	//==============================================================================
+	/// 바뀌지 않는 한도 값 읽기. (처음에 한 번 묻는다)
+	//==============================================================================
+	fn read_constant_parameter(&self, gl: &glow::Context, parameter: u32) -> i32 {
+		if let Some(value) = self.constant_parameter_table.borrow().get(&parameter) {
+			return *value;
+		}
+		let value = unsafe { gl.get_parameter_i32(parameter) };
+		self.constant_parameter_table.borrow_mut().insert(parameter, value);
+		value
+	}
+
+	//==============================================================================
+	/// 뷰포트 크기 한도 읽기. (원본 MAX_VIEWPORT_DIMS)
+	//==============================================================================
+	fn read_maximum_viewport_size(&self, gl: &glow::Context) -> [i32; 2] {
+		if let Some(value) = self.maximum_viewport_size.get() {
+			return value;
+		}
+		let mut value = [0i32; 2];
+		unsafe {
+			gl.get_parameter_i32_slice(glow::MAX_VIEWPORT_DIMS, &mut value);
+		}
+		self.maximum_viewport_size.set(Some(value));
+		value
+	}
+
+	//==============================================================================
+	/// 켜고 끄는 기능의 칸 번호. (기억하지 않는 것이면 None)
+	//==============================================================================
+	fn find_capability_index(capability: u32) -> Option<usize> {
+		CAPABILITY_LIST.iter().position(|&value| value == capability)
+	}
+
+	//==============================================================================
+	/// 활성 텍스처 유닛 읽기. (TEXTURE0 + 번호)
+	//==============================================================================
+	fn read_active_texture(&self, gl: &glow::Context) -> u32 {
+		if let Some(active_texture) = self.active_texture.get() {
+			return active_texture;
+		}
+		let active_texture = unsafe { gl.get_parameter_i32(glow::ACTIVE_TEXTURE) } as u32;
+		self.active_texture.set(Some(active_texture));
+		active_texture
+	}
+
+	//==============================================================================
+	/// 한 대상의 텍스처 묶음 기억을 모든 유닛에서 잊기.
+	//==============================================================================
+	fn forget_texture_target(&self, texture_target_index: usize) {
+		self.texture_binding_table.borrow_mut().retain(|key, _| *key as usize % 4 != texture_target_index);
+	}
+}
+
+//==============================================================================
+/// 섞기 인자 짝을 GL 이 받는지. (원본 isBlendFactorPairValid)
+//==============================================================================
+fn is_blend_factor_pair_valid(source_factor: u32, destination_factor: u32) -> bool {
+	if !BLEND_FACTOR_LIST.contains(&source_factor) || !BLEND_FACTOR_LIST.contains(&destination_factor) {
+		return false;
+	}
+	// WebGL 은 상수 색과 상수 알파를 소스와 대상에 섞어 쓰지 못하게 한다. (INVALID_OPERATION)
+	let is_constant_color = |factor: u32| factor == glow::CONSTANT_COLOR || factor == glow::ONE_MINUS_CONSTANT_COLOR;
+	let is_constant_alpha = |factor: u32| factor == glow::CONSTANT_ALPHA || factor == glow::ONE_MINUS_CONSTANT_ALPHA;
+	if (is_constant_color(source_factor) && is_constant_alpha(destination_factor)) || (is_constant_alpha(source_factor) && is_constant_color(destination_factor)) {
+		return false;
+	}
+	// 대상 인자의 SRC_ALPHA_SATURATE 는 판마다 받는지가 달라 모른다로 둔다.
+	destination_factor != glow::SRC_ALPHA_SATURATE
+}
+
+//==============================================================================
+/// 컨텍스트에 상태 캐시 걸기. (원본 WebGLStateCache.attach, 같은 컨텍스트에는 하나만, Graphic::new 가 부른다)
+//==============================================================================
+pub(crate) fn attach(gl: &Rc<glow::Context>) -> Rc<GlStateCache> {
+	if let Some(state_cache) = find(gl) {
+		return state_cache;
+	}
+	let state_cache = Rc::new(GlStateCache::new());
+	STATE_CACHE_LIST.with(|state_cache_list| {
+		let mut state_cache_list = state_cache_list.borrow_mut();
+		state_cache_list.retain(|(context, _)| context.strong_count() > 0);
+		state_cache_list.push((Rc::downgrade(gl), state_cache.clone()));
+	});
+	state_cache
+}
+
+//==============================================================================
+/// 컨텍스트의 상태 캐시 찾기. (원본 WebGLStateCache.find, 걸지 않았으면 None)
+//==============================================================================
+pub(crate) fn find(gl: &glow::Context) -> Option<Rc<GlStateCache>> {
+	STATE_CACHE_LIST.with(|state_cache_list| {
+		state_cache_list.borrow().iter().find(|(context, _)| std::ptr::eq(context.as_ptr(), gl) && context.strong_count() > 0).map(|(_, state_cache)| state_cache.clone())
+	})
+}
+
+//==============================================================================
+/// 컨텍스트의 상태 캐시로 하기. (걸지 않았으면 None 을 받는다)
+//==============================================================================
+fn with_state_cache<R>(gl: &glow::Context, callback: impl FnOnce(Option<&GlStateCache>) -> R) -> R {
+	STATE_CACHE_LIST.with(|state_cache_list| {
+		let state_cache_list = state_cache_list.borrow();
+		let state_cache = state_cache_list.iter().find(|(context, _)| std::ptr::eq(context.as_ptr(), gl) && context.strong_count() > 0).map(|(_, state_cache)| state_cache.as_ref());
+		callback(state_cache)
+	})
+}
+
+//==============================================================================
+/// 컨텍스트의 기억 모두 잊기. (원본 Graphic.resetGLStateCache, 이 모듈을 거치지 않고 glow 로 상태를 바꾼 뒤)
+//==============================================================================
+pub(crate) fn reset(gl: &glow::Context) {
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.reset();
+		}
+	});
+}
+
+//==============================================================================
+// 프레임 버퍼.
+//==============================================================================
+/// 프레임 버퍼 묶기. (원본 bindFramebuffer)
+pub(crate) unsafe fn bind_framebuffer(gl: &glow::Context, target: u32, framebuffer: Option<GlFramebuffer>) {
+	unsafe {
+		gl.bind_framebuffer(target, framebuffer);
+	}
+	with_state_cache(gl, |state_cache| {
+		let Some(state_cache) = state_cache else {
+			return;
+		};
+		if let Some(framebuffer) = framebuffer {
+			if state_cache.deleted_framebuffer_set.borrow().contains(&framebuffer) {
+				state_cache.draw_framebuffer.set(None);
+				state_cache.read_framebuffer.set(None);
+				return;
+			}
+		}
+		if target == glow::FRAMEBUFFER {
+			state_cache.draw_framebuffer.set(Some(framebuffer));
+			state_cache.read_framebuffer.set(Some(framebuffer));
+		}
+		else if target == glow::DRAW_FRAMEBUFFER {
+			state_cache.draw_framebuffer.set(Some(framebuffer));
+		}
+		else if target == glow::READ_FRAMEBUFFER {
+			state_cache.read_framebuffer.set(Some(framebuffer));
+		}
+	});
+}
+
+/// 프레임 버퍼 만들기. (지운 이름을 GL 이 다시 주면 지운 기억에서 뺀다)
+pub(crate) unsafe fn create_framebuffer(gl: &glow::Context) -> Result<GlFramebuffer, String> {
+	let framebuffer = unsafe { gl.create_framebuffer() }?;
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.deleted_framebuffer_set.borrow_mut().remove(&framebuffer);
+		}
+	});
+	Ok(framebuffer)
+}
+
+/// 프레임 버퍼 지우기. (원본 deleteFramebuffer, 묶인 것을 지우면 GL 이 기본 프레임 버퍼로 되돌린다)
+pub(crate) unsafe fn delete_framebuffer(gl: &glow::Context, framebuffer: GlFramebuffer) {
+	unsafe {
+		gl.delete_framebuffer(framebuffer);
+	}
+	with_state_cache(gl, |state_cache| {
+		let Some(state_cache) = state_cache else {
+			return;
+		};
+		state_cache.deleted_framebuffer_set.borrow_mut().insert(framebuffer);
+		if state_cache.draw_framebuffer.get() == Some(Some(framebuffer)) {
+			state_cache.draw_framebuffer.set(Some(None));
+		}
+		if state_cache.read_framebuffer.get() == Some(Some(framebuffer)) {
+			state_cache.read_framebuffer.set(Some(None));
+		}
+	});
+}
+
+//==============================================================================
+// 뷰포트와 가위. (너비나 높이가 음수면 GL 이 무시한다, 뷰포트 크기는 한도에 맞춰 줄인다)
+//==============================================================================
+/// 뷰포트. (원본 viewport)
+pub(crate) unsafe fn viewport(gl: &glow::Context, x: i32, y: i32, width: i32, height: i32) {
+	unsafe {
+		gl.viewport(x, y, width, height);
+	}
+	with_state_cache(gl, |state_cache| {
+		let Some(state_cache) = state_cache else {
+			return;
+		};
+		if width < 0 || height < 0 {
+			return;
+		}
+		let maximum_viewport_size = state_cache.read_maximum_viewport_size(gl);
+		if maximum_viewport_size[0] <= 0 || maximum_viewport_size[1] <= 0 {
+			state_cache.viewport.set(None);
+			return;
+		}
+		state_cache.viewport.set(Some([x, y, width.min(maximum_viewport_size[0]), height.min(maximum_viewport_size[1])]));
+	});
+}
+
+/// 가위 상자. (원본 scissor)
+pub(crate) unsafe fn scissor(gl: &glow::Context, x: i32, y: i32, width: i32, height: i32) {
+	unsafe {
+		gl.scissor(x, y, width, height);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			if width >= 0 && height >= 0 {
+				state_cache.scissor_box.set(Some([x, y, width, height]));
+			}
+		}
+	});
+}
+
+//==============================================================================
+// 켜고 끄기.
+//==============================================================================
+/// 기능 켜기. (원본 enable)
+pub(crate) unsafe fn enable(gl: &glow::Context, capability: u32) {
+	unsafe {
+		gl.enable(capability);
+	}
+	set_capability(gl, capability, true);
+}
+
+/// 기능 끄기. (원본 disable)
+pub(crate) unsafe fn disable(gl: &glow::Context, capability: u32) {
+	unsafe {
+		gl.disable(capability);
+	}
+	set_capability(gl, capability, false);
+}
+
+fn set_capability(gl: &glow::Context, capability: u32, is_enabled: bool) {
+	with_state_cache(gl, |state_cache| {
+		if let (Some(state_cache), Some(capability_index)) = (state_cache, GlStateCache::find_capability_index(capability)) {
+			state_cache.capability_list[capability_index].set(Some(is_enabled));
+		}
+	});
+}
+
+/// 기능이 켜졌는지. (원본 isEnabled, 기억한 값으로 답한다)
+pub(crate) unsafe fn is_enabled(gl: &glow::Context, capability: u32) -> bool {
+	with_state_cache(gl, |state_cache| {
+		let (Some(state_cache), Some(capability_index)) = (state_cache, GlStateCache::find_capability_index(capability)) else {
+			return unsafe { gl.is_enabled(capability) };
+		};
+		if let Some(is_enabled) = state_cache.capability_list[capability_index].get() {
+			return is_enabled;
+		}
+		let is_enabled = unsafe { gl.is_enabled(capability) };
+		state_cache.capability_list[capability_index].set(Some(is_enabled));
+		is_enabled
+	})
+}
+
+//==============================================================================
+// 비우기 색과 색 쓰기. (비우기 색은 0 ~ 1 로 자르지 않고 그대로 기억한다)
+//==============================================================================
+/// 비우기 색. (원본 clearColor)
+pub(crate) unsafe fn clear_color(gl: &glow::Context, red: f32, green: f32, blue: f32, alpha: f32) {
+	unsafe {
+		gl.clear_color(red, green, blue, alpha);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.clear_color.set(Some([red, green, blue, alpha]));
+		}
+	});
+}
+
+/// 색 쓰기 가림. (원본 colorMask)
+pub(crate) unsafe fn color_mask(gl: &glow::Context, red: bool, green: bool, blue: bool, alpha: bool) {
+	unsafe {
+		gl.color_mask(red, green, blue, alpha);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.color_write_mask.set(Some([red, green, blue, alpha]));
+		}
+	});
+}
+
+//==============================================================================
+// 섞기.
+//==============================================================================
+/// 섞기 인자. (원본 blendFunc)
+pub(crate) unsafe fn blend_func(gl: &glow::Context, source_factor: u32, destination_factor: u32) {
+	unsafe {
+		gl.blend_func(source_factor, destination_factor);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.blend_factors.set(if is_blend_factor_pair_valid(source_factor, destination_factor) { Some([source_factor, destination_factor, source_factor, destination_factor]) } else { None });
+		}
+	});
+}
+
+/// 섞기 인자 따로. (원본 blendFuncSeparate)
+pub(crate) unsafe fn blend_func_separate(gl: &glow::Context, source_rgb: u32, destination_rgb: u32, source_alpha: u32, destination_alpha: u32) {
+	unsafe {
+		gl.blend_func_separate(source_rgb, destination_rgb, source_alpha, destination_alpha);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			let is_valid = is_blend_factor_pair_valid(source_rgb, destination_rgb) && is_blend_factor_pair_valid(source_alpha, destination_alpha);
+			state_cache.blend_factors.set(if is_valid { Some([source_rgb, destination_rgb, source_alpha, destination_alpha]) } else { None });
+		}
+	});
+}
+
+//==============================================================================
+// 깊이와 면.
+//==============================================================================
+/// 깊이 쓰기. (원본 depthMask)
+pub(crate) unsafe fn depth_mask(gl: &glow::Context, value: bool) {
+	unsafe {
+		gl.depth_mask(value);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.depth_write_mask.set(Some(value));
+		}
+	});
+}
+
+/// 깊이 견주기. (원본 depthFunc, NEVER ~ ALWAYS)
+pub(crate) unsafe fn depth_func(gl: &glow::Context, function: u32) {
+	unsafe {
+		gl.depth_func(function);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.depth_function.set(if (glow::NEVER..=glow::ALWAYS).contains(&function) { Some(function) } else { None });
+		}
+	});
+}
+
+/// 앞면 감김 방향. (원본 frontFace, CW, CCW)
+pub(crate) unsafe fn front_face(gl: &glow::Context, mode: u32) {
+	unsafe {
+		gl.front_face(mode);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.front_face.set(if mode == glow::CW || mode == glow::CCW { Some(mode) } else { None });
+		}
+	});
+}
+
+/// 가리는 면. (원본 cullFace, FRONT, BACK, FRONT_AND_BACK)
+pub(crate) unsafe fn cull_face(gl: &glow::Context, mode: u32) {
+	unsafe {
+		gl.cull_face(mode);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.cull_face_mode.set(if mode == glow::FRONT || mode == glow::BACK || mode == glow::FRONT_AND_BACK { Some(mode) } else { None });
+		}
+	});
+}
+
+//==============================================================================
+// 프로그램과 버텍스 어레이. (링크에 실패한 프로그램을 쓰게 하면 GL 이 무시하므로, 링크 결과를 모를 때는 다음에 읽을 때 묻는다)
+//==============================================================================
+/// 프로그램 쓰기. (원본 useProgram)
+pub(crate) unsafe fn use_program(gl: &glow::Context, program: Option<GlProgram>) {
+	unsafe {
+		gl.use_program(program);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			let is_known = match program {
+				Some(program) => state_cache.program_link_status_table.borrow().get(&program) == Some(&true),
+				None => true,
+			};
+			state_cache.program.set(if is_known { Some(program) } else { None });
+		}
+	});
+}
+
+/// 프로그램 만들기. (지운 이름을 GL 이 다시 주면 그 이름의 링크 결과를 잊는다)
+pub(crate) unsafe fn create_program(gl: &glow::Context) -> Result<GlProgram, String> {
+	let program = unsafe { gl.create_program() }?;
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.program_link_status_table.borrow_mut().remove(&program);
+		}
+	});
+	Ok(program)
+}
+
+/// 프로그램 링크. (원본 linkProgram, 다시 링크하면 결과를 다시 알아내야 한다)
+pub(crate) unsafe fn link_program(gl: &glow::Context, program: GlProgram) {
+	unsafe {
+		gl.link_program(program);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.program_link_status_table.borrow_mut().remove(&program);
+		}
+	});
+}
+
+/// 링크 결과 묻기. (원본 getProgramParameter(LINK_STATUS), 물은 것을 보고 기억한다)
+pub(crate) unsafe fn get_program_link_status(gl: &glow::Context, program: GlProgram) -> bool {
+	let is_linked = unsafe { gl.get_program_link_status(program) };
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			let mut program_link_status_table = state_cache.program_link_status_table.borrow_mut();
+			if program_link_status_table.get(&program) != Some(&false) {
+				program_link_status_table.insert(program, is_linked);
+			}
+		}
+	});
+	is_linked
+}
+
+/// 프로그램 지우기. (원본 deleteProgram, 쓰는 중인 것은 지워도 계속 쓰이고, 다시 쓰게 하면 GL 이 무시한다)
+pub(crate) unsafe fn delete_program(gl: &glow::Context, program: GlProgram) {
+	unsafe {
+		gl.delete_program(program);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.program_link_status_table.borrow_mut().insert(program, false);
+		}
+	});
+}
+
+/// 버텍스 어레이 묶기. (원본 bindVertexArray)
+pub(crate) unsafe fn bind_vertex_array(gl: &glow::Context, vertex_array: Option<GlVertexArray>) {
+	unsafe {
+		gl.bind_vertex_array(vertex_array);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			let is_known = match vertex_array {
+				Some(vertex_array) => !state_cache.deleted_vertex_array_set.borrow().contains(&vertex_array),
+				None => true,
+			};
+			state_cache.vertex_array.set(if is_known { Some(vertex_array) } else { None });
+		}
+	});
+}
+
+/// 버텍스 어레이 만들기. (지운 이름을 GL 이 다시 주면 지운 기억에서 뺀다)
+pub(crate) unsafe fn create_vertex_array(gl: &glow::Context) -> Result<GlVertexArray, String> {
+	let vertex_array = unsafe { gl.create_vertex_array() }?;
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.deleted_vertex_array_set.borrow_mut().remove(&vertex_array);
+		}
+	});
+	Ok(vertex_array)
+}
+
+/// 버텍스 어레이 지우기. (원본 deleteVertexArray, 묶인 것을 지우면 GL 이 기본으로 되돌린다)
+pub(crate) unsafe fn delete_vertex_array(gl: &glow::Context, vertex_array: GlVertexArray) {
+	unsafe {
+		gl.delete_vertex_array(vertex_array);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.deleted_vertex_array_set.borrow_mut().insert(vertex_array);
+			if state_cache.vertex_array.get() == Some(Some(vertex_array)) {
+				state_cache.vertex_array.set(Some(None));
+			}
+		}
+	});
+}
+
+//==============================================================================
+// 텍스처.
+//==============================================================================
+/// 활성 텍스처 유닛. (원본 activeTexture, TEXTURE0 + 번호)
+pub(crate) unsafe fn active_texture(gl: &glow::Context, texture_unit: u32) {
+	unsafe {
+		gl.active_texture(texture_unit);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			let maximum_texture_unit_count = state_cache.read_constant_parameter(gl, glow::MAX_COMBINED_TEXTURE_IMAGE_UNITS).max(0) as u32;
+			let is_valid = texture_unit >= glow::TEXTURE0 && texture_unit < glow::TEXTURE0 + maximum_texture_unit_count;
+			state_cache.active_texture.set(if is_valid { Some(texture_unit) } else { None });
+		}
+	});
+}
+
+/// 텍스처 묶기. (원본 bindTexture, 텍스처는 처음 묶은 대상에만 묶인다)
+pub(crate) unsafe fn bind_texture(gl: &glow::Context, target: u32, texture: Option<GlTexture>) {
+	unsafe {
+		gl.bind_texture(target, texture);
+	}
+	with_state_cache(gl, |state_cache| {
+		let Some(state_cache) = state_cache else {
+			return;
+		};
+		let Some(texture_target_index) = TEXTURE_TARGET_LIST.iter().position(|&value| value == target) else {
+			return;
+		};
+		let Some(active_texture) = state_cache.active_texture.get() else {
+			// 유닛을 모르면 그 대상의 기억을 모두 잊는다.
+			state_cache.forget_texture_target(texture_target_index);
+			return;
+		};
+		let key = (active_texture - glow::TEXTURE0) * 4 + texture_target_index as u32;
+		let Some(texture) = texture else {
+			state_cache.texture_binding_table.borrow_mut().insert(key, None);
+			return;
+		};
+		if state_cache.deleted_texture_set.borrow().contains(&texture) {
+			state_cache.texture_binding_table.borrow_mut().remove(&key);
+			return;
+		}
+		let mut texture_target_table = state_cache.texture_target_table.borrow_mut();
+		match texture_target_table.get(&texture) {
+			None => {
+				texture_target_table.insert(texture, texture_target_index);
+			}
+			Some(&first_target_index) => {
+				if first_target_index != texture_target_index {
+					return;
+				}
+			}
+		}
+		state_cache.texture_binding_table.borrow_mut().insert(key, Some(texture));
+	});
+}
+
+/// 텍스처 만들기. (지운 이름을 GL 이 다시 주면 지운 기억과 처음 묶은 대상을 뺀다)
+pub(crate) unsafe fn create_texture(gl: &glow::Context) -> Result<GlTexture, String> {
+	let texture = unsafe { gl.create_texture() }?;
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.deleted_texture_set.borrow_mut().remove(&texture);
+			state_cache.texture_target_table.borrow_mut().remove(&texture);
+		}
+	});
+	Ok(texture)
+}
+
+/// 텍스처 지우기. (원본 deleteTexture, 묶인 것을 지우면 GL 이 그 유닛에서 풀어 준다)
+pub(crate) unsafe fn delete_texture(gl: &glow::Context, texture: GlTexture) {
+	unsafe {
+		gl.delete_texture(texture);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			state_cache.deleted_texture_set.borrow_mut().insert(texture);
+			for bound_texture in state_cache.texture_binding_table.borrow_mut().values_mut() {
+				if *bound_texture == Some(texture) {
+					*bound_texture = None;
+				}
+			}
+		}
+	});
+}
+
+//==============================================================================
+// 픽셀 올리기와 읽기 설정.
+//==============================================================================
+/// 픽셀 저장 설정. (원본 pixelStorei)
+pub(crate) unsafe fn pixel_store_i32(gl: &glow::Context, parameter: u32, value: i32) {
+	unsafe {
+		gl.pixel_store_i32(parameter, value);
+	}
+	with_state_cache(gl, |state_cache| {
+		if let Some(state_cache) = state_cache {
+			if parameter == glow::PACK_ALIGNMENT || parameter == glow::UNPACK_ALIGNMENT {
+				let mut pixel_store_table = state_cache.pixel_store_table.borrow_mut();
+				if matches!(value, 1 | 2 | 4 | 8) {
+					pixel_store_table.insert(parameter, value);
+				}
+				else {
+					pixel_store_table.remove(&parameter);
+				}
+			}
+		}
+	});
+}
+
+//==============================================================================
+// 읽기. (기억한 값으로 답하고 모르면 GL 에 한 번 묻고 기억한다)
+//==============================================================================
+/// 정수 하나 읽기. (원본 getParameter)
+pub(crate) unsafe fn get_parameter_i32(gl: &glow::Context, parameter: u32) -> i32 {
+	with_state_cache(gl, |state_cache| {
+		let query = || unsafe { gl.get_parameter_i32(parameter) };
+		let Some(state_cache) = state_cache else {
+			return query();
+		};
+		match parameter {
+			glow::BLEND_SRC_RGB | glow::BLEND_DST_RGB | glow::BLEND_SRC_ALPHA | glow::BLEND_DST_ALPHA => {
+				let blend_factors = state_cache.blend_factors.get().unwrap_or_else(|| {
+					let blend_factors = unsafe { [gl.get_parameter_i32(glow::BLEND_SRC_RGB) as u32, gl.get_parameter_i32(glow::BLEND_DST_RGB) as u32, gl.get_parameter_i32(glow::BLEND_SRC_ALPHA) as u32, gl.get_parameter_i32(glow::BLEND_DST_ALPHA) as u32] };
+					state_cache.blend_factors.set(Some(blend_factors));
+					blend_factors
+				});
+				let index = match parameter {
+					glow::BLEND_SRC_RGB => 0,
+					glow::BLEND_DST_RGB => 1,
+					glow::BLEND_SRC_ALPHA => 2,
+					_ => 3,
+				};
+				blend_factors[index] as i32
+			}
+			glow::BLEND_EQUATION_RGB | glow::BLEND_EQUATION_ALPHA => {
+				let blend_equations = state_cache.blend_equations.get().unwrap_or_else(|| {
+					let blend_equations = unsafe { [gl.get_parameter_i32(glow::BLEND_EQUATION_RGB) as u32, gl.get_parameter_i32(glow::BLEND_EQUATION_ALPHA) as u32] };
+					state_cache.blend_equations.set(Some(blend_equations));
+					blend_equations
+				});
+				blend_equations[if parameter == glow::BLEND_EQUATION_RGB { 0 } else { 1 }] as i32
+			}
+			glow::DEPTH_FUNC => remember_u32(&state_cache.depth_function, query) as i32,
+			glow::FRONT_FACE => remember_u32(&state_cache.front_face, query) as i32,
+			glow::CULL_FACE_MODE => remember_u32(&state_cache.cull_face_mode, query) as i32,
+			glow::ACTIVE_TEXTURE => state_cache.read_active_texture(gl) as i32,
+			glow::PACK_ALIGNMENT | glow::UNPACK_ALIGNMENT => {
+				if let Some(value) = state_cache.pixel_store_table.borrow().get(&parameter) {
+					return *value;
+				}
+				let value = query();
+				state_cache.pixel_store_table.borrow_mut().insert(parameter, value);
+				value
+			}
+			_ if CONSTANT_PARAMETER_LIST.contains(&parameter) => state_cache.read_constant_parameter(gl, parameter),
+			_ => query(),
+		}
+	})
+}
+
+fn remember_u32(cell: &Cell<Option<u32>>, query: impl FnOnce() -> i32) -> u32 {
+	if let Some(value) = cell.get() {
+		return value;
+	}
+	let value = query() as u32;
+	cell.set(Some(value));
+	value
+}
+
+/// 참 거짓 하나 읽기. (원본 getParameter)
+pub(crate) unsafe fn get_parameter_bool(gl: &glow::Context, parameter: u32) -> bool {
+	with_state_cache(gl, |state_cache| match (state_cache, parameter) {
+		(Some(state_cache), glow::DEPTH_WRITEMASK) => {
+			if let Some(value) = state_cache.depth_write_mask.get() {
+				return value;
+			}
+			let value = unsafe { gl.get_parameter_bool(parameter) };
+			state_cache.depth_write_mask.set(Some(value));
+			value
+		}
+		_ => unsafe { gl.get_parameter_bool(parameter) },
+	})
+}
+
+/// 정수 여럿 읽기. (원본 getParameter, VIEWPORT, SCISSOR_BOX, MAX_VIEWPORT_DIMS)
+pub(crate) unsafe fn get_parameter_i32_slice(gl: &glow::Context, parameter: u32, out: &mut [i32]) {
+	with_state_cache(gl, |state_cache| {
+		let cell = match (state_cache, parameter) {
+			(Some(state_cache), glow::VIEWPORT) if out.len() >= 4 => &state_cache.viewport,
+			(Some(state_cache), glow::SCISSOR_BOX) if out.len() >= 4 => &state_cache.scissor_box,
+			(Some(state_cache), glow::MAX_VIEWPORT_DIMS) if out.len() >= 2 => {
+				out[..2].copy_from_slice(&state_cache.read_maximum_viewport_size(gl));
+				return;
+			}
+			_ => {
+				unsafe {
+					gl.get_parameter_i32_slice(parameter, out);
+				}
+				return;
+			}
+		};
+		let value = cell.get().unwrap_or_else(|| {
+			let mut value = [0i32; 4];
+			unsafe {
+				gl.get_parameter_i32_slice(parameter, &mut value);
+			}
+			cell.set(Some(value));
+			value
+		});
+		out[..4].copy_from_slice(&value);
+	});
+}
+
+/// 실수 여럿 읽기. (원본 getParameter, COLOR_CLEAR_VALUE)
+pub(crate) unsafe fn get_parameter_f32_slice(gl: &glow::Context, parameter: u32, out: &mut [f32]) {
+	with_state_cache(gl, |state_cache| {
+		let Some(state_cache) = state_cache.filter(|_| parameter == glow::COLOR_CLEAR_VALUE && out.len() >= 4) else {
+			unsafe {
+				gl.get_parameter_f32_slice(parameter, out);
+			}
+			return;
+		};
+		let value = state_cache.clear_color.get().unwrap_or_else(|| {
+			let mut value = [0f32; 4];
+			unsafe {
+				gl.get_parameter_f32_slice(parameter, &mut value);
+			}
+			state_cache.clear_color.set(Some(value));
+			value
+		});
+		out[..4].copy_from_slice(&value);
+	});
+}
+
+/// 참 거짓 넷 읽기. (원본 getParameter, COLOR_WRITEMASK)
+pub(crate) unsafe fn get_parameter_bool_array<const N: usize>(gl: &glow::Context, parameter: u32) -> [bool; N] {
+	with_state_cache(gl, |state_cache| {
+		let Some(state_cache) = state_cache.filter(|_| parameter == glow::COLOR_WRITEMASK && N == 4) else {
+			return unsafe { gl.get_parameter_bool_array::<N>(parameter) };
+		};
+		let value = state_cache.color_write_mask.get().unwrap_or_else(|| {
+			let value = unsafe { gl.get_parameter_bool_array::<4>(parameter) };
+			state_cache.color_write_mask.set(Some(value));
+			value
+		});
+		let mut out = [false; N];
+		out.copy_from_slice(&value[..N]);
+		out
+	})
+}
+
+/// 그리는 프레임 버퍼 읽기. (원본 getDrawFramebuffer, 기본 프레임 버퍼면 None, query 는 모를 때 GL 에 묻는 길)
+pub(crate) fn read_draw_framebuffer(gl: &glow::Context, query: impl FnOnce() -> Option<GlFramebuffer>) -> Option<GlFramebuffer> {
+	with_state_cache(gl, |state_cache| {
+		let Some(state_cache) = state_cache else {
+			return query();
+		};
+		if let Some(framebuffer) = state_cache.draw_framebuffer.get() {
+			return framebuffer;
+		}
+		let framebuffer = query();
+		state_cache.draw_framebuffer.set(Some(framebuffer));
+		framebuffer
+	})
+}
+
+/// 쓰는 프로그램 읽기. (원본 getParameter(CURRENT_PROGRAM))
+pub(crate) fn read_program(gl: &glow::Context, query: impl FnOnce() -> Option<GlProgram>) -> Option<GlProgram> {
+	with_state_cache(gl, |state_cache| {
+		let Some(state_cache) = state_cache else {
+			return query();
+		};
+		if let Some(program) = state_cache.program.get() {
+			return program;
+		}
+		let program = query();
+		state_cache.program.set(Some(program));
+		program
+	})
+}
+
+/// 묶인 버텍스 어레이 읽기. (원본 getParameter(VERTEX_ARRAY_BINDING))
+pub(crate) fn read_vertex_array(gl: &glow::Context, query: impl FnOnce() -> Option<GlVertexArray>) -> Option<GlVertexArray> {
+	with_state_cache(gl, |state_cache| {
+		let Some(state_cache) = state_cache else {
+			return query();
+		};
+		if let Some(vertex_array) = state_cache.vertex_array.get() {
+			return vertex_array;
+		}
+		let vertex_array = query();
+		state_cache.vertex_array.set(Some(vertex_array));
+		vertex_array
+	})
+}
+
+/// 활성 유닛에 묶인 2D 텍스처 읽기. (원본 getParameter(TEXTURE_BINDING_2D))
+pub(crate) fn read_texture_binding_2d(gl: &glow::Context, query: impl FnOnce() -> Option<GlTexture>) -> Option<GlTexture> {
+	with_state_cache(gl, |state_cache| {
+		let Some(state_cache) = state_cache else {
+			return query();
+		};
+		let key = (state_cache.read_active_texture(gl) - glow::TEXTURE0) * 4;
+		if let Some(texture) = state_cache.texture_binding_table.borrow().get(&key) {
+			return *texture;
+		}
+		let texture = query();
+		state_cache.texture_binding_table.borrow_mut().insert(key, texture);
+		texture
+	})
+}
+
+//==============================================================================
+// 견주기. (기억한 값이 같을 때만 참, 모르면 거짓, 부르는 쪽이 같은 값 호출을 건너뛸 때)
+//==============================================================================
+/// 그 프로그램을 쓰는 중인지. (원본 isProgramInUse)
+pub(crate) fn is_program_in_use(gl: &glow::Context, program: Option<GlProgram>) -> bool {
+	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.program.get() == Some(program)))
+}
+
+/// 그 버텍스 어레이가 묶였는지. (원본 isVertexArrayBound)
+pub(crate) fn is_vertex_array_bound(gl: &glow::Context, vertex_array: Option<GlVertexArray>) -> bool {
+	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.vertex_array.get() == Some(vertex_array)))
+}
+
+/// 활성 텍스처 유닛이 그것인지. (원본 isActiveTexture, TEXTURE0 + 번호)
+pub(crate) fn is_active_texture(gl: &glow::Context, texture_unit: u32) -> bool {
+	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.active_texture.get() == Some(texture_unit)))
+}
+
+/// 그 유닛과 대상에 그 텍스처가 묶였는지. (원본 isTextureBound)
+pub(crate) fn is_texture_bound(gl: &glow::Context, texture_unit: u32, target: u32, texture: Option<GlTexture>) -> bool {
+	let Some(texture_target_index) = TEXTURE_TARGET_LIST.iter().position(|&value| value == target) else {
+		return false;
+	};
+	if texture_unit < glow::TEXTURE0 {
+		return false;
+	}
+	let key = (texture_unit - glow::TEXTURE0) * 4 + texture_target_index as u32;
+	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.texture_binding_table.borrow().get(&key) == Some(&texture)))
+}
+
+/// 앞면 감김이 그것인지. (원본 isFrontFace)
+pub(crate) fn is_front_face(gl: &glow::Context, mode: u32) -> bool {
+	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.front_face.get() == Some(mode)))
+}
+
+/// 가리는 면이 그것인지. (원본 isCullFace)
+pub(crate) fn is_cull_face(gl: &glow::Context, mode: u32) -> bool {
+	with_state_cache(gl, |state_cache| state_cache.is_some_and(|state_cache| state_cache.cull_face_mode.get() == Some(mode)))
+}
+
+//==============================================================================
+// 시험. (원본 webglstatecachechrome.test.mjs 와 같은 꼴, 진짜 GL 컨텍스트를 맥의 CGL 로 창 없이 짓는다)
+//==============================================================================
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+	use super::*;
+	use std::ffi::{c_char, c_void};
+
+	#[link(name = "OpenGL", kind = "framework")]
+	extern "C" {
+		fn CGLChoosePixelFormat(attribute_list: *const i32, pixel_format: *mut *mut c_void, pixel_format_count: *mut i32) -> i32;
+		fn CGLCreateContext(pixel_format: *mut c_void, share_context: *mut c_void, context: *mut *mut c_void) -> i32;
+		fn CGLDestroyPixelFormat(pixel_format: *mut c_void) -> i32;
+		fn CGLSetCurrentContext(context: *mut c_void) -> i32;
+	}
+
+	extern "C" {
+		fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+	}
+
+	const VERTEX_SHADER_SOURCE: &str = "#version 300 es\nin vec2 vertexPosition;\nvoid main() {\n\tgl_Position = vec4(vertexPosition, 0.0, 1.0);\n}\n";
+	const FRAGMENT_SHADER_SOURCE: &str = "#version 300 es\nprecision highp float;\nout vec4 outputColor;\nvoid main() {\n\toutputColor = vec4(1.0);\n}\n";
+
+	/// 창 없는 GL 3.2 이상 코어 컨텍스트. (CGL 을 바로 불러 AppKit 과 주 스레드 없이 짓는다, 못 지으면 None, 시험을 건너뛴다)
+	fn create_surfaceless_context() -> Option<Rc<glow::Context>> {
+		// kCGLPFAOpenGLProfile, kCGLOGLPVersion_3_2_Core (맥은 4.1 코어를 준다), kCGLPFAAccelerated.
+		let attribute_list: [i32; 4] = [99, 0x3200, 73, 0];
+		let mut pixel_format: *mut c_void = std::ptr::null_mut();
+		let mut pixel_format_count = 0i32;
+		let mut context: *mut c_void = std::ptr::null_mut();
+		unsafe {
+			if CGLChoosePixelFormat(attribute_list.as_ptr(), &mut pixel_format, &mut pixel_format_count) != 0 || pixel_format.is_null() {
+				return None;
+			}
+			let result = CGLCreateContext(pixel_format, std::ptr::null_mut(), &mut context);
+			CGLDestroyPixelFormat(pixel_format);
+			if result != 0 || context.is_null() || CGLSetCurrentContext(context) != 0 {
+				return None;
+			}
+			// RTLD_DEFAULT 는 맥에서 -2.
+			let gl = glow::Context::from_loader_function_cstr(|symbol_name| dlsym(-2isize as *mut c_void, symbol_name.as_ptr()) as *const _);
+			Some(Rc::new(gl))
+		}
+	}
+
+	/// 섞기 쉬운 수. (시험마다 같은 차례)
+	struct NumberSequence(u64);
+
+	impl NumberSequence {
+		fn read(&mut self, count: usize) -> usize {
+			self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+			((self.0 >> 33) as usize) % count
+		}
+	}
+
+	/// 마구 부르기 뒤 캐시 답이 진짜 GL 과 같은지. (원본 600 번)
+	#[test]
+	fn cache_answers_match_real_gl_after_random_calls() {
+		let Some(gl) = create_surfaceless_context() else {
+			eprintln!("glstatecache: 창 없는 GL 컨텍스트를 짓지 못해 건너뜀");
+			return;
+		};
+		let _ = attach(&gl);
+		let gl: &glow::Context = &gl;
+		let mut number_sequence = NumberSequence(20261127);
+		let mut mismatch_list: Vec<String> = Vec::new();
+		unsafe {
+			let program_list = [crate::core::shaderprogram::ShaderProgram::new(gl, VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE).unwrap().get_program(), crate::core::shaderprogram::ShaderProgram::new(gl, VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE).unwrap().get_program()];
+			let failed_program = create_program(gl).unwrap();
+			link_program(gl, failed_program);
+			let _ = get_program_link_status(gl, failed_program);
+			let mut framebuffer_list: Vec<GlFramebuffer> = (0..3).map(|_| create_framebuffer(gl).unwrap()).collect();
+			let mut texture_list: Vec<GlTexture> = (0..4).map(|_| create_texture(gl).unwrap()).collect();
+			let mut vertex_array_list: Vec<GlVertexArray> = (0..2).map(|_| create_vertex_array(gl).unwrap()).collect();
+			let capability_list = [glow::BLEND, glow::CULL_FACE, glow::DEPTH_TEST, glow::SCISSOR_TEST, glow::STENCIL_TEST, glow::POLYGON_OFFSET_FILL];
+			let factor_list = [glow::ZERO, glow::ONE, glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::DST_COLOR, glow::CONSTANT_COLOR, glow::CONSTANT_ALPHA, 0x1234];
+			for step in 0..600 {
+				match number_sequence.read(19) {
+					0 => bind_framebuffer(gl, [glow::FRAMEBUFFER, glow::DRAW_FRAMEBUFFER, glow::READ_FRAMEBUFFER][number_sequence.read(3)], if number_sequence.read(4) == 0 { None } else { Some(framebuffer_list[number_sequence.read(framebuffer_list.len())]) }),
+					1 => {
+						let index = number_sequence.read(framebuffer_list.len());
+						delete_framebuffer(gl, framebuffer_list[index]);
+						framebuffer_list[index] = create_framebuffer(gl).unwrap();
+					}
+					2 => viewport(gl, number_sequence.read(50) as i32 - 10, number_sequence.read(50) as i32, number_sequence.read(4000) as i32 - 5, number_sequence.read(100000) as i32),
+					3 => scissor(gl, number_sequence.read(50) as i32, number_sequence.read(50) as i32, number_sequence.read(300) as i32 - 5, number_sequence.read(300) as i32),
+					4 => enable(gl, capability_list[number_sequence.read(capability_list.len())]),
+					5 => disable(gl, capability_list[number_sequence.read(capability_list.len())]),
+					6 => clear_color(gl, number_sequence.read(5) as f32 * 0.5 - 0.5, 0.25, number_sequence.read(3) as f32, 1.0),
+					7 => color_mask(gl, number_sequence.read(2) == 0, number_sequence.read(2) == 0, true, number_sequence.read(2) == 0),
+					8 => blend_func(gl, factor_list[number_sequence.read(factor_list.len())], factor_list[number_sequence.read(factor_list.len())]),
+					9 => blend_func_separate(gl, factor_list[number_sequence.read(factor_list.len())], factor_list[number_sequence.read(factor_list.len())], factor_list[number_sequence.read(4)], factor_list[number_sequence.read(4)]),
+					10 => depth_mask(gl, number_sequence.read(2) == 0),
+					11 => depth_func(gl, [glow::LESS, glow::LEQUAL, glow::ALWAYS, 0x1234][number_sequence.read(4)]),
+					12 => front_face(gl, [glow::CW, glow::CCW, 0x1234][number_sequence.read(3)]),
+					13 => cull_face(gl, [glow::FRONT, glow::BACK, glow::FRONT_AND_BACK, 0x1234][number_sequence.read(4)]),
+					14 => use_program(gl, [None, Some(program_list[0]), Some(program_list[1]), Some(failed_program)][number_sequence.read(4)]),
+					15 => {
+						if number_sequence.read(5) == 0 {
+							let index = number_sequence.read(vertex_array_list.len());
+							delete_vertex_array(gl, vertex_array_list[index]);
+							vertex_array_list[index] = create_vertex_array(gl).unwrap();
+						}
+						bind_vertex_array(gl, if number_sequence.read(3) == 0 { None } else { Some(vertex_array_list[number_sequence.read(vertex_array_list.len())]) });
+					}
+					16 => active_texture(gl, glow::TEXTURE0 + number_sequence.read(6) as u32),
+					17 => {
+						if number_sequence.read(6) == 0 {
+							let index = number_sequence.read(texture_list.len());
+							delete_texture(gl, texture_list[index]);
+							texture_list[index] = create_texture(gl).unwrap();
+						}
+						bind_texture(gl, [glow::TEXTURE_2D, glow::TEXTURE_2D, glow::TEXTURE_CUBE_MAP][number_sequence.read(3)], if number_sequence.read(4) == 0 { None } else { Some(texture_list[number_sequence.read(texture_list.len())]) });
+					}
+					_ => pixel_store_i32(gl, [glow::PACK_ALIGNMENT, glow::UNPACK_ALIGNMENT][number_sequence.read(2)], [1, 2, 3, 4, 8][number_sequence.read(5)]),
+				}
+				if number_sequence.read(40) == 0 {
+					reset(gl);
+				}
+				// 캐시 답과 진짜 GL 견주기.
+				let mut compare = |name: &str, cached: String, real: String| {
+					if cached != real {
+						mismatch_list.push(format!("{} 번째 {}: 캐시 {} 진짜 {}", step, name, cached, real));
+					}
+				};
+				compare("FRAMEBUFFER_BINDING", format!("{:?}", read_draw_framebuffer(gl, || gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING))), format!("{:?}", gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING)));
+				let mut cached_viewport = [0i32; 4];
+				let mut real_viewport = [0i32; 4];
+				get_parameter_i32_slice(gl, glow::VIEWPORT, &mut cached_viewport);
+				gl.get_parameter_i32_slice(glow::VIEWPORT, &mut real_viewport);
+				compare("VIEWPORT", format!("{:?}", cached_viewport), format!("{:?}", real_viewport));
+				get_parameter_i32_slice(gl, glow::SCISSOR_BOX, &mut cached_viewport);
+				gl.get_parameter_i32_slice(glow::SCISSOR_BOX, &mut real_viewport);
+				compare("SCISSOR_BOX", format!("{:?}", cached_viewport), format!("{:?}", real_viewport));
+				let mut cached_color = [0f32; 4];
+				let mut real_color = [0f32; 4];
+				get_parameter_f32_slice(gl, glow::COLOR_CLEAR_VALUE, &mut cached_color);
+				gl.get_parameter_f32_slice(glow::COLOR_CLEAR_VALUE, &mut real_color);
+				compare("COLOR_CLEAR_VALUE", format!("{:?}", cached_color), format!("{:?}", real_color));
+				compare("COLOR_WRITEMASK", format!("{:?}", get_parameter_bool_array::<4>(gl, glow::COLOR_WRITEMASK)), format!("{:?}", gl.get_parameter_bool_array::<4>(glow::COLOR_WRITEMASK)));
+				compare("DEPTH_WRITEMASK", format!("{}", get_parameter_bool(gl, glow::DEPTH_WRITEMASK)), format!("{}", gl.get_parameter_bool(glow::DEPTH_WRITEMASK)));
+				for parameter in [glow::BLEND_SRC_RGB, glow::BLEND_DST_RGB, glow::BLEND_SRC_ALPHA, glow::BLEND_DST_ALPHA, glow::DEPTH_FUNC, glow::FRONT_FACE, glow::CULL_FACE_MODE, glow::ACTIVE_TEXTURE, glow::PACK_ALIGNMENT, glow::UNPACK_ALIGNMENT, glow::MAX_TEXTURE_SIZE] {
+					compare(&format!("0x{:04X}", parameter), format!("{}", get_parameter_i32(gl, parameter)), format!("{}", gl.get_parameter_i32(parameter)));
+				}
+				for capability in capability_list {
+					compare(&format!("is_enabled 0x{:04X}", capability), format!("{}", is_enabled(gl, capability)), format!("{}", gl.is_enabled(capability)));
+				}
+				compare("CURRENT_PROGRAM", format!("{:?}", read_program(gl, || gl.get_parameter_program(glow::CURRENT_PROGRAM))), format!("{:?}", gl.get_parameter_program(glow::CURRENT_PROGRAM)));
+				compare("VERTEX_ARRAY_BINDING", format!("{:?}", read_vertex_array(gl, || gl.get_parameter_vertex_array(glow::VERTEX_ARRAY_BINDING))), format!("{:?}", gl.get_parameter_vertex_array(glow::VERTEX_ARRAY_BINDING)));
+				compare("TEXTURE_BINDING_2D", format!("{:?}", read_texture_binding_2d(gl, || gl.get_parameter_texture(glow::TEXTURE_BINDING_2D))), format!("{:?}", gl.get_parameter_texture(glow::TEXTURE_BINDING_2D)));
+				// 견주기 함수가 참이면 진짜 GL 도 그 값이어야 한다.
+				let real_program = gl.get_parameter_program(glow::CURRENT_PROGRAM);
+				for program in [None, Some(program_list[0]), Some(program_list[1]), Some(failed_program)] {
+					if is_program_in_use(gl, program) && program != real_program {
+						mismatch_list.push(format!("{} 번째 is_program_in_use 참인데 진짜 {:?}", step, real_program));
+					}
+				}
+				let real_active_texture = gl.get_parameter_i32(glow::ACTIVE_TEXTURE) as u32;
+				for texture_unit in 0..6 {
+					if is_active_texture(gl, glow::TEXTURE0 + texture_unit) && glow::TEXTURE0 + texture_unit != real_active_texture {
+						mismatch_list.push(format!("{} 번째 is_active_texture 참인데 진짜 {}", step, real_active_texture));
+					}
+				}
+				let real_texture = gl.get_parameter_texture(glow::TEXTURE_BINDING_2D);
+				for texture in texture_list.iter().map(|texture| Some(*texture)).chain([None]) {
+					if is_texture_bound(gl, real_active_texture, glow::TEXTURE_2D, texture) && texture != real_texture {
+						mismatch_list.push(format!("{} 번째 is_texture_bound 참인데 진짜 {:?}", step, real_texture));
+					}
+				}
+				let real_vertex_array = gl.get_parameter_vertex_array(glow::VERTEX_ARRAY_BINDING);
+				for vertex_array in vertex_array_list.iter().map(|vertex_array| Some(*vertex_array)).chain([None]) {
+					if is_vertex_array_bound(gl, vertex_array) && vertex_array != real_vertex_array {
+						mismatch_list.push(format!("{} 번째 is_vertex_array_bound 참인데 진짜 {:?}", step, real_vertex_array));
+					}
+				}
+				for mode in [glow::CW, glow::CCW] {
+					if is_front_face(gl, mode) && mode as i32 != gl.get_parameter_i32(glow::FRONT_FACE) {
+						mismatch_list.push(format!("{} 번째 is_front_face 틀림", step));
+					}
+				}
+				for mode in [glow::FRONT, glow::BACK, glow::FRONT_AND_BACK] {
+					if is_cull_face(gl, mode) && mode as i32 != gl.get_parameter_i32(glow::CULL_FACE_MODE) {
+						mismatch_list.push(format!("{} 번째 is_cull_face 틀림", step));
+					}
+				}
+			}
+		}
+		eprintln!("glstatecache: 마구 부르기 600 번, 틀린 것 {} 개", mismatch_list.len());
+		assert!(mismatch_list.is_empty(), "틀린 것 {} 개: {:?}", mismatch_list.len(), &mismatch_list[..mismatch_list.len().min(8)]);
+	}
+}

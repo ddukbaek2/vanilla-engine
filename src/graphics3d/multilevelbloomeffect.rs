@@ -256,9 +256,9 @@ impl MultiLevelBloomEffect {
 			return;
 		}
 		unsafe {
-			gl.disable(glow::DEPTH_TEST);
-			gl.disable(glow::BLEND);
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::disable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::disable(gl, glow::BLEND);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 		}
 
 		// 1. 밝은 몫을 반 크기로 뽑기. (씬 → 첫 단)
@@ -270,7 +270,7 @@ impl MultiLevelBloomEffect {
 			gl.uniform_2_f64(extract_pass.get_uniform_location(gl, "sourceTexel").as_ref(), 1.0 / self.scene_width as f64, 1.0 / self.scene_height as f64);
 			gl.uniform_1_f64(extract_pass.get_uniform_location(gl, "threshold").as_ref(), self.threshold);
 			gl.uniform_1_f64(extract_pass.get_uniform_location(gl, "knee").as_ref(), self.knee);
-			gl.bind_texture(glow::TEXTURE_2D, scene_color_texture);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, scene_color_texture);
 		}
 		extract_pass.draw(gl);
 
@@ -286,35 +286,35 @@ impl MultiLevelBloomEffect {
 			level_render_target_list[level_index].bind(gl);
 			unsafe {
 				gl.uniform_2_f64(downsample_texel_location.as_ref(), 1.0 / source_render_target.get_width() as f64, 1.0 / source_render_target.get_height() as f64);
-				gl.bind_texture(glow::TEXTURE_2D, source_render_target.get_color_texture(0));
+				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, source_render_target.get_color_texture(0));
 			}
 			downsample_pass.draw(gl);
 		}
 
 		// 3. 거꾸로 두 배씩 키우며 위 단에 더하기.
 		let (blend_source_rgb, blend_destination_rgb, blend_source_alpha, blend_destination_alpha) = unsafe {
-			(gl.get_parameter_i32(glow::BLEND_SRC_RGB) as u32, gl.get_parameter_i32(glow::BLEND_DST_RGB) as u32, gl.get_parameter_i32(glow::BLEND_SRC_ALPHA) as u32, gl.get_parameter_i32(glow::BLEND_DST_ALPHA) as u32)
+			(crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_SRC_RGB) as u32, crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_DST_RGB) as u32, crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_SRC_ALPHA) as u32, crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_DST_ALPHA) as u32)
 		};
 		let upsample_pass = &self.upsample_pass;
 		upsample_pass.use_program(gl);
 		let upsample_texel_location = upsample_pass.get_uniform_location(gl, "sourceTexel");
 		unsafe {
 			gl.uniform_1_i32(upsample_pass.get_uniform_location(gl, "sourceTexture").as_ref(), 0);
-			gl.enable(glow::BLEND);
-			gl.blend_func(glow::ONE, glow::ONE);
+			crate::core::glstatecache::enable(gl, glow::BLEND);
+			crate::core::glstatecache::blend_func(gl, glow::ONE, glow::ONE);
 		}
 		for level_index in (1..level_count).rev() {
 			let source_render_target = &level_render_target_list[level_index];
 			level_render_target_list[level_index - 1].bind(gl);
 			unsafe {
 				gl.uniform_2_f64(upsample_texel_location.as_ref(), 1.0 / source_render_target.get_width() as f64, 1.0 / source_render_target.get_height() as f64);
-				gl.bind_texture(glow::TEXTURE_2D, source_render_target.get_color_texture(0));
+				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, source_render_target.get_color_texture(0));
 			}
 			upsample_pass.draw(gl);
 		}
 		unsafe {
-			gl.disable(glow::BLEND);
-			gl.blend_func_separate(blend_source_rgb, blend_destination_rgb, blend_source_alpha, blend_destination_alpha);
+			crate::core::glstatecache::disable(gl, glow::BLEND);
+			crate::core::glstatecache::blend_func_separate(gl, blend_source_rgb, blend_destination_rgb, blend_source_alpha, blend_destination_alpha);
 		}
 	}
 

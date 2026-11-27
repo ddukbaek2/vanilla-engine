@@ -399,9 +399,9 @@ impl SkinnedModelRenderer {
 	//==============================================================================
 	fn create_empty_shadow_texture(gl: &glow::Context) -> Result<GlTexture, String> {
 		unsafe {
-			let texture = gl.create_texture()?;
-			gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
-			gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+			let texture = crate::core::glstatecache::create_texture(gl)?;
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
 			// 웹의 glow 는 UNSIGNED_INT 바이트를 u32 배열로 보므로 4 바이트 맞춘 u32 에서 바이트를 읽는다.
 			let depth_values = [u32::MAX];
 			let depth_bytes = std::slice::from_raw_parts(depth_values.as_ptr() as *const u8, std::mem::size_of_val(&depth_values));
@@ -412,8 +412,8 @@ impl SkinnedModelRenderer {
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_COMPARE_MODE, glow::COMPARE_REF_TO_TEXTURE as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_COMPARE_FUNC, glow::LEQUAL as i32);
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 			Ok(texture)
 		}
 	}
@@ -462,18 +462,18 @@ impl SkinnedModelRenderer {
 					gl.uniform_1_i32(shadow_map_texture_location.as_ref(), TEXTURE_UNIT_SHADOWMAP as i32);
 					gl.uniform_1_f64(shadow_texel_size_location.as_ref(), self.shadow_texel_size);
 					gl.uniform_1_f64(shadow_strength_location.as_ref(), self.shadow_strength);
-					gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
-					gl.bind_texture(glow::TEXTURE_2D, Some(shadow_map_texture));
-					gl.active_texture(glow::TEXTURE0);
+					crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
+					crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(shadow_map_texture));
+					crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 				}
 			}
 			_ => {
 				unsafe {
 					gl.uniform_1_i32(shadow_map_texture_location.as_ref(), TEXTURE_UNIT_SHADOWMAP as i32);
 					gl.uniform_1_f64(shadow_strength_location.as_ref(), 0.0);
-					gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
-					gl.bind_texture(glow::TEXTURE_2D, Some(self.empty_shadow_texture));
-					gl.active_texture(glow::TEXTURE0);
+					crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
+					crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(self.empty_shadow_texture));
+					crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 				}
 			}
 		}
@@ -497,7 +497,7 @@ impl SkinnedModelRenderer {
 			draw_drawable_triangles(gl, drawable);
 		}
 		unsafe {
-			gl.bind_vertex_array(None);
+			crate::core::glstatecache::bind_vertex_array(gl, None);
 		}
 	}
 
@@ -563,7 +563,7 @@ impl SkinnedModelRenderer {
 			draw_drawable_triangles(gl, drawable);
 		}
 		unsafe {
-			gl.bind_vertex_array(None);
+			crate::core::glstatecache::bind_vertex_array(gl, None);
 		}
 	}
 
@@ -616,14 +616,14 @@ impl SkinnedModelRenderer {
 			}
 			self.apply_morph_uniforms(gl, wireframe_shader_program, drawable);
 			unsafe {
-				gl.bind_vertex_array(Some(drawable.vertex_array));
+				crate::core::glstatecache::bind_vertex_array(gl, Some(drawable.vertex_array));
 				gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(wireframe_index_buffer));
 				gl.draw_elements(glow::LINES, drawable.wireframe_index_count as i32, drawable.wireframe_index_component_type, 0);
 				gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, drawable.index_buffer);
 			}
 		}
 		unsafe {
-			gl.bind_vertex_array(None);
+			crate::core::glstatecache::bind_vertex_array(gl, None);
 		}
 	}
 
@@ -660,9 +660,9 @@ impl SkinnedModelRenderer {
 			gl.uniform_1_i32(morph_texture_width_location.as_ref(), drawable.morph_texture_width);
 			gl.uniform_1_f32_slice(morph_weights_location.as_ref(), &drawable.morph_weights);
 			gl.uniform_1_i32(morph_texture_location.as_ref(), MORPH_TEXTURE_UNIT as i32);
-			gl.active_texture(glow::TEXTURE0 + MORPH_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, drawable.morph_texture);
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + MORPH_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, drawable.morph_texture);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 		}
 	}
 
@@ -771,7 +771,7 @@ impl SkinnedModelRenderer {
 //==============================================================================
 fn draw_drawable_triangles(gl: &glow::Context, drawable: &Drawable) {
 	unsafe {
-		gl.bind_vertex_array(Some(drawable.vertex_array));
+		crate::core::glstatecache::bind_vertex_array(gl, Some(drawable.vertex_array));
 		if drawable.is_indexed {
 			gl.draw_elements(glow::TRIANGLES, drawable.index_count as i32, drawable.index_component_type, drawable.index_byte_offset);
 		}

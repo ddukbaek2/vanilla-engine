@@ -1012,7 +1012,7 @@ impl HumanSkinRenderer {
 			draw_drawable_triangles(gl, drawable);
 		}
 		unsafe {
-			gl.bind_vertex_array(None);
+			crate::core::glstatecache::bind_vertex_array(gl, None);
 		}
 	}
 
@@ -1094,8 +1094,8 @@ impl HumanSkinRenderer {
 						if uniform_name == coverage_name {
 							unsafe {
 								gl.uniform_1_i32(coverage_texture_location.as_ref(), TEXTURE_UNIT_BASECOLOR as i32);
-								gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_BASECOLOR);
-								gl.bind_texture(glow::TEXTURE_2D, *texture);
+								crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + TEXTURE_UNIT_BASECOLOR);
+								crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, *texture);
 							}
 						}
 					}
@@ -1104,7 +1104,7 @@ impl HumanSkinRenderer {
 			}
 		}
 		unsafe {
-			gl.bind_vertex_array(None);
+			crate::core::glstatecache::bind_vertex_array(gl, None);
 		}
 	}
 
@@ -1202,17 +1202,17 @@ impl HumanSkinRenderer {
 					gl.uniform_matrix_4_f32_slice(light_view_projection_location.as_ref(), false, light_view_projection_elements);
 					gl.uniform_1_f64(shadow_texel_size_location.as_ref(), self.shadow_texel_size);
 					gl.uniform_1_f64(shadow_strength_location.as_ref(), self.shadow_strength);
-					gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
-					gl.bind_texture(glow::TEXTURE_2D, Some(shadow_map_texture));
-					gl.active_texture(glow::TEXTURE0);
+					crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
+					crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(shadow_map_texture));
+					crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 				}
 			}
 			_ => {
 				unsafe {
 					gl.uniform_1_f64(shadow_strength_location.as_ref(), 0.0);
-					gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
-					gl.bind_texture(glow::TEXTURE_2D, Some(self.skinned_model_renderer.get_empty_shadow_texture()));
-					gl.active_texture(glow::TEXTURE0);
+					crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
+					crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(self.skinned_model_renderer.get_empty_shadow_texture()));
+					crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 				}
 			}
 		}
@@ -1627,7 +1627,7 @@ fn build_wrinkle_tile_mask(wrinkle_channel_weights: &[f32; WRINKLE_CHANNEL_COUNT
 //==============================================================================
 fn draw_drawable_triangles(gl: &glow::Context, drawable: &Drawable) {
 	unsafe {
-		gl.bind_vertex_array(Some(drawable.vertex_array));
+		crate::core::glstatecache::bind_vertex_array(gl, Some(drawable.vertex_array));
 		if drawable.is_indexed {
 			gl.draw_elements(glow::TRIANGLES, drawable.index_count as i32, drawable.index_component_type, drawable.index_byte_offset);
 		}

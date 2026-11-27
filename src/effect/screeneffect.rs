@@ -1071,8 +1071,8 @@ fn create_pass_step(pass_name: &'static str, effect_state: Option<&ScreenEffectS
 //==============================================================================
 fn create_color_texture(gl: &glow::Context, width: i32, height: i32, is_opaque: bool) -> Result<GlTexture, String> {
 	unsafe {
-		let texture = gl.create_texture()?;
-		gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+		let texture = crate::core::glstatecache::create_texture(gl)?;
+		crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
 		if is_opaque {
 			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGB8 as i32, width, height, 0, glow::RGB, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None));
 		}
@@ -1093,16 +1093,16 @@ fn create_color_texture(gl: &glow::Context, width: i32, height: i32, is_opaque: 
 fn create_render_target(gl: &glow::Context, width: i32, height: i32, use_stencil: bool, is_opaque: bool) -> Result<RenderTarget, String> {
 	let texture = create_color_texture(gl, width, height, is_opaque)?;
 	unsafe {
-		let framebuffer = match gl.create_framebuffer() {
+		let framebuffer = match crate::core::glstatecache::create_framebuffer(gl) {
 			Ok(framebuffer) => {
 				framebuffer
 			}
 			Err(error) => {
-				gl.delete_texture(texture);
+				crate::core::glstatecache::delete_texture(gl, texture);
 				return Err(error);
 			}
 		};
-		gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+		crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(framebuffer));
 		gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
 		let mut stencil_renderbuffer = None;
 		if use_stencil {
@@ -1111,9 +1111,9 @@ fn create_render_target(gl: &glow::Context, width: i32, height: i32, use_stencil
 					renderbuffer
 				}
 				Err(error) => {
-					gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-					gl.delete_framebuffer(framebuffer);
-					gl.delete_texture(texture);
+					crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, None);
+					crate::core::glstatecache::delete_framebuffer(gl, framebuffer);
+					crate::core::glstatecache::delete_texture(gl, texture);
 					return Err(error);
 				}
 			};
@@ -1122,7 +1122,7 @@ fn create_render_target(gl: &glow::Context, width: i32, height: i32, use_stencil
 			gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(renderbuffer));
 			stencil_renderbuffer = Some(renderbuffer);
 		}
-		gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+		crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, None);
 		Ok(RenderTarget {
 			framebuffer,
 			texture,
@@ -1138,8 +1138,8 @@ fn create_render_target(gl: &glow::Context, width: i32, height: i32, use_stencil
 //==============================================================================
 fn destroy_render_target(gl: &glow::Context, render_target: &RenderTarget) {
 	unsafe {
-		gl.delete_framebuffer(render_target.framebuffer);
-		gl.delete_texture(render_target.texture);
+		crate::core::glstatecache::delete_framebuffer(gl, render_target.framebuffer);
+		crate::core::glstatecache::delete_texture(gl, render_target.texture);
 		if let Some(stencil_renderbuffer) = render_target.stencil_renderbuffer {
 			gl.delete_renderbuffer(stencil_renderbuffer);
 		}
@@ -1385,7 +1385,7 @@ impl ScreenEffect {
 		}
 		let width = region_width;
 		let height = region_height;
-		let gl = graphic.get_gl();
+		let gl = graphic.get_tracked_gl();
 		if let Some(gl_context) = crate::core::imagetexturecache::find_gl_context_handle(gl) {
 			self.gl_context = gl_context;
 		}
@@ -1458,12 +1458,12 @@ impl ScreenEffect {
 		// 화면 영역 → 씬 대상 복사. (GL 은 아래가 0. 기본 프레임버퍼는 멀티샘플 / 무알파일 수 있어 blitFramebuffer 대신 copyTexSubImage2D 로 RGB8 텍스처에 떠 온다)
 		let gl_region_y = buffer_height - (region_y + region_height);
 		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-			gl.active_texture(glow::TEXTURE0);
-			gl.bind_texture(glow::TEXTURE_2D, Some(render_target_set.scene_target.texture));
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(render_target_set.scene_target.texture));
 			gl.copy_tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, region_x, gl_region_y, width, height);
-			gl.disable(glow::BLEND);
-			gl.disable(glow::STENCIL_TEST);
+			crate::core::glstatecache::disable(gl, glow::BLEND);
+			crate::core::glstatecache::disable(gl, glow::STENCIL_TEST);
 		}
 
 		let mut previous_texture = render_target_set.scene_target.texture;
@@ -1483,10 +1483,10 @@ impl ScreenEffect {
 			let mut target_texture = None;
 			unsafe {
 				if Some(step_index) == last_screen_index {
-					gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-					gl.viewport(region_x, gl_region_y, width, height);
-					gl.enable(glow::SCISSOR_TEST);
-					gl.scissor(region_x, gl_region_y, width, height);
+					crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, None);
+					crate::core::glstatecache::viewport(gl, region_x, gl_region_y, width, height);
+					crate::core::glstatecache::enable(gl, glow::SCISSOR_TEST);
+					crate::core::glstatecache::scissor(gl, region_x, gl_region_y, width, height);
 				}
 				else if is_half_target {
 					let half_target = if step.target == PassStepTarget::HalfA {
@@ -1495,8 +1495,8 @@ impl ScreenEffect {
 					else {
 						&render_target_set.half_target_b
 					};
-					gl.bind_framebuffer(glow::FRAMEBUFFER, Some(half_target.framebuffer));
-					gl.viewport(0, 0, half_target.width, half_target.height);
+					crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(half_target.framebuffer));
+					crate::core::glstatecache::viewport(gl, 0, 0, half_target.width, half_target.height);
 					target_texture = Some(half_target.texture);
 				}
 				else {
@@ -1507,8 +1507,8 @@ impl ScreenEffect {
 						&render_target_set.pong_target
 					};
 					ping_pong_turn += 1;
-					gl.bind_framebuffer(glow::FRAMEBUFFER, Some(ping_pong_target.framebuffer));
-					gl.viewport(0, 0, width, height);
+					crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(ping_pong_target.framebuffer));
+					crate::core::glstatecache::viewport(gl, 0, 0, width, height);
 					target_texture = Some(ping_pong_target.texture);
 				}
 			}
@@ -1534,8 +1534,8 @@ impl ScreenEffect {
 
 			pass.use_program(gl);
 			unsafe {
-				gl.active_texture(glow::TEXTURE0);
-				gl.bind_texture(glow::TEXTURE_2D, Some(source_texture));
+				crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
+				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(source_texture));
 				gl.uniform_1_i32(pass.get_uniform_location(gl, "sourceTexture").as_ref(), 0);
 				if let Some(auxiliary) = step.auxiliary {
 					let auxiliary_texture = match auxiliary {
@@ -1549,10 +1549,10 @@ impl ScreenEffect {
 							render_target_set.half_target_b.texture
 						}
 					};
-					gl.active_texture(glow::TEXTURE1);
-					gl.bind_texture(glow::TEXTURE_2D, Some(auxiliary_texture));
+					crate::core::glstatecache::active_texture(gl, glow::TEXTURE1);
+					crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(auxiliary_texture));
 					gl.uniform_1_i32(pass.get_uniform_location(gl, "auxiliaryTexture").as_ref(), 1);
-					gl.active_texture(glow::TEXTURE0);
+					crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 				}
 				gl.uniform_2_f64(pass.get_uniform_location(gl, "resolution").as_ref(), pass_width as f64, pass_height as f64);
 				gl.uniform_1_f64(pass.get_uniform_location(gl, "time").as_ref(), self.time);
@@ -1571,9 +1571,9 @@ impl ScreenEffect {
 		}
 
 		unsafe {
-			gl.disable(glow::SCISSOR_TEST);
-			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-			gl.bind_vertex_array(None);
+			crate::core::glstatecache::disable(gl, glow::SCISSOR_TEST);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, None);
+			crate::core::glstatecache::bind_vertex_array(gl, None);
 		}
 		graphic.restore_render_state();
 	}

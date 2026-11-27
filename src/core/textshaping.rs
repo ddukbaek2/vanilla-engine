@@ -1524,6 +1524,8 @@ pub struct ShapedGlyph {
 	pub text_end: usize,
 	/// 든 줄기(run)가 오른쪽에서 왼쪽인지.
 	pub is_right_to_left: bool,
+	/// 글리프가 든 글자 묶음(HarfBuzz cluster)의 글 시작 자리. (바이트, 시스템 글꼴 조각이면 조각 시작, 글리프 아틀라스가 글자 덩어리를 가른다)
+	pub cluster_start: usize,
 }
 
 //==============================================================================
@@ -1954,6 +1956,7 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 						text_start: piece_start,
 						text_end: piece_end,
 						is_right_to_left: is_right_to_left_run,
+						cluster_start: piece_start,
 					});
 					pen_x += piece_width;
 					continue;
@@ -1994,6 +1997,7 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 						text_start: 0,
 						text_end: 0,
 						is_right_to_left: is_right_to_left_run,
+						cluster_start: piece_start + glyph_info.cluster as usize,
 					});
 					// 맥 색 이모지는 정수 픽셀로 반올림한다. (곱셈 오차로 0.5 가 조금 모자라 내려가지 않게 작은 값을 더한다)
 					let mut advance = if is_integer_advance {

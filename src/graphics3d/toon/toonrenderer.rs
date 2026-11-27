@@ -69,7 +69,7 @@ use crate::base::rect::Rect;
 use crate::graphics3d::camera3d::Camera3D;
 
 use crate::base::matrix4::Matrix4;
-use crate::core::graphic::{GlBuffer, GlProgram, GlTexture, GlVertexArray};
+use crate::core::graphic::{GlBuffer, GlProgram, GlTexture, GlUniformLocation, GlVertexArray};
 use crate::graphics3d::GlFramebuffer;
 use crate::core::shaderprogram::ShaderProgram;
 use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowAtlasLight, ShadowMap, SHADOW_ATLAS_MAXIMUM_LIGHTS};
@@ -122,6 +122,22 @@ const UV_LOCATION: u32 = 12;
 
 /// 모형마다 다른 번호를 주는 셈. (인스턴스 버퍼가 모형마다 지은 버텍스 어레이를 가린다)
 static NEXT_MESH_ID: AtomicU64 = AtomicU64::new(1);
+
+//==============================================================================
+/// 기억한 유니폼 하나. (원본 readUniformSlot 의 칸, serial 이 렌더러의 판 번호와 같을 때만 values 가 GL 의 값과 같다)
+//==============================================================================
+struct ToonUniformSlot {
+	location: Option<GlUniformLocation>,
+	serial: u64,
+	values: Vec<f64>,
+}
+
+//==============================================================================
+/// 같은 수인지. (원본 isSameNumber, 0 과 -0 을 가르고 NaN 은 늘 다르다)
+//==============================================================================
+fn is_same_number(left: f64, right: f64) -> bool {
+	left == right && left.is_sign_negative() == right.is_sign_negative()
+}
 
 //==============================================================================
 /// 그리기의 프로그램 종류. (on_before_draw 의 셋째 인자)
@@ -1468,6 +1484,10 @@ pub struct ToonRenderer {
 	saved_state: Option<SavedState>,
 	instance_data: Vec<f32>,
 	frame_statistics: ToonFrameStatistics,
+	/// 프로그램마다 유니폼 이름별 마지막에 올린 값. (원본 uniformSlotTable, 같은 값이면 GL 에 다시 올리지 않는다)
+	uniform_slot_table: RefCell<HashMap<GlProgram, HashMap<String, ToonUniformSlot>>>,
+	/// 유니폼 기억의 판 번호. (원본 uniformSerial, 올리면 모든 프로그램의 기억을 잊는다)
+	uniform_serial: Cell<u64>,
 	screen_rect: Option<Rect>,
 	is_scissor_applied: bool,
 	/// 이번 프레임의 보기 돌림 3x3. (열 차례, 매트캡의 보기 공간 노멀)
@@ -1801,9 +1821,9 @@ fn upload_texture(gl: &glow::Context, width: u32, height: u32, pixels: &[u8], op
 		return Err(format!("텍스처 바이트가 모자란다: {} x {} 에 {} 바이트", width, height, pixels.len()));
 	}
 	unsafe {
-		let texture = gl.create_texture()?;
-		gl.active_texture(glow::TEXTURE0 + BASE_COLOR_TEXTURE_UNIT);
-		gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+		let texture = crate::core::glstatecache::create_texture(gl)?;
+		crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + BASE_COLOR_TEXTURE_UNIT);
+		crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
 		gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA as i32, width as i32, height as i32, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&pixels[..byte_count])));
 		let wrap = if options.is_repeated { glow::REPEAT } else { glow::CLAMP_TO_EDGE };
 		let magnify_filter = if options.is_filtered { glow::LINEAR } else { glow::NEAREST };
@@ -1816,8 +1836,8 @@ fn upload_texture(gl: &glow::Context, width: u32, height: u32, pixels: &[u8], op
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, magnify_filter as i32);
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, wrap as i32);
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, wrap as i32);
-		gl.bind_texture(glow::TEXTURE_2D, None);
-		gl.active_texture(glow::TEXTURE0);
+		crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
+		crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 		Ok(texture)
 	}
 }
@@ -1881,6 +1901,8 @@ impl ToonRenderer {
 			saved_state: None,
 			instance_data: Vec::new(),
 			frame_statistics: ToonFrameStatistics::default(),
+			uniform_slot_table: RefCell::new(HashMap::new()),
+			uniform_serial: Cell::new(1),
 			screen_rect: None,
 			is_scissor_applied: false,
 			view_rotation: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
@@ -1904,7 +1926,7 @@ impl ToonRenderer {
 			}
 			Err(error) => {
 				unsafe {
-					gl.delete_program(solid_program.get_program());
+					crate::core::glstatecache::delete_program(gl, solid_program.get_program());
 				}
 				return Err(error);
 			}
@@ -1915,8 +1937,8 @@ impl ToonRenderer {
 			}
 			Err(error) => {
 				unsafe {
-					gl.delete_program(solid_program.get_program());
-					gl.delete_program(outline_program.get_program());
+					crate::core::glstatecache::delete_program(gl, solid_program.get_program());
+					crate::core::glstatecache::delete_program(gl, outline_program.get_program());
 				}
 				return Err(error);
 			}
@@ -1927,7 +1949,7 @@ impl ToonRenderer {
 			for (name, unit) in [("shadowTexture", SHADOW_TEXTURE_UNIT), ("baseColorTexture", BASE_COLOR_TEXTURE_UNIT), ("emissiveTexture", EMISSIVE_TEXTURE_UNIT), ("decalTexture", DECAL_TEXTURE_UNIT), ("rampTexture", RAMP_TEXTURE_UNIT), ("matcapTexture", MATCAP_TEXTURE_UNIT), ("localShadowTexture", LOCAL_SHADOW_TEXTURE_UNIT), ("angelRingTexture", ANGEL_RING_TEXTURE_UNIT)] {
 				gl.uniform_1_i32(solid_program.get_uniform_location(gl, name).as_ref(), unit as i32);
 			}
-			gl.use_program(previous_program);
+			crate::core::glstatecache::use_program(gl, previous_program);
 		}
 		Ok(ToonProgramSet {
 			solid: ToonProgramEntry::new(solid_program, ToonProgramKind::Solid),
@@ -2000,6 +2022,11 @@ impl ToonRenderer {
 		for key in key_list {
 			if let Some(Some(program_set)) = self.program_set_table.remove(&key) {
 				ToonRenderer::delete_program_set(gl, &program_set);
+				// 지운 프로그램의 이름은 GL 이 다시 줄 수 있어 기억한 유니폼 값도 버린다.
+				let uniform_slot_table = self.uniform_slot_table.get_mut();
+				for program in [&program_set.solid.program, &program_set.outline.program, &program_set.depth.program] {
+					uniform_slot_table.remove(&program.get_program());
+				}
 			}
 		}
 	}
@@ -2009,9 +2036,9 @@ impl ToonRenderer {
 	//==============================================================================
 	fn delete_program_set(gl: &glow::Context, program_set: &ToonProgramSet) {
 		unsafe {
-			gl.delete_program(program_set.solid.program.get_program());
-			gl.delete_program(program_set.outline.program.get_program());
-			gl.delete_program(program_set.depth.program.get_program());
+			crate::core::glstatecache::delete_program(gl, program_set.solid.program.get_program());
+			crate::core::glstatecache::delete_program(gl, program_set.outline.program.get_program());
+			crate::core::glstatecache::delete_program(gl, program_set.depth.program.get_program());
 		}
 	}
 
@@ -2113,9 +2140,9 @@ impl ToonRenderer {
 	pub fn delete_instance_buffer(&self, gl: &glow::Context, instance_buffer: ToonInstanceBuffer) {
 		unsafe {
 			for (_, body_vertex_array, outline_vertex_array) in instance_buffer.vertex_array_list.borrow().iter() {
-				gl.delete_vertex_array(*body_vertex_array);
+				crate::core::glstatecache::delete_vertex_array(gl, *body_vertex_array);
 				if let Some(outline_vertex_array) = outline_vertex_array {
-					gl.delete_vertex_array(*outline_vertex_array);
+					crate::core::glstatecache::delete_vertex_array(gl, *outline_vertex_array);
 				}
 			}
 			gl.delete_buffer(instance_buffer.buffer);
@@ -2148,7 +2175,7 @@ impl ToonRenderer {
 	//==============================================================================
 	pub fn delete_texture(&self, gl: &glow::Context, texture: GlTexture) {
 		unsafe {
-			gl.delete_texture(texture);
+			crate::core::glstatecache::delete_texture(gl, texture);
 		}
 	}
 
@@ -2157,9 +2184,9 @@ impl ToonRenderer {
 	//==============================================================================
 	fn create_empty_shadow_texture(gl: &glow::Context) -> Result<GlTexture, String> {
 		unsafe {
-			let texture = gl.create_texture()?;
-			gl.active_texture(glow::TEXTURE0 + SHADOW_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+			let texture = crate::core::glstatecache::create_texture(gl)?;
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + SHADOW_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
 			// 웹의 glow 는 UNSIGNED_INT 바이트를 u32 배열로 보므로 4 바이트 맞춘 u32 에서 바이트를 읽는다.
 			let depth_values = [u32::MAX];
 			let depth_bytes = index_slice_to_bytes(&depth_values);
@@ -2170,8 +2197,8 @@ impl ToonRenderer {
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_COMPARE_MODE, glow::COMPARE_REF_TO_TEXTURE as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_COMPARE_FUNC, glow::LEQUAL as i32);
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 			Ok(texture)
 		}
 	}
@@ -2186,9 +2213,10 @@ impl ToonRenderer {
 		for program_set in self.program_set_table.values().flatten() {
 			ToonRenderer::delete_program_set(gl, program_set);
 		}
+		self.uniform_slot_table.borrow_mut().clear();
 		unsafe {
-			gl.delete_texture(self.empty_shadow_texture);
-			gl.delete_texture(self.white_texture);
+			crate::core::glstatecache::delete_texture(gl, self.empty_shadow_texture);
+			crate::core::glstatecache::delete_texture(gl, self.white_texture);
 		}
 	}
 
@@ -2241,9 +2269,9 @@ impl ToonRenderer {
 		};
 		if mesh.is_none() {
 			unsafe {
-				gl.bind_vertex_array(None);
+				crate::core::glstatecache::bind_vertex_array(gl, None);
 				for vertex_array in created_vertex_array_list {
-					gl.delete_vertex_array(vertex_array);
+					crate::core::glstatecache::delete_vertex_array(gl, vertex_array);
 				}
 				for buffer in created_buffer_list {
 					gl.delete_buffer(buffer);
@@ -2295,9 +2323,9 @@ impl ToonRenderer {
 		else {
 			None
 		};
-		let body_vertex_array = gl.create_vertex_array().ok()?;
+		let body_vertex_array = crate::core::glstatecache::create_vertex_array(gl).ok()?;
 		created_vertex_array_list.push(body_vertex_array);
-		gl.bind_vertex_array(Some(body_vertex_array));
+		crate::core::glstatecache::bind_vertex_array(gl, Some(body_vertex_array));
 		let body_index_buffer = ToonRenderer::create_index_buffer(gl, &arrays.index_data)?;
 		created_buffer_list.push(body_index_buffer);
 		buffer_list.push(body_index_buffer);
@@ -2336,9 +2364,9 @@ impl ToonRenderer {
 				buffer_list.push(outline_skin_buffer);
 				mesh.outline_skin_buffer = Some(outline_skin_buffer);
 			}
-			let outline_vertex_array = gl.create_vertex_array().ok()?;
+			let outline_vertex_array = crate::core::glstatecache::create_vertex_array(gl).ok()?;
 			created_vertex_array_list.push(outline_vertex_array);
-			gl.bind_vertex_array(Some(outline_vertex_array));
+			crate::core::glstatecache::bind_vertex_array(gl, Some(outline_vertex_array));
 			let outline_index_buffer = ToonRenderer::create_index_buffer(gl, &arrays.outline_index_data)?;
 			created_buffer_list.push(outline_index_buffer);
 			buffer_list.push(outline_index_buffer);
@@ -2349,7 +2377,7 @@ impl ToonRenderer {
 			mesh.outline_vertex_array = Some(outline_vertex_array);
 			mesh.outline_index_count = arrays.outline_index_data.len() as i32;
 		}
-		gl.bind_vertex_array(None);
+		crate::core::glstatecache::bind_vertex_array(gl, None);
 		mesh.buffer_list = buffer_list;
 		Some(mesh)
 	}
@@ -2450,29 +2478,29 @@ impl ToonRenderer {
 			return Some((*body_vertex_array, *outline_vertex_array));
 		}
 		unsafe {
-			let body_vertex_array = gl.create_vertex_array().ok()?;
-			gl.bind_vertex_array(Some(body_vertex_array));
+			let body_vertex_array = crate::core::glstatecache::create_vertex_array(gl).ok()?;
+			crate::core::glstatecache::bind_vertex_array(gl, Some(body_vertex_array));
 			ToonRenderer::attach_body_attributes(gl, mesh);
 			ToonRenderer::attach_layout_attributes(gl, &instance_buffer.layout, instance_buffer.buffer);
 			let mut outline_vertex_array = None;
 			if mesh.outline_vertex_array.is_some() {
 				// 바깥선 쪽을 짓지 못하면 먼저 지은 몸 쪽을 지운다.
-				let vertex_array = match gl.create_vertex_array() {
+				let vertex_array = match crate::core::glstatecache::create_vertex_array(gl) {
 					Ok(vertex_array) => {
 						vertex_array
 					}
 					Err(_) => {
-						gl.bind_vertex_array(None);
-						gl.delete_vertex_array(body_vertex_array);
+						crate::core::glstatecache::bind_vertex_array(gl, None);
+						crate::core::glstatecache::delete_vertex_array(gl, body_vertex_array);
 						return None;
 					}
 				};
-				gl.bind_vertex_array(Some(vertex_array));
+				crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
 				ToonRenderer::attach_outline_attributes(gl, mesh);
 				ToonRenderer::attach_layout_attributes(gl, &instance_buffer.layout, instance_buffer.buffer);
 				outline_vertex_array = Some(vertex_array);
 			}
-			gl.bind_vertex_array(None);
+			crate::core::glstatecache::bind_vertex_array(gl, None);
 			instance_buffer.vertex_array_list.borrow_mut().push((mesh.mesh_id, body_vertex_array, outline_vertex_array));
 			Some((body_vertex_array, outline_vertex_array))
 		}
@@ -2487,9 +2515,9 @@ impl ToonRenderer {
 	//==============================================================================
 	pub fn delete_mesh(&self, gl: &glow::Context, mesh: ToonMesh) {
 		unsafe {
-			gl.delete_vertex_array(mesh.body_vertex_array);
+			crate::core::glstatecache::delete_vertex_array(gl, mesh.body_vertex_array);
 			if let Some(outline_vertex_array) = mesh.outline_vertex_array {
-				gl.delete_vertex_array(outline_vertex_array);
+				crate::core::glstatecache::delete_vertex_array(gl, outline_vertex_array);
 			}
 			gl.delete_buffer(mesh.instance_buffer);
 			for buffer in mesh.buffer_list {
@@ -2504,21 +2532,21 @@ impl ToonRenderer {
 	fn save_state(&mut self, gl: &glow::Context) {
 		unsafe {
 			let mut viewport = [0i32; 4];
-			gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+			crate::core::glstatecache::get_parameter_i32_slice(gl, glow::VIEWPORT, &mut viewport);
 			self.saved_state = Some(SavedState {
-				is_blend_enabled: gl.is_enabled(glow::BLEND),
-				is_depth_test_enabled: gl.is_enabled(glow::DEPTH_TEST),
-				is_cull_face_enabled: gl.is_enabled(glow::CULL_FACE),
-				depth_mask: gl.get_parameter_bool(glow::DEPTH_WRITEMASK),
-				blend_source_rgb: gl.get_parameter_i32(glow::BLEND_SRC_RGB),
-				blend_destination_rgb: gl.get_parameter_i32(glow::BLEND_DST_RGB),
-				blend_source_alpha: gl.get_parameter_i32(glow::BLEND_SRC_ALPHA),
-				blend_destination_alpha: gl.get_parameter_i32(glow::BLEND_DST_ALPHA),
+				is_blend_enabled: crate::core::glstatecache::is_enabled(gl, glow::BLEND),
+				is_depth_test_enabled: crate::core::glstatecache::is_enabled(gl, glow::DEPTH_TEST),
+				is_cull_face_enabled: crate::core::glstatecache::is_enabled(gl, glow::CULL_FACE),
+				depth_mask: crate::core::glstatecache::get_parameter_bool(gl, glow::DEPTH_WRITEMASK),
+				blend_source_rgb: crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_SRC_RGB),
+				blend_destination_rgb: crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_DST_RGB),
+				blend_source_alpha: crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_SRC_ALPHA),
+				blend_destination_alpha: crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_DST_ALPHA),
 				program: crate::graphics3d::read_program_binding(gl),
 				vertex_array: crate::graphics3d::read_vertex_array_binding(gl),
 				viewport,
 				framebuffer: crate::graphics3d::read_framebuffer_binding(gl),
-				active_texture: gl.get_parameter_i32(glow::ACTIVE_TEXTURE),
+				active_texture: crate::core::glstatecache::get_parameter_i32(gl, glow::ACTIVE_TEXTURE),
 				first_unit_texture: ToonRenderer::read_first_unit_texture(gl),
 			});
 		}
@@ -2529,10 +2557,10 @@ impl ToonRenderer {
 	//==============================================================================
 	fn read_first_unit_texture(gl: &glow::Context) -> Option<GlTexture> {
 		unsafe {
-			let active_texture = gl.get_parameter_i32(glow::ACTIVE_TEXTURE);
-			gl.active_texture(glow::TEXTURE0);
+			let active_texture = crate::core::glstatecache::get_parameter_i32(gl, glow::ACTIVE_TEXTURE);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 			let texture = crate::graphics3d::read_texture_binding(gl);
-			gl.active_texture(active_texture as u32);
+			crate::core::glstatecache::active_texture(gl, active_texture as u32);
 			texture
 		}
 	}
@@ -2541,10 +2569,11 @@ impl ToonRenderer {
 	/// 적어 둔 상태로 돌리기.
 	//==============================================================================
 	fn restore_state(&mut self, gl: &glow::Context, is_framebuffer_restored: bool) {
+		self.forget_all_uniform_values();
 		unsafe {
-			gl.cull_face(glow::BACK);
-			gl.front_face(glow::CCW);
-			gl.color_mask(true, true, true, true);
+			crate::core::glstatecache::cull_face(gl, glow::BACK);
+			crate::core::glstatecache::front_face(gl, glow::CCW);
+			crate::core::glstatecache::color_mask(gl, true, true, true, true);
 			let saved_state = match self.saved_state.take() {
 				Some(saved_state) => {
 					saved_state
@@ -2554,24 +2583,24 @@ impl ToonRenderer {
 				}
 			};
 			if is_framebuffer_restored {
-				gl.bind_framebuffer(glow::FRAMEBUFFER, saved_state.framebuffer);
-				gl.viewport(saved_state.viewport[0], saved_state.viewport[1], saved_state.viewport[2], saved_state.viewport[3]);
+				crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, saved_state.framebuffer);
+				crate::core::glstatecache::viewport(gl, saved_state.viewport[0], saved_state.viewport[1], saved_state.viewport[2], saved_state.viewport[3]);
 			}
-			gl.bind_vertex_array(saved_state.vertex_array);
-			gl.use_program(saved_state.program);
-			gl.depth_mask(saved_state.depth_mask);
-			gl.blend_func_separate(saved_state.blend_source_rgb as u32, saved_state.blend_destination_rgb as u32, saved_state.blend_source_alpha as u32, saved_state.blend_destination_alpha as u32);
+			crate::core::glstatecache::bind_vertex_array(gl, saved_state.vertex_array);
+			crate::core::glstatecache::use_program(gl, saved_state.program);
+			crate::core::glstatecache::depth_mask(gl, saved_state.depth_mask);
+			crate::core::glstatecache::blend_func_separate(gl, saved_state.blend_source_rgb as u32, saved_state.blend_destination_rgb as u32, saved_state.blend_source_alpha as u32, saved_state.blend_destination_alpha as u32);
 			for (capability, is_enabled) in [(glow::BLEND, saved_state.is_blend_enabled), (glow::DEPTH_TEST, saved_state.is_depth_test_enabled), (glow::CULL_FACE, saved_state.is_cull_face_enabled)] {
 				if is_enabled {
-					gl.enable(capability);
+					crate::core::glstatecache::enable(gl, capability);
 				}
 				else {
-					gl.disable(capability);
+					crate::core::glstatecache::disable(gl, capability);
 				}
 			}
-			gl.active_texture(glow::TEXTURE0);
-			gl.bind_texture(glow::TEXTURE_2D, saved_state.first_unit_texture);
-			gl.active_texture(saved_state.active_texture as u32);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, saved_state.first_unit_texture);
+			crate::core::glstatecache::active_texture(gl, saved_state.active_texture as u32);
 		}
 	}
 
@@ -2582,15 +2611,17 @@ impl ToonRenderer {
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn apply_frame_state(&self, gl: &glow::Context) {
+		// 단계 콜백, 화면 공간 바깥선처럼 렌더러 밖의 코드가 유니폼을 바꿨을 수 있다.
+		self.forget_all_uniform_values();
 		unsafe {
-			gl.disable(glow::BLEND);
-			gl.enable(glow::DEPTH_TEST);
-			gl.depth_func(glow::LEQUAL);
-			gl.depth_mask(true);
-			gl.enable(glow::CULL_FACE);
-			gl.cull_face(glow::BACK);
-			gl.front_face(glow::CCW);
-			gl.color_mask(true, true, true, true);
+			crate::core::glstatecache::disable(gl, glow::BLEND);
+			crate::core::glstatecache::enable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::depth_func(gl, glow::LEQUAL);
+			crate::core::glstatecache::depth_mask(gl, true);
+			crate::core::glstatecache::enable(gl, glow::CULL_FACE);
+			crate::core::glstatecache::cull_face(gl, glow::BACK);
+			crate::core::glstatecache::front_face(gl, glow::CCW);
+			crate::core::glstatecache::color_mask(gl, true, true, true, true);
 		}
 	}
 
@@ -2724,8 +2755,8 @@ impl ToonRenderer {
 		let scissor_right = (screen_rect.position.x + screen_rect.size.x).ceil() as i32;
 		let scissor_top = (viewport_height - screen_rect.position.y).ceil() as i32;
 		unsafe {
-			gl.enable(glow::SCISSOR_TEST);
-			gl.scissor(viewport[0] + scissor_left, viewport[1] + scissor_bottom, scissor_right - scissor_left, scissor_top - scissor_bottom);
+			crate::core::glstatecache::enable(gl, glow::SCISSOR_TEST);
+			crate::core::glstatecache::scissor(gl, viewport[0] + scissor_left, viewport[1] + scissor_bottom, scissor_right - scissor_left, scissor_top - scissor_bottom);
 		}
 		self.is_scissor_applied = true;
 	}
@@ -2738,7 +2769,7 @@ impl ToonRenderer {
 			return;
 		}
 		unsafe {
-			gl.disable(glow::SCISSOR_TEST);
+			crate::core::glstatecache::disable(gl, glow::SCISSOR_TEST);
 		}
 		self.is_scissor_applied = false;
 	}
@@ -2751,6 +2782,7 @@ impl ToonRenderer {
 	/// - `shadow_map`: ShadowMap. (깊이를 그릴 곳, update_light_matrix 로 빛 행렬을 정해 둔다)
 	//==============================================================================
 	pub fn begin_shadow_pass(&mut self, gl: &glow::Context, shadow_map: &ShadowMap) {
+		self.forget_all_uniform_values();
 		self.save_state(gl);
 		self.view_projection_matrix = *shadow_map.get_light_view_projection_matrix();
 		self.frustum_planes = extract_frustum_planes(&self.view_projection_matrix);
@@ -2759,10 +2791,10 @@ impl ToonRenderer {
 		self.frame_serial += 1;
 		shadow_map.begin_render(gl);
 		unsafe {
-			gl.disable(glow::BLEND);
-			gl.depth_func(glow::LEQUAL);
-			gl.enable(glow::CULL_FACE);
-			gl.cull_face(glow::BACK);
+			crate::core::glstatecache::disable(gl, glow::BLEND);
+			crate::core::glstatecache::depth_func(gl, glow::LEQUAL);
+			crate::core::glstatecache::enable(gl, glow::CULL_FACE);
+			crate::core::glstatecache::cull_face(gl, glow::BACK);
 		}
 	}
 
@@ -2774,16 +2806,17 @@ impl ToonRenderer {
 	/// - `shadow_atlas`: ShadowAtlas.
 	//==============================================================================
 	pub fn begin_shadow_atlas_pass(&mut self, gl: &glow::Context, shadow_atlas: &ShadowAtlas) {
+		self.forget_all_uniform_values();
 		self.save_state(gl);
 		self.is_shadow_pass = true;
 		self.is_frame_mirrored = false;
 		self.frame_serial += 1;
 		shadow_atlas.begin_render(gl);
 		unsafe {
-			gl.disable(glow::BLEND);
-			gl.depth_func(glow::LEQUAL);
-			gl.enable(glow::CULL_FACE);
-			gl.cull_face(glow::BACK);
+			crate::core::glstatecache::disable(gl, glow::BLEND);
+			crate::core::glstatecache::depth_func(gl, glow::LEQUAL);
+			crate::core::glstatecache::enable(gl, glow::CULL_FACE);
+			crate::core::glstatecache::cull_face(gl, glow::BACK);
 		}
 	}
 
@@ -3081,15 +3114,13 @@ impl ToonRenderer {
 	//==============================================================================
 	/// 그리기마다의 공용 유니폼 올리기. (모형 행렬, 뼈대, 인스턴싱 0 아님, 1 인스턴스 행렬과 틴트, 2 인스턴스 틴트만)
 	//==============================================================================
-	fn upload_draw_uniforms(gl: &glow::Context, program: &ShaderProgram, model_matrix: &Matrix4, is_skinned: bool, instanced_mode: f64, joint_matrices: Option<&[f32]>) {
-		unsafe {
-			gl.uniform_matrix_4_f32_slice(program.get_uniform_location(gl, "modelMatrix").as_ref(), false, &model_matrix.elements);
-			gl.uniform_1_f64(program.get_uniform_location(gl, "instanced").as_ref(), instanced_mode);
-			gl.uniform_1_f64(program.get_uniform_location(gl, "skinned").as_ref(), if is_skinned { 1.0 } else { 0.0 });
-			if let (true, Some(joint_matrices)) = (is_skinned, joint_matrices) {
-				let joint_float_count = joint_matrices.len().min(TOON_MAXIMUM_JOINTS * 16) / 16 * 16;
-				gl.uniform_matrix_4_f32_slice(program.get_uniform_location(gl, "jointMatrices").as_ref(), false, &joint_matrices[..joint_float_count]);
-			}
+	fn upload_draw_uniforms(&self, gl: &glow::Context, program: &ShaderProgram, model_matrix: &Matrix4, is_skinned: bool, instanced_mode: f64, joint_matrices: Option<&[f32]>) {
+		self.write_uniform_matrix4(gl, program, "modelMatrix", &model_matrix.elements);
+		self.write_uniform_floats(gl, program, "instanced", 1, [instanced_mode, 0.0, 0.0, 0.0]);
+		self.write_uniform_floats(gl, program, "skinned", 1, [if is_skinned { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0]);
+		if let (true, Some(joint_matrices)) = (is_skinned, joint_matrices) {
+			let joint_float_count = joint_matrices.len().min(TOON_MAXIMUM_JOINTS * 16) / 16 * 16;
+			self.write_uniform_matrix4(gl, program, "jointMatrices", &joint_matrices[..joint_float_count]);
 		}
 	}
 
@@ -3097,10 +3128,166 @@ impl ToonRenderer {
 	/// 텍스처 유닛에 묶기. (없으면 흰 텍스처)
 	//==============================================================================
 	fn bind_texture_unit(&self, gl: &glow::Context, unit: u32, texture: Option<GlTexture>) {
-		unsafe {
-			gl.active_texture(glow::TEXTURE0 + unit);
-			gl.bind_texture(glow::TEXTURE_2D, Some(texture.unwrap_or(self.white_texture)));
+		ToonRenderer::bind_texture_2d(gl, unit, texture.unwrap_or(self.white_texture));
+	}
+
+	//==============================================================================
+	/// 텍스처 유닛에 2D 텍스처 묶기. (원본 bindTexture2D, 상태 캐시가 이미 묶였다고 기억하면 건너뛰고, 유닛도 다를 때만 고른다)
+	//==============================================================================
+	fn bind_texture_2d(gl: &glow::Context, unit: u32, texture: GlTexture) {
+		let texture_unit = glow::TEXTURE0 + unit;
+		if crate::core::glstatecache::is_texture_bound(gl, texture_unit, glow::TEXTURE_2D, Some(texture)) {
+			return;
 		}
+		unsafe {
+			if !crate::core::glstatecache::is_active_texture(gl, texture_unit) {
+				crate::core::glstatecache::active_texture(gl, texture_unit);
+			}
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
+		}
+	}
+
+	//==============================================================================
+	/// 텍스처 유닛 고르기. (원본 applyActiveTexture, 상태 캐시가 이미 같은 유닛이라고 기억하면 건너뛴다)
+	//==============================================================================
+	fn apply_active_texture(gl: &glow::Context, texture_unit: u32) {
+		if !crate::core::glstatecache::is_active_texture(gl, texture_unit) {
+			unsafe {
+				crate::core::glstatecache::active_texture(gl, texture_unit);
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 앞면 감김 방향 걸기. (원본 applyFrontFace, 상태 캐시가 같은 값이라고 기억하면 건너뛴다)
+	//==============================================================================
+	fn apply_front_face(gl: &glow::Context, mode: u32) {
+		if !crate::core::glstatecache::is_front_face(gl, mode) {
+			unsafe {
+				crate::core::glstatecache::front_face(gl, mode);
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 가릴 면 걸기. (원본 applyCullFace, 상태 캐시가 같은 값이라고 기억하면 건너뛴다)
+	//==============================================================================
+	fn apply_cull_face(gl: &glow::Context, mode: u32) {
+		if !crate::core::glstatecache::is_cull_face(gl, mode) {
+			unsafe {
+				crate::core::glstatecache::cull_face(gl, mode);
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 버텍스 어레이 묶기. (원본 applyVertexArray, 상태 캐시가 같은 것이라고 기억하면 건너뛴다)
+	//==============================================================================
+	fn apply_vertex_array(gl: &glow::Context, vertex_array: GlVertexArray) {
+		if !crate::core::glstatecache::is_vertex_array_bound(gl, Some(vertex_array)) {
+			unsafe {
+				crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 유니폼 값 기억하며 올리기. (원본 readUniformSlot, 프로그램마다 이름별로 마지막에 올린 값을 기억해 같은 값이면 GL 에 다시 올리지 않는다)
+	/// - 유니폼 값은 프로그램에 남으므로 프로그램이 같은 동안 같은 값은 다시 올릴 필요가 없다. (three.js 의 WebGLUniforms 캐시와 같은 꼴)
+	/// - 렌더러 밖의 코드가 같은 유니폼을 바꿨을 수 있는 때는 기억을 잊는다:
+	///   프레임과 그림자 판의 시작, apply_frame_state(단계 콜백과 화면 공간 바깥선 뒤), 상태 되돌리기, 그 프로그램의 on_before_draw 를 부른 뒤.
+	/// - 값은 주어진 수 그대로 견준다. (0 과 -0 도 가른다, NaN 은 늘 다시 올린다) 셰이더에서 빠진 유니폼(위치 None)은 올리지 않는다.
+	//==============================================================================
+	fn with_uniform_slot<R>(&self, gl: &glow::Context, program: &ShaderProgram, uniform_name: &str, callback: impl FnOnce(&mut ToonUniformSlot, u64) -> R) -> R {
+		let mut uniform_slot_table = self.uniform_slot_table.borrow_mut();
+		let slot_table = uniform_slot_table.entry(program.get_program()).or_default();
+		if !slot_table.contains_key(uniform_name) {
+			slot_table.insert(uniform_name.to_string(), ToonUniformSlot { location: program.get_uniform_location(gl, uniform_name), serial: 0, values: Vec::new() });
+		}
+		callback(slot_table.get_mut(uniform_name).unwrap(), self.uniform_serial.get())
+	}
+
+	//==============================================================================
+	/// 모든 프로그램의 기억한 유니폼 값 잊기. (원본 forgetAllUniformValues, 다음 그리기가 모두 다시 올린다)
+	//==============================================================================
+	fn forget_all_uniform_values(&self) {
+		self.uniform_serial.set(self.uniform_serial.get() + 1);
+	}
+
+	//==============================================================================
+	/// 한 프로그램의 기억한 유니폼 값 잊기. (원본 forgetUniformValues, on_before_draw 뒤)
+	//==============================================================================
+	fn forget_uniform_values(&self, program: &ShaderProgram) {
+		if let Some(slot_table) = self.uniform_slot_table.borrow_mut().get_mut(&program.get_program()) {
+			for slot in slot_table.values_mut() {
+				slot.serial = 0;
+			}
+		}
+	}
+
+	//==============================================================================
+	/// float 유니폼 하나 올리기. (원본 writeUniformFloats, uniform1f ~ uniform4f, 같은 값이면 건너뛴다)
+	//==============================================================================
+	fn write_uniform_floats(&self, gl: &glow::Context, program: &ShaderProgram, uniform_name: &str, component_count: usize, values: [f64; 4]) {
+		self.with_uniform_slot(gl, program, uniform_name, |slot, uniform_serial| {
+			let Some(location) = slot.location.as_ref() else {
+				return;
+			};
+			if slot.serial == uniform_serial && slot.values.len() == 4 && (0..4).all(|index| is_same_number(slot.values[index], values[index])) {
+				return;
+			}
+			slot.values.clear();
+			slot.values.extend_from_slice(&values);
+			slot.serial = uniform_serial;
+			unsafe {
+				match component_count {
+					1 => gl.uniform_1_f64(Some(location), values[0]),
+					2 => gl.uniform_2_f64(Some(location), values[0], values[1]),
+					3 => gl.uniform_3_f64(Some(location), values[0], values[1], values[2]),
+					_ => gl.uniform_4_f64(Some(location), values[0], values[1], values[2], values[3]),
+				}
+			}
+		});
+	}
+
+	//==============================================================================
+	/// int 유니폼 하나 올리기. (원본 writeUniform1i, 같은 값이면 건너뛴다)
+	//==============================================================================
+	fn write_uniform_1i(&self, gl: &glow::Context, program: &ShaderProgram, uniform_name: &str, value: i32) {
+		self.with_uniform_slot(gl, program, uniform_name, |slot, uniform_serial| {
+			let Some(location) = slot.location.as_ref() else {
+				return;
+			};
+			if slot.serial == uniform_serial && slot.values.len() == 1 && slot.values[0] == value as f64 {
+				return;
+			}
+			slot.values.clear();
+			slot.values.push(value as f64);
+			slot.serial = uniform_serial;
+			unsafe {
+				gl.uniform_1_i32(Some(location), value);
+			}
+		});
+	}
+
+	//==============================================================================
+	/// mat4 유니폼이나 그 배열 올리기. (원본 writeUniformMatrix4, uniformMatrix4fv, 전치 없음, 같은 값이면 건너뛴다)
+	//==============================================================================
+	fn write_uniform_matrix4(&self, gl: &glow::Context, program: &ShaderProgram, uniform_name: &str, elements: &[f32]) {
+		self.with_uniform_slot(gl, program, uniform_name, |slot, uniform_serial| {
+			let Some(location) = slot.location.as_ref() else {
+				return;
+			};
+			if slot.serial == uniform_serial && slot.values.len() == elements.len() && slot.values.iter().zip(elements).all(|(&value, &element)| is_same_number(value, element as f64)) {
+				return;
+			}
+			slot.values.clear();
+			slot.values.extend(elements.iter().map(|&element| element as f64));
+			slot.serial = uniform_serial;
+			unsafe {
+				gl.uniform_matrix_4_f32_slice(Some(location), false, elements);
+			}
+		});
 	}
 
 	//==============================================================================
@@ -3166,26 +3353,23 @@ impl ToonRenderer {
 			}
 			draw_call_count += 1;
 		};
-		unsafe {
-			gl.front_face(if is_mirrored { glow::CW } else { glow::CCW });
-		}
+		ToonRenderer::apply_front_face(gl, if is_mirrored { glow::CW } else { glow::CCW });
 
 		// 그림자 패스. (몸의 깊이만)
 		if self.is_shadow_pass {
 			let depth_entry = &program_set.depth;
 			depth_entry.program.use_program(gl);
 			self.upload_frame_uniforms(gl, depth_entry);
-			ToonRenderer::upload_draw_uniforms(gl, &depth_entry.program, model_matrix, is_skinned, instanced_mode, options.joint_matrices);
+			self.upload_draw_uniforms(gl, &depth_entry.program, model_matrix, is_skinned, instanced_mode, options.joint_matrices);
 			if let Some(on_before_draw) = options.on_before_draw {
 				on_before_draw(&depth_entry.program, gl, ToonProgramKind::Depth);
+				self.forget_uniform_values(&depth_entry.program);
+				// 콜백은 glow 로 상태를 바로 바꿀 수 있다. (상태 캐시를 거치지 않음)
+				crate::core::glstatecache::reset(gl);
 			}
-			unsafe {
-				gl.bind_vertex_array(Some(body_vertex_array));
-			}
+			ToonRenderer::apply_vertex_array(gl, body_vertex_array);
 			draw_elements(gl, index_start, index_count);
-			unsafe {
-				gl.front_face(glow::CCW);
-			}
+			ToonRenderer::apply_front_face(gl, glow::CCW);
 			self.frame_statistics.draw_call_count += draw_call_count;
 			return;
 		}
@@ -3197,16 +3381,16 @@ impl ToonRenderer {
 				// 알파 칸은 덮은 정도(미리 곱한 알파의 over)로 쌓는다. (원본과 같고, 유니티 Blend SrcAlpha OneMinusSrcAlpha, One OneMinusSrcAlpha 와 같다)
 				// 캔버스(알파 없음)에는 색이 같고, 투명하게 비운 판(ToonView3D 렌더 스케일, 투명도 층)에 그려 얹을 때 아래가 맞게 비친다.
 				// 더하기는 덮지 않으므로 알파를 바꾸지 않는다.
-				gl.enable(glow::BLEND);
+				crate::core::glstatecache::enable(gl, glow::BLEND);
 				match options.blend_mode {
 					ToonBlendMode::Additive => {
-						gl.blend_func_separate(glow::ONE, glow::ONE, glow::ZERO, glow::ONE);
+						crate::core::glstatecache::blend_func_separate(gl, glow::ONE, glow::ONE, glow::ZERO, glow::ONE);
 					}
 					ToonBlendMode::Premultiplied => {
-						gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+						crate::core::glstatecache::blend_func(gl, glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
 					}
 					ToonBlendMode::Alpha => {
-						gl.blend_func_separate(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+						crate::core::glstatecache::blend_func_separate(gl, glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
 					}
 				}
 			}
@@ -3218,35 +3402,34 @@ impl ToonRenderer {
 			let outline_program = &outline_entry.program;
 			outline_program.use_program(gl);
 			self.upload_frame_uniforms(gl, outline_entry);
-			ToonRenderer::upload_draw_uniforms(gl, outline_program, model_matrix, is_skinned, instanced_mode, options.joint_matrices);
+			self.upload_draw_uniforms(gl, outline_program, model_matrix, is_skinned, instanced_mode, options.joint_matrices);
 			let outline_color = options.outline_color.unwrap_or(self.outline_color);
-			unsafe {
-				gl.uniform_4_f64(outline_program.get_uniform_location(gl, "outlineColor").as_ref(), outline_color[0], outline_color[1], outline_color[2], outline_color[3]);
-				gl.uniform_1_f64(outline_program.get_uniform_location(gl, "outlineWidthScale").as_ref(), options.outline_width_scale.max(0.0));
-				gl.uniform_1_f64(outline_program.get_uniform_location(gl, "outlineOffsetZ").as_ref(), options.outline_offset_z);
-				let outline_light_set = options.light_set.unwrap_or(&self.light_set);
-				let outline_light_color = if outline_light_set.get_light_color_usage().outline { read_outline_light_color(outline_light_set.get_sun_color()) } else { [1.0; 3] };
-				gl.uniform_3_f64(outline_program.get_uniform_location(gl, "outlineLightColor").as_ref(), outline_light_color[0], outline_light_color[1], outline_light_color[2]);
-				gl.uniform_1_f64(outline_program.get_uniform_location(gl, "alpha").as_ref(), options.alpha);
-				gl.uniform_1_f64(outline_program.get_uniform_location(gl, "premultipliedOutput").as_ref(), premultiplied_output);
-			}
+			self.write_uniform_floats(gl, outline_program, "outlineColor", 4, [outline_color[0], outline_color[1], outline_color[2], outline_color[3]]);
+			self.write_uniform_floats(gl, outline_program, "outlineWidthScale", 1, [options.outline_width_scale.max(0.0), 0.0, 0.0, 0.0]);
+			self.write_uniform_floats(gl, outline_program, "outlineOffsetZ", 1, [options.outline_offset_z, 0.0, 0.0, 0.0]);
+			let outline_light_set = options.light_set.unwrap_or(&self.light_set);
+			let outline_light_color = if outline_light_set.get_light_color_usage().outline { read_outline_light_color(outline_light_set.get_sun_color()) } else { [1.0; 3] };
+			self.write_uniform_floats(gl, outline_program, "outlineLightColor", 3, [outline_light_color[0], outline_light_color[1], outline_light_color[2], 0.0]);
+			self.write_uniform_floats(gl, outline_program, "alpha", 1, [options.alpha, 0.0, 0.0, 0.0]);
+			self.write_uniform_floats(gl, outline_program, "premultipliedOutput", 1, [premultiplied_output, 0.0, 0.0, 0.0]);
 			if let Some(on_before_draw) = options.on_before_draw {
 				on_before_draw(outline_program, gl, ToonProgramKind::Outline);
+				self.forget_uniform_values(outline_program);
+				// 콜백은 glow 로 상태를 바로 바꿀 수 있다. (상태 캐시를 거치지 않음)
+				crate::core::glstatecache::reset(gl);
 			}
-			unsafe {
-				gl.cull_face(glow::FRONT);
-				gl.bind_vertex_array(Some(outline_vertex_array));
-			}
+			ToonRenderer::apply_cull_face(gl, glow::FRONT);
+			ToonRenderer::apply_vertex_array(gl, outline_vertex_array);
 			draw_elements(gl, outline_index_start, outline_index_count);
 		}
 		if !options.is_body_drawn {
 			unsafe {
 				if is_transparent {
-					gl.disable(glow::BLEND);
+					crate::core::glstatecache::disable(gl, glow::BLEND);
 				}
-				gl.cull_face(glow::BACK);
-				gl.front_face(glow::CCW);
 			}
+			ToonRenderer::apply_cull_face(gl, glow::BACK);
+			ToonRenderer::apply_front_face(gl, glow::CCW);
 			self.frame_statistics.draw_call_count += draw_call_count;
 			return;
 		}
@@ -3259,70 +3442,61 @@ impl ToonRenderer {
 		let light_set = options.light_set.unwrap_or(&self.light_set);
 		ToonRenderer::upload_light_uniforms(gl, solid_entry, light_set);
 		let ramp_texture = light_set.get_ramp_texture();
-		ToonRenderer::upload_draw_uniforms(gl, solid_program, model_matrix, is_skinned, instanced_mode, options.joint_matrices);
+		self.upload_draw_uniforms(gl, solid_program, model_matrix, is_skinned, instanced_mode, options.joint_matrices);
 		let tint_color = options.tint_color;
 		let emissive_color = options.emissive_color;
 		let decal_color = options.decal_color;
 		let uv_transform = options.uv_transform;
 		let decal_uv_transform = options.decal_uv_transform;
 		let enabled = |texture: Option<GlTexture>| if texture.is_some() { 1.0 } else { 0.0 };
-		unsafe {
-			gl.uniform_4_f64(solid_program.get_uniform_location(gl, "tintColor").as_ref(), tint_color[0], tint_color[1], tint_color[2], tint_color[3]);
-			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "tintAmount").as_ref(), options.tint_amount.map(|tint_amount| tint_amount.clamp(0.0, 1.0)).unwrap_or(-1.0));
-			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "alpha").as_ref(), options.alpha);
-			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "glowScale").as_ref(), options.glow_scale);
-			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "colorScale").as_ref(), options.color_scale);
-			gl.uniform_4_f64(solid_program.get_uniform_location(gl, "emissiveColor").as_ref(), emissive_color[0], emissive_color[1], emissive_color[2], options.emissive_intensity);
-			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "softEdge").as_ref(), options.soft_edge);
-			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "alphaCutoff").as_ref(), options.alpha_cutoff);
-			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "premultipliedOutput").as_ref(), premultiplied_output);
-			gl.uniform_3_f64(solid_program.get_uniform_location(gl, "textureEnabled").as_ref(), enabled(options.base_color_texture), enabled(options.emissive_texture), enabled(options.decal_texture));
-			gl.uniform_4_f64(solid_program.get_uniform_location(gl, "uvTransform").as_ref(), uv_transform[0], uv_transform[1], uv_transform[2], uv_transform[3]);
-			gl.uniform_4_f64(solid_program.get_uniform_location(gl, "decalUvTransform").as_ref(), decal_uv_transform[0], decal_uv_transform[1], decal_uv_transform[2], decal_uv_transform[3]);
-			gl.uniform_4_f64(solid_program.get_uniform_location(gl, "decalColor").as_ref(), decal_color[0], decal_color[1], decal_color[2], options.decal_emission);
-			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "receivesShadow").as_ref(), if options.receives_shadow { 1.0 } else { 0.0 });
-			gl.uniform_1_f64(solid_program.get_uniform_location(gl, "shadeOffset").as_ref(), options.shade_offset);
-			gl.uniform_2_f64(solid_program.get_uniform_location(gl, "highlightScale").as_ref(), options.specular_scale.max(0.0), options.rim_scale.max(0.0));
-			gl.uniform_3_f64(solid_program.get_uniform_location(gl, "matcapSettings").as_ref(), enabled(options.matcap_texture), options.matcap_strength, if options.matcap_blend == ToonMatcapBlend::Add { 1.0 } else { 0.0 });
-			gl.uniform_4_f64(solid_program.get_uniform_location(gl, "angelRingSettings").as_ref(), enabled(options.angel_ring_texture), options.angel_ring_offset_u, options.angel_ring_offset_v, if options.is_angel_ring_alpha { 1.0 } else { 0.0 });
-			gl.uniform_3_f64(solid_program.get_uniform_location(gl, "angelRingColor").as_ref(), options.angel_ring_color[0], options.angel_ring_color[1], options.angel_ring_color[2]);
-			gl.active_texture(glow::TEXTURE0 + SHADOW_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, Some(self.shadow_input.map(|shadow_input| shadow_input.depth_texture).unwrap_or(self.empty_shadow_texture)));
-		}
+		self.write_uniform_floats(gl, solid_program, "tintColor", 4, [tint_color[0], tint_color[1], tint_color[2], tint_color[3]]);
+		self.write_uniform_floats(gl, solid_program, "tintAmount", 1, [options.tint_amount.map(|tint_amount| tint_amount.clamp(0.0, 1.0)).unwrap_or(-1.0), 0.0, 0.0, 0.0]);
+		self.write_uniform_floats(gl, solid_program, "alpha", 1, [options.alpha, 0.0, 0.0, 0.0]);
+		self.write_uniform_floats(gl, solid_program, "glowScale", 1, [options.glow_scale, 0.0, 0.0, 0.0]);
+		self.write_uniform_floats(gl, solid_program, "colorScale", 1, [options.color_scale, 0.0, 0.0, 0.0]);
+		self.write_uniform_floats(gl, solid_program, "emissiveColor", 4, [emissive_color[0], emissive_color[1], emissive_color[2], options.emissive_intensity]);
+		self.write_uniform_floats(gl, solid_program, "softEdge", 1, [options.soft_edge, 0.0, 0.0, 0.0]);
+		self.write_uniform_floats(gl, solid_program, "alphaCutoff", 1, [options.alpha_cutoff, 0.0, 0.0, 0.0]);
+		self.write_uniform_floats(gl, solid_program, "premultipliedOutput", 1, [premultiplied_output, 0.0, 0.0, 0.0]);
+		self.write_uniform_floats(gl, solid_program, "textureEnabled", 3, [enabled(options.base_color_texture), enabled(options.emissive_texture), enabled(options.decal_texture), 0.0]);
+		self.write_uniform_floats(gl, solid_program, "uvTransform", 4, [uv_transform[0], uv_transform[1], uv_transform[2], uv_transform[3]]);
+		self.write_uniform_floats(gl, solid_program, "decalUvTransform", 4, [decal_uv_transform[0], decal_uv_transform[1], decal_uv_transform[2], decal_uv_transform[3]]);
+		self.write_uniform_floats(gl, solid_program, "decalColor", 4, [decal_color[0], decal_color[1], decal_color[2], options.decal_emission]);
+		self.write_uniform_floats(gl, solid_program, "receivesShadow", 1, [if options.receives_shadow { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0]);
+		self.write_uniform_floats(gl, solid_program, "shadeOffset", 1, [options.shade_offset, 0.0, 0.0, 0.0]);
+		self.write_uniform_floats(gl, solid_program, "highlightScale", 2, [options.specular_scale.max(0.0), options.rim_scale.max(0.0), 0.0, 0.0]);
+		self.write_uniform_floats(gl, solid_program, "matcapSettings", 3, [enabled(options.matcap_texture), options.matcap_strength, if options.matcap_blend == ToonMatcapBlend::Add { 1.0 } else { 0.0 }, 0.0]);
+		self.write_uniform_floats(gl, solid_program, "angelRingSettings", 4, [enabled(options.angel_ring_texture), options.angel_ring_offset_u, options.angel_ring_offset_v, if options.is_angel_ring_alpha { 1.0 } else { 0.0 }]);
+		self.write_uniform_floats(gl, solid_program, "angelRingColor", 3, [options.angel_ring_color[0], options.angel_ring_color[1], options.angel_ring_color[2], 0.0]);
+		ToonRenderer::bind_texture_2d(gl, SHADOW_TEXTURE_UNIT, self.shadow_input.map(|shadow_input| shadow_input.depth_texture).unwrap_or(self.empty_shadow_texture));
 		self.bind_texture_unit(gl, BASE_COLOR_TEXTURE_UNIT, options.base_color_texture);
 		self.bind_texture_unit(gl, EMISSIVE_TEXTURE_UNIT, options.emissive_texture);
 		self.bind_texture_unit(gl, DECAL_TEXTURE_UNIT, options.decal_texture);
 		self.bind_texture_unit(gl, RAMP_TEXTURE_UNIT, ramp_texture);
 		self.bind_texture_unit(gl, MATCAP_TEXTURE_UNIT, options.matcap_texture);
 		self.bind_texture_unit(gl, ANGEL_RING_TEXTURE_UNIT, options.angel_ring_texture);
-		unsafe {
-			gl.active_texture(glow::TEXTURE0 + LOCAL_SHADOW_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, Some(self.local_shadow_input.as_ref().map(|local_shadow_input| local_shadow_input.depth_texture).unwrap_or(self.empty_shadow_texture)));
-		}
+		ToonRenderer::bind_texture_2d(gl, LOCAL_SHADOW_TEXTURE_UNIT, self.local_shadow_input.as_ref().map(|local_shadow_input| local_shadow_input.depth_texture).unwrap_or(self.empty_shadow_texture));
 		for (texture_index, (uniform_name, texture)) in options.textures.iter().take(TOON_MAXIMUM_MATERIAL_TEXTURES).enumerate() {
 			let unit = FIRST_MATERIAL_TEXTURE_UNIT + texture_index as u32;
 			self.bind_texture_unit(gl, unit, Some(*texture));
-			unsafe {
-				gl.uniform_1_i32(solid_program.get_uniform_location(gl, uniform_name).as_ref(), unit as i32);
-			}
+			self.write_uniform_1i(gl, solid_program, uniform_name, unit as i32);
 		}
-		unsafe {
-			gl.active_texture(glow::TEXTURE0);
-		}
+		ToonRenderer::apply_active_texture(gl, glow::TEXTURE0);
 		if let Some(on_before_draw) = options.on_before_draw {
 			on_before_draw(solid_program, gl, ToonProgramKind::Solid);
+			self.forget_uniform_values(solid_program);
+			// 콜백은 glow 로 상태를 바로 바꿀 수 있다. (상태 캐시를 거치지 않음)
+			crate::core::glstatecache::reset(gl);
 		}
-		unsafe {
-			gl.cull_face(glow::BACK);
-			gl.bind_vertex_array(Some(body_vertex_array));
-		}
+		ToonRenderer::apply_cull_face(gl, glow::BACK);
+		ToonRenderer::apply_vertex_array(gl, body_vertex_array);
 		draw_elements(gl, index_start, index_count);
 		unsafe {
 			if is_transparent {
-				gl.disable(glow::BLEND);
+				crate::core::glstatecache::disable(gl, glow::BLEND);
 			}
-			gl.front_face(glow::CCW);
 		}
+		ToonRenderer::apply_front_face(gl, glow::CCW);
 		self.frame_statistics.draw_call_count += draw_call_count;
 	}
 

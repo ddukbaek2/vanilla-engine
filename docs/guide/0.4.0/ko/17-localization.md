@@ -535,7 +535,7 @@ fn main() {
 `Text` 와 `UILabel` 은 `set_font_family` 로 글꼴을 주지 않으면 엔진의 기본 글꼴로 그립니다. 기본 글꼴은 플랫폼마다 이렇게 정합니다.
 
 - 데스크탑: `EngineConfiguration.default_font_paths` 가 비어 있으면(처음 값) 원본 시스템 글꼴 목록(`-apple-system, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`)의 이름을 차례로 운영체제 글꼴에서 찾아 잇습니다. 경로를 주면 읽히는 파일을 차례로 잇고, 앞 글꼴에 없는 글자는 뒤 글꼴로 그립니다. 굵은 얼굴은 `default_bold_font_paths` 입니다. 어느 글꼴에도 없는 글자는 운영체제가 고른 대체 글꼴로 그리고, `fallback_font_paths` 를 주면 그 파일을 씁니다.
-- 웹: `EngineConfiguration.default_font_url` 이 처음에 빈 글입니다. 원본의 처음 값(jsDelivr 의 DOSGothic 주소)은 넣지 않았습니다. 아무 글꼴도 주지 않으면 원본처럼 브라우저 시스템 글꼴로 그립니다. 주소를 주면 받아 기본 글꼴로 쓰고, 받는 동안은 시스템 글꼴로 그립니다.
+- 웹: `EngineConfiguration.default_font_url` 이 처음에 빈 글입니다(원본 `defaultFontUrl` 과 같다). 아무 글꼴도 주지 않으면 원본처럼 브라우저 시스템 글꼴로 그립니다. 주소를 주면 받아 기본 글꼴로 쓰고, 받는 동안은 시스템 글꼴로 그립니다.
 - 두 플랫폼 모두 `default_font_bytes`, `default_bold_font_bytes` 에 글꼴 파일 내용을 미리 넣으면 그것을 먼저 씁니다.
 
 엔진 정보창(`use_statistics`)도 이 기본 글꼴을 씁니다. 다른 글꼴을 쓰려면 `FontAsset` 으로 받아 `set_font_family` 에 그 이름을 줍니다. ("애셋" 장)

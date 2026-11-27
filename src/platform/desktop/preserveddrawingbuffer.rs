@@ -44,13 +44,13 @@ impl PreservedDrawingBuffer {
 		let fullscreen_pass = FullscreenPass::new(gl, RESTORE_FRAGMENTSHADER_SOURCE)?;
 		let source_texture_location = fullscreen_pass.get_uniform_location(gl, "sourceTexture");
 		let saved_texture = unsafe {
-			let saved_texture = gl.create_texture()?;
-			gl.bind_texture(glow::TEXTURE_2D, Some(saved_texture));
+			let saved_texture = crate::core::glstatecache::create_texture(gl)?;
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(saved_texture));
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
-			gl.bind_texture(glow::TEXTURE_2D, None);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
 			saved_texture
 		};
 		Ok(PreservedDrawingBuffer {
@@ -70,11 +70,11 @@ impl PreservedDrawingBuffer {
 			return;
 		}
 		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-			gl.active_texture(glow::TEXTURE0);
-			gl.bind_texture(glow::TEXTURE_2D, Some(self.saved_texture));
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(self.saved_texture));
 			gl.copy_tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA, 0, 0, render_width, render_height, 0);
-			gl.bind_texture(glow::TEXTURE_2D, None);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
 		}
 		self.saved_width = render_width;
 		self.saved_height = render_height;
@@ -90,45 +90,45 @@ impl PreservedDrawingBuffer {
 			return;
 		}
 		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-			gl.color_mask(true, true, true, true);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, None);
+			crate::core::glstatecache::color_mask(gl, true, true, true, true);
 			if self.saved_width != render_width || self.saved_height != render_height {
-				let is_scissor_test_enabled = gl.is_enabled(glow::SCISSOR_TEST);
-				gl.disable(glow::SCISSOR_TEST);
-				gl.clear_color(0.0, 0.0, 0.0, 1.0);
+				let is_scissor_test_enabled = crate::core::glstatecache::is_enabled(gl, glow::SCISSOR_TEST);
+				crate::core::glstatecache::disable(gl, glow::SCISSOR_TEST);
+				crate::core::glstatecache::clear_color(gl, 0.0, 0.0, 0.0, 1.0);
 				gl.clear(glow::COLOR_BUFFER_BIT);
 				if is_scissor_test_enabled {
-					gl.enable(glow::SCISSOR_TEST);
+					crate::core::glstatecache::enable(gl, glow::SCISSOR_TEST);
 				}
 				return;
 			}
-			let is_blend_enabled = gl.is_enabled(glow::BLEND);
-			let is_stencil_test_enabled = gl.is_enabled(glow::STENCIL_TEST);
-			let is_scissor_test_enabled = gl.is_enabled(glow::SCISSOR_TEST);
-			let is_depth_test_enabled = gl.is_enabled(glow::DEPTH_TEST);
-			gl.disable(glow::BLEND);
-			gl.disable(glow::STENCIL_TEST);
-			gl.disable(glow::SCISSOR_TEST);
-			gl.disable(glow::DEPTH_TEST);
-			gl.viewport(0, 0, render_width, render_height);
-			gl.active_texture(glow::TEXTURE0);
-			gl.bind_texture(glow::TEXTURE_2D, Some(self.saved_texture));
+			let is_blend_enabled = crate::core::glstatecache::is_enabled(gl, glow::BLEND);
+			let is_stencil_test_enabled = crate::core::glstatecache::is_enabled(gl, glow::STENCIL_TEST);
+			let is_scissor_test_enabled = crate::core::glstatecache::is_enabled(gl, glow::SCISSOR_TEST);
+			let is_depth_test_enabled = crate::core::glstatecache::is_enabled(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::disable(gl, glow::BLEND);
+			crate::core::glstatecache::disable(gl, glow::STENCIL_TEST);
+			crate::core::glstatecache::disable(gl, glow::SCISSOR_TEST);
+			crate::core::glstatecache::disable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::viewport(gl, 0, 0, render_width, render_height);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(self.saved_texture));
 			self.fullscreen_pass.use_program(gl);
 			gl.uniform_1_i32(self.source_texture_location.as_ref(), 0);
 			self.fullscreen_pass.draw(gl);
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			gl.bind_vertex_array(None);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
+			crate::core::glstatecache::bind_vertex_array(gl, None);
 			if is_blend_enabled {
-				gl.enable(glow::BLEND);
+				crate::core::glstatecache::enable(gl, glow::BLEND);
 			}
 			if is_stencil_test_enabled {
-				gl.enable(glow::STENCIL_TEST);
+				crate::core::glstatecache::enable(gl, glow::STENCIL_TEST);
 			}
 			if is_scissor_test_enabled {
-				gl.enable(glow::SCISSOR_TEST);
+				crate::core::glstatecache::enable(gl, glow::SCISSOR_TEST);
 			}
 			if is_depth_test_enabled {
-				gl.enable(glow::DEPTH_TEST);
+				crate::core::glstatecache::enable(gl, glow::DEPTH_TEST);
 			}
 		}
 	}

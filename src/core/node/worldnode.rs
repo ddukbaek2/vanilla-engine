@@ -783,6 +783,27 @@ impl WorldNode {
 	}
 
 	//==============================================================================
+	/// 내용 크기를 target 에 적는다. (원본 copyContentSizeTo, 새 값을 만들지 않고 받을 자리에 적는다)
+	///
+	/// # 인자
+	/// - `target`: 내용 크기를 받을 벡터. (노드 좌표, 배율을 걸기 전)
+	///
+	/// # 예제
+	/// ```rust
+	/// use vanilla::{Vector2, WorldNode};
+	///
+	/// let mut node = WorldNode::new("panel");
+	/// node.set_content_size(Vector2::create(30.0, 40.0));
+	/// let mut content_size = Vector2::zero();
+	/// node.copy_content_size_to(&mut content_size);
+	/// assert_eq!(content_size, Vector2::create(30.0, 40.0));
+	/// ```
+	//==============================================================================
+	pub fn copy_content_size_to(&self, target: &mut Vector2) {
+		*target = self.transform.get_content_size();
+	}
+
+	//==============================================================================
 	/// 로컬 위치 설정. (x, y 를 바로 받는다, NodeTransform::set_local_position_xy)
 	///
 	/// # 인자

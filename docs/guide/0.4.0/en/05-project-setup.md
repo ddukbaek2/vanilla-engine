@@ -233,7 +233,7 @@ Fields used only on the web:
 
 - Profiles in the engine's `Cargo.toml` do not carry over to the game build. Put the release settings and `wasm-release` in the game's `Cargo.toml`.
 - Relative desktop asset folder paths are based on the working directory at run time. Opening the executable from another location may fail to find assets.
-- The original's default font (DOSGothic) is not included in the engine. The default of `default_font_url` is also an empty string. Give a game font with one of `default_font_url`, `default_font_bytes` or `FontAsset`.
+- The engine ships and fetches no font of its own. The default of `default_font_url` is an empty string (same as the original `defaultFontUrl`). Give a game font with one of `default_font_url`, `default_font_bytes` or `FontAsset`.
 - `title` is the desktop window title. On the web this field is not written to the document title at startup, so set it with `<title>` in `index.html` or call `Engine::set_title` at run time.
 - When checking the Linux target, cpal's alsa-sys and gilrs's libudev-sys call pkg-config. To check on a Mac, pass a pkg-config that prints empty flags through `PKG_CONFIG` and check with `PKG_CONFIG_ALLOW_CROSS=1`.
 

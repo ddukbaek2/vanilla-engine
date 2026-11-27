@@ -99,13 +99,13 @@ impl ShaderWarmer {
 			let fragment_shader = gl.create_shader(glow::FRAGMENT_SHADER).ok()?;
 			gl.shader_source(fragment_shader, &desktop_fragment_shader_source);
 			gl.compile_shader(fragment_shader);
-			let program = gl.create_program().ok()?;
+			let program = crate::core::glstatecache::create_program(gl).ok()?;
 			gl.attach_shader(program, vertex_shader);
 			gl.attach_shader(program, fragment_shader);
 			for (attribute_name, attribute_location) in attribute_location_list {
 				gl.bind_attrib_location(program, *attribute_location, attribute_name);
 			}
-			gl.link_program(program);
+			crate::core::glstatecache::link_program(gl, program);
 			Some((program, vertex_shader, fragment_shader))
 		}
 	}
@@ -126,7 +126,7 @@ impl ShaderWarmer {
 				return true;
 			}
 			unsafe {
-				gl.delete_program(*program);
+				crate::core::glstatecache::delete_program(gl, *program);
 				gl.delete_shader(*vertex_shader);
 				gl.delete_shader(*fragment_shader);
 			}

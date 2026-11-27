@@ -270,8 +270,8 @@ impl AmbientOcclusionEffect {
 	//==============================================================================
 	pub fn render(&self, gl: &glow::Context, depth_texture: Option<GlTexture>, normal_texture: Option<GlTexture>, view_matrix_elements: &[f32; 16], field_of_view_radian: f64, aspect_ratio: f64, near_distance: f64, far_distance: f64) {
 		unsafe {
-			gl.disable(glow::DEPTH_TEST);
-			gl.disable(glow::BLEND);
+			crate::core::glstatecache::disable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::disable(gl, glow::BLEND);
 		}
 
 		// 1. 차폐.
@@ -289,10 +289,10 @@ impl AmbientOcclusionEffect {
 			gl.uniform_1_f64(occlusion_pass.get_uniform_location(gl, "radius").as_ref(), self.radius);
 			gl.uniform_1_f64(occlusion_pass.get_uniform_location(gl, "intensity").as_ref(), self.intensity);
 			gl.uniform_1_f64(occlusion_pass.get_uniform_location(gl, "bias").as_ref(), self.bias);
-			gl.active_texture(glow::TEXTURE2);
-			gl.bind_texture(glow::TEXTURE_2D, normal_texture);
-			gl.active_texture(glow::TEXTURE0);
-			gl.bind_texture(glow::TEXTURE_2D, depth_texture);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE2);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, normal_texture);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, depth_texture);
 		}
 		let occlusion_render_target = &self.occlusion_render_target;
 		occlusion_render_target.bind(gl);
@@ -312,21 +312,21 @@ impl AmbientOcclusionEffect {
 		ping_render_target.bind(gl);
 		unsafe {
 			gl.uniform_2_f64(blur_direction_location.as_ref(), 1.0, 0.0);
-			gl.bind_texture(glow::TEXTURE_2D, occlusion_render_target.get_color_texture(0));
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, occlusion_render_target.get_color_texture(0));
 		}
 		blur_pass.draw(gl);
 		let pong_render_target = &self.pong_render_target;
 		pong_render_target.bind(gl);
 		unsafe {
 			gl.uniform_2_f64(blur_direction_location.as_ref(), 0.0, 1.0);
-			gl.bind_texture(glow::TEXTURE_2D, ping_render_target.get_color_texture(0));
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, ping_render_target.get_color_texture(0));
 		}
 		blur_pass.draw(gl);
 
 		unsafe {
-			gl.active_texture(glow::TEXTURE2);
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE2);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 		}
 	}
 

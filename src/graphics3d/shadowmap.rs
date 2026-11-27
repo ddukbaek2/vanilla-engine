@@ -43,8 +43,8 @@ fn create_depth_target(gl: &glow::Context, resolution: i32) -> Result<(GlFramebu
 	unsafe {
 		let previous_texture = crate::graphics3d::read_texture_binding(gl);
 		let previous_framebuffer = crate::graphics3d::read_framebuffer_binding(gl);
-		let depth_texture = gl.create_texture()?;
-		gl.bind_texture(glow::TEXTURE_2D, Some(depth_texture));
+		let depth_texture = crate::core::glstatecache::create_texture(gl)?;
+		crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(depth_texture));
 		gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::DEPTH_COMPONENT24 as i32, resolution, resolution, 0, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT, glow::PixelUnpackData::Slice(None));
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
@@ -52,13 +52,13 @@ fn create_depth_target(gl: &glow::Context, resolution: i32) -> Result<(GlFramebu
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_COMPARE_MODE, glow::COMPARE_REF_TO_TEXTURE as i32);
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_COMPARE_FUNC, glow::LEQUAL as i32);
-		let framebuffer = gl.create_framebuffer()?;
-		gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+		let framebuffer = crate::core::glstatecache::create_framebuffer(gl)?;
+		crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(framebuffer));
 		gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::TEXTURE_2D, Some(depth_texture), 0);
 		gl.draw_buffers(&[glow::NONE]);
 		gl.read_buffer(glow::NONE);
-		gl.bind_framebuffer(glow::FRAMEBUFFER, previous_framebuffer);
-		gl.bind_texture(glow::TEXTURE_2D, previous_texture);
+		crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, previous_framebuffer);
+		crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, previous_texture);
 		Ok((framebuffer, depth_texture))
 	}
 }
@@ -206,10 +206,10 @@ impl ShadowMap {
 	//==============================================================================
 	pub fn begin_render(&self, gl: &glow::Context) {
 		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.framebuffer));
-			gl.viewport(0, 0, self.resolution, self.resolution);
-			gl.enable(glow::DEPTH_TEST);
-			gl.depth_mask(true);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(self.framebuffer));
+			crate::core::glstatecache::viewport(gl, 0, 0, self.resolution, self.resolution);
+			crate::core::glstatecache::enable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::depth_mask(gl, true);
 			gl.clear(glow::DEPTH_BUFFER_BIT);
 		}
 	}
@@ -262,8 +262,8 @@ impl ShadowMap {
 	//==============================================================================
 	pub fn destroy(&self, gl: &glow::Context) {
 		unsafe {
-			gl.delete_framebuffer(self.framebuffer);
-			gl.delete_texture(self.depth_texture);
+			crate::core::glstatecache::delete_framebuffer(gl, self.framebuffer);
+			crate::core::glstatecache::delete_texture(gl, self.depth_texture);
 		}
 	}
 }
@@ -502,11 +502,11 @@ impl ShadowAtlas {
 	//==============================================================================
 	pub fn begin_render(&self, gl: &glow::Context) {
 		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.framebuffer));
-			gl.viewport(0, 0, self.resolution, self.resolution);
-			gl.disable(glow::SCISSOR_TEST);
-			gl.enable(glow::DEPTH_TEST);
-			gl.depth_mask(true);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(self.framebuffer));
+			crate::core::glstatecache::viewport(gl, 0, 0, self.resolution, self.resolution);
+			crate::core::glstatecache::disable(gl, glow::SCISSOR_TEST);
+			crate::core::glstatecache::enable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::depth_mask(gl, true);
 			gl.clear(glow::DEPTH_BUFFER_BIT);
 		}
 	}
@@ -521,7 +521,7 @@ impl ShadowAtlas {
 	pub fn begin_tile(&self, gl: &glow::Context, tile_index: usize) {
 		let tile = self.tile_list[tile_index];
 		unsafe {
-			gl.viewport(tile.x, tile.y, tile.size, tile.size);
+			crate::core::glstatecache::viewport(gl, tile.x, tile.y, tile.size, tile.size);
 		}
 	}
 
@@ -533,6 +533,25 @@ impl ShadowAtlas {
 	//==============================================================================
 	pub fn get_lights(&self) -> &[ShadowAtlasLight] {
 		&self.light_list
+	}
+
+	//==============================================================================
+	/// 그림자를 받는 빛 개수 반환. (원본 getLightCount, get_lights 의 길이)
+	///
+	/// # 돌려줌
+	/// 마지막 update_lights 가 고른 빛 개수. (0 ~ SHADOW_ATLAS_MAXIMUM_LIGHTS)
+	///
+	/// # 예제
+	/// ```rust
+	/// use vanilla::ShadowAtlas;
+	///
+	/// fn has_shadow_lights(shadow_atlas: &ShadowAtlas) -> bool {
+	/// 	shadow_atlas.get_light_count() > 0
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn get_light_count(&self) -> usize {
+		self.light_list.len()
 	}
 
 	//==============================================================================
@@ -626,8 +645,8 @@ impl ShadowAtlas {
 	//==============================================================================
 	pub fn destroy(&self, gl: &glow::Context) {
 		unsafe {
-			gl.delete_framebuffer(self.framebuffer);
-			gl.delete_texture(self.depth_texture);
+			crate::core::glstatecache::delete_framebuffer(gl, self.framebuffer);
+			crate::core::glstatecache::delete_texture(gl, self.depth_texture);
 		}
 	}
 }
