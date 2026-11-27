@@ -35,6 +35,25 @@ use crate::core::node::nodetree::{NodeId, NodeTree, TouchKind};
 use crate::core::node::worldnode::WorldNode;
 use crate::core::tween::{Tween, TweenId};
 
+/// 로딩 문 손잡이의 경로. (맡긴 손잡이 목록에서 알아보기 쉽게)
+const LOADING_GATE_PATH: &str = "GameSceneBase.loadingGate";
+
+//==============================================================================
+/// 엔진 시계로 열리는 로딩 문. (GameSceneBase 의 최소 노출 시간과 터치 건너뛰기, 원본 GameScene.load 의 기다림)
+//==============================================================================
+struct LoadingGate {
+	/// 맡긴 손잡이. (열면 끝낸다)
+	load_handle: AssetLoadHandle,
+	/// 시작 시각. (엔진 시작 뒤 초)
+	start_time: f64,
+	/// 첫 프레임 전에 걸어 시작 시각을 첫 갱신에서 잡을지.
+	is_start_time_pending: bool,
+	/// 최소 노출 시간. (밀리초)
+	min_duration_ms: f64,
+	/// 건너뛰기가 눌렸는지.
+	is_touched_to_skip: bool,
+}
+
 //==============================================================================
 /// 씬이 기다리는 읽기 하나. (애셋 읽기 손잡이, 또는 오디오 애셋)
 //==============================================================================
@@ -138,8 +157,8 @@ pub struct SceneBase {
 	scene_background_color: Color,
 	pressed_node_id: Option<NodeId>,
 	tracked_load_list: Vec<TrackedLoad>,
-	/// 엔진 시계로 열리는 맡긴 손잡이. (GameSceneBase 의 로딩 문, 찍기 모드의 프레임 세우기에서 뺀다)
-	engine_clock_load_handle: Option<AssetLoadHandle>,
+	/// 엔진 시계로 열리는 로딩 문. (GameSceneBase 의 최소 노출 시간과 터치 건너뛰기, 찍기 모드의 프레임 세우기에서 뺀다)
+	loading_gate: Option<LoadingGate>,
 	/// 내리기를 시작했는지. (그 뒤로 맡긴 것은 내리기 작업이다, 원본 await scene.unload 자리)
 	is_unload_started: bool,
 	tracked_unload_list: Vec<TrackedLoad>,
@@ -172,7 +191,7 @@ impl SceneBase {
 			scene_background_color: Color::black(),
 			pressed_node_id: None,
 			tracked_load_list: Vec::new(),
-			engine_clock_load_handle: None,
+			loading_gate: None,
 			is_unload_started: false,
 			tracked_unload_list: Vec::new(),
 			has_ever_touched: false,
@@ -390,10 +409,82 @@ impl SceneBase {
 	}
 
 	//==============================================================================
-	/// 엔진 시계로 열리는 맡긴 손잡이 적기. (GameSceneBase 의 로딩 문. 찍기 모드의 프레임 세우기가 이것은 기다리지 않는다)
+	/// 엔진 시계로 열리는 로딩 문 걸기. (GameSceneBase 의 로딩 문, 맡긴 손잡이로 initialize 를 막는다. 찍기 모드의 프레임 세우기는 이것을 기다리지 않는다)
+	/// - 문은 엔진이 로딩 중 프레임마다 부르는 update_loading_gate 가 연다. 덮어쓸 수 있는 draw_on_load 에 기대지 않아, 씬이 바탕 draw_on_load 를 부르지 않아도 멈추지 않는다. (원본 GameScene.load 가 거는 엔진 프레임 함수)
+	/// - 최소 노출 시간이 0 이하이면 처음부터 열어 둔다.
 	//==============================================================================
-	pub(crate) fn set_engine_clock_load_handle(&mut self, load_handle: &AssetLoadHandle) {
-		self.engine_clock_load_handle = Some(load_handle.clone());
+	pub(crate) fn begin_loading_gate(&mut self, current_time: f64, is_start_time_pending: bool, min_duration_ms: f64) {
+		let load_handle = AssetLoadHandle::create_pending(LOADING_GATE_PATH);
+		self.track_load_handle(&load_handle);
+		if min_duration_ms <= 0.0 {
+			load_handle.finish(Ok(Vec::new()));
+		}
+		self.loading_gate = Some(LoadingGate {
+			load_handle,
+			start_time: current_time,
+			is_start_time_pending,
+			min_duration_ms,
+			is_touched_to_skip: false,
+		});
+	}
+
+	//==============================================================================
+	/// 로딩 문 갱신. (엔진이 불러오는 중인 씬마다 프레임마다 부른다. 첫 프레임 전에 건 문은 이 시각부터 재고, 누르면 건너뛰기로 적고, 최소 시간이 지났거나 건너뛰었으면 연다)
+	/// - 문이 없거나 이미 열렸으면 시작 시각과 건너뛰기만 적는다.
+	//==============================================================================
+	pub(crate) fn update_loading_gate(&mut self, current_time: f64, is_touch_pressed: bool) {
+		let loading_gate = match self.loading_gate.as_mut() {
+			Some(loading_gate) => {
+				loading_gate
+			}
+			None => {
+				return;
+			}
+		};
+		if loading_gate.is_start_time_pending {
+			loading_gate.start_time = current_time;
+			loading_gate.is_start_time_pending = false;
+		}
+		if is_touch_pressed {
+			loading_gate.is_touched_to_skip = true;
+		}
+		if loading_gate.load_handle.is_finished() {
+			return;
+		}
+		let elapsed_milliseconds = (current_time - loading_gate.start_time) * 1000.0;
+		if elapsed_milliseconds >= loading_gate.min_duration_ms || loading_gate.is_touched_to_skip {
+			loading_gate.load_handle.finish(Ok(Vec::new()));
+		}
+	}
+
+	//==============================================================================
+	/// 로딩 문의 최소 노출 시간 바꾸기. (문을 건 뒤에 바꾸면 다음 갱신부터 그 시간으로 본다)
+	//==============================================================================
+	pub(crate) fn set_loading_gate_min_duration_ms(&mut self, min_duration_ms: f64) {
+		if let Some(loading_gate) = self.loading_gate.as_mut() {
+			loading_gate.min_duration_ms = min_duration_ms;
+		}
+	}
+
+	//==============================================================================
+	/// 로딩 문의 시작 시각. (엔진 시작 뒤 초, 문이 없으면 0)
+	//==============================================================================
+	pub(crate) fn get_loading_gate_start_time(&self) -> f64 {
+		self.loading_gate.as_ref().map(|loading_gate| loading_gate.start_time).unwrap_or(0.0)
+	}
+
+	//==============================================================================
+	/// 로딩 문 건너뛰기가 눌렸는지. (문이 없으면 false)
+	//==============================================================================
+	pub(crate) fn is_loading_gate_touched_to_skip(&self) -> bool {
+		self.loading_gate.as_ref().is_some_and(|loading_gate| loading_gate.is_touched_to_skip)
+	}
+
+	//==============================================================================
+	/// 로딩 문의 맡긴 손잡이. (문이 없으면 None)
+	//==============================================================================
+	pub(crate) fn get_loading_gate_handle(&self) -> Option<&AssetLoadHandle> {
+		self.loading_gate.as_ref().map(|loading_gate| &loading_gate.load_handle)
 	}
 
 	//==============================================================================
@@ -404,9 +495,9 @@ impl SceneBase {
 		if self.is_loaded {
 			return false;
 		}
-		match self.engine_clock_load_handle.as_ref() {
-			Some(engine_clock_load_handle) => {
-				!self.are_tracked_assets_finished_except(engine_clock_load_handle)
+		match self.get_loading_gate_handle() {
+			Some(loading_gate_handle) => {
+				!self.are_tracked_assets_finished_except(loading_gate_handle)
 			}
 			None => {
 				!self.are_tracked_assets_finished()

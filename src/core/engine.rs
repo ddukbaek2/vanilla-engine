@@ -2498,7 +2498,7 @@ impl EngineRunner {
 		for scene in scene_list.iter_mut() {
 			// 맡긴 애셋을 기다리는 씬은 로딩 화면만. (다 읽혔으면 이번 프레임부터 돈다, 원본처럼 내리는 중이어도 불러오기가 끝나면 initialize 한다)
 			if !scene.get_scene_base().is_loaded() {
-				initialize_scene_if_ready(self.engine, scene.as_mut(), scene_load_seconds);
+				advance_loading_scene(self.engine, scene.as_mut(), scene_load_seconds);
 			}
 			if !scene.get_scene_base().is_loaded() {
 				self.engine.with_graphic(|engine, graphic| {
@@ -2791,6 +2791,19 @@ fn apply_scene_root_to_view_size(engine: &Engine, scene: &mut dyn Scene) {
 }
 
 //==============================================================================
+/// 불러오는 중인 씬의 한 프레임. (엔진이 로딩 중 프레임마다, 시간을 올린 뒤 씬 처리 앞에서 부른다. 로딩 화면 draw_on_load 앞)
+/// - 로딩 문을 갱신하고, 맡긴 것이 다 끝났으면 initialize 한다.
+/// - 로딩 문은 엔진 시계(시간 관리자의 실제 경과 시간, 찍기 모드는 엔진 시계)와 엔진 입력으로 로딩 시각과 터치 건너뛰기를 잡는다. (원본 GameScene.load 가 거는 엔진 프레임 함수)
+///   덮어쓸 수 있는 draw_on_load 에 기대지 않아, 씬이 바탕 draw_on_load 를 부르지 않아도 최소 노출 시간 뒤 문이 열린다.
+//==============================================================================
+fn advance_loading_scene(engine: &Engine, scene: &mut dyn Scene, scene_load_seconds: f64) {
+	let current_time = engine.get_time_manager().get_realtime_since_startup();
+	let is_touch_pressed = engine.get_input_manager().is_touch_pressed();
+	scene.get_scene_base_mut().update_loading_gate(current_time, is_touch_pressed);
+	initialize_scene_if_ready(engine, scene, scene_load_seconds);
+}
+
+//==============================================================================
 /// 씬이 맡긴 애셋과 작업이 다 끝났으면 initialize 하고 불러온 것으로 친다. (원본 load 다음 0.3초 더 기다리고 set_loaded, initialize, 그리고 loadScene 의 Promise 를 푼다)
 /// - current_time 은 엔진 시작 뒤 지금까지의 실제 초다. (첫 프레임 전에도 맞는 시각이어야 해서 시간 관리자의 지난 값을 쓰지 않는다. 찍기 모드는 엔진 시계, read_scene_load_seconds)
 //==============================================================================
@@ -2882,6 +2895,65 @@ mod tests {
 		fn on_page_visibility_restored(&mut self) {
 			self.restore_count.set(self.restore_count.get() + 1);
 		}
+	}
+
+	//==============================================================================
+	/// GameSceneBase 를 품고 Scene 을 바로 구현한 씬. (draw_on_load 를 덮어쓰고 바탕 draw_on_load 를 부르지 않는다, initialize 수를 센다)
+	//==============================================================================
+	struct DirectGameScene {
+		game_scene_base: crate::game::gamescene::GameSceneBase,
+		initialize_count: Rc<Cell<u32>>,
+	}
+
+	impl Scene for DirectGameScene {
+		fn get_scene_base(&self) -> &SceneBase {
+			self.game_scene_base.get_scene_base()
+		}
+
+		fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+			self.game_scene_base.get_scene_base_mut()
+		}
+
+		fn load(&mut self, engine: &Engine) {
+			self.game_scene_base.set_loading_min_duration_ms(50.0);
+			self.game_scene_base.load(engine);
+		}
+
+		fn draw_on_load(&mut self, _graphic: &mut Graphic) {
+		}
+
+		fn initialize(&mut self, _engine: &Engine) {
+			self.initialize_count.set(self.initialize_count.get() + 1);
+		}
+	}
+
+	//==============================================================================
+	/// GameSceneBase 의 로딩 시각과 건너뛰기는 엔진이 로딩 중 프레임마다 잡는다. (원본 df379ce 의 엔진 프레임 함수)
+	/// - 씬이 draw_on_load 를 덮어쓰고 바탕을 부르지 않아도 최소 노출 시간 뒤 initialize 가 불린다. (엔진 프레임의 로딩 중 씬 한 프레임 advance_loading_scene 을 돌린다)
+	//==============================================================================
+	#[test]
+	fn game_scene_loading_gate_opens_without_base_draw_on_load() {
+		let initialize_count = Rc::new(Cell::new(0));
+		let scene = Box::new(DirectGameScene {
+			game_scene_base: crate::game::gamescene::GameSceneBase::new(),
+			initialize_count: initialize_count.clone(),
+		});
+		let mut scene = scene;
+		let engine = Engine::new(EngineConfiguration::new());
+		// 첫 프레임 전에 불러온다. (로딩 문은 첫 로딩 프레임의 시각부터 잰다)
+		scene.load(engine);
+		let mut current_seconds = 0.0;
+		for _ in 0..120 {
+			current_seconds += 1.0 / 60.0;
+			engine.get_time_manager_mut().update(current_seconds);
+			advance_loading_scene(engine, scene.as_mut(), current_seconds);
+			if scene.get_scene_base().is_loaded() {
+				break;
+			}
+		}
+		assert_eq!(initialize_count.get(), 1, "로딩 문이 열려 initialize 가 불린다");
+		// 최소 노출 시간 50 ms 와 씬 불러오기 뒤 0.3 초를 지나서야 열린다.
+		assert!(current_seconds > 0.35, "{}", current_seconds);
 	}
 
 	//==============================================================================
