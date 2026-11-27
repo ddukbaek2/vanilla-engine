@@ -1296,7 +1296,7 @@ impl Graphic {
 			round_rect_unit_table: build_round_rect_unit_table(),
 			is_batching_enabled: true,
 			batch_suspend_depth: 0,
-			batch_vertex_data: vec![0.0f64 as f32; BATCH_VERTEX_CAPACITY * BATCH_FLOATS_PER_VERTEX],
+			batch_vertex_data: vec![0.0; BATCH_VERTEX_CAPACITY * BATCH_FLOATS_PER_VERTEX],
 			batch_vertex_count: 0,
 			batch_texture: None,
 			is_culling_enabled: true,
