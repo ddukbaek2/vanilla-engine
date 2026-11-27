@@ -974,7 +974,7 @@ fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Res
 }
 
 //==============================================================================
-/// GL 컨텍스트를 잃거나 되살림. (원본 Graphic 생성자처럼 캔버스의 webglcontextlost, webglcontextrestored 에서 그래픽의 묶음 기억을 잊는다)
+/// GL 컨텍스트를 잃거나 되살림. (원본 WebGLStateCache 처럼 캔버스의 webglcontextlost, webglcontextrestored 에서 GL 상태 기억을 잊는다)
 /// - 컨텍스트를 잃거나 되살리면 GL 의 묶음이 처음으로 돌아가므로 기억을 잊는다. 프레임 콜백 안에서 겹쳐 불리지 않게 try_borrow 로 본다.
 //==============================================================================
 fn add_context_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
@@ -982,7 +982,7 @@ fn add_context_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 	let web_application_cell_for_context = web_application_cell.clone();
 	let context_change_callback: Closure<dyn FnMut()> = Closure::new(move || {
 		if let Ok(web_application) = web_application_cell_for_context.try_borrow() {
-			web_application.engine_runner.invalidate_render_state_cache();
+			web_application.engine_runner.reset_gl_state_cache();
 		}
 	});
 	canvas.add_event_listener_with_callback("webglcontextlost", context_change_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;

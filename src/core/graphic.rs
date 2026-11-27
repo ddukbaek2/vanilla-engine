@@ -33,7 +33,6 @@ use crate::core::textshaping::ShapingDirection;
 use crate::core::textstringtexturecache::{TextDrawKind, TextEntry, TextMetrics, TextStringTextureCache};
 use glow::HasContext;
 use crate::core::gluniform::GlUniformF64;
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -1214,8 +1213,6 @@ pub struct Graphic {
 	batch_texture_count: usize,
 	/// 텍스처 칸 수. (기기의 MAX_TEXTURE_IMAGE_UNITS 와 BATCH_TEXTURE_SLOT_LIMIT 가운데 작은 것, 묶음 자원을 지을 때 정한다)
 	batch_texture_slot_count: usize,
-	/// 1 번부터의 텍스처 유닛에 묶어 둔 것. (0 번은 bound_texture 가 기억한다, None 이면 모른다)
-	batch_bound_texture_list: [Cell<Option<GlTexture>>; BATCH_TEXTURE_SLOT_LIMIT],
 	/// 자르기 사각형 표. (칸마다 왼쪽, 위, 오른쪽, 아래 디바이스 픽셀)
 	batch_clip_rect_data: [f32; BATCH_CLIP_SLOT_CAPACITY * 4],
 	/// 표에 적은 칸 수. (0 번 자르지 않는 칸 포함)
@@ -1236,14 +1233,6 @@ pub struct Graphic {
 	/// 기본 프레임버퍼가 멀티샘플인지. (-1 모름, 0 아님, 1 멀티샘플)
 	framebuffer_sample_state: i32,
 	is_culling_enabled: bool,
-	/// 마지막으로 사용 중으로 건 셰이더 프로그램. (모르면 None, 같으면 use_program 을 건너뛴다)
-	bound_program: Cell<Option<GlProgram>>,
-	/// 텍스처 유닛 0 에 마지막으로 바인드한 텍스처. (모르면 None, 같으면 bind_texture 를 건너뛴다)
-	bound_texture: Cell<Option<GlTexture>>,
-	/// 텍스처 유닛 1 에 마지막으로 바인드한 떠 온 아래. (셰이더 섞기, 모르면 None)
-	bound_backdrop_texture: Cell<Option<GlTexture>>,
-	/// 지금 프레임버퍼에 맞는 색 쓰기 마스크를 걸었는지. (apply_color_mask)
-	is_color_mask_known: Cell<bool>,
 	/// 프레임이 끝난 뒤에도 그린 것을 남기는지. (원본 생성 인자 preserveDrawingBuffer, 켜면 프레임 첫머리에 색을 비우지 않는다)
 	is_drawing_buffer_preserved: bool,
 }
@@ -1266,6 +1255,9 @@ impl Drop for ExternalPassGuard<'_> {
 		self.graphic.restore_render_state();
 		if self.shader_clip_count > 0 {
 			self.graphic.write_shader_clips_to_stencil(false);
+		}
+		else {
+			self.graphic.restore_stencil_clip_state();
 		}
 	}
 }
@@ -1294,9 +1286,9 @@ impl Graphic {
 		let vertex_data = vec![0.0f32; VERTEX_CAPACITY * FLOATS_PER_VERTEX];
 		let (vertex_array, vertex_buffer, white_texture) = unsafe {
 			let vertex_array = crate::core::glstatecache::create_vertex_array(&gl)?;
-			let vertex_buffer = gl.create_buffer()?;
+			let vertex_buffer = crate::core::glstatecache::create_buffer(&gl)?;
 			crate::core::glstatecache::bind_vertex_array(&gl, Some(vertex_array));
-			gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
+			crate::core::glstatecache::bind_buffer(&gl, glow::ARRAY_BUFFER, Some(vertex_buffer));
 			gl.buffer_data_size(glow::ARRAY_BUFFER, (vertex_data.len() * 4) as i32, glow::DYNAMIC_DRAW);
 			let stride_bytes = (FLOATS_PER_VERTEX * 4) as i32;
 			let vertex_position_location = shader_program.get_attribute_location(&gl, "vertexPosition");
@@ -1416,7 +1408,6 @@ impl Graphic {
 			batch_texture_list: [None; BATCH_TEXTURE_SLOT_LIMIT],
 			batch_texture_count: 0,
 			batch_texture_slot_count: 1,
-			batch_bound_texture_list: std::array::from_fn(|_| Cell::new(None)),
 			batch_clip_rect_data: create_batch_clip_rect_data(),
 			batch_clip_rect_count: 1,
 			batch_generation: 0,
@@ -1428,10 +1419,6 @@ impl Graphic {
 			is_clip_scissor_enabled: false,
 			framebuffer_sample_state: -1,
 			is_culling_enabled: true,
-			bound_program: Cell::new(None),
-			bound_texture: Cell::new(None),
-			bound_backdrop_texture: Cell::new(None),
-			is_color_mask_known: Cell::new(false),
 			is_drawing_buffer_preserved: preserve_drawing_buffer,
 		})
 	}
@@ -1474,13 +1461,12 @@ impl Graphic {
 			self.applied_viewport_height = drawing_buffer_height;
 		}
 
-		// 프로그램/버퍼 바인딩 및 프로젝션 업로드. (프레임 사이에 GL 이 바뀌었을 수 있어 기억한 것을 잊고 다시 건다)
-		self.forget_bound_render_state();
+		// 프로그램/버퍼 바인딩 및 프로젝션 업로드. (바깥 GL 이 바꾼 묶음은 상태 캐시가 알므로 따로 잊지 않는다)
 		self.use_shader_program(&self.shader_program);
 		let projection_matrix_location = self.shader_program.get_uniform_location(&self.gl, "projectionMatrix");
 		unsafe {
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
-			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 		}
 
@@ -1541,51 +1527,92 @@ impl Graphic {
 		if self.frame_number.is_multiple_of(IMAGE_TEXTURE_SWEEP_INTERVAL) {
 			self.image_texture_cache.sweep(&self.gl);
 		}
-		self.forget_bound_render_state();
+		self.release_color_mask();
 	}
 
 	//==============================================================================
-	/// 셰이더 프로그램을 사용 중으로 건다. (마지막으로 건 것과 같으면 건너뛴다)
+	/// 셰이더 프로그램을 사용 중으로 건다. (원본 useShaderProgram, 상태 캐시가 이미 이 프로그램을 쓴다고 기억하면 ShaderProgram::use_program 이 건너뛴다)
+	/// - Graphic 은 쓰게 한 프로그램을 따로 기억하지 않는다. 게임이 같은 컨텍스트로 다른 프로그램을 쓰게 해도 다음 그리기가 제 프로그램을 다시 건다.
 	//==============================================================================
 	fn use_shader_program(&self, shader_program: &ShaderProgram) {
-		let program = shader_program.get_program();
-		if self.bound_program.get() == Some(program) {
-			return;
-		}
 		shader_program.use_program(&self.gl);
-		self.bound_program.set(Some(program));
 	}
 
 	//==============================================================================
-	/// 텍스처 유닛 0 에 텍스처를 바인드한다. (마지막으로 바인드한 것과 같으면 건너뛴다)
+	/// 텍스처 유닛 0 에 텍스처를 바인드한다. (원본 bindTexture, 상태 캐시가 이미 묶였다고 기억하면 다시 묶지 않는다)
+	/// - 활성 유닛이 0 번이 아니면 0 번으로 돌린다. (게임이 다른 유닛을 활성으로 두고 돌아와도 0 번에 묶는다)
 	//==============================================================================
 	fn bind_main_texture(&self, texture: GlTexture) {
-		if self.bound_texture.get() == Some(texture) {
+		unsafe {
+			if !crate::core::glstatecache::is_active_texture(&self.gl, glow::TEXTURE0) {
+				crate::core::glstatecache::active_texture(&self.gl, glow::TEXTURE0);
+			}
+			if crate::core::glstatecache::is_texture_bound(&self.gl, glow::TEXTURE0, glow::TEXTURE_2D, Some(texture)) {
+				return;
+			}
+			crate::core::glstatecache::bind_texture(&self.gl, glow::TEXTURE_2D, Some(texture));
+		}
+	}
+
+	//==============================================================================
+	/// 2D 그리기 상태 맞추기. (원본 applyDrawState, 그리기 바로 앞에서 부른다)
+	/// - 섞기(켬, FUNC_ADD, 지금 블렌드 모드의 인자), 깊이 시험과 면 가리기 끔, 드로잉 버퍼 전체 뷰포트, 자르기 가위가 아니면 가위 끔.
+	/// - 상태 캐시가 이미 그렇다고 기억하는 것은 다시 걸지 않는다. (바뀌지 않은 프레임에는 GL 을 더 부르지 않는다)
+	///   게임이 run_external_pass 밖에서 같은 컨텍스트로 이것들을 바꿔 두고 돌아와도 다음 2D 그리기가 맞게 된다.
+	//==============================================================================
+	fn apply_draw_state(&self) {
+		let gl: &glow::Context = &self.gl;
+		unsafe {
+			if !crate::core::glstatecache::is_capability_set(gl, glow::BLEND, true) {
+				crate::core::glstatecache::enable(gl, glow::BLEND);
+			}
+			if !crate::core::glstatecache::is_capability_set(gl, glow::DEPTH_TEST, false) {
+				crate::core::glstatecache::disable(gl, glow::DEPTH_TEST);
+			}
+			if !crate::core::glstatecache::is_capability_set(gl, glow::CULL_FACE, false) {
+				crate::core::glstatecache::disable(gl, glow::CULL_FACE);
+			}
+			if !self.is_clip_scissor_enabled && !crate::core::glstatecache::is_capability_set(gl, glow::SCISSOR_TEST, false) {
+				crate::core::glstatecache::disable(gl, glow::SCISSOR_TEST);
+			}
+			if !crate::core::glstatecache::is_blend_equation(gl, glow::FUNC_ADD) {
+				crate::core::glstatecache::blend_equation(gl, glow::FUNC_ADD);
+			}
+			let (source_factor, destination_factor) = self.blend_mode.get_blend_function().unwrap_or((glow::ONE, glow::ONE_MINUS_SRC_ALPHA));
+			if !crate::core::glstatecache::is_blend_function(gl, source_factor, destination_factor) {
+				crate::core::glstatecache::blend_func(gl, source_factor, destination_factor);
+			}
+			if !crate::core::glstatecache::is_viewport(gl, 0, 0, self.applied_viewport_width, self.applied_viewport_height) {
+				crate::core::glstatecache::viewport(gl, 0, 0, self.applied_viewport_width, self.applied_viewport_height);
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 기본 경로의 버텍스 어레이와 정점 버퍼 묶기. (원본 bindDefaultVertexArray, 상태 캐시가 이미 묶였다고 기억하면 다시 묶지 않는다)
+	//==============================================================================
+	fn bind_default_vertex_array(&self) {
+		unsafe {
+			if !crate::core::glstatecache::is_vertex_array_bound(&self.gl, Some(self.vertex_array)) {
+				crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
+			}
+			if !crate::core::glstatecache::is_array_buffer_bound(&self.gl, Some(self.vertex_buffer)) {
+				crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 색 쓰기 마스크를 모든 채널로 되돌리기. (GL 을 밖에 내줄 때와 프레임 끝, 상태 캐시가 이미 그렇다고 기억하면 부르지 않는다)
+	/// - apply_color_mask 가 데스크탑 기본 프레임버퍼에서 알파를 끈다. 밖의 GL 코드(렌더 타겟에 그리는 3D 같은 것)는 모든 채널을 쓰는 마스크를 기대한다.
+	///   (원본과 웹은 기본 프레임버퍼에 알파가 없어 마스크를 바꾸지 않는다)
+	//==============================================================================
+	fn release_color_mask(&self) {
+		if crate::core::glstatecache::is_color_mask(&self.gl, true, true, true, true) {
 			return;
 		}
 		unsafe {
-			crate::core::glstatecache::bind_texture(&self.gl, glow::TEXTURE_2D, Some(texture));
-		}
-		self.bound_texture.set(Some(texture));
-	}
-
-	//==============================================================================
-	/// 기억한 프로그램과 텍스처를 잊는다. (GL 을 밖에서 만졌을 수 있을 때. 다음에 거는 것은 건너뛰지 않는다)
-	//==============================================================================
-	fn forget_bound_render_state(&self) {
-		self.bound_program.set(None);
-		self.bound_texture.set(None);
-		self.bound_backdrop_texture.set(None);
-		for bound_texture in self.batch_bound_texture_list.iter() {
-			bound_texture.set(None);
-		}
-
-		// 밖의 GL 코드는 모든 채널을 쓰는 마스크를 기대하므로 되돌린다.
-		if self.is_color_mask_known.get() {
-			unsafe {
-				crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
-			}
-			self.is_color_mask_known.set(false);
+			crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
 		}
 	}
 
@@ -1594,26 +1621,20 @@ impl Graphic {
 	/// - 원본과 웹은 캔버스가 alpha: false 라 화면의 알파가 늘 1 이다. 데스크탑 기본 프레임버퍼는 알파 8 비트가 있어,
 	///   알파를 낮추는 모드(source-out, xor, destination-out 같은 것) 뒤에 DST_ALPHA 를 쓰는 모드와 셰이더 섞기가 웹과 다르게 나왔다.
 	///   프레임 첫머리에 알파를 1 로 비우고 기본 프레임버퍼에는 알파를 쓰지 않아 웹과 같게 한다. (웹 기본 프레임버퍼는 알파가 없어 걸어도 그대로다)
-	/// - 렌더 타겟에 그릴 때는 알파도 쓴다. 한 번 걸면 GL 을 밖에 내주거나 프레임버퍼를 바꿀 때까지 다시 묻지 않는다.
+	/// - 렌더 타겟에 그릴 때는 알파도 쓴다. 지금 프레임버퍼와 마스크는 상태 캐시에 견주어, 이미 맞으면 GL 을 부르지 않는다. (따로 기억하지 않는다)
 	/// - 스텐실에 클립 영역을 적는 동안은 색을 쓰지 않는 마스크가 걸려 있으므로 건드리지 않는다.
 	//==============================================================================
 	fn apply_color_mask(&self) {
-		if self.is_color_mask_known.get() || self.batch_suspend_depth > 0 {
+		if self.batch_suspend_depth > 0 {
 			return;
 		}
-		let is_default_framebuffer = read_framebuffer_binding(&self.gl).is_none();
-		unsafe {
-			crate::core::glstatecache::color_mask(&self.gl, true, true, true, !is_default_framebuffer);
+		let is_alpha_written = read_framebuffer_binding(&self.gl).is_some();
+		if crate::core::glstatecache::is_color_mask(&self.gl, true, true, true, is_alpha_written) {
+			return;
 		}
-		self.is_color_mask_known.set(true);
-	}
-
-	//==============================================================================
-	/// 묶음 기억 잊기. (원본 invalidateRenderStateCache, Graphic 을 거치지 않고 GL 로 프로그램이나 텍스처를 바꾼 뒤 2D 를 이어 그릴 때)
-	/// - get_gl, restore_render_state, 프레임 시작과 끝은 스스로 잊는다.
-	//==============================================================================
-	pub fn invalidate_render_state_cache(&self) {
-		self.forget_bound_render_state();
+		unsafe {
+			crate::core::glstatecache::color_mask(&self.gl, true, true, true, is_alpha_written);
+		}
 	}
 
 	//==============================================================================
@@ -1631,9 +1652,11 @@ impl Graphic {
 
 	//==============================================================================
 	/// 2D 그리기 사이에 GL 패스 끼우기. (원본 runExternalPass)
-	/// - 앞의 2D 묶음을 내보내고, 기억한 프로그램과 텍스처를 잊고, is_depth_cleared 면 깊이를 비운 뒤 pass 를 부르고, 끝나면 restore_render_state 를 부른다.
-	/// - pass 는 GL 컨텍스트를 받아 프로그램, 버텍스 어레이, 뷰포트, 섞기, 깊이, 면 가리기를 바꿔도 된다. (클립 중이면 스텐실 테스트는 restore_render_state 가 다시 켠다)
+	/// - 앞의 2D 묶음을 내보내고, is_depth_cleared 면 깊이를 비운 뒤 pass 를 부르고, 끝나면 restore_render_state 를 부른다.
+	/// - pass 는 GL 컨텍스트를 받아 프로그램, 버텍스 어레이, 뷰포트, 섞기, 깊이, 면 가리기를 바꿔도 된다. (스텐실 자르기는 그대로 걸려 있고, 끝나면 스텐실 자르기 상태를 되돌린다)
 	/// - 받은 컨텍스트(GlContext)의 상태 함수는 GL 상태 캐시를 거치므로, pass 안에서 상태를 바꾼 뒤 엔진 그리기를 이어 불러도 엔진이 바뀐 상태를 안다.
+	/// - 이 함수 밖에서 같은 컨텍스트로 GL 을 써도 다음 2D 그리기가 프로그램, 버텍스 어레이, 정점 버퍼, 텍스처 유닛, 섞기, 깊이, 면 가리기, 가위, 뷰포트를 상태 캐시에 견주어 다시 건다.
+	///   남는 약속은 둘이다. 2D 는 지금 묶인 프레임 버퍼에 그리므로 게임 프레임 버퍼를 묶었으면 들어올 때 것으로 돌려 두고, 스텐실 상태는 바꾸지 않는다.
 	/// - pass 가 돌려준 값을 그대로 돌려준다. pass 가 패닉해도 풀리는 동안 가드가 restore_render_state 를 부른다. (원본은 던져도 되돌린다)
 	///
 	/// # 인자
@@ -1668,7 +1691,7 @@ impl Graphic {
 
 		// 셰이더 자르기는 바깥 패스가 모르므로 그동안 스텐실에 적어 둔다.
 		let shader_clip_count = self.write_shader_clips_to_stencil(true);
-		self.forget_bound_render_state();
+		self.release_color_mask();
 		let guard = ExternalPassGuard { graphic: self, shader_clip_count };
 		pass(GlContext::from_context(&guard.graphic.gl))
 	}
@@ -2165,6 +2188,8 @@ impl Graphic {
 			return;
 		}
 		self.flush_batch();
+		self.apply_draw_state();
+		self.bind_default_vertex_array();
 
 		// 묶지 않고 그리는 것에는 셰이더 자르기를 가위로 건다. (화소 가운데 기준이 같아 결과가 같다)
 		self.apply_clip_scissor();
@@ -2330,7 +2355,6 @@ impl Graphic {
 		unsafe {
 			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, Some(layer_target.framebuffer));
 			crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
-			self.is_color_mask_known.set(false);
 			crate::core::glstatecache::enable(&self.gl, glow::SCISSOR_TEST);
 			crate::core::glstatecache::scissor(&self.gl, backdrop_rect.x, backdrop_rect.y, backdrop_rect.width, backdrop_rect.height);
 			self.gl.clear_buffer_f32_slice(glow::COLOR, 0, &[0.0, 0.0, 0.0, 0.0]);
@@ -2347,7 +2371,6 @@ impl Graphic {
 			crate::core::glstatecache::draw_arrays(&self.gl, glow::TRIANGLES, 0, vertex_count as i32);
 			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, framebuffer);
 		}
-		self.is_color_mask_known.set(false);
 		self.draw_call_count += 1;
 		self.draw_vertex_count += vertex_count as u32;
 
@@ -2425,12 +2448,10 @@ impl Graphic {
 			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::DRAW_FRAMEBUFFER, Some(backdrop_target.framebuffer));
 			self.gl.blit_framebuffer(left_x, bottom_y, right_x, top_y, left_x, bottom_y, right_x, top_y, glow::COLOR_BUFFER_BIT, glow::NEAREST);
 			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, framebuffer);
-			if self.bound_backdrop_texture.get() != Some(backdrop_target.texture) {
+			if !crate::core::glstatecache::is_texture_bound(&self.gl, glow::TEXTURE1, glow::TEXTURE_2D, Some(backdrop_target.texture)) {
 				crate::core::glstatecache::active_texture(&self.gl, glow::TEXTURE1);
 				crate::core::glstatecache::bind_texture(&self.gl, glow::TEXTURE_2D, Some(backdrop_target.texture));
 				crate::core::glstatecache::active_texture(&self.gl, glow::TEXTURE0);
-				self.bound_backdrop_texture.set(Some(backdrop_target.texture));
-				self.batch_bound_texture_list[1].set(None);
 			}
 		}
 		Ok(())
@@ -2551,28 +2572,9 @@ impl Graphic {
 	}
 
 	//==============================================================================
-	/// 지울 텍스처를 유닛에 바인드했다고 기억하면 잊기. (0 번, 떠 온 아래, 묶음의 1 번부터 유닛)
-	/// - 데스크탑 GL 은 지운 이름을 다시 쓰므로 기억이 남으면 같은 이름의 새 텍스처를 바인드하지 않게 된다. (원본 WebGLTexture 는 객체라 겹치지 않는다)
-	//==============================================================================
-	fn forget_bound_texture(&self, texture: GlTexture) {
-		if self.bound_texture.get() == Some(texture) {
-			self.bound_texture.set(None);
-		}
-		if self.bound_backdrop_texture.get() == Some(texture) {
-			self.bound_backdrop_texture.set(None);
-		}
-		for bound_texture in self.batch_bound_texture_list.iter() {
-			if bound_texture.get() == Some(texture) {
-				bound_texture.set(None);
-			}
-		}
-	}
-
-	//==============================================================================
-	/// 오프스크린 칸 지우기. (지운 텍스처를 바인드했다고 기억하면 잊는다. 데스크탑은 지운 이름을 다시 쓰므로 기억이 남으면 새 텍스처를 바인드하지 않게 된다)
+	/// 오프스크린 칸 지우기. (지운 텍스처의 묶음 기억은 상태 캐시가 잊는다. 데스크탑은 지운 이름을 다시 쓰므로 남으면 새 텍스처를 묶지 않게 된다)
 	//==============================================================================
 	fn destroy_offscreen_target(&self, offscreen_target: OffscreenTarget) {
-		self.forget_bound_texture(offscreen_target.texture);
 		unsafe {
 			crate::core::glstatecache::delete_framebuffer(&self.gl, offscreen_target.framebuffer);
 			crate::core::glstatecache::delete_texture(&self.gl, offscreen_target.texture);
@@ -2799,6 +2801,7 @@ impl Graphic {
 			}
 		};
 		self.release_clip_scissor();
+		self.apply_draw_state();
 		let batch_shader_program = match &self.batch_shader_program {
 			Some(batch_shader_program) => {
 				batch_shader_program
@@ -2814,38 +2817,33 @@ impl Graphic {
 		let vertex_bytes = float_slice_to_bytes(&self.batch_vertex_data[..vertex_count * BATCH_FLOATS_PER_VERTEX]);
 		unsafe {
 			crate::core::glstatecache::bind_vertex_array(&self.gl, self.batch_vertex_array);
-			self.gl.bind_buffer(glow::ARRAY_BUFFER, self.batch_vertex_buffer);
+			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, self.batch_vertex_buffer);
 			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 			self.gl.uniform_1_f32(framebuffer_height_location.as_ref(), self.applied_viewport_height as f32);
 			self.gl.uniform_4_f32_slice(clip_rect_list_location.as_ref(), &self.batch_clip_rect_data[..clip_rect_count * 4]);
 		}
 
-		// 텍스처 묶기. (0 번 유닛은 bind_main_texture 가 기억하고, 1 번 유닛은 셰이더 섞기의 떠 온 아래와 같이 쓴다)
-		// 묶음이 쓰는 칸은 기억과 같아도 다시 묶는다. 데스크탑 GL 은 지운 텍스처 이름을 다시 쓰므로(글자 캐시가 프레임 중에 지운다) 같은 이름이 같은 텍스처라는 보장이 없다. (원본 WebGLTexture 는 객체라 겹치지 않는다)
-		// 쓰지 않는 칸의 흰 텍스처는 지우지 않으므로 기억과 같으면 건너뛴다.
+		// 텍스처 묶기. (상태 캐시가 이미 묶였다고 기억하는 유닛은 건너뛴다, 1 번 유닛은 셰이더 섞기의 떠 온 아래와 같이 쓴다)
+		// 데스크탑 GL 은 지운 텍스처 이름을 다시 쓰지만(글자 캐시가 프레임 중에 지운다) 지울 때 상태 캐시가 그 묶음을 잊으므로, 같은 이름의 새 텍스처는 다시 묶는다.
 		self.bind_main_texture(first_texture);
 		let mut is_texture_unit_changed = false;
 		for slot_index in 1..self.batch_texture_slot_count {
-			let is_used_slot = slot_index < texture_count;
-			let texture = if is_used_slot {
+			let texture = if slot_index < texture_count {
 				batch_texture_list[slot_index]
 			}
 			else {
 				Some(self.white_texture)
 			};
-			if !is_used_slot && self.batch_bound_texture_list[slot_index].get() == texture {
+			let texture_unit = glow::TEXTURE0 + slot_index as u32;
+			if crate::core::glstatecache::is_texture_bound(&self.gl, texture_unit, glow::TEXTURE_2D, texture) {
 				continue;
 			}
 			unsafe {
-				crate::core::glstatecache::active_texture(&self.gl, glow::TEXTURE0 + slot_index as u32);
+				crate::core::glstatecache::active_texture(&self.gl, texture_unit);
 				crate::core::glstatecache::bind_texture(&self.gl, glow::TEXTURE_2D, texture);
 			}
-			self.batch_bound_texture_list[slot_index].set(texture);
 			is_texture_unit_changed = true;
-			if slot_index == 1 {
-				self.bound_backdrop_texture.set(None);
-			}
 		}
 		if is_texture_unit_changed {
 			unsafe {
@@ -2858,7 +2856,7 @@ impl Graphic {
 
 			// 기본 버텍스 어레이로 복귀. (프로그램은 다음에 낱장으로 그릴 때 건다)
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
-			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 		}
 		self.draw_call_count += 1;
 		self.draw_vertex_count += vertex_count as u32;
@@ -3037,9 +3035,9 @@ impl Graphic {
 		self.batch_clip_rect_count = 1;
 		unsafe {
 			let batch_vertex_array = crate::core::glstatecache::create_vertex_array(&self.gl)?;
-			let batch_vertex_buffer = self.gl.create_buffer()?;
+			let batch_vertex_buffer = crate::core::glstatecache::create_buffer(&self.gl)?;
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(batch_vertex_array));
-			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(batch_vertex_buffer));
+			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(batch_vertex_buffer));
 			let stride_bytes = (BATCH_FLOATS_PER_VERTEX * 4) as i32;
 			let attribute_layout: [(&str, i32, i32); 5] = [("vertexPosition", 2, 0), ("vertexTextureCoordinate", 2, 8), ("vertexColor", 4, 16), ("vertexTintColor", 4, 32), ("vertexSlot", 2, 48)];
 			for (attribute_name, component_count, byte_offset) in attribute_layout {
@@ -3050,7 +3048,7 @@ impl Graphic {
 				}
 			}
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
-			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 			self.batch_vertex_array = Some(batch_vertex_array);
 			self.batch_vertex_buffer = Some(batch_vertex_buffer);
 		}
@@ -3075,9 +3073,9 @@ impl Graphic {
 		let particle_shader_program = ShaderProgram::new(&self.gl, PARTICLE_VERTEXSHADER_SOURCE, PARTICLE_FRAGMENTSHADER_SOURCE)?;
 		unsafe {
 			let particle_vertex_array = crate::core::glstatecache::create_vertex_array(&self.gl)?;
-			let particle_vertex_buffer = self.gl.create_buffer()?;
+			let particle_vertex_buffer = crate::core::glstatecache::create_buffer(&self.gl)?;
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(particle_vertex_array));
-			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(particle_vertex_buffer));
+			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(particle_vertex_buffer));
 			self.gl.buffer_data_size(glow::ARRAY_BUFFER, (PARTICLE_VERTEX_CAPACITY * PARTICLE_FLOATS_PER_VERTEX * 4) as i32, glow::DYNAMIC_DRAW);
 			let stride_bytes = (PARTICLE_FLOATS_PER_VERTEX * 4) as i32;
 			let attribute_layout: [(&str, i32, i32); 3] = [("vertexPosition", 2, 0), ("vertexTextureCoordinate", 2, 8), ("vertexColor", 4, 16)];
@@ -3089,7 +3087,7 @@ impl Graphic {
 				}
 			}
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
-			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 			self.particle_vertex_array = Some(particle_vertex_array);
 			self.particle_vertex_buffer = Some(particle_vertex_buffer);
 		}
@@ -3166,6 +3164,7 @@ impl Graphic {
 			return;
 		}
 		self.flush_batch();
+		self.apply_draw_state();
 		if let Err(error) = self.ensure_particle_batch_resources() {
 			eprintln!("Graphic: particle resources failed: {}", error);
 			return;
@@ -3203,7 +3202,7 @@ impl Graphic {
 		let vertex_bytes = float_slice_to_bytes(&self.particle_vertex_data[..vertex_count * PARTICLE_FLOATS_PER_VERTEX]);
 		unsafe {
 			crate::core::glstatecache::bind_vertex_array(&self.gl, self.particle_vertex_array);
-			self.gl.bind_buffer(glow::ARRAY_BUFFER, self.particle_vertex_buffer);
+			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, self.particle_vertex_buffer);
 			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 			self.gl.uniform_matrix_3_f32_slice(model_matrix_location.as_ref(), false, &self.model_matrix_array);
@@ -3230,7 +3229,7 @@ impl Graphic {
 		// 기본 버텍스 어레이로 복귀. (프로그램은 다음에 낱장으로 그릴 때 건다)
 		unsafe {
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
-			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 		}
 		self.release_clip_scissor();
 	}
@@ -3359,7 +3358,6 @@ impl Graphic {
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 			texture
 		};
-		self.bound_texture.set(Some(soft_disc_texture));
 		self.soft_disc_texture = Some(soft_disc_texture);
 		soft_disc_texture
 	}
@@ -3380,8 +3378,7 @@ impl Graphic {
 			return Some(texture);
 		}
 
-		// 새로 올리거나 필터를 다시 걸면 텍스처 바인드가 바뀐다.
-		self.bound_texture.set(None);
+		// 새로 올리거나 필터를 다시 걸면 텍스처 바인드가 바뀐다. (상태 캐시를 거쳐 묶으므로 따로 잊지 않는다)
 		self.image_texture_cache.get_texture(&self.gl, image, is_image_smoothing_enabled, is_image_mipmap_enabled)
 	}
 
@@ -4482,13 +4479,12 @@ impl Graphic {
 		}
 
 		// 버릴 아틀라스 장 텍스처는 쌓아 둔 묶음이 쓸 수 있어 묶음을 먼저 내보내고 지운다. (원본 beforeTextureOverwrite)
-		// 새 글리프는 장의 빈 칸에만 올리므로 묶음을 내보내지 않는다. 올리며 텍스처를 묶으므로 묶은 텍스처 기억은 지운다.
+		// 새 글리프는 장의 빈 칸에만 올리므로 묶음을 내보내지 않는다. (올리며 텍스처를 묶는 것은 상태 캐시를 거친다)
 		if self.text_string_texture_cache.has_pending_deleted_textures() {
 			self.flush_batch();
 			self.text_string_texture_cache.delete_pending_textures(&self.gl);
 		}
 		let entry = self.text_string_texture_cache.get_entry(&self.gl, text_draw_kind, text, &self.font_string, line_width, bake_scale, shaping_direction);
-		self.bound_texture.set(None);
 		if self.text_string_texture_cache.has_pending_deleted_textures() {
 			self.flush_batch();
 			self.text_string_texture_cache.delete_pending_textures(&self.gl);
@@ -4624,7 +4620,6 @@ impl Graphic {
 			self.draw_rect(rect);
 		}
 		self.batch_suspend_depth -= 1;
-		self.is_color_mask_known.set(false);
 		unsafe {
 			crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
 			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
@@ -4681,7 +4676,6 @@ impl Graphic {
 				// 깊이는 1 로, 스텐실은 지금 자르기 깊이로 비운다. (지난 층의 깊이가 남으면 층 안의 깊이를 비우지 않는 3D 패스가 가려진다, 원본 clearBufferfi)
 				self.gl.clear_buffer_depth_stencil(glow::DEPTH_STENCIL, 0, 1.0, clip_depth);
 			}
-			self.is_color_mask_known.set(false);
 			self.global_alpha = 1.0;
 		}
 		self.opacity_layer_stack.push(OpacityLayer {
@@ -4786,7 +4780,6 @@ impl Graphic {
 	/// 투명도 층 칸 지우기.
 	//==============================================================================
 	fn destroy_opacity_layer_target(&self, target: OpacityLayerTarget) {
-		self.forget_bound_texture(target.texture);
 		unsafe {
 			crate::core::glstatecache::delete_framebuffer(&self.gl, target.framebuffer);
 			self.gl.delete_renderbuffer(target.stencil_renderbuffer);
@@ -4833,7 +4826,6 @@ impl Graphic {
 			self.draw_rect(clip_entry.rect);
 		}
 		self.batch_suspend_depth -= 1;
-		self.is_color_mask_known.set(false);
 		unsafe {
 			crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
 			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
@@ -4953,7 +4945,6 @@ impl Graphic {
 			self.draw_rect(rect);
 		}
 		self.batch_suspend_depth -= 1;
-		self.is_color_mask_known.set(false);
 		unsafe {
 			crate::core::glstatecache::color_mask(&self.gl, true, true, true, true);
 			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
@@ -5096,34 +5087,49 @@ impl Graphic {
 	}
 
 	//==============================================================================
-	/// 렌더 상태 복구. (외부 GL 패스가 프로그램 / 버텍스 어레이 / 뷰포트 / 블렌드를 바꾼 뒤 Graphic 출력을 이어갈 때)
-	/// - 원본과 같고, 클립 중이면 스텐실 테스트도 다시 켠다. (원본은 켜지 않는다)
-	/// - 기억한 프로그램과 텍스처를 잊고 다시 건다.
+	/// 렌더 상태 복구. (외부 GL 패스가 프로그램 / 버텍스 어레이 / 뷰포트 / 블렌드를 바꾼 뒤 Graphic 출력을 이어갈 때, 원본 restoreRenderState)
+	/// - 스텐실 자르기 상태는 되돌리지 않는다. (run_external_pass 가 끝에 되돌린다, 원본과 같음)
 	//==============================================================================
 	pub fn restore_render_state(&mut self) {
-		self.forget_bound_render_state();
+		unsafe {
+			crate::core::glstatecache::viewport(&self.gl, 0, 0, self.applied_viewport_width, self.applied_viewport_height);
+			crate::core::glstatecache::disable(&self.gl, glow::SCISSOR_TEST);
+		}
+		self.is_clip_scissor_enabled = false;
 		let shader_program = self.get_shader_program();
 		self.use_shader_program(shader_program);
 		let projection_matrix_location = shader_program.get_uniform_location(&self.gl, "projectionMatrix");
 		let main_texture_location = shader_program.get_uniform_location(&self.gl, "mainTexture");
 		unsafe {
-			crate::core::glstatecache::viewport(&self.gl, 0, 0, self.applied_viewport_width, self.applied_viewport_height);
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
-			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 			self.gl.uniform_1_i32(main_texture_location.as_ref(), 0);
 			crate::core::glstatecache::active_texture(&self.gl, glow::TEXTURE0);
 			crate::core::glstatecache::enable(&self.gl, glow::BLEND);
 			crate::core::glstatecache::disable(&self.gl, glow::DEPTH_TEST);
 			crate::core::glstatecache::disable(&self.gl, glow::CULL_FACE);
-			crate::core::glstatecache::disable(&self.gl, glow::SCISSOR_TEST);
-			if self.stencil_clip_depth > 0 {
-				crate::core::glstatecache::enable(&self.gl, glow::STENCIL_TEST);
-			}
 		}
-		self.is_clip_scissor_enabled = false;
 		let blend_mode = self.get_blend_mode();
 		self.apply_blend_mode(blend_mode);
+	}
+
+	//==============================================================================
+	/// 스텐실 자르기 상태 되돌리기. (원본 restoreStencilClipState, 셰이더 자르기가 없을 때 run_external_pass 가 끝에 부른다)
+	/// - 바깥 패스가 스텐실 테스트를 끄거나 스텐실 함수, 연산, 마스크를 바꿨어도 지금 스텐실 자르기 깊이대로 다시 건다.
+	//==============================================================================
+	fn restore_stencil_clip_state(&mut self) {
+		unsafe {
+			self.gl.stencil_mask(0xFF);
+			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
+			let stencil_depth = self.stencil_clip_depth;
+			if stencil_depth == 0 {
+				crate::core::glstatecache::disable(&self.gl, glow::STENCIL_TEST);
+				return;
+			}
+			crate::core::glstatecache::enable(&self.gl, glow::STENCIL_TEST);
+			self.gl.stencil_func(glow::EQUAL, stencil_depth, 0xFF);
+		}
 	}
 
 	//==============================================================================
@@ -5177,14 +5183,15 @@ impl Graphic {
 	//==============================================================================
 	/// GL 컨텍스트 반환. (원본 getWebGL2RenderingContext)
 	/// - 받은 컨텍스트(GlContext)의 상태 함수는 GL 상태 캐시를 거치므로, 받은 뒤 바꾼 상태를 엔진이 안다.
-	/// - 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, Graphic 이 2D 그리기에 묶어 둔 프로그램과 텍스처의 기억은 잊는다. (다음 그리기에서 상태 캐시에 물어 다시 건다)
+	///   Graphic 은 묶음과 2D 상태를 따로 기억하지 않고 그리기 앞에 상태 캐시에 견주므로, 받은 쪽이 프로그램, 텍스처, 섞기 같은 것을 바꿔도 다음 2D 그리기가 다시 건다.
+	/// - 색 쓰기 마스크는 모든 채널로 되돌려 준다. (데스크탑 기본 프레임버퍼에 알파를 쓰지 않으려 Graphic 이 끈 것)
 	/// - GL 상태 캐시는 잊지 않는다. (원본과 같음, 안의 glow::Context 를 꺼내 상태를 바꿨으면 reset_gl_state_cache 를 부른다)
 	///
 	/// # 돌려줌
 	/// Graphic 이 든 GL 컨텍스트. 엔진 함수의 `&glow::Context` 인자로도 그대로 넘긴다.
 	//==============================================================================
 	pub fn get_gl(&self) -> &GlContext {
-		self.forget_bound_render_state();
+		self.release_color_mask();
 		GlContext::from_context(&self.gl)
 	}
 
@@ -5192,7 +5199,7 @@ impl Graphic {
 	/// GL 컨텍스트 반환. (엔진 안에서, 상태 캐시를 거쳐 GL 을 부르는 쪽이 쓴다, 상태 캐시를 잊지 않는다)
 	//==============================================================================
 	pub(crate) fn get_tracked_gl(&self) -> &glow::Context {
-		self.forget_bound_render_state();
+		self.release_color_mask();
 		&self.gl
 	}
 

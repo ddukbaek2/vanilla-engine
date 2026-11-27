@@ -1856,6 +1856,62 @@ pub(crate) mod tests {
 		}
 	}
 
+	/// ARRAY_BUFFER 기억이 진짜 GL 과 같은지. (버퍼를 마구 만들고 ARRAY_BUFFER, ELEMENT_ARRAY_BUFFER, COPY_READ_BUFFER 에 묶고 지운다, 원본 isArrayBufferBound)
+	/// - 처음 ELEMENT_ARRAY_BUFFER 에 묶은 버퍼는 WebGL 이 ARRAY_BUFFER 에 묶지 못하게 하므로 모름으로 둔다. (데스크탑 GL 은 묶어 주므로 모름이 맞다)
+	#[test]
+	fn array_buffer_binding_matches_real_gl() {
+		let Some(gl) = create_surfaceless_context() else {
+			eprintln!("glstatecache: 창 없는 GL 컨텍스트를 짓지 못해 건너뜀");
+			return;
+		};
+		let _ = attach(&gl);
+		let gl: &glow::Context = &gl;
+		let context = crate::core::glcontext::GlContext::from_context(gl);
+		let mut number_sequence = NumberSequence(20261128);
+		let mut mismatch_list: Vec<String> = Vec::new();
+		unsafe {
+			let vertex_array = context.create_vertex_array().unwrap();
+			context.bind_vertex_array(Some(vertex_array));
+			let mut buffer_list: Vec<GlBuffer> = (0..4).map(|_| context.create_buffer().unwrap()).collect();
+			for step in 0..400 {
+				match number_sequence.read(6) {
+					0 | 1 => {
+						let buffer = buffer_list[number_sequence.read(buffer_list.len())];
+						context.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+					}
+					2 => {
+						let buffer = buffer_list[number_sequence.read(buffer_list.len())];
+						context.bind_buffer([glow::ELEMENT_ARRAY_BUFFER, glow::COPY_READ_BUFFER][number_sequence.read(2)], Some(buffer));
+					}
+					3 => {
+						context.bind_buffer(glow::ARRAY_BUFFER, None);
+					}
+					4 => {
+						let buffer_index = number_sequence.read(buffer_list.len());
+						context.delete_buffer(buffer_list[buffer_index]);
+						buffer_list[buffer_index] = context.create_buffer().unwrap();
+					}
+					_ => {
+						let buffer = buffer_list[number_sequence.read(buffer_list.len())];
+						if !is_array_buffer_bound(gl, Some(buffer)) {
+							context.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+						}
+						let real = gl.get_parameter_buffer(glow::ARRAY_BUFFER_BINDING);
+						if real != Some(buffer) {
+							mismatch_list.push(format!("{}: {:?} 기대, 진짜 {:?}", step, buffer, real));
+						}
+					}
+				}
+				let real = gl.get_parameter_buffer(glow::ARRAY_BUFFER_BINDING);
+				let remembered = find(gl).unwrap().array_buffer.get();
+				if remembered.is_some_and(|remembered| remembered != real) {
+					mismatch_list.push(format!("{}: 기억 {:?}, 진짜 {:?}", step, remembered, real));
+				}
+			}
+		}
+		assert!(mismatch_list.is_empty(), "틀린 것 {} 개: {:?}", mismatch_list.len(), &mismatch_list[..mismatch_list.len().min(8)]);
+	}
+
 	/// 검사 모드: GlContext 와 엔진 길로 마구 바꾸며 그리면 어긋남이 없고, 날 glow 로 바꾼 뒤 그리면 그 갈래를 잡아 세는지.
 	#[test]
 	fn check_mode_finds_only_bypassed_state_change() {

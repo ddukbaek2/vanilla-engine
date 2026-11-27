@@ -2088,12 +2088,13 @@ impl EngineRunner {
 	}
 
 	//==============================================================================
-	/// 그래픽의 묶음 기억 잊기. (웹 플랫폼이 GL 컨텍스트를 잃거나 되살릴 때, 원본 Graphic 의 webglcontextlost / webglcontextrestored)
+	/// 그래픽의 GL 상태 기억 잊기. (웹 플랫폼이 GL 컨텍스트를 잃거나 되살릴 때, 원본 WebGLStateCache 의 webglcontextlost / webglcontextrestored)
+	/// - Graphic 은 묶음과 2D 상태를 따로 기억하지 않고 상태 캐시에 견주므로 상태 캐시만 잊는다. (원본 Graphic 도 묶음 기억을 따로 잊지 않는다)
 	//==============================================================================
 	#[cfg(target_arch = "wasm32")]
-	pub(crate) fn invalidate_render_state_cache(&self) {
+	pub(crate) fn reset_gl_state_cache(&self) {
 		if let Some(graphic) = self.engine.get_graphic() {
-			graphic.invalidate_render_state_cache();
+			graphic.reset_gl_state_cache();
 		}
 	}
 

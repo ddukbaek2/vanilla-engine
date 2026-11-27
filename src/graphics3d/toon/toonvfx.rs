@@ -1631,18 +1631,18 @@ impl ToonVfx {
 		let corner_data = [-1.0f32, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0];
 		let particle_capacity = particle_capacity.max(1);
 		unsafe {
-			let particle_buffer = gl.create_buffer()?;
+			let particle_buffer = crate::core::glstatecache::create_buffer(gl)?;
 			buffer_list.push(particle_buffer);
 			let particle_vertex_array = ToonVfx::create_particle_vertex_array(gl, &mut buffer_list, &corner_data, particle_buffer)?;
-			let glint_buffer = gl.create_buffer()?;
+			let glint_buffer = crate::core::glstatecache::create_buffer(gl)?;
 			buffer_list.push(glint_buffer);
 			let glint_vertex_array = ToonVfx::create_particle_vertex_array(gl, &mut buffer_list, &corner_data, glint_buffer)?;
 			// 리본: 자리와 (길이 쪽, 가로).
 			let ribbon_vertex_array = crate::core::glstatecache::create_vertex_array(gl)?;
 			crate::core::glstatecache::bind_vertex_array(gl, Some(ribbon_vertex_array));
-			let ribbon_buffer = gl.create_buffer()?;
+			let ribbon_buffer = crate::core::glstatecache::create_buffer(gl)?;
 			buffer_list.push(ribbon_buffer);
-			gl.bind_buffer(glow::ARRAY_BUFFER, Some(ribbon_buffer));
+			crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(ribbon_buffer));
 			gl.enable_vertex_attrib_array(0);
 			gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, (RIBBON_FLOAT_COUNT * 4) as i32, 0);
 			gl.enable_vertex_attrib_array(1);
@@ -1728,7 +1728,7 @@ impl ToonVfx {
 		let vertex_array = crate::core::glstatecache::create_vertex_array(gl)?;
 		crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
 		ToonVfx::bind_corner_buffer(gl, buffer_list, corner_data, 0)?;
-		gl.bind_buffer(glow::ARRAY_BUFFER, Some(instance_buffer));
+		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(instance_buffer));
 		for attribute_index in 0..7u32 {
 			let location = 1 + attribute_index;
 			gl.enable_vertex_attrib_array(location);
@@ -1743,9 +1743,9 @@ impl ToonVfx {
 	/// 네 귀퉁이 버퍼를 묶인 버텍스 어레이에 붙이기.
 	//==============================================================================
 	unsafe fn bind_corner_buffer(gl: &glow::Context, buffer_list: &mut Vec<GlBuffer>, corner_data: &[f32], location: u32) -> Result<(), String> {
-		let corner_buffer = gl.create_buffer()?;
+		let corner_buffer = crate::core::glstatecache::create_buffer(gl)?;
 		buffer_list.push(corner_buffer);
-		gl.bind_buffer(glow::ARRAY_BUFFER, Some(corner_buffer));
+		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(corner_buffer));
 		gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(corner_data), glow::STATIC_DRAW);
 		gl.enable_vertex_attrib_array(location);
 		gl.vertex_attrib_pointer_f32(location, 2, glow::FLOAT, false, 8, 0);
@@ -1758,15 +1758,15 @@ impl ToonVfx {
 	unsafe fn create_indexed_mesh(gl: &glow::Context, buffer_list: &mut Vec<GlBuffer>, positions: &[f32], indices: &[u16], component_count: i32) -> Result<IndexedMesh, String> {
 		let vertex_array = crate::core::glstatecache::create_vertex_array(gl)?;
 		crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
-		let vertex_buffer = gl.create_buffer()?;
+		let vertex_buffer = crate::core::glstatecache::create_buffer(gl)?;
 		buffer_list.push(vertex_buffer);
-		gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
+		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(vertex_buffer));
 		gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(positions), glow::STATIC_DRAW);
 		gl.enable_vertex_attrib_array(0);
 		gl.vertex_attrib_pointer_f32(0, component_count, glow::FLOAT, false, component_count * 4, 0);
-		let index_buffer = gl.create_buffer()?;
+		let index_buffer = crate::core::glstatecache::create_buffer(gl)?;
 		buffer_list.push(index_buffer);
-		gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(index_buffer));
+		crate::core::glstatecache::bind_buffer(gl, glow::ELEMENT_ARRAY_BUFFER, Some(index_buffer));
 		gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, index_slice_to_bytes(indices), glow::STATIC_DRAW);
 		crate::core::glstatecache::bind_vertex_array(gl, None);
 		Ok(IndexedMesh { vertex_array, index_count: indices.len() as i32 })
@@ -2808,7 +2808,7 @@ impl ToonVfx {
 		set_uniform_vector3(gl, ribbon_program, "rimColor", self.rim_color);
 		unsafe {
 			crate::core::glstatecache::bind_vertex_array(gl, Some(self.ribbon_vertex_array));
-			gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.ribbon_buffer));
+			crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(self.ribbon_buffer));
 			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&ribbon_data), glow::DYNAMIC_DRAW);
 		}
 		let mut first_vertex = 0;
@@ -2855,7 +2855,7 @@ impl ToonVfx {
 				crate::core::glstatecache::bind_vertex_array(gl, Some(self.particle_vertex_array));
 				let used_count = self.particle_used_count;
 				if self.is_particle_dirty {
-					gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.particle_buffer));
+					crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(self.particle_buffer));
 					gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&self.particle_data[..used_count * PARTICLE_FLOAT_COUNT]), glow::DYNAMIC_DRAW);
 					self.is_particle_dirty = false;
 				}
@@ -2863,7 +2863,7 @@ impl ToonVfx {
 			}
 			if glint_count > 0 {
 				crate::core::glstatecache::bind_vertex_array(gl, Some(self.glint_vertex_array));
-				gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.glint_buffer));
+				crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(self.glint_buffer));
 				gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&self.glint_data[..glint_count * PARTICLE_FLOAT_COUNT]), glow::DYNAMIC_DRAW);
 				crate::core::glstatecache::draw_arrays_instanced(gl, glow::TRIANGLE_STRIP, 0, 4, glint_count as i32);
 			}
@@ -2907,7 +2907,7 @@ impl ToonVfx {
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		unsafe {
 			for buffer in self.buffer_list.drain(..) {
-				gl.delete_buffer(buffer);
+				crate::core::glstatecache::delete_buffer(gl, buffer);
 			}
 			for vertex_array in [self.particle_vertex_array, self.glint_vertex_array, self.ribbon_vertex_array, self.decal_vertex_array, self.sphere_mesh.vertex_array, self.band_mesh.vertex_array, self.lathe_mesh.vertex_array] {
 				crate::core::glstatecache::delete_vertex_array(gl, vertex_array);

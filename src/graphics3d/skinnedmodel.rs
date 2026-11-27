@@ -2418,8 +2418,8 @@ impl SkinnedModel {
 			let is_indexed = mesh_description.indices.is_some();
 			if let Some(indices) = &mesh_description.indices {
 				unsafe {
-					let created_index_buffer = gl.create_buffer()?;
-					gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(created_index_buffer));
+					let created_index_buffer = crate::core::glstatecache::create_buffer(gl)?;
+					crate::core::glstatecache::bind_buffer(gl, glow::ELEMENT_ARRAY_BUFFER, Some(created_index_buffer));
 					gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, indices.as_bytes(), glow::STATIC_DRAW);
 					index_buffer = Some(created_index_buffer);
 				}
@@ -2599,7 +2599,7 @@ impl SkinnedModel {
 		let drawable = self.drawable_list.get_mut(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
 		if let Some(wireframe_index_buffer) = drawable.wireframe_index_buffer.take() {
 			unsafe {
-				gl.delete_buffer(wireframe_index_buffer);
+				crate::core::glstatecache::delete_buffer(gl, wireframe_index_buffer);
 			}
 		}
 		let edge_list = SkinnedModel::build_wireframe_edge_list(drawable.mesh_description.indices.as_ref(), drawable.vertex_count);
@@ -2611,11 +2611,11 @@ impl SkinnedModel {
 			IndexArray::UnsignedShort(edge_list.iter().map(|index| *index as u16).collect())
 		};
 		unsafe {
-			let wireframe_index_buffer = gl.create_buffer()?;
+			let wireframe_index_buffer = crate::core::glstatecache::create_buffer(gl)?;
 			crate::core::glstatecache::bind_vertex_array(gl, None);
-			gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(wireframe_index_buffer));
+			crate::core::glstatecache::bind_buffer(gl, glow::ELEMENT_ARRAY_BUFFER, Some(wireframe_index_buffer));
 			gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, wireframe_indices.as_bytes(), glow::STATIC_DRAW);
-			gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
+			crate::core::glstatecache::bind_buffer(gl, glow::ELEMENT_ARRAY_BUFFER, None);
 			drawable.wireframe_index_buffer = Some(wireframe_index_buffer);
 		}
 		drawable.wireframe_index_count = wireframe_indices.len();
@@ -3069,8 +3069,8 @@ impl SkinnedModel {
 			}
 		};
 		unsafe {
-			let vertex_buffer = gl.create_buffer()?;
-			gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
+			let vertex_buffer = crate::core::glstatecache::create_buffer(gl)?;
+			crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(vertex_buffer));
 			// 셈은 f64 로 들고 GPU 에는 f32 로 올린다. (원본 Float32Array)
 			let float32_array: Vec<f32> = data_array.iter().map(|value| *value as f32).collect();
 			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_to_bytes(&float32_array), glow::STATIC_DRAW);
@@ -3104,8 +3104,8 @@ impl SkinnedModel {
 			}
 		};
 		unsafe {
-			let vertex_buffer = gl.create_buffer()?;
-			gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
+			let vertex_buffer = crate::core::glstatecache::create_buffer(gl)?;
+			crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(vertex_buffer));
 			// u16 그대로 올린다. (원본 Uint16Array, 포인터가 UNSIGNED_SHORT 라 f32 로 바꿔 올리면 조인트 번호가 깨져 jointMatrices 밖을 읽는다)
 			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_to_bytes(data_array), glow::STATIC_DRAW);
 			gl.enable_vertex_attrib_array(attribute_location);
@@ -3426,7 +3426,7 @@ impl SkinnedModel {
 		for drawable in self.drawable_list.drain(..) {
 			unsafe {
 				if let Some(wireframe_index_buffer) = drawable.wireframe_index_buffer {
-					gl.delete_buffer(wireframe_index_buffer);
+					crate::core::glstatecache::delete_buffer(gl, wireframe_index_buffer);
 				}
 				if !drawable.is_morph_texture_shared {
 					if let Some(morph_texture) = drawable.morph_texture {
