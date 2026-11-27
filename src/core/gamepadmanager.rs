@@ -2214,6 +2214,6 @@ mod tests {
 		assert_eq!(round_to_hundredths(0.125), 0.13);
 		assert_eq!(round_to_hundredths(-0.456), -0.46);
 		assert_eq!(round_to_hundredths(1.0), 1.0);
-		assert_eq!(round_to_hundredths(0_f64), 0.29);
+		assert_eq!(round_to_hundredths(0.29f32 as f64), 0.29);
 	}
 }
