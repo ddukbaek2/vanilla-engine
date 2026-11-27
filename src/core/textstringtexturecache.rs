@@ -2,9 +2,12 @@
 //! 문자열 텍스처 캐시.
 //! - 원본은 글꼴(모드, 글꼴 글, 굽는 배율, 선 굵기)마다 글자 덩어리를 글리프 아틀라스(1024 x 1024 장, 8 장까지)에 한 번만 굽고, 글은 글리프 사각형 목록(엔트리, LRU 상한 1024)으로 그린다.
 //! - 데스크탑은 글자 모양 짓기(textshaping.rs: 양방향 정렬, rustybuzz 모양 짓기)로 글리프를 놓고, 처음 보는 글리프만 래스터화해(맥 CoreText, 윈도우 DirectWrite, 리눅스 skrifa) 아틀라스 칸에 굽는다.
-//!   글리프 열쇠는 (얼굴, 글리프 번호, 크기, 서브픽셀 칸, 방식과 선 굵기, 안티앨리어싱)이다. 셰이퍼가 합자와 이어진 꼴을 글리프로 풀어 주므로 원본의 글자 덩어리 나누기 대신,
-//!   잉크가 가로로 빈 열 하나 없이 닿는 글리프(외곽선은 띠까지)만 한 칸에 묶는다. 빈 열이 있으면 칸마다 그려도 문자열을 통째로 구운 것과 화소가 같다.
-//!   256px 넘는 글꼴과 웹(브라우저 Canvas2D 로 굽는다)은 원본처럼 문자열째 칸 하나에 굽는다.
+//!   칸은 원본과 같은 글자 덩어리마다 하나다. 한글, 한자, 가나, 숫자, 문장 부호, 이모지는 글자 묶음마다, 라틴과 키릴 같은 글자는 낱말째 한 칸이다.
+//!   칸 열쇠는 덩어리에 든 글리프마다 (얼굴, 글리프 번호, 크기, 스키아 서브픽셀 1/4 칸)과 첫 글리프에서의 정수 자리 차이, 방식과 선 굵기, 안티앨리어싱이다.
+//!   (원본은 스키아의 칸 경계를 모두 담는 1/8 자리 칸을 열쇠로 쓴다. 러스트는 스키아가 쓰는 칸 자체를 알아 같은 래스터를 더 적게 굽는다)
+//!   이웃 덩어리의 잉크가 닿으면 칸마다 따로 그려 소수 자리의 선형 거르기와 겹친 잉크 섞기가 문자열째와 조금 다를 수 있다. (원본과 같다, 스키아 글리프 캐시와 TextMeshPro 의 꼴)
+//!   칸마다 위아래에 가장자리 줄을 한 줄씩 되풀이해 굽는다. (세로 소수 자리에서 칸 끝을 넘어 뽑아도 아틀라스의 다른 줄이 아니라 예전 CLAMP_TO_EDGE 처럼 가장자리 줄이 나온다)
+//!   256px 넘는 글꼴, 오른쪽에서 왼쪽 글, 웹(브라우저 Canvas2D 로 굽는다)은 원본처럼 문자열째 칸 하나에 굽는다.
 //!   장 정책(가장 나중에 연 장에만 이어 놓기, 차면 새 장, 8 장을 넘으면 가장 오래 안 쓴 장을 비우기), 엔트리 상한, 엔트리 키 구성(방식, 문단 방향, 폰트 문자열, 선 두께, 배율, 글)은 원본과 같다.
 //!   원본은 키를 문자열로 이어 붙인다. 여기서는 찾을 때마다 문자열을 만들지 않게 키의 해시로 찾고, 같은 해시 안에서 키를 하나씩 맞춰 본다.
 //! - 글자는 흰색으로 굽고, 그릴 때 색을 곱한다. (색이 바뀌어도 다시 굽지 않는다)
@@ -41,6 +44,8 @@
 //==============================================================================
 use crate::base::color::Color;
 use crate::core::textshaping::{self, FontFaceDescriptors, LoadedFont, RegisteredFontFace, ResolvedFontFace, ShapedText, ShapingDirection};
+use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
+use unicode_script::{Script, UnicodeScript};
 use unicode_segmentation::UnicodeSegmentation;
 use glow::HasContext;
 use std::cell::{Cell, RefCell};
@@ -233,6 +238,8 @@ const MAXIMUM_ATLAS_PAGE_COUNT: usize = 8;
 const MAXIMUM_ATLAS_FONT_SIZE: f32 = 256.0;
 /// 글리프 칸 가장자리의 빈 텍셀. (선형 거르기가 이웃 칸의 잉크를 뽑지 않게)
 const GLYPH_CELL_GUTTER: i32 = 1;
+/// 글리프 칸 위아래에 가장자리 줄을 되풀이해 굽는 줄 수. (세로 소수 자리에서 칸 끝을 넘어 뽑아도 예전 문자열 텍스처의 CLAMP_TO_EDGE 처럼 칸의 가장자리 줄이 나온다, 원본과 같다)
+const GLYPH_EDGE_ROW_COUNT: i32 = 1;
 /// 잉크 경계를 기억하는 글리프 래스터 수 상한. (넘으면 비운다)
 const MAXIMUM_GLYPH_INK_COUNT: usize = 16384;
 /// 글 재기 캐시 상한. (원본과 같음)
@@ -559,13 +566,13 @@ struct GlyphInk {
 
 //==============================================================================
 /// 글리프 아틀라스의 칸 열쇠. (원본 #glyphs 의 열쇠)
-/// - 글리프 묶음: 잉크가 닿는 글리프들(대개 하나)의 래스터 열쇠와 정수 자리 차이, 방식과 선 굵기, 안티앨리어싱.
-///   셰이퍼가 합자와 이어진 꼴을 글리프로 풀어 주므로 원본의 글자 덩어리 나누기 대신 잉크가 닿는지로 묶는다.
+/// - 글리프 묶음: 글자 덩어리(원본 splitTextChunks 의 덩어리)에 든 잉크 있는 글리프들의 래스터 열쇠와 정수 자리 차이, 방식과 선 굵기, 안티앨리어싱.
+///   래스터 열쇠에 스키아 서브픽셀 칸이 들어 원본의 1/8 자리 칸 열쇠와 같은 래스터를 가린다. (결합 부호가 붙은 덩어리도 글리프마다 자리가 들어 정확하다)
 /// - 문자열째: 아주 큰 글꼴, 브라우저로 굽는 웹. (원본 isWholeText)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum GlyphKey {
-	/// 잉크가 닿는 글리프 묶음. (글리프마다 래스터 열쇠와 첫 글리프에서의 정수 자리 차이, 대개 글리프 하나)
+	/// 글자 덩어리의 글리프 묶음. (글리프마다 래스터 열쇠와 첫 글리프에서의 정수 자리 차이, 한글, 숫자 같은 덩어리는 대개 글리프 하나)
 	Glyphs {
 		glyph_list: Vec<(GlyphRasterKey, i32, i32)>,
 		text_draw_kind: TextDrawKind,
@@ -1782,7 +1789,7 @@ impl TextStringTextureCache {
 	/// 글 배치 엔트리 반환. (없으면 배치하고 처음 보는 글리프만 아틀라스에 굽는다, direction 은 문단 방향. 원본 getEntry 의 textDirection)
 	/// - 글리프 아틀라스: 1024 x 1024 장에 글리프를 한 번만 굽는다. 가장 나중에 연 장에만 이어 놓고, 차면 새 장, 8 장을 넘으면 가장 오래 안 쓴 장을 비운다.
 	///   비운 장의 텍스처는 버릴 목록에 두고 다음 get_entry 때 지운다. (Graphic 은 쌓아 둔 묶음을 먼저 내보내고 바로 지운다)
-	/// - 글리프 자리는 셰이퍼가 준 자리를 크롬 스키아처럼 정수 자리와 서브픽셀 4 칸으로 나눈다. 잉크가 닿는 글리프는 한 칸에 묶는다. 256px 넘는 글꼴은 문자열째 굽는다.
+	/// - 글리프 자리는 셰이퍼가 준 자리를 크롬 스키아처럼 정수 자리와 서브픽셀 4 칸으로 나눈다. 글자 덩어리(한글, 숫자 같은 글자는 글자마다, 라틴 낱말은 낱말째)마다 한 칸에 굽는다. 256px 넘는 글꼴과 오른쪽에서 왼쪽 글은 문자열째 굽는다.
 	///
 	/// # 인자
 	/// - `gl`: 텍스처를 만들 GL 컨텍스트.
@@ -2338,8 +2345,8 @@ impl TextStringTextureCache {
 		let system_font_measure = create_system_font_measure(&font_description, pixel_size);
 		let shaped_text: ShapedText = textshaping::shape_text(&face_list, text, pixel_size, direction, system_font_measure.as_deref());
 		let has_system_piece = shaped_text.glyph_list.iter().any(|shaped_glyph| shaped_glyph.face_index == textshaping::SYSTEM_FACE_INDEX);
-		if pixel_size > MAXIMUM_ATLAS_FONT_SIZE || has_system_piece {
-			// 아주 큰 글꼴과 브라우저 시스템 글꼴 조각이 든 글은 문자열째 굽는다. (원본 isWholeText)
+		if pixel_size > MAXIMUM_ATLAS_FONT_SIZE || has_system_piece || direction != ShapingDirection::LeftToRight || has_right_to_left_character(text) {
+			// 아주 큰 글꼴, 오른쪽에서 왼쪽 글(문단 방향이나 글자), 브라우저 시스템 글꼴 조각이 든 글은 문자열째 굽는다. (원본 splitTextChunks 의 isWholeText)
 			let laid_out_text = lay_out_text(&face_list, &font_description, text, pixel_size, direction, padding, WHITE_LUMINANCE_COLOR)?;
 			let mut coverage = laid_out_text.coverage;
 			let mut color_pixels = laid_out_text.color_pixels;
@@ -2425,41 +2432,32 @@ impl TextStringTextureCache {
 			}
 		}
 
-		// 잉크가 닿는 글리프끼리 한 칸으로 묶는다. (가로로 빈 열이 하나도 없이 닿으면, 외곽선은 띠까지 넓혀 본다)
-		// 빈 열이 있으면 선형 거르기의 이웃 텍셀에 두 글리프가 함께 들지 않아, 칸마다 그려도 문자열을 통째로 구워 그린 것과 화소가 같다.
-		// 닿는 글리프를 따로 그리면 거르기와 겹친 잉크 섞기가 달라진다. (원본은 라틴 낱말을 한 칸에 굽는다)
-		let stroke_extent = match text_draw_kind {
-			TextDrawKind::Stroke => {
-				stroke_radius.ceil() as i32
+		// 글자 덩어리마다 한 칸으로 묶는다. (원본 splitTextChunks 와 같은 덩어리, 글리프는 든 글자 묶음의 시작 자리로 덩어리를 찾는다)
+		// 한글, 한자, 가나, 숫자, 문장 부호, 이모지는 글자 덩어리마다 한 칸이라, 아는 글자로 된 새 문자열(바뀌는 숫자 같은)은 새로 굽지 않는다.
+		// 이웃 덩어리의 잉크가 닿으면 칸마다 따로 그려 소수 자리의 선형 거르기와 겹친 잉크 섞기가 문자열째와 조금 다를 수 있다. (원본과 같다, 스키아 글리프 캐시와 TextMeshPro 의 꼴)
+		let chunk_start_list = split_text_chunk_starts(text);
+		let mut chunk_member_list: Vec<(usize, usize)> = inked_glyph_list.iter().enumerate().map(|(inked_index, (glyph_order, _, _, _, _))| {
+			let cluster_start = shaped_text.glyph_list[*glyph_order].cluster_start;
+			(chunk_start_list.partition_point(|chunk_start| *chunk_start <= cluster_start).saturating_sub(1), inked_index)
+		}).collect();
+		// 덩어리 차례로, 덩어리 안은 글리프 차례로. (안정 정렬, 왼쪽에서 오른쪽 글은 이미 차례대로다)
+		chunk_member_list.sort_by_key(|(chunk_index, _)| *chunk_index);
+		let mut chunk_list: Vec<(usize, Vec<usize>)> = Vec::new();
+		for (chunk_index, inked_index) in chunk_member_list {
+			match chunk_list.last_mut() {
+				Some(chunk) if chunk.0 == chunk_index => {
+					chunk.1.push(inked_index);
+				}
+				_ => {
+					chunk_list.push((chunk_index, vec![inked_index]));
+				}
 			}
-			TextDrawKind::Fill => {
-				0
-			}
-		};
-		let mut chunk_list: Vec<(i32, i32, Vec<usize>)> = Vec::new();
-		for (inked_index, (_, _, integer_x, _, glyph_ink)) in inked_glyph_list.iter().enumerate() {
-			let left_x = integer_x + glyph_ink.left_x - stroke_extent;
-			let right_x = integer_x + glyph_ink.left_x + glyph_ink.width + stroke_extent;
-			let touching_index_list: Vec<usize> = chunk_list.iter().enumerate().filter(|(_, chunk)| left_x <= chunk.1 && chunk.0 <= right_x).map(|(chunk_index, _)| chunk_index).collect();
-			if touching_index_list.is_empty() {
-				chunk_list.push((left_x, right_x, vec![inked_index]));
-				continue;
-			}
-			let mut merged_chunk = (left_x, right_x, vec![inked_index]);
-			for chunk_index in touching_index_list.into_iter().rev() {
-				let chunk = chunk_list.remove(chunk_index);
-				merged_chunk.0 = merged_chunk.0.min(chunk.0);
-				merged_chunk.1 = merged_chunk.1.max(chunk.1);
-				merged_chunk.2.extend(chunk.2);
-			}
-			merged_chunk.2.sort_unstable();
-			chunk_list.push(merged_chunk);
 		}
 
 		// 칸 찾기. (없으면 지어 굽기 목록에 모은다, 있으면 그 장의 사용 번호를 올려 이번에 비우지 않게 한다)
 		let mut glyph_position_list: Vec<(GlyphKey, i32, i32)> = Vec::with_capacity(chunk_list.len());
 		let mut pending_glyph_list: Vec<PendingGlyph> = Vec::new();
-		for (_, _, inked_index_list) in &chunk_list {
+		for (_, inked_index_list) in &chunk_list {
 			let (_, _, first_integer_x, first_integer_y, _) = inked_glyph_list[inked_index_list[0]];
 			let glyph_key = GlyphKey::Glyphs {
 				glyph_list: inked_index_list.iter().map(|inked_index| {
@@ -2672,6 +2670,7 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 새 글리프들을 아틀라스에 놓고 올리기. (원본 bakeGlyphs, 같은 줄에 이어 놓인 글리프들은 한 번에 올린다)
+	/// - 칸마다 위아래에 가장자리 줄을 한 줄씩 되풀이해 굽는다. (GLYPH_EDGE_ROW_COUNT, 글리프의 atlas_y 는 되풀이 줄 아래 첫 줄이다)
 	//==============================================================================
 	fn bake_glyphs(&mut self, gl: &glow::Context, pending_glyph_list: Vec<PendingGlyph>, is_antialias: bool) {
 		let is_nearest = !is_antialias;
@@ -2681,13 +2680,14 @@ impl TextStringTextureCache {
 		for mut pending_glyph in pending_glyph_list {
 			let glyph = &mut pending_glyph.glyph;
 			if glyph.cell_width > 0 && glyph.cell_height > 0 {
-				if let Some((atlas_page_id, atlas_x, atlas_y)) = self.allocate_glyph_cell(gl, glyph.cell_width, glyph.cell_height, is_nearest) {
+				let allocated_height = glyph.cell_height + GLYPH_EDGE_ROW_COUNT * 2;
+				if let Some((atlas_page_id, atlas_x, atlas_y)) = self.allocate_glyph_cell(gl, glyph.cell_width, allocated_height, is_nearest) {
 					glyph.atlas_page_id = Some(atlas_page_id);
 					glyph.atlas_x = atlas_x;
-					glyph.atlas_y = atlas_y;
+					glyph.atlas_y = atlas_y + GLYPH_EDGE_ROW_COUNT;
 					let glyph_order = placed_glyph_list.len();
 					let is_joined = match span_list.last_mut() {
-						Some(span) if span.0 == atlas_page_id && span.1 == atlas_y && span.2 + span.3 == atlas_x && span.4 == glyph.cell_height => {
+						Some(span) if span.0 == atlas_page_id && span.1 == atlas_y && span.2 + span.3 == atlas_x && span.4 == allocated_height => {
 							span.3 += glyph.cell_width;
 							span.5.push(glyph_order);
 							true
@@ -2697,7 +2697,7 @@ impl TextStringTextureCache {
 						}
 					};
 					if !is_joined {
-						span_list.push((atlas_page_id, atlas_y, atlas_x, glyph.cell_width, glyph.cell_height, vec![glyph_order]));
+						span_list.push((atlas_page_id, atlas_y, atlas_x, glyph.cell_width, allocated_height, vec![glyph_order]));
 					}
 				}
 			}
@@ -2720,9 +2720,11 @@ impl TextStringTextureCache {
 				let glyph = &placed_glyph.glyph;
 				let offset_x = glyph.atlas_x - atlas_x;
 				let row_bytes = (glyph.cell_width * 4) as usize;
-				for cell_y in 0..glyph.cell_height {
+				for span_y in 0..*span_height {
+					// 위아래 되풀이 줄은 칸의 가장자리 줄을 옮긴다.
+					let cell_y = (span_y - GLYPH_EDGE_ROW_COUNT).clamp(0, glyph.cell_height - 1);
 					let source_start = (cell_y * glyph.cell_width * 4) as usize;
-					let destination_start = ((cell_y * *span_width + offset_x) * 4) as usize;
+					let destination_start = ((span_y * *span_width + offset_x) * 4) as usize;
 					span_pixels[destination_start..destination_start + row_bytes].copy_from_slice(&placed_glyph.pixels[source_start..source_start + row_bytes]);
 				}
 			}
@@ -3085,6 +3087,42 @@ fn split_glyph_position(position_x: f32, position_y: f32, is_subpixel: bool) -> 
 }
 
 //==============================================================================
+/// 글을 따로 구울 글자 덩어리로 나눈 시작 자리들. (원본 splitTextChunks, 바이트, 첫 값은 0)
+/// - 한글, 한자, 가나, 주음, 숫자, 문장 부호, 공백, 이모지는 글자 묶음(UAX #29 확장 자소 묶음, 원본 Intl.Segmenter 의 grapheme)마다 따로다.
+/// - 그 밖의 글자(라틴, 키릴, 태국 같은, 글자나 결합 부호로 시작하는 묶음)는 합자나 이어진 꼴로 이웃과 엮일 수 있어 이어진 낱말째 한 덩어리다.
+/// - 원본은 결합 부호가 붙은 덩어리를 정확한 자리로 굽는다. 러스트는 칸 열쇠가 글리프마다 스키아 서브픽셀 칸과 정수 자리 차이라 늘 정확한 자리다.
+//==============================================================================
+fn split_text_chunk_starts(text: &str) -> Vec<usize> {
+	let mut chunk_start_list: Vec<usize> = Vec::new();
+	let mut is_previous_joining = false;
+	for (cluster_start, cluster_text) in text.grapheme_indices(true) {
+		let is_joining = match cluster_text.chars().next() {
+			Some(first_character) => {
+				matches!(first_character.general_category_group(), GeneralCategoryGroup::Letter | GeneralCategoryGroup::Mark) && !matches!(first_character.script(), Script::Hangul | Script::Han | Script::Hiragana | Script::Katakana | Script::Bopomofo)
+			}
+			None => {
+				false
+			}
+		};
+		if !(is_joining && is_previous_joining) {
+			chunk_start_list.push(cluster_start);
+		}
+		is_previous_joining = is_joining;
+	}
+	if chunk_start_list.first() != Some(&0) {
+		chunk_start_list.insert(0, 0);
+	}
+	chunk_start_list
+}
+
+//==============================================================================
+/// 오른쪽에서 왼쪽 글자가 들었는지. (원본 RIGHT_TO_LEFT_PATTERN, 히브리, 아랍, 시리아, 타나 같은 U+0590 ~ U+08FF 와 표현형, 보조 평면의 오른쪽에서 왼쪽 구역)
+//==============================================================================
+fn has_right_to_left_character(text: &str) -> bool {
+	text.chars().any(|character| matches!(character as u32, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x10800..=0x10FFF | 0x1E800..=0x1EFFF))
+}
+
+//==============================================================================
 /// 시스템 글꼴 조각 재는 함수. (웹이면 브라우저 캔버스로 재고, 데스크탑은 없다)
 //==============================================================================
 #[allow(clippy::type_complexity)]
@@ -3138,7 +3176,7 @@ fn bake_system_font_bitmap(text_draw_kind: TextDrawKind, text: &str, font_descri
 }
 
 //==============================================================================
-/// 잉크가 닿는 글리프 묶음을 아틀라스 칸으로 짓기. (글리프 차례대로 겹쳐 얹고, 외곽선, 안티앨리어싱 문턱, 흰색 프리멀티플라이드 RGBA 까지)
+/// 글자 덩어리의 글리프 묶음을 아틀라스 칸으로 짓기. (글리프 차례대로 겹쳐 얹고, 외곽선, 안티앨리어싱 문턱, 흰색 프리멀티플라이드 RGBA 까지)
 /// - member_list: (래스터, 첫 글리프에서의 정수 자리 차이 x, y(위가 양수)). 문자열을 통째로 구울 때(lay_out_text)와 같은 차례와 섞기다.
 /// - 칸 가로는 잉크에 여백(cell_padding)을 둘러 잡고, 세로는 첫 얼굴의 줄 높이(넘는 잉크는 잉크까지)에 여백을 둘러 잡는다. (같은 글꼴의 칸이 같은 높이 줄에 이어 놓인다)
 //==============================================================================
@@ -3177,7 +3215,7 @@ fn compose_atlas_chunk(member_list: &[(&textshaping::GlyphRaster, i32, i32)], fo
 		}
 	}
 
-	// 외곽선: 윤곽 바깥으로 반두께 넓힌 것에서 안으로 반두께 좁힌 것을 뺀 띠. (띠가 닿는 글리프는 한 칸에 묶였으므로 문자열째 그은 것과 같다, 색 글리프는 테 없이 그대로)
+	// 외곽선: 윤곽 바깥으로 반두께 넓힌 것에서 안으로 반두께 좁힌 것을 뺀 띠. (덩어리 안의 글리프는 문자열째 그은 것과 같고, 덩어리끼리 띠가 겹치면 원본 strokeText 를 덩어리마다 그은 것처럼 겹쳐 섞인다, 색 글리프는 테 없이 그대로)
 	if text_draw_kind == TextDrawKind::Stroke {
 		coverage = build_stroke_coverage(&coverage, cell_width, cell_height, stroke_radius);
 	}
@@ -5310,5 +5348,28 @@ mod tests {
 		let plain_bytes: Vec<u8> = vec![0, 1, 0, 0, 9, 9];
 		let result_bytes = decompress_web_font(plain_bytes.clone()).expect("plain bytes");
 		assert_eq!(result_bytes, plain_bytes);
+	}
+
+	//==============================================================================
+	/// 글자 덩어리 나누기가 원본 splitTextChunks 와 같은지. (라틴과 키릴은 낱말째, 한글, 숫자, 문장 부호, 공백, 이모지는 글자 묶음마다, 결합 부호는 앞 글자 묶음에)
+	//==============================================================================
+	#[test]
+	fn text_chunks_match_original_split() {
+		let split = |text: &str| -> Vec<String> {
+			let chunk_start_list = split_text_chunk_starts(text);
+			chunk_start_list.iter().enumerate().map(|(chunk_index, chunk_start)| {
+				let chunk_end = chunk_start_list.get(chunk_index + 1).copied().unwrap_or(text.len());
+				String::from(&text[*chunk_start..chunk_end])
+			}).collect()
+		};
+		assert_eq!(split("Item 42"), vec!["Item", " ", "4", "2"]);
+		assert_eq!(split("ffi, Привет"), vec!["ffi", ",", " ", "Привет"]);
+		assert_eq!(split("다람쥐 漢字かナ"), vec!["다", "람", "쥐", " ", "漢", "字", "か", "ナ"]);
+		assert_eq!(split("e\u{0301}x 1\u{FE0F}\u{20E3}"), vec!["e\u{0301}x", " ", "1\u{FE0F}\u{20E3}"]);
+		assert_eq!(split("\u{1F468}\u{200D}\u{1F469}A"), vec!["\u{1F468}\u{200D}\u{1F469}", "A"]);
+		assert_eq!(split_text_chunk_starts(""), vec![0]);
+		assert!(has_right_to_left_character("abc \u{05E9}"));
+		assert!(has_right_to_left_character("\u{0645}"));
+		assert!(!has_right_to_left_character("abc 가 \u{1F600}"));
 	}
 }
