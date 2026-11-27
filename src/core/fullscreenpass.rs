@@ -34,7 +34,6 @@ void main() {
 /// # 예제
 /// 화면 가장자리를 어둡게 덮기
 /// ```rust,no_run
-/// use glow::HasContext;
 /// use vanilla::{FullscreenPass, Graphic};
 ///
 /// const VIGNETTE_FRAGMENTSHADER_SOURCE: &str = "#version 300 es

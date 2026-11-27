@@ -1671,7 +1671,6 @@ impl Graphic {
 	/// # 예제
 	/// GL 로 직접 그리고 값 돌려받기
 	/// ```rust,no_run
-	/// use glow::HasContext;
 	/// use vanilla::Graphic;
 	///
 	/// fn draw(graphic: &mut Graphic) {
@@ -5274,7 +5273,7 @@ impl Graphic {
 	/// - 받은 컨텍스트(GlContext)의 상태 함수는 GL 상태 캐시를 거치므로, 받은 뒤 바꾼 상태를 엔진이 안다.
 	///   Graphic 은 묶음과 2D 상태를 따로 기억하지 않고 그리기 앞에 상태 캐시에 견주므로, 받은 쪽이 프로그램, 텍스처, 섞기 같은 것을 바꿔도 다음 2D 그리기가 다시 건다.
 	/// - 색 쓰기 마스크는 모든 채널로 되돌려 준다. (데스크탑 기본 프레임버퍼에 알파를 쓰지 않으려 Graphic 이 끈 것)
-	/// - GL 상태 캐시는 잊지 않는다. (원본과 같음, 안의 glow::Context 를 꺼내 상태를 바꿨으면 reset_gl_state_cache 를 부른다)
+	/// - GL 상태 캐시는 잊지 않는다. (원본과 같음, 안의 glow::Context 는 꺼낼 수 없어 받은 쪽이 상태 캐시를 건너뛰지 못한다)
 	///
 	/// # 돌려줌
 	/// Graphic 이 든 GL 컨텍스트. 엔진 함수의 `&GlContext` 인자로 그대로 넘긴다. (안의 glow::Context 는 꺼낼 수 없다)

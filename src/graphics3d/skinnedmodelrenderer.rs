@@ -296,7 +296,6 @@ void main() {
 /// # 예제
 /// 렌더러를 짓고 태양과 안개를 맞춘 뒤 모델 하나 그리기
 /// ```rust,no_run
-/// use glow::HasContext;
 /// use vanilla::{Graphic, Matrix4, SkinnedModel, SkinnedModelRenderer, Vector3};
 ///
 /// fn create_renderer(graphic: &Graphic) -> Result<SkinnedModelRenderer, String> {
@@ -513,7 +512,6 @@ impl SkinnedModelRenderer {
 	/// # 예제
 	/// 섀도우 맵에 깊이를 그리고 화면 패스에서 그림자 받기
 	/// ```rust,no_run
-	/// use glow::HasContext;
 	/// use vanilla::{Matrix4, ShadowMap, SkinnedModel, SkinnedModelRenderer, Vector3};
 	///
 	/// fn draw_with_shadow(gl: &vanilla::GlContext, skinned_model_renderer: &mut SkinnedModelRenderer, shadow_map: &mut ShadowMap, skinned_model: &mut SkinnedModel, view_projection_matrix: &Matrix4, camera_position: Vector3, drawing_buffer_width: i32, drawing_buffer_height: i32) {

@@ -69,7 +69,6 @@ impl Default for RenderTargetOptions {
 /// # 예제
 /// 씬을 HDR 렌더 타겟에 그리고 컬러 텍스처를 다음 패스에서 읽기
 /// ```rust,no_run
-/// use glow::HasContext;
 /// use vanilla::{RenderTarget, RenderTargetOptions};
 ///
 /// fn create_scene_target(gl: &vanilla::GlContext) -> Result<RenderTarget, String> {

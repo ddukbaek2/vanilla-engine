@@ -74,7 +74,6 @@ void main() {
 /// # 예제
 /// 머리말의 쓰임: resize, render, get_result_texture 를 합성 패스에 묶기
 /// ```rust,no_run
-/// use glow::HasContext;
 /// use vanilla::{MultiLevelBloomEffect, RenderTarget};
 ///
 /// fn create_bloom(gl: &vanilla::GlContext) -> Result<MultiLevelBloomEffect, String> {

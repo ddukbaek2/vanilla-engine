@@ -732,7 +732,6 @@ pub fn create_cutout_depth_vertex_shader_source() -> String {
 /// # 예제
 /// 머티리얼 이름으로 셰이딩 모드를 고르고 MRT 판에 불투명, 블렌드 두 패스로 그리기
 /// ```rust,no_run
-/// use glow::HasContext;
 /// use vanilla::{HumanSkinRenderer, Matrix4, RenderTarget, RenderTargetOptions, SkinnedModel, Vector3, SKIN_SHADING_EYE, SKIN_SHADING_HAIR};
 ///
 /// fn create_head(gl: &vanilla::GlContext, glb_bytes: &[u8]) -> Result<(HumanSkinRenderer, SkinnedModel, RenderTarget), String> {
@@ -920,7 +919,6 @@ impl HumanSkinRenderer {
 	/// # 예제
 	/// 어태치먼트마다 알파 섞기를 켜고 깊이 쓰기를 끈 뒤 블렌드 패스 그리기
 	/// ```rust,no_run
-	/// use glow::HasContext;
 	/// use vanilla::{HumanSkinRenderer, SkinnedModel};
 	///
 	/// fn render_blended(gl: &vanilla::GlContext, human_skin_renderer: &HumanSkinRenderer, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16]) {

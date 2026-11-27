@@ -52,7 +52,6 @@ void main() {
 /// # 예제
 /// 씬 렌더 타겟에서 블룸을 만들고 결과를 합성 패스의 1 번 유닛에 묶기
 /// ```rust,no_run
-/// use glow::HasContext;
 /// use vanilla::{BloomEffect, RenderTarget};
 ///
 /// fn create_bloom(gl: &vanilla::GlContext) -> Result<BloomEffect, String> {

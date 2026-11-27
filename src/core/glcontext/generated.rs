@@ -1,14 +1,14 @@
 //==============================================================================
 //! GlContext 의 glow 넘기기 메서드. (기계로 지은 파일, 손으로 고치지 않는다)
 //! - glow 0.18.0 의 HasContext 트레이트 메서드 모두(396 개)와 웹의 glow::Context 고유 메서드 가운데 &self 를 받는 것(45 개) 가운데,
-//!   src/core/glcontext.rs 에 손으로 둔 것(상태 캐시를 거치는 61 개)을 뺀 380 개다. 같은 이름, 같은 꼴로 안의 glow::Context 를 그대로 부른다.
+//!   src/core/glcontext.rs 에 손으로 둔 것(상태 캐시를 거치거나 그 값을 잊게 하는 61 개)을 뺀 380 개다. 같은 이름, 같은 꼴로 안의 glow::Context 를 그대로 부른다.
 //! - 웹 고유 메서드는 glow 와 같은 cfg(all(target_family = "wasm", not(target_os = "emscripten"))) 로 가른다.
 //! - 지은 법: glow-0.18.0/src/lib.rs 의 `pub trait HasContext` 선언에서 메서드 선언(속성 #[doc(alias)] 와 함께)을 차례대로 읽고,
 //!   glow-0.18.0/src/web_sys.rs 의 첫 `impl Context` 블록에서 `pub fn`, `pub unsafe fn` 가운데 첫 인자가 self 인 것을 읽는다.
 //!   glcontext.rs 의 `impl GlContext` 에 있는 `pub fn`, `pub unsafe fn` 이름은 뺀다. 형의 `Self::X` 와 `<Self as HasContext>::X` 는 `glow::X`,
 //!   web_sys 에서 가져온 형은 `web_sys::X`, HashSet 은 `std::collections::HashSet`, 그 밖의 glow 형은 `glow::X` 로 쓴다.
 //!   메서드마다 `#[inline]` 을 달고 unsafe 면 `unsafe { self.context.이름(인자) }`, 아니면 `self.context.이름(인자)` 로 넘긴다.
-//!   glow 판을 올리면 같은 규칙으로 다시 짓는다. (미선짱 저장소의 짓기 스크립트 glcontextgen.py, 인자는 glow 소스 폴더와 엔진 저장소)
+//!   glow 판을 올리면 새 판의 소스에서 같은 규칙으로 다시 짓고, 새 상태 함수가 생겼으면 glcontext.rs 에 손으로 두어 상태 캐시를 거치게 한다.
 //==============================================================================
 #![allow(clippy::too_many_arguments)]
 use super::GlContext;

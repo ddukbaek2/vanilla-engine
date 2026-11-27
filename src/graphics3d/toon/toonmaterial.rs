@@ -28,7 +28,6 @@
 //! 표면 조각으로 줄무늬를 넣고 텍스처와 유니폼을 그리기마다 넘기기
 //! ```rust,no_run
 //! use vanilla::{create_box_geometry, GlContext, Matrix4, MeshBuilder, ShaderProgram, ToonDrawOptions, ToonMaterialChunks, ToonPartOptions, ToonProgramKind, ToonRenderer, ToonTextureOptions, Vector3};
-//! use glow::HasContext;
 //!
 //! fn draw_stripe(gl: &vanilla::GlContext) -> Result<(), String> {
 //! 	let mut renderer = ToonRenderer::new(gl)?;

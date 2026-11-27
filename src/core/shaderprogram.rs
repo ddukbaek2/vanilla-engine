@@ -16,7 +16,6 @@ use std::collections::HashMap;
 /// # 예제
 /// 단색 프로그램을 만들고 유니폼 올리기
 /// ```rust,no_run
-/// use glow::HasContext;
 /// use vanilla::{Graphic, ShaderProgram};
 ///
 /// const VERTEX_SHADER_SOURCE: &str = "#version 300 es
