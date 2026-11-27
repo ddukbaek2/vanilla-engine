@@ -5,6 +5,7 @@
 // - 원본이 글을 굽고 재는 캔버스처럼 문서에 붙이지 않은 캔버스의 2D 컨텍스트로 잰다.
 // - 깔린 글꼴과 크롬 판, 운영체제마다 값이 달라 저장소에 넣지 않는다. 엔진을 시험할 기계에서 찍는다. (CI 의 platforms 워크플로가 윈도우, 리눅스, 맥에서 찍는다)
 // - 폰트 문자열은 원본 SYSTEM_FONT_STRING 사슬, 일반 이름, 운영체제마다 흔한 글꼴 이름, 없는 이름이고, 글은 라틴, 한글, 일본어, 이모지, 아랍어, 태국어다.
+// - systemFontCases 는 CSS 시스템 글꼴 낱말(caption, menu 같은)을 font 에 넣은 뒤 게터의 글과 잰 폭이다.
 //==============================================================================
 const fs = require("fs");
 const path = require("path");
@@ -54,6 +55,9 @@ const fontList = [
 	"16px \"Noto Sans Arabic\"",
 	"16px \"Noto Naskh Arabic\"",
 ];
+// CSS 시스템 글꼴 낱말. (font 세터 뒤 게터가 돌려준 글과 그 글꼴로 잰 폭, 윈도우 크롬은 small-caption, menu, status-bar 가 운영체제 글꼴이다)
+const systemFontList = ["caption", "icon", "menu", "message-box", "small-caption", "status-bar", "-webkit-control", "-webkit-small-control", "-webkit-mini-control"];
+const systemFontTextList = ["Hello World Wifi", "가나다라 한글"];
 const textList = [
 	"Hello World Wifi",
 	"가나다라 한글",
@@ -92,8 +96,20 @@ const textList = [
 		}
 		return resultList;
 	}, fontList, textList);
+	const systemFontCaseList = await page.evaluate((systemFontList, systemFontTextList) => {
+		const context = document.createElement("canvas").getContext("2d");
+		const resultList = [];
+		for (const font of systemFontList) {
+			context.font = "10px sans-serif";
+			context.font = font;
+			for (const text of systemFontTextList) {
+				resultList.push({ font: font, serialized: context.font, text: text, width: context.measureText(text).width });
+			}
+		}
+		return resultList;
+	}, systemFontList, systemFontTextList);
 	const languageList = await page.evaluate(() => navigator.languages);
-	const result = { chrome: await browser.version(), platform: process.platform, architecture: process.arch, languages: languageList, cases: caseList };
+	const result = { chrome: await browser.version(), platform: process.platform, architecture: process.arch, languages: languageList, cases: caseList, systemFontCases: systemFontCaseList };
 	await browser.close();
 	fs.writeFileSync(outputPath, JSON.stringify(result, null, "\t"));
 	console.log(`${result.chrome} (${result.platform} ${result.architecture}): ${caseList.length} 글 → ${outputPath}`);

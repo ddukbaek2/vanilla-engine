@@ -8,7 +8,7 @@
 //!   (굵기와 기울기는 블링크 FontSelectionValue 처럼 0.25 단위로 버린 값이다)
 //! - 크기는 엔진 글자 캐시의 폰트 문자열 셈으로 센다. (문서에 붙이지 않은 캔버스의 부모 10px, 뿌리 16px, 고정폭 13 / 16)
 //! - 시스템 글꼴은 크롬의 기본 제공자(layout_theme_font_provider_default.cc)처럼 Arial 16px, 컨트롤 셋은 2pt 작다.
-//!   윈도우 크롬의 small-caption, menu, status-bar 는 운영체제가 정한 글꼴이라 다를 수 있다.
+//!   윈도우 크롬의 small-caption, menu, status-bar 는 운영체제 글꼴(NONCLIENTMETRICS, systemfont::read_system_font_keyword)이다.
 //==============================================================================
 use crate::core::textstringtexturecache::{compute_canvas_font_size, evaluate_css_math_angle, evaluate_css_math_number};
 
@@ -72,14 +72,22 @@ pub(crate) fn parse_canvas_font(font_string: &str) -> Option<CanvasFont> {
 			if !stream.is_at_end() {
 				return None;
 			}
-			// 크롬 기본 제공자: 컨트롤 셋은 기본 글자 크기(16)보다 2pt(96dpi 에서 2 / 72 x 96 px) 작다.
-			let font_size = if keyword.ends_with("-control") {
-				16.0 - (2.0 / 72.0) * 96.0
-			}
-			else {
-				16.0
+			// 크롬 기본 제공자: 컨트롤 셋은 기본 글자 크기(16)보다 2pt(96dpi 에서 2 / 72 x 96 px) 작다. 윈도우의 small-caption, menu, status-bar 는 운영체제 글꼴이다.
+			let (family_name, font_size) = match crate::platform::desktop::systemfont::read_system_font_keyword(&keyword) {
+				Some(system_font) => {
+					system_font
+				}
+				None => {
+					let font_size = if keyword.ends_with("-control") {
+						16.0 - (2.0 / 72.0) * 96.0
+					}
+					else {
+						16.0
+					};
+					(String::from("Arial"), font_size)
+				}
 			};
-			let serialized_font = format!("{}px Arial", format_css_number(font_size));
+			let serialized_font = format!("{}px {}", format_css_number(font_size), serialize_family_name(&FamilyName::Named(family_name)));
 			return Some(CanvasFont {
 				source_font: font_string.to_string(),
 				serialized_font: serialized_font.clone(),
@@ -1313,8 +1321,6 @@ mod tests {
 		("10p\\78 a", None),
 		("10\\70x a", Some("10px a")),
 		("caption", Some("16px Arial")),
-		("menu", Some("16px Arial")),
-		("status-bar", Some("16px Arial")),
 		("-webkit-control", Some("13.3333px Arial")),
 		("-webkit-mini-control", Some("13.3333px Arial")),
 		("Caption", Some("16px Arial")),
@@ -1357,6 +1363,25 @@ mod tests {
 		};
 		assert_eq!(parse_canvas_font("10px BlinkMacSystemFont").unwrap().serialized_font, expected_system_font);
 		assert_eq!(parse_canvas_font("10px blinkmacsystemfont").unwrap().serialized_font, "10px blinkmacsystemfont");
+	}
+
+	//==============================================================================
+	/// small-caption, menu, status-bar: 윈도우는 운영체제 글꼴(NONCLIENTMETRICS), 그 밖은 크롬 기본 제공자의 Arial 16px.
+	//==============================================================================
+	#[test]
+	fn system_font_keywords_follow_platform() {
+		for keyword in ["small-caption", "menu", "status-bar"] {
+			let serialized_font = parse_canvas_font(keyword).unwrap().serialized_font;
+			if cfg!(target_os = "windows") {
+				let (family_name, font_size) = crate::platform::desktop::systemfont::read_system_font_keyword(keyword).expect("NONCLIENTMETRICS");
+				assert!(font_size >= 1.0);
+				assert_eq!(serialized_font, format!("{}px {}", format_css_number(font_size), serialize_family_name(&FamilyName::Named(family_name))));
+			}
+			else {
+				assert_eq!(serialized_font, "16px Arial");
+			}
+		}
+		assert!(crate::platform::desktop::systemfont::read_system_font_keyword("caption").is_none());
 	}
 
 	//==============================================================================

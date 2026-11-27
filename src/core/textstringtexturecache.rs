@@ -135,7 +135,7 @@ pub fn measure_normal_line_height_without_graphic(font_string: &str) -> Option<f
 			let shared_measure_cache = shared_measure_cache_cell.borrow();
 			let face_list = shared_measure_cache.as_ref()?.resolve_face_list(&font_description);
 			let primary_face = face_list.first()?;
-			Some(primary_face.font.calculate_normal_line_height(font_description.font_size) as f64)
+			Some(primary_face.font.calculate_normal_line_height(calculate_effective_font_size(font_description.font_size)) as f64)
 		})
 	}
 }
@@ -1523,7 +1523,7 @@ impl TextStringTextureCache {
 				return TextMetrics::default();
 			}
 		}
-		let font_size = font_description.font_size;
+		let font_size = calculate_effective_font_size(font_description.font_size);
 		let system_font_measure = create_system_font_measure(&font_description, font_size);
 		let shaped_text = textshaping::shape_text(&face_list, text, font_size, ShapingDirection::LeftToRight, system_font_measure.as_deref());
 		let (font_ascent, font_descent) = read_line_metrics(&face_list[0].font, font_size);
@@ -1542,22 +1542,44 @@ impl TextStringTextureCache {
 				continue;
 			}
 			let face = &face_list[shaped_glyph.face_index];
-			let (glyph_left_x, glyph_bottom_y, glyph_width, glyph_height) = face.font.read_glyph_metrics(shaped_glyph.glyph_index, font_size);
-			if glyph_width == 0 || glyph_height == 0 {
-				continue;
+			// 맥 크롬은 윤곽 경로의 상자(반올림하지 않음), 경로가 없는 글리프와 그 밖의 운영체제는 글리프 픽셀 상자다. (블링크 SkFontGetBoundsForGlyph)
+			let skew = if face.is_synthetic_italic {
+				textshaping::SYNTHETIC_ITALIC_SKEW
 			}
-			let mut left_x = shaped_glyph.position_x + glyph_left_x as f32;
-			let mut right_x = left_x + glyph_width as f32;
-			let mut top_y = shaped_glyph.position_y + (glyph_bottom_y + glyph_height) as f32;
-			let mut bottom_y = shaped_glyph.position_y + glyph_bottom_y as f32;
-			if face.is_synthetic_bold {
+			else {
+				0.0
+			};
+			let path_bounds = if cfg!(target_os = "macos") {
+				face.font.read_glyph_path_bounds(shaped_glyph.glyph_index, font_size, skew).or_else(|| face.font.read_glyph_skia_bounds(shaped_glyph.glyph_index, font_size, skew))
+			}
+			else {
+				None
+			};
+			let (glyph_left_x, glyph_bottom_y, glyph_right_x, glyph_top_y) = match path_bounds {
+				Some(path_bounds) => {
+					path_bounds
+				}
+				None => {
+					let (glyph_left_x, glyph_bottom_y, glyph_width, glyph_height) = face.font.read_glyph_metrics(shaped_glyph.glyph_index, font_size);
+					if glyph_width == 0 || glyph_height == 0 {
+						continue;
+					}
+					(glyph_left_x as f32, glyph_bottom_y as f32, (glyph_left_x + glyph_width) as f32, (glyph_bottom_y + glyph_height) as f32)
+				}
+			};
+			let mut left_x = shaped_glyph.position_x + glyph_left_x;
+			let mut right_x = shaped_glyph.position_x + glyph_right_x;
+			let mut top_y = shaped_glyph.position_y + glyph_top_y;
+			let mut bottom_y = shaped_glyph.position_y + glyph_bottom_y;
+			// 가짜 굵게는 윤곽을 넓힌다. 맥에서 경로가 없는 글리프(색 이모지)는 스키아가 경로를 청하지 않아(neverRequestPath) 상자가 그대로다. (맥 크롬 158 bold 16px 이모지 상자가 보통과 같다)
+			if face.is_synthetic_bold && !(cfg!(target_os = "macos") && face.font.is_core_text_raster()) {
 				let radius = textshaping::calculate_synthetic_bold_radius(font_size);
 				left_x -= radius;
 				right_x += radius;
 				top_y += radius;
 				bottom_y -= radius;
 			}
-			if face.is_synthetic_italic {
+			if face.is_synthetic_italic && path_bounds.is_none() {
 				right_x += top_y.max(0.0) * textshaping::SYNTHETIC_ITALIC_SKEW;
 				left_x += bottom_y.min(0.0) * textshaping::SYNTHETIC_ITALIC_SKEW;
 			}
@@ -1776,7 +1798,7 @@ impl TextStringTextureCache {
 				return None;
 			}
 		}
-		let laid_out_text = lay_out_text(&face_list, &font_description, text, (f64::from(font_description.font_size) * bake_scale) as f32, direction, padding.max(1), luminance_color)?;
+		let laid_out_text = lay_out_text(&face_list, &font_description, text, calculate_effective_font_size((f64::from(font_description.font_size) * bake_scale) as f32), direction, padding.max(1), luminance_color)?;
 		Some(TextRaster {
 			coverage: laid_out_text.coverage,
 			color_pixels: laid_out_text.color_pixels,
@@ -1823,7 +1845,7 @@ impl TextStringTextureCache {
 	pub fn rasterize_character(&self, character: &str, font_string: &str) -> Option<(textshaping::GlyphRaster, f32, f32, f32)> {
 		let font_description = parse_font_string(font_string);
 		let face_list = self.resolve_covering_face_list(character, &font_description);
-		let font_size = font_description.font_size;
+		let font_size = calculate_effective_font_size(font_description.font_size);
 		if face_list.is_empty() || self.is_browser_raster {
 			// 웹: 원본처럼 브라우저 Canvas2D 로 굽는다.
 			#[cfg(target_arch = "wasm32")]
@@ -2123,8 +2145,8 @@ impl TextStringTextureCache {
 			}
 		};
 		let padding = stroke_radius.ceil() as i32 + 1;
-		// 원본은 글 크기에 배율을 double 로 곱해 글꼴 글을 짓고, 블링크가 float 로 든다.
-		let pixel_size = (f64::from(font_description.font_size) * bake_scale) as f32;
+		// 원본은 글 크기에 배율을 double 로 곱해 글꼴 글을 짓고, 블링크가 float 로 든다. 글꼴은 크롬 EffectiveFontSize 처럼 0.01px 아래를 버린 크기로 짓는다.
+		let pixel_size = calculate_effective_font_size((f64::from(font_description.font_size) * bake_scale) as f32);
 		let laid_out_text = lay_out_text(&face_list, &font_description, text, pixel_size, direction, padding, WHITE_LUMINANCE_COLOR)?;
 		let mut coverage = laid_out_text.coverage;
 		let mut color_pixels = laid_out_text.color_pixels;
@@ -2735,6 +2757,15 @@ fn find_post_script_face_index(font_bytes: &[u8], post_script_name: &str) -> Opt
 			})
 		}).unwrap_or(false)
 	})
+}
+
+
+//==============================================================================
+/// 글꼴을 짓고 재는 글자 크기. (크롬 FontDescription::EffectiveFontSize 처럼 0.01 px 아래를 버린다, 글꼴 캐시 정밀도 kFontSizePrecisionMultiplier 100)
+/// - 크롬은 계산된 크기(게터와 em 셈에 쓰는 값)는 그대로 두고 글꼴은 이 크기로 짓는다. 그래서 13.3333px 는 13.33px 의 글꼴로 잰다.
+//==============================================================================
+pub(crate) fn calculate_effective_font_size(font_size: f32) -> f32 {
+	(font_size * 100.0).floor() / 100.0
 }
 
 //==============================================================================

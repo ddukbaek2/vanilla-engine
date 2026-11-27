@@ -199,6 +199,37 @@ fn text_widths_match_chrome() {
 }
 
 //==============================================================================
+/// CSS 시스템 글꼴 낱말(caption, menu, status-bar 같은)을 Canvas2D font 에 넣은 뒤 게터의 글과 잰 폭을 같은 기계의 크롬과 견준다.
+/// (윈도우 크롬은 small-caption, menu, status-bar 가 NONCLIENTMETRICS 의 글꼴이고 나머지는 Arial 16px, 컨트롤 셋 13.3333px)
+//==============================================================================
+#[test]
+#[ignore = "같은 기계의 크롬 측정 JSON 이 있어야 한다 (CI platforms 워크플로)"]
+fn canvas_system_fonts_match_chrome() {
+	let json_path = std::env::var("VANILLA_CHROME_MEASURE_PATH").unwrap_or_else(|_| String::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/systemfont/chrome_measure.json")));
+	let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&json_path).unwrap_or_else(|error| panic!("{}: {}", json_path, error))).expect("json");
+	let text_string_texture_cache = create_system_text_cache();
+	let mut mismatch_list = Vec::new();
+	let case_list = json["systemFontCases"].as_array().expect("systemFontCases");
+	for test_case in case_list {
+		let font = test_case["font"].as_str().expect("font");
+		let text = test_case["text"].as_str().expect("text");
+		let chrome_serialized = test_case["serialized"].as_str().expect("serialized");
+		let chrome_width = test_case["width"].as_f64().unwrap_or(f64::NAN);
+		let mut canvas = vanilla::core::canvas2d::Canvas2D::new(1, 1);
+		canvas.set_font(font);
+		let serialized = canvas.get_font();
+		let width = text_string_texture_cache.measure_text(&serialized, text).width;
+		let is_matched = serialized == chrome_serialized && (width - chrome_width).abs() < CHROME_TOLERANCE;
+		println!("{} [{}] {}: 글 {} / {}, 폭 {} / {}", if is_matched { "같음" } else { "다름" }, font, text, serialized, chrome_serialized, width, chrome_width);
+		if !is_matched {
+			mismatch_list.push(format!("[{}] {}: 글 {} / {}, 폭 {} / {}", font, text, serialized, chrome_serialized, width, chrome_width));
+		}
+	}
+	println!("크롬과 같은 것 {} / {}", case_list.len() - mismatch_list.len(), case_list.len());
+	assert!(mismatch_list.is_empty(), "크롬과 다른 것 {} 개:\n{}", mismatch_list.len(), mismatch_list.join("\n"));
+}
+
+//==============================================================================
 /// 시스템 클립보드에 쓴 글을 그대로 읽는다. (한글과 이모지 포함)
 //==============================================================================
 #[test]
