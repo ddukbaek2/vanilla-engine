@@ -34,6 +34,16 @@ exclude = ["third_party/rustybuzz", "third_party/ttf-parser"]
 name = "toonhighlight"
 harness = false
 
+# 색 공간 칸 찍기 시험. (원본 tests/graphics3d/tooncolorspacechrome.test.mjs 와 같은 검사)
+[[test]]
+name = "tooncolorspace"
+harness = false
+
+# 툰 모서리 어둠 찍기 시험. (원본 tests/graphics3d/toonambientocclusionchrome.test.mjs 와 같은 장면)
+[[test]]
+name = "toonambientocclusion"
+harness = false
+
 # 해 그림자 치우침 찍기 시험. (원본 tests/graphics3d/shadowbiaschrome.test.mjs 와 같은 장면)
 [[test]]
 name = "shadowbias"

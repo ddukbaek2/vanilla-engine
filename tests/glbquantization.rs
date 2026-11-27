@@ -95,12 +95,12 @@ fn interpret_pbr(bytes: &[u8]) -> Result<(SkinnedModel, Vec<vanilla::graphics3d:
 #[test]
 fn toon_reader_matches_original_for_quantized_glb() {
 	let expected = read_expected();
-	let float_arrays = read_glb_arrays(&read_asset("float.glb"), None).unwrap();
+	let float_arrays = read_glb_arrays(&read_asset("float.glb"), None, None).unwrap();
 	check_near(&read_vertex_columns(&float_arrays.vertex_data, 0), &POSITIONS.concat(), 1e-6, "실수 모형 위치");
 	for (name, position_cell_size, uv_cell_size, normal_tolerance) in [("quantized_a", 1.9 / 16383.0, 0.8 / 65535.0, 1.5 / 127.0), ("quantized_b", 0.95 / 32767.0, 0.8 / 127.0, 1.5 / 32767.0)] {
 		let bytes = read_asset(&format!("{}.glb", name));
 		let model_expected = &expected[name];
-		let arrays = read_glb_arrays(&bytes, None).unwrap();
+		let arrays = read_glb_arrays(&bytes, None, None).unwrap();
 		// 원본과 같은 값.
 		check_near(&widen(&arrays.vertex_data), &read_numbers(&model_expected["vertexData"]), ORIGINAL_TOLERANCE, &format!("{} 꼭짓점 (원본)", name));
 		check_near(&widen(&arrays.uv_data), &read_numbers(&model_expected["uvData"]), ORIGINAL_TOLERANCE, &format!("{} UV (원본)", name));
@@ -111,7 +111,7 @@ fn toon_reader_matches_original_for_quantized_glb() {
 		check_near(&widen(&arrays.uv_data), &UVS.concat(), uv_cell_size, &format!("{} 툰 UV (KHR_texture_transform)", name));
 		assert_eq!(arrays.material_ranges[0].node_name, "hull", "{} 이름 없는 되풀이 잎 노드는 부모 부품", name);
 		let outline_options = ToonOutlineOptions { width: 0.02, added_parts: vec![String::from("hull")], ..ToonOutlineOptions::default() };
-		let part_arrays = read_glb_node_arrays(&bytes, Some(&outline_options)).unwrap();
+		let part_arrays = read_glb_node_arrays(&bytes, Some(&outline_options), None).unwrap();
 		let mut part_names: Vec<&String> = part_arrays.keys().collect();
 		part_names.sort();
 		assert_eq!(part_names, vec!["hull"], "{} 부품 이름", name);
@@ -135,7 +135,7 @@ fn toon_reader_matches_original_for_quantized_skinned_glb() {
 	for name in ["skinned_float", "skinned_quantized"] {
 		let bytes = read_asset(&format!("{}.glb", name));
 		let model_expected = &expected[name];
-		let arrays = read_glb_arrays(&bytes, None).unwrap();
+		let arrays = read_glb_arrays(&bytes, None, None).unwrap();
 		let skeleton = arrays.skeleton.as_ref().unwrap();
 		let mut joint_matrices = [0.0f32; 16];
 		write_skin_pose(skeleton, "Turn", 0.5, &mut joint_matrices, None, None, None);
@@ -144,7 +144,7 @@ fn toon_reader_matches_original_for_quantized_skinned_glb() {
 		check_near(&widen(&skeleton.inverse_bind_matrices), &read_numbers(&model_expected["inverseBindMatrices"]), ORIGINAL_TOLERANCE, &format!("{} 거꾸로 묶는 행렬 (원본)", name));
 		check_near(&skeleton.animations["Turn"].channels[0].values, &read_numbers(&model_expected["toonRotationValues"]), ORIGINAL_TOLERANCE, &format!("{} 돌림 움직임 값 (원본)", name));
 		check_near(&widen(&joint_matrices), &read_numbers(&model_expected["jointMatrices"]), ORIGINAL_TOLERANCE, &format!("{} 본 행렬 (원본)", name));
-		let outlined = read_glb_arrays(&bytes, Some(&outline_options)).unwrap();
+		let outlined = read_glb_arrays(&bytes, Some(&outline_options), None).unwrap();
 		assert!(!outlined.outline_vertex_data.is_empty(), "{} 뼈대 바깥선 껍데기", name);
 		check_near(&widen(&outlined.outline_vertex_data), &read_numbers(&model_expected["outlineVertexData"]), ORIGINAL_TOLERANCE, &format!("{} 바깥선 껍데기 (원본)", name));
 		posed.push((skin_points(&read_vertex_columns(&arrays.vertex_data, 0), &joint_matrices), skin_points(&widen(&outlined.outline_vertex_data), &joint_matrices), skeleton.animations["Turn"].channels[0].values.clone(), arrays.skin_data.clone()));
@@ -207,8 +207,8 @@ fn unsupported_extension_and_external_buffer_are_errors() {
 		let bytes = read_asset(file_name);
 		let toon_message = expected["messages"][case_name]["toon"].as_str().unwrap();
 		let pbr_message = expected["messages"][case_name]["pbr"].as_str().unwrap();
-		assert_eq!(read_glb_arrays(&bytes, None).err().as_deref(), Some(toon_message), "{} read_glb_arrays", case_name);
-		assert_eq!(read_glb_node_arrays(&bytes, None).err().as_deref(), Some(toon_message), "{} read_glb_node_arrays", case_name);
+		assert_eq!(read_glb_arrays(&bytes, None, None).err().as_deref(), Some(toon_message), "{} read_glb_arrays", case_name);
+		assert_eq!(read_glb_node_arrays(&bytes, None, None).err().as_deref(), Some(toon_message), "{} read_glb_node_arrays", case_name);
 		assert_eq!(read_glb_node_infos(&bytes).err().as_deref(), Some(toon_message), "{} read_glb_node_infos", case_name);
 		assert_eq!(interpret_pbr(&bytes).err().as_deref(), Some(pbr_message), "{} SkinnedModel", case_name);
 	}
@@ -242,7 +242,7 @@ fn toon_reader_builds_flat_normals_when_normals_are_missing() {
 	let (mut json, binary_buffer) = SkinnedModel::read_glb_chunks(&read_asset("float.glb")).unwrap();
 	json["meshes"][0]["primitives"][0]["attributes"].as_object_mut().unwrap().remove("NORMAL");
 	let bytes = create_glb(&json, &binary_buffer);
-	let arrays = read_glb_arrays(&bytes, None).unwrap();
+	let arrays = read_glb_arrays(&bytes, None, None).unwrap();
 	let indices = [0usize, 1, 2, 0, 2, 3];
 	assert_eq!(arrays.vertex_data.len(), indices.len() * VERTEX_FLOAT_COUNT, "꼭짓점을 삼각형마다 따로 푼다");
 	let mut expected_positions = Vec::new();
@@ -262,7 +262,7 @@ fn toon_reader_builds_flat_normals_when_normals_are_missing() {
 	check_near(&read_vertex_columns(&arrays.vertex_data, 3), &expected_normals, 1e-6, "평평한 노멀");
 	check_near(&widen(&arrays.uv_data), &indices.iter().flat_map(|corner| UVS[*corner]).collect::<Vec<f64>>(), 1e-6, "텍스처 좌표도 삼각형마다 푼다");
 	let outline_options = ToonOutlineOptions { width: 0.02, added_parts: vec![String::from("hull")], ..ToonOutlineOptions::default() };
-	assert!(!read_glb_arrays(&bytes, Some(&outline_options)).unwrap().outline_vertex_data.is_empty(), "노멀이 없어도 몸으로 바깥선 껍데기를 짓는다");
+	assert!(!read_glb_arrays(&bytes, Some(&outline_options), None).unwrap().outline_vertex_data.is_empty(), "노멀이 없어도 몸으로 바깥선 껍데기를 짓는다");
 }
 
 //==============================================================================
@@ -330,12 +330,12 @@ fn toon_reader_rejects_accessor_outside_binary_chunk() {
 	far_json["accessors"][position_accessor]["byteOffset"] = Value::from(100000);
 	let far_bytes = create_glb(&far_json, &binary_buffer);
 	let expected_message = format!("GLB 접근자 {} 가 바이너리 덩어리 밖을 읽습니다. (바이트 100000 ~ 100048, 바이너리 덩어리 {} 바이트)", position_accessor, binary_buffer.len());
-	assert_eq!(read_glb_arrays(&far_bytes, None).err().as_deref(), Some(expected_message.as_str()), "버퍼 밖 바이트는 Err");
+	assert_eq!(read_glb_arrays(&far_bytes, None, None).err().as_deref(), Some(expected_message.as_str()), "버퍼 밖 바이트는 Err");
 	let mut tail_json = json.clone();
 	tail_json["accessors"][position_accessor]["byteOffset"] = Value::from(binary_buffer.len() - 8);
-	assert!(read_glb_arrays(&create_glb(&tail_json, &binary_buffer), None).is_err(), "끝이 덩어리를 넘는 접근자도 Err");
+	assert!(read_glb_arrays(&create_glb(&tail_json, &binary_buffer), None, None).is_err(), "끝이 덩어리를 넘는 접근자도 Err");
 	let mut missing_json = json.clone();
 	missing_json["accessors"][position_accessor].as_object_mut().unwrap().remove("bufferView");
-	let missing_arrays = read_glb_arrays(&create_glb(&missing_json, &binary_buffer), None).unwrap();
+	let missing_arrays = read_glb_arrays(&create_glb(&missing_json, &binary_buffer), None, None).unwrap();
 	assert!(!missing_arrays.vertex_data.is_empty() && read_vertex_columns(&missing_arrays.vertex_data, 0).iter().all(|value| *value == 0.0), "bufferView 없는 접근자는 0 으로 채운다 (bufferView 0 을 읽지 않는다)");
 }

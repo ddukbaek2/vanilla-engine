@@ -106,6 +106,7 @@ pub use crate::core::reflection::{FromReflectValue, Reflect, ReflectedGetter, Re
 // 반사 매크로. (컴포넌트의 impl 블록과 impl Component 블록에 #[vanilla::reflect] 로 붙인다. 원본의 실행 중 반사 자리)
 pub use vanilla_engine_macros::reflect;
 pub use crate::core::engine::{Engine, EngineConfiguration};
+pub use crate::core::colorspace::ColorSpace;
 pub use crate::core::globalengine::EngineAccessError;
 pub use crate::core::engine::{PageEvent, PageEventListener};
 pub use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind, ModalDialogResult};
@@ -245,7 +246,8 @@ pub use crate::resource::spriteatlas::{SpriteAtlas, SpriteAtlasLoadFuture, Sprit
 pub use crate::graphics3d::humanskinrenderer::{HumanSkinRenderer, SKIN_SHADING_EYE, SKIN_SHADING_FACIALHAIR, SKIN_SHADING_FLUID, SKIN_SHADING_HAIR, SKIN_SHADING_OCCLUSION, SKIN_SHADING_SKIN, SKIN_TEXTURE_UNIT_AUXILIARY, SKIN_TEXTURE_UNIT_DETAILHEIGHT, SKIN_TEXTURE_UNIT_LAYERCOLOR, SKIN_TEXTURE_UNIT_LAYERNORMAL, SKIN_TEXTURE_UNIT_MASKATLAS, SKIN_TEXTURE_UNIT_MICRO, WRINKLE_CHANNEL_COUNT};
 pub use crate::animation::action::ActionConditionCallbacks;
 pub use crate::graphics3d::toon::toonrenderer::extract_frustum_planes;
-pub use crate::graphics3d::toon::toonscreenoutline::ToonLineTarget;
+pub use crate::graphics3d::toon::toonscreenoutline::{ToonLineTarget, ToonScreenOutlineOptions};
+pub use crate::graphics3d::toon::toonrenderer::ToonRendererOptions;
 pub use crate::graphics3d::toon::toonvfx::ToonFlashOptions;
 pub use crate::graphics3d::toon::toonvfx::ToonRampColor;
 pub use crate::web::pane::{Pane, PaneDirection, PaneOptions, PaneResizableEdges, PaneResizeCallback, PaneSize, PaneStyle, PaneStyleOptions, PaneTheme};
@@ -284,7 +286,7 @@ pub use crate::graphics3d::fbxloader::{FbxLoadFuture, FbxLoadHandle};
 pub use crate::graphics3d::material::ImageDescriptionLoadHandle;
 pub use crate::graphics3d::skinnedmodel::{AnimationLoadFuture, AnimationLoadHandle, SkinnedModelLoadHandle};
 pub use crate::graphics3d::multilevelbloomeffect::MultiLevelBloomEffect;
-pub use crate::graphics3d::toon::toonpostprocess::ToonPostProcessOptions;
+pub use crate::graphics3d::toon::toonpostprocess::{ToonAmbientOcclusion, ToonPostProcessOptions};
 pub use crate::graphics3d::toon::toonvfx::ToonBlobShadowOptions;
 pub use crate::base::identifier::create_guid;
 pub use crate::core::component::text::slice_graphemes;

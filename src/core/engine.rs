@@ -51,6 +51,7 @@ use crate::base::vector2::Vector2;
 use crate::base::version::Version;
 use crate::core::asset::AssetLoadHandle;
 use crate::core::audiomanager::AudioManager;
+use crate::core::colorspace::ColorSpace;
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::image::Image;
 use crate::core::inputmanager::InputManager;
@@ -176,6 +177,9 @@ pub struct EngineConfiguration {
 	/// 문서의 meta. ((이름, content) 목록, 웹 판 index.html 의 head 의 meta 자리. Document::get_meta_content, BuildInfo 가 build-version 을 읽는다)
 	/// - 데스크탑 배포 빌드는 웹 판이 index.html 에 적는 판을 여기에 넣는다. (build.rs 의 rustc-env 를 env! 로 읽는 것 같은 것) 웹에서도 비어 있지 않으면 문서에 쓴다.
 	pub document_meta_list: Vec<(String, String)>,
+	/// 3D 색 공간. (원본 colorSpace, 기본 Gamma, 생성 때 정한다. Linear 면 툰 렌더러, 후처리, 화면 바깥선, GLB 읽기가 선형 공간에서 빛을 셈한다, colorspace.rs 머리말)
+	/// - 2D(Graphic 의 2D 묶음, 글자, UI)는 어느 값이든 감마 공간에서 합성한다.
+	pub color_space: ColorSpace,
 }
 
 impl EngineConfiguration {
@@ -215,6 +219,7 @@ impl EngineConfiguration {
 			rebake_text_on_font_load: false,
 			document_language: String::new(),
 			document_meta_list: Vec::new(),
+			color_space: ColorSpace::Gamma,
 		}
 	}
 }
@@ -313,6 +318,8 @@ enum PendingFontOperation {
 /// ```
 //==============================================================================
 pub struct Engine {
+	/// 3D 색 공간. (EngineConfiguration::color_space, 생성 때 정하고 바뀌지 않는다. 그래픽을 내어 준 동안에도 읽게 엔진이 따로 든다)
+	color_space: ColorSpace,
 	engine_configuration: RefCell<EngineConfiguration>,
 	time_manager: RefCell<TimeManager>,
 	view_manager: RefCell<ViewManager>,
@@ -369,8 +376,10 @@ impl Engine {
 	pub fn new(engine_configuration: EngineConfiguration) -> &'static Engine {
 		let reference_resolution_size = engine_configuration.reference_resolution_size;
 		let view_scale_mode = engine_configuration.view_scale_mode;
+		let color_space = engine_configuration.color_space;
 		crate::platform::document::apply_engine_configuration(&engine_configuration.document_language, &engine_configuration.document_meta_list);
 		let engine = Engine {
+			color_space,
 			engine_configuration: RefCell::new(engine_configuration),
 			time_manager: RefCell::new(TimeManager::new()),
 			view_manager: RefCell::new(ViewManager::new(reference_resolution_size, view_scale_mode)),
@@ -1646,6 +1655,32 @@ impl Engine {
 			clipboard_resolver.resolve(clipboard_text);
 		}));
 		clipboard_promise
+	}
+
+	//==============================================================================
+	/// 3D 색 공간 반환. (원본 getColorSpace, EngineConfiguration::color_space, 생성 때 정한 값이라 바뀌지 않는다)
+	///
+	/// # 돌려줌
+	/// ColorSpace::Gamma 나 ColorSpace::Linear.
+	///
+	/// # 예제
+	/// 선형 색 공간인 엔진에서 툰 렌더러를 지으면 렌더러도 선형
+	/// ```rust,no_run
+	/// use vanilla::{ColorSpace, Engine, EngineConfiguration, ToonRenderer};
+	///
+	/// let mut engine_configuration = EngineConfiguration::new();
+	/// engine_configuration.color_space = ColorSpace::Linear;
+	/// let engine = Engine::new(engine_configuration);
+	/// assert_eq!(engine.get_color_space(), ColorSpace::Linear);
+	/// if let Some(graphic) = engine.get_graphic() {
+	/// 	assert_eq!(graphic.get_color_space(), ColorSpace::Linear);
+	/// 	let renderer = ToonRenderer::new(graphic.get_gl()).unwrap();
+	/// 	assert_eq!(renderer.get_color_space(), ColorSpace::Linear);
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn get_color_space(&self) -> ColorSpace {
+		self.color_space
 	}
 
 	//==============================================================================

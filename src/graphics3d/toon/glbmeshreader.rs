@@ -3,7 +3,7 @@
 //! - 재질 색으로 칠하는 모형을 툰 3D 의 MeshBuilder 꼭짓점 배열로 읽는다. 텍스처 좌표와 재질 텍스처가 있으면 그것도 읽는다. (외계행성 광부 키우기에서 왔다)
 //!   - 부품 하나가 노드 하나이고, 노드의 메시는 색마다 프리미티브 하나다. 꼭짓점은 위치와 노멀, 뼈대가 있으면 본 번호와 무게다.
 //!     노멀이 없는 프리미티브는 glTF 명세대로 평평한 노멀(삼각형마다 하나)을 짓는다. (꼭짓점을 삼각형마다 따로 푼다)
-//!   - 재질의 baseColorFactor 는 선형 색이라 sRGB 로 바꿔 담고, emissiveFactor 가 있으면 빛남으로 담는다. (emissiveTexture 가 있으면 빛남은 재질 범위로만 넘긴다)
+//!   - 재질의 baseColorFactor 는 선형 색이라 sRGB 로 바꿔 담고(감마 색 공간은 pow 1 / 2.2, 선형 색 공간은 sRGB 표준 곡선, 셰이더가 푸는 곡선의 역), emissiveFactor 가 있으면 빛남으로 담는다. (emissiveTexture 가 있으면 빛남은 재질 범위로만 넘긴다)
 //!   - TEXCOORD_0 이 있으면 uv_data 로, TEXCOORD_1 이 있으면 uv1_data(2 번 UV, 천사 고리)로 담는다. 프리미티브마다 재질 범위(ToonMaterialRange)를 담는다. (재질 이름, extras, 텍스처 그림 차례)
 //!     부품 안에서 칸을 갈라 칠할 때(강조색 칸, 표시판) 재질 이름이나 extras 로 고르고 ToonDrawOptions 의 index_start, index_count 로 그 칸만 그린다.
 //!   - 그림은 read_glb_images 로 읽고 decode_glb_image 로 풀어 ToonRenderer::create_texture 에 넘긴다.
@@ -17,6 +17,7 @@
 //!     이름 없는 메시 노드는 이름 있는 부모 노드의 부품에 든다. (양자화 도구가 되풀이 변환을 맡기는 잎 노드) extensionsRequired 에 읽지 못하는 확장(meshopt 압축 등)이 있거나 바이너리 덩어리 밖의 버퍼를 가리키면 Err.
 //! - 엔진의 SkinnedModel(텍스처 PBR)과는 따로다. 툰 그리기에 쓸 꼭짓점 배열만 뽑는다.
 //==============================================================================
+use crate::core::colorspace::{read_engine_color_space, ColorSpace};
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
@@ -68,7 +69,7 @@ const UNSUPPORTED_EXTENSION_MESSAGES: [(&str, &str); 2] = [
 /// 		added_parts: vec![String::from("Mannequin_F")],
 /// 		..ToonOutlineOptions::default()
 /// 	};
-/// 	read_glb_arrays(bytes, Some(&outline_options))
+/// 	read_glb_arrays(bytes, Some(&outline_options), None)
 /// }
 /// ```
 //==============================================================================
@@ -224,7 +225,7 @@ pub struct ToonAnimation {
 /// use vanilla::{read_glb_arrays, write_skin_pose};
 ///
 /// fn read_pose(bytes: &[u8], time: f64) -> Result<Vec<f32>, String> {
-/// 	let arrays = read_glb_arrays(bytes, None)?;
+/// 	let arrays = read_glb_arrays(bytes, None, None)?;
 /// 	let Some(skeleton) = arrays.skeleton.as_ref() else {
 /// 		return Ok(Vec::new());
 /// 	};
@@ -256,7 +257,7 @@ pub struct ToonSkeleton {
 ///
 /// fn create_part_meshes(gl: &vanilla::GlContext, renderer: &ToonRenderer, bytes: &[u8]) -> Result<Vec<(String, ToonMesh, f64)>, String> {
 /// 	let outline_options = ToonOutlineOptions { width: 1.5, added_parts: vec![String::from("vanguard_Mesh"), String::from("vanguard_visor")], ..ToonOutlineOptions::default() };
-/// 	let part_arrays = read_glb_node_arrays(bytes, Some(&outline_options))?;
+/// 	let part_arrays = read_glb_node_arrays(bytes, Some(&outline_options), None)?;
 /// 	let mut meshes = Vec::new();
 /// 	for (part_name, part) in part_arrays.iter() {
 /// 		if part_name == "vanguard_visor" {
@@ -289,7 +290,7 @@ pub struct ToonPartArrays {
 /// use vanilla::{read_glb_arrays, read_glb_node_infos, write_skin_pose, Matrix4};
 ///
 /// fn read_visor_position(bytes: &[u8]) -> Result<Option<[f64; 3]>, String> {
-/// 	let arrays = read_glb_arrays(bytes, None)?;
+/// 	let arrays = read_glb_arrays(bytes, None, None)?;
 /// 	let node_infos = read_glb_node_infos(bytes)?;
 /// 	let (Some(skeleton), Some(visor_info)) = (arrays.skeleton.as_ref(), node_infos.get("vanguard_visor")) else {
 /// 		return Ok(None);
@@ -831,7 +832,7 @@ fn read_material<'a>(chunks: &'a GlbChunks, primitive: &Value) -> &'a Value {
 /// - part_node 는 재질 범위의 node_name 으로 쓸 부품 노드다. (visit_mesh_nodes 가 넘긴 것)
 /// - 바이너리 덩어리 밖의 버퍼를 가리키는 접근자가 있으면 Err.
 //==============================================================================
-fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, primitive: &Value, matrix: &Matrix4, is_outline_rebuilt: bool, part_node: &Value) -> Result<(), String> {
+fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, primitive: &Value, matrix: &Matrix4, is_outline_rebuilt: bool, part_node: &Value, color_space: ColorSpace) -> Result<(), String> {
 	let mode = primitive["mode"].as_u64().unwrap_or(TRIANGLES_MODE);
 	let attributes = &primitive["attributes"];
 	let position_accessor = match attributes["POSITION"].as_u64() {
@@ -894,7 +895,14 @@ fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, pr
 		}
 	};
 	let base_color = read_float_array(&material["pbrMetallicRoughness"]["baseColorFactor"], [1.0; 4]);
-	let color = [base_color[0].max(0.0).powf(1.0 / 2.2), base_color[1].max(0.0).powf(1.0 / 2.2), base_color[2].max(0.0).powf(1.0 / 2.2)];
+	let encode = |value: f64| -> f64 {
+		if color_space == ColorSpace::Linear {
+			let linear = value.clamp(0.0, 1.0);
+			return if linear <= 0.0031308 { linear * 12.92 } else { 1.055 * linear.powf(1.0 / 2.4) - 0.055 };
+		}
+		value.max(0.0).powf(1.0 / 2.2)
+	};
+	let color = [encode(base_color[0]), encode(base_color[1]), encode(base_color[2])];
 	// 빛남은 바탕색에 곱하는 세기로 담는다. (셰이더는 바탕색 x 세기를 더한다)
 	let mut glow = 0.0;
 	let emissive_image = read_texture_image(chunks, &material["emissiveTexture"]);
@@ -1319,11 +1327,13 @@ fn read_primitives(chunks: &GlbChunks, node: &Value) -> Vec<Value> {
 /// # 인자
 /// - `bytes`: GLB 파일 전체.
 /// - `outline_options`: 주면 GLB 의 바깥선 껍데기 대신 ".outline" 짝이 있는 노드의 몸으로 껍데기를 새로 짓는다. (None 이면 GLB 의 껍데기 그대로)
+/// - `color_space`: 꼭짓점 색(baseColorFactor 를 sRGB 로 바꾸는 곡선)의 색 공간. (None 이면 엔진의 색 공간, 원본 기본값과 같음, 그릴 ToonRenderer 와 같은 값)
 ///
 /// # 돌려줌
 /// MeshBuilder::read_arrays 의 꼴과 skeleton (없으면 None), inner_outline_ranges, inner_body_ranges. (ToonRenderer::create_mesh 에 넘긴다) GLB 가 아니거나 덩어리가 잘렸거나 모자라거나 JSON 을 읽지 못하면 Err(까닭 글).
 //==============================================================================
-pub fn read_glb_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOptions>) -> Result<ToonMeshArrays, String> {
+pub fn read_glb_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOptions>, color_space: Option<ColorSpace>) -> Result<ToonMeshArrays, String> {
+	let vertex_color_space = color_space.unwrap_or_else(read_engine_color_space);
 	let chunks = read_glb_chunks(bytes)?;
 	let mut builder = MeshBuilder::new();
 	let is_outline_rebuilt = outline_options.is_some();
@@ -1335,7 +1345,7 @@ pub fn read_glb_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOptions
 	visit_mesh_nodes(&chunks, &mut |node: &Value, matrix: &Matrix4, part_node: &Value| {
 		let body_start = builder.get_index_count();
 		for primitive in read_primitives(&chunks, node).iter() {
-			add_primitive(&mut builder, &chunks, node, primitive, matrix, is_outline_rebuilt, part_node)?;
+			add_primitive(&mut builder, &chunks, node, primitive, matrix, is_outline_rebuilt, part_node, vertex_color_space)?;
 		}
 		if !is_outline_rebuilt {
 			return Ok(());
@@ -1380,11 +1390,13 @@ pub fn read_glb_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOptions
 /// # 인자
 /// - `bytes`: GLB 파일 전체.
 /// - `outline_options`: read_glb_arrays 와 같음.
+/// - `color_space`: read_glb_arrays 와 같음. (None 이면 엔진의 색 공간)
 ///
 /// # 돌려줌
 /// 노드 이름마다 부품의 배열과 extras, alpha. GLB 가 아니거나 덩어리가 잘렸거나 모자라거나 JSON 을 읽지 못하면 Err(까닭 글).
 //==============================================================================
-pub fn read_glb_node_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOptions>) -> Result<HashMap<String, ToonPartArrays>, String> {
+pub fn read_glb_node_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOptions>, color_space: Option<ColorSpace>) -> Result<HashMap<String, ToonPartArrays>, String> {
+	let vertex_color_space = color_space.unwrap_or_else(read_engine_color_space);
 	let chunks = read_glb_chunks(bytes)?;
 	let mut builders: HashMap<String, MeshBuilder> = HashMap::new();
 	let mut part_extras: HashMap<String, Value> = HashMap::new();
@@ -1399,7 +1411,7 @@ pub fn read_glb_node_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOp
 			part_extras.insert(part_name.clone(), part_node["extras"].clone());
 		}
 		for primitive in read_primitives(&chunks, node).iter() {
-			add_primitive(builder, &chunks, node, primitive, matrix, is_outline_rebuilt, part_node)?;
+			add_primitive(builder, &chunks, node, primitive, matrix, is_outline_rebuilt, part_node, vertex_color_space)?;
 			let material = read_material(&chunks, primitive);
 			if material["alphaMode"].as_str() == Some("BLEND") {
 				let base_color = read_float_array(&material["pbrMetallicRoughness"]["baseColorFactor"], [1.0; 4]);
@@ -1868,7 +1880,7 @@ mod pose_adjust_tests {
 				return None;
 			}
 		};
-		read_glb_arrays(&glb_bytes, None).unwrap().skeleton
+		read_glb_arrays(&glb_bytes, None, None).unwrap().skeleton
 	}
 
 	//==============================================================================
@@ -2156,14 +2168,14 @@ mod tests {
 		let source_image = image::RgbaImage::from_raw(2, 1, vec![255, 0, 0, 255, 0, 255, 0, 128]).unwrap();
 		image::DynamicImage::ImageRgba8(source_image).write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png).unwrap();
 		let glb = build_test_glb(&png_bytes);
-		let arrays = read_glb_arrays(&glb, None).unwrap();
+		let arrays = read_glb_arrays(&glb, None, None).unwrap();
 		assert_eq!(arrays.uv_data, vec![0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0]);
 		let range = &arrays.material_ranges[0];
 		assert_eq!((range.name.as_str(), range.index_start, range.index_count), ("logoPlate", 0, 6));
 		assert_eq!(range.extras["slot"].as_str(), Some("accent"));
 		assert_eq!(range.base_color_image, Some(0));
 		assert!(range.has_uv);
-		let parts = read_glb_node_arrays(&glb, None).unwrap();
+		let parts = read_glb_node_arrays(&glb, None, None).unwrap();
 		assert_eq!(parts["plate"].extras["mark"]["kind"].as_str(), Some("logo"));
 		assert_eq!(parts["plate"].arrays.uv_data.len(), 8);
 		let images = read_glb_images(&glb).unwrap();

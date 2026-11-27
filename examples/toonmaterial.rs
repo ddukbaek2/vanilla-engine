@@ -44,7 +44,7 @@ float readSegmentInk(vec2 point) {
 const SEGMENT_SURFACE_CHUNK: &str = "void applySurface(inout ToonSurface surface) {
 	vec2 point = vec2((surface.uv.x - 0.5) * 1.6, 0.5 - surface.uv.y) * 2.2;
 	float ink = readSegmentInk(point);
-	surface.baseColor = mix(surface.baseColor, segmentColor, ink);
+	surface.baseColor = mix(surface.baseColor, toSurfaceColor(segmentColor), ink);
 	surface.emission += toLinear(segmentColor) * ink * 1.5;
 }
 ";

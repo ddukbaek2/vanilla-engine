@@ -47,14 +47,20 @@
 //!   (엔진 2D 그리기 사이에 끼울 때, 그 전에 Graphic 의 묶음을 내보낸다)
 //!   begin_frame_with_matrices(gl, 보기, 투영) 는 두 행렬로 시작한다. (직교 원 행렬 카메라) 카메라의 자리와 보기 돌림(하이라이트, 림, 소프트 엣지, 매트캡)은 보기와 투영에서 읽는다.
 //! - 프로그램마다 프레임 값(보기와 투영, 카메라, 그림자, HDR)과 빛 묶음은 바뀔 때만 올린다. 그리기마다 바뀌는 값(모형 행렬, 틴트, 텍스처)만 매번 올린다.
-//! - read_program_sources 로 ShaderWarmer 에 넘길 기본 소스를, read_material_program_sources(머티리얼, 인스턴스 꼴) 로 그 프로그램의 소스를 준다. (원본은 한 함수에 선택 인자)
+//! - read_program_sources 로 ShaderWarmer 에 넘길 기본 소스를, read_material_program_sources(머티리얼, 인스턴스 꼴, 모서리 어둠, 색 공간) 으로 그 프로그램의 소스를 준다. (원본은 한 함수에 선택 인자)
 //! - 노드 사각형 안에 그리기: set_screen_rect(x, y, 너비, 높이) 를 주면 begin_frame 이 보기와 투영의 클립 공간을 그 사각형으로 옮기고 가위로 밖을 자른다.
 //!   사각형은 begin_frame 때의 뷰포트(보통 드로잉 버퍼 전체) 안의 픽셀이고 왼쪽 위가 원점이다. 화면 밖 거르기는 옮기기 전의 절두체로 한다. end_frame 이 가위를 푼다.
 //! - begin_frame_with_camera(Camera3D) 는 카메라의 보기와 투영으로 begin_frame 을 부른다. 2D 표시(Camera3D::project_to_view)와 같은 카메라를 쓴다.
 //! - draw_mesh_outline 은 바깥선 껍데기만 그린다. (ToonDrawQueue 가 불투명한 몸을 다 그린 뒤 바깥선을 몰아 그릴 때, 그린 수는 세지 않는다)
 //! - ToonDrawOptions 의 casts_shadow 는 ToonDrawQueue::draw_shadows 만 읽는다. is_body_drawn 이 false 면 바깥선만 그린다. (원본은 꼴 객체에 이름으로 단다)
 //! - 텍스처: create_texture(gl, 너비, 높이, RGBA 바이트, ToonTextureOptions) 로 짓는다. UV (0, 0) 이 그림의 왼쪽 위다. (glTF 와 같음)
-//! - 텍스처 유닛: 점광 그림자 아틀라스 0, 램프 1, 매트캡 2, 해 그림자 3, 바탕색 4, 빛남 5, 데칼 6, 천사 고리 7, 머티리얼 8 ~ 15. 유닛 0 의 묶음은 begin_frame 이 적어 두고 end_frame 이 돌린다.
+//! - 색 공간: new_with_options 의 ToonRendererOptions::color_space(기본은 엔진의 EngineConfiguration::color_space, 엔진이 없으면 Gamma)로 정하고 바뀌지 않는다. (get_color_space)
+//!   Gamma(기본): 넘기는 색과 색 텍스처는 sRGB 이고 바탕색, 틴트, 데칼은 sRGB 로 곱하고 섞은 뒤 pow(색, 2.2) 로 선형으로 바꿔 빛을 셈한다. 화면에 낼 때 pow(1 / 2.2) 를 건다.
+//!   Linear: 색 텍스처를 sRGB 형식으로 올려 GPU 가 선형으로 풀고, 넘기는 색은 sRGB 표준 곡선으로 선형으로 바꿔 곱하고 섞는다. 화면에 낼 때 같은 곡선으로 sRGB 로 바꾼다.
+//!   셰이더 소스마다 #define VANILLA_COLOR_SPACE_LINEAR 1 이 들어간다. (ToonPostProcess, ToonScreenOutline 도 같은 값으로 짓는다)
+//! - 텍스처 유닛: 점광 그림자 아틀라스 0, 램프 1, 매트캡 2, 해 그림자 3, 바탕색 4, 빛남 5, 데칼 6, 천사 고리 7, 머티리얼 8 ~ 15, 모서리 어둠 16. 유닛 0 의 묶음은 begin_frame 이 적어 두고 end_frame 이 돌린다.
+//! - 모서리 어둠: set_ambient_occlusion_texture(ToonPostProcess::draw_ambient_occlusion 의 결과, 직접 빛 몫) 를 건 동안 몸은 TOON_AMBIENT_OCCLUSION 을 정의한 몸 프로그램으로 그린다.
+//!   (원본은 원점과 직접 빛 몫을 프레임 블록 ToonFrame 의 칸으로 올린다. 러스트는 프레임 블록이 없어 같은 이름의 유니폼 ambientOcclusionOrigin, ambientOcclusionDirectLightingStrength 로 올린다)
 //! - 2 번 UV: 배열에 uv1_data 가 있으면 vertexUv 가 (UV, 2 번 UV) 넷이다. 셰이더 조각은 ToonSurface.uv1 로 읽는다. (없으면 (0, 1))
 //! - 빛 색 쓰기(set_light_color_usage), 그늘 쪽 림(set_shade_rim_light), 빛 세기 막기(set_light_intensity_limited)는 빛 묶음(ToonLightSet)에 둔다.
 //==============================================================================
@@ -72,6 +78,7 @@ use crate::base::matrix4::Matrix4;
 use crate::core::graphic::{GlBuffer, GlProgram, GlTexture, GlUniformLocation, GlVertexArray};
 use crate::graphics3d::GlFramebuffer;
 use crate::core::shaderprogram::ShaderProgram;
+use crate::core::colorspace::{add_color_space_define, read_engine_color_space, ColorSpace};
 use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowAtlasLight, ShadowMap, SHADOW_ATLAS_MAXIMUM_LIGHTS};
 use crate::graphics3d::toon::meshbuilder::{ToonMeshArrays, SKIN_FLOAT_COUNT, VERTEX_FLOAT_COUNT};
 use crate::graphics3d::toon::toonlightset::{ToonLightColorUsage, ToonLightModel, ToonLightSet, ToonPointLight, ToonShade, TOON_MAXIMUM_BAND_STEPS, TOON_MAXIMUM_POINT_LIGHTS};
@@ -104,6 +111,8 @@ const EMISSIVE_TEXTURE_UNIT: u32 = 5;
 const DECAL_TEXTURE_UNIT: u32 = 6;
 const ANGEL_RING_TEXTURE_UNIT: u32 = 7;
 const FIRST_MATERIAL_TEXTURE_UNIT: u32 = 8;
+/// 모서리 어둠(화면 공간 AO) 텍스처 유닛. (조각 셰이더 유닛 16 개를 머티리얼까지 다 쓰므로 그 뒤, WebGL2 가 보장하는 합친 유닛 32 안)
+const AMBIENT_OCCLUSION_TEXTURE_UNIT: u32 = 16;
 
 /// 머티리얼이 그리기마다 묶을 수 있는 텍스처 수의 상한. (유닛 8 ~ 15)
 pub const TOON_MAXIMUM_MATERIAL_TEXTURES: usize = 8;
@@ -345,6 +354,11 @@ uniform sampler2DShadow localShadowTexture;
 uniform vec4 lightColorUsage;
 uniform vec3 lightColorUsageExtra;
 uniform vec4 shadeRimLight;
+#ifdef TOON_AMBIENT_OCCLUSION
+uniform sampler2D ambientOcclusionTexture;
+uniform vec2 ambientOcclusionOrigin;
+uniform float ambientOcclusionDirectLightingStrength;
+#endif
 uniform vec4 cameraPosition;
 uniform vec3 cameraForward;
 uniform mat3 viewRotation;
@@ -404,8 +418,27 @@ struct ToonLighting {
 	float shadow;
 	float sunLevel;
 };
+#ifdef VANILLA_COLOR_SPACE_LINEAR
+vec3 toLinear(vec3 color) {
+	vec3 value = max(color, vec3(0.0));
+	return mix(value / 12.92, pow((value + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), value));
+}
+vec3 toSurfaceColor(vec3 color) {
+	return toLinear(color);
+}
+vec3 toOutput(vec3 color) {
+	if (hdrOutput > 0.5) {
+		return max(color, vec3(0.0));
+	}
+	vec3 value = clamp(color, 0.0, 1.0);
+	return mix(value * 12.92, 1.055 * pow(value, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), value));
+}
+#else
 vec3 toLinear(vec3 color) {
 	return pow(color, vec3(2.2));
+}
+vec3 toSurfaceColor(vec3 color) {
+	return color;
 }
 vec3 toOutput(vec3 color) {
 	if (hdrOutput > 0.5) {
@@ -413,6 +446,7 @@ vec3 toOutput(vec3 color) {
 	}
 	return pow(clamp(color, 0.0, 1.0), vec3(1.0 / 2.2));
 }
+#endif
 float readLuminance(vec3 color) {
 	return dot(color, vec3(0.2126, 0.7152, 0.0722));
 }
@@ -509,7 +543,11 @@ float readToonCoordinate(float cosine, float offset) {
 }
 vec3 readShadeRamp(float coordinate) {
 	if (rampTextureEnabled > 0.5) {
+#ifdef VANILLA_COLOR_SPACE_LINEAR
+		return textureLod(rampTexture, vec2(clamp(coordinate, 0.0, 1.0), 0.5), 0.0).rgb;
+#else
 		return toLinear(textureLod(rampTexture, vec2(clamp(coordinate, 0.0, 1.0), 0.5), 0.0).rgb);
+#endif
 	}
 	if (shadeStopCount < 2) {
 		return vec3(clamp(coordinate, 0.0, 1.0));
@@ -529,8 +567,13 @@ float readShadeLevel(vec3 rampColor, float cosine) {
 	float bottom;
 	float top;
 	if (rampTextureEnabled > 0.5) {
+#ifdef VANILLA_COLOR_SPACE_LINEAR
+		bottom = readLuminance(textureLod(rampTexture, vec2(0.0, 0.5), 0.0).rgb);
+		top = readLuminance(textureLod(rampTexture, vec2(1.0, 0.5), 0.0).rgb);
+#else
 		bottom = readLuminance(toLinear(textureLod(rampTexture, vec2(0.0, 0.5), 0.0).rgb));
 		top = readLuminance(toLinear(textureLod(rampTexture, vec2(1.0, 0.5), 0.0).rgb));
+#endif
 	}
 	else if (shadeStopCount < 2) {
 		return clamp(cosine, 0.0, 1.0);
@@ -553,12 +596,28 @@ vec3 readViewDirection() {
 	}
 	return -cameraForward;
 }
+float readAmbientOcclusion() {
+#ifdef TOON_AMBIENT_OCCLUSION
+	if (alpha * tintColor.a < 1.0) {
+		return 1.0;
+	}
+	vec4 occlusion = texelFetch(ambientOcclusionTexture, ivec2(gl_FragCoord.xy - ambientOcclusionOrigin), 0);
+	float depth = dot(floor(occlusion.gba * 255.0 + 0.5), vec3(65536.0, 256.0, 1.0)) / 16777215.0;
+	return abs(depth - gl_FragCoord.z) <= 0.0000153 ? occlusion.r : 1.0;
+#else
+	return 1.0;
+#endif
+}
 ";
 
 /// 몸을 그리는 조각 셰이더의 몸통. (표면 → 표면 조각 → 틴트 → 빛 → 빛 조각 → 합치기)
 const SOLID_FRAGMENT_BODY: &str = "ToonSurface readSurface() {
 	ToonSurface surface;
+#ifdef VANILLA_COLOR_SPACE_LINEAR
+	vec3 color = toLinear(surfaceColor) * toLinear(surfaceTint.rgb);
+#else
 	vec3 color = surfaceColor * surfaceTint.rgb;
+#endif
 	float opacity = alpha * tintColor.a * surfaceTint.a;
 	vec2 uv = surfaceUv * uvTransform.zw + uvTransform.xy;
 	if (textureEnabled.x > 0.5) {
@@ -567,6 +626,17 @@ const SOLID_FRAGMENT_BODY: &str = "ToonSurface readSurface() {
 		opacity *= texel.a;
 	}
 	vec3 emission = toLinear(emissiveColor.rgb) * emissiveColor.a;
+#ifdef VANILLA_COLOR_SPACE_LINEAR
+	if (textureEnabled.y > 0.5) {
+		emission *= texture(emissiveTexture, uv).rgb;
+	}
+	if (textureEnabled.z > 0.5) {
+		vec4 decal = texture(decalTexture, surfaceUv * decalUvTransform.zw + decalUvTransform.xy);
+		vec3 decalTint = decal.rgb * toLinear(decalColor.rgb);
+		color = mix(color, decalTint, decal.a);
+		emission += decalTint * decal.a * decalColor.a;
+	}
+#else
 	if (textureEnabled.y > 0.5) {
 		emission *= toLinear(texture(emissiveTexture, uv).rgb);
 	}
@@ -576,6 +646,7 @@ const SOLID_FRAGMENT_BODY: &str = "ToonSurface readSurface() {
 		color = mix(color, decalTint, decal.a);
 		emission += toLinear(decalTint) * decal.a * decalColor.a;
 	}
+#endif
 	surface.baseColor = color;
 	surface.alpha = opacity;
 	surface.emission = emission + toLinear(surfaceEmissive.rgb) * surfaceEmissive.a;
@@ -606,14 +677,25 @@ ToonLighting readLighting(ToonSurface surface) {
 	float sunCosine = dot(normal, toSun);
 	vec3 sunRamp = readShadeRamp(readToonCoordinate(sunCosine, surface.shadeOffset) * shadow);
 	float sunLevel = readShadeLevel(sunRamp, sunCosine * shadow);
-	vec3 sunLight = sunRamp * mix(readLightColor(sunLightColor, lightColorUsage.y), readLightColor(sunLightColor, lightColorUsage.x), sunLevel);
+#ifdef TOON_AMBIENT_OCCLUSION
+	// 직접 빛의 가림. (1 - 몫 x (1 - 보임), 칸을 고른 뒤 해, 채움빛, 점광의 확산과 반사광에 곱한다, 몫 0 이나 트인 곳은 정확히 1)
+	float ambientOcclusion = readAmbientOcclusion();
+	float directOcclusion = 1.0 - ambientOcclusionDirectLightingStrength * (1.0 - ambientOcclusion);
+#else
+	const float directOcclusion = 1.0;
+#endif
+	vec3 sunLight = sunRamp * directOcclusion * mix(readLightColor(sunLightColor, lightColorUsage.y), readLightColor(sunLightColor, lightColorUsage.x), sunLevel);
+#ifdef TOON_AMBIENT_OCCLUSION
+	vec3 irradiance = sunLight + mix(groundColor, skyColor, normal.y * 0.5 + 0.5) * ambientOcclusion;
+#else
 	vec3 irradiance = sunLight + mix(groundColor, skyColor, normal.y * 0.5 + 0.5);
+#endif
 	if (hasSpecular) {
-		specularSum += readLightColor(sunLightColor, lightColorUsage.z) * readToonSpecular(normal, toSun, viewDirection) * sunLevel;
+		specularSum += readLightColor(sunLightColor, lightColorUsage.z) * directOcclusion * readToonSpecular(normal, toSun, viewDirection) * sunLevel;
 	}
 	vec3 toFill = -normalize(fillDirection);
 	float fillCosine = dot(normal, toFill);
-	irradiance += readLightColor(readLimitedDirectionalColor(fillColor), lightColorUsage.x) * readShadeLevel(readShadeRamp(readToonCoordinate(fillCosine, surface.shadeOffset)), fillCosine);
+	irradiance += readLightColor(readLimitedDirectionalColor(fillColor), lightColorUsage.x) * directOcclusion * readShadeLevel(readShadeRamp(readToonCoordinate(fillCosine, surface.shadeOffset)), fillCosine);
 	for (int index = 0; index < 8; ++index) {
 		if (index >= pointLightCount) {
 			break;
@@ -643,9 +725,9 @@ ToonLighting readLighting(ToonSurface surface) {
 		float cosine = (dot(normal, lightDirection) + shape.z) / (1.0 + shape.z);
 		float level = readShadeLevel(readShadeRamp(readToonCoordinate(cosine, surface.shadeOffset) * lightShadow), cosine * lightShadow);
 		vec3 pointColor = readLimitedLocalColor(pointLightColors[index] * falloff);
-		irradiance += readLightColor(pointColor, lightColorUsage.x) * level;
+		irradiance += readLightColor(pointColor, lightColorUsage.x) * directOcclusion * level;
 		if (hasSpecular) {
-			specularSum += readLightColor(pointColor, lightColorUsage.z) * readToonSpecular(normal, lightDirection, viewDirection) * level;
+			specularSum += readLightColor(pointColor, lightColorUsage.z) * directOcclusion * readToonSpecular(normal, lightDirection, viewDirection) * level;
 		}
 	}
 	lighting.irradiance = irradiance;
@@ -673,8 +755,13 @@ void main() {
 	if (alphaCutoff > 0.0 && surface.alpha < alphaCutoff) {
 		discard;
 	}
+#ifdef VANILLA_COLOR_SPACE_LINEAR
+	vec3 tintLinear = toLinear(tintColor.rgb);
+	vec3 albedo = tintAmount < 0.0 ? surface.baseColor * tintLinear : mix(surface.baseColor, tintLinear, tintAmount);
+#else
 	vec3 tintedColor = tintAmount < 0.0 ? surface.baseColor * tintColor.rgb : mix(surface.baseColor, tintColor.rgb, tintAmount);
 	vec3 albedo = toLinear(tintedColor);
+#endif
 	vec3 emission = surface.emission + albedo * surface.glow * glowScale;
 	vec3 color;
 	if (surface.isUnlit) {
@@ -689,7 +776,11 @@ void main() {
 	vec3 viewNormal = normalize(viewRotation * surface.normal);
 	vec3 sunLightColor = readLimitedDirectionalColor(sunColor);
 	if (matcapSettings.x > 0.5) {
+#ifdef VANILLA_COLOR_SPACE_LINEAR
+		vec3 matcap = texture(matcapTexture, vec2(viewNormal.x * 0.5 + 0.5, 0.5 - viewNormal.y * 0.5)).rgb * mix(vec3(1.0), sunLightColor, lightColorUsageExtra.y);
+#else
 		vec3 matcap = toLinear(texture(matcapTexture, vec2(viewNormal.x * 0.5 + 0.5, 0.5 - viewNormal.y * 0.5)).rgb) * mix(vec3(1.0), sunLightColor, lightColorUsageExtra.y);
+#endif
 		color = matcapSettings.z > 0.5 ? color + matcap * matcapSettings.y : color * mix(vec3(1.0), matcap, matcapSettings.y);
 	}
 	if (angelRingSettings.x > 0.5) {
@@ -697,7 +788,11 @@ void main() {
 		vec2 ringNormal = vec2(ringOffset.x * cameraRoll.x + ringOffset.y * cameraRoll.y, ringOffset.y * cameraRoll.x - ringOffset.x * cameraRoll.y) + 0.5;
 		vec2 ringUv = vec2(ringNormal.x, 1.0 - mix(1.0 - surface.uv1.y, ringNormal.y, angelRingSettings.z));
 		vec4 ring = texture(angelRingTexture, ringUv);
+#ifdef VANILLA_COLOR_SPACE_LINEAR
+		vec3 ringColor = ring.rgb * angelRingColor * mix(vec3(1.0), sunLightColor, lightColorUsageExtra.z);
+#else
 		vec3 ringColor = toLinear(ring.rgb) * angelRingColor * mix(vec3(1.0), sunLightColor, lightColorUsageExtra.z);
+#endif
 		color = angelRingSettings.w > 0.5 ? color * (1.0 - ring.a) + ringColor * ring.a : color + ringColor;
 	}
 	float opacity = surface.alpha;
@@ -749,8 +844,18 @@ uniform float alpha;
 uniform float hdrOutput;
 uniform float premultipliedOutput;
 out vec4 fragmentColor;
+#ifdef VANILLA_COLOR_SPACE_LINEAR
+vec3 toLinear(vec3 color) {
+	vec3 value = max(color, vec3(0.0));
+	return mix(value / 12.92, pow((value + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), value));
+}
+#endif
 void main() {
+#ifdef VANILLA_COLOR_SPACE_LINEAR
+	vec3 color = (hdrOutput > 0.5 ? toLinear(outlineColor.rgb) : outlineColor.rgb) * outlineLightColor;
+#else
 	vec3 color = (hdrOutput > 0.5 ? pow(outlineColor.rgb, vec3(2.2)) : outlineColor.rgb) * outlineLightColor;
+#endif
 	float outputAlpha = outlineColor.a * alpha * outlineTint;
 	if (premultipliedOutput > 0.5) {
 		color *= outputAlpha;
@@ -779,7 +884,7 @@ void main() {
 /// # 예제
 /// 머티리얼 조각과 사용자 인스턴스 어트리뷰트가 든 소스 짓기
 /// ```rust
-/// use vanilla::{compose_toon_program_sources, ToonInstanceLayout, ToonMaterial, ToonMaterialChunks};
+/// use vanilla::{compose_toon_program_sources, ColorSpace, ToonInstanceLayout, ToonMaterial, ToonMaterialChunks};
 ///
 /// let material = ToonMaterial::new(ToonMaterialChunks {
 /// 	name: String::from("pulse"),
@@ -788,8 +893,10 @@ void main() {
 /// 	..ToonMaterialChunks::default()
 /// });
 /// let instance_layout = ToonInstanceLayout::new(&[("instanceOffset", 3)]).unwrap();
-/// let sources = compose_toon_program_sources(Some(&material), Some(&instance_layout));
+/// let sources = compose_toon_program_sources(Some(&material), Some(&instance_layout), false, ColorSpace::Gamma);
 /// assert!(sources.solid_fragment_shader.contains("uniform float pulse;"));
+/// let linear_sources = compose_toon_program_sources(Some(&material), Some(&instance_layout), true, ColorSpace::Linear);
+/// assert!(linear_sources.solid_fragment_shader.starts_with("#version 300 es\n#define VANILLA_COLOR_SPACE_LINEAR 1\n#define TOON_AMBIENT_OCCLUSION\n"));
 /// assert!(sources.solid_vertex_shader.contains("in vec3 instanceOffset;"));
 /// assert!(sources.attribute_locations.iter().any(|(name, _)| name == "instanceOffset"));
 /// ```
@@ -818,11 +925,13 @@ pub struct ToonProgramSources {
 /// # 인자
 /// - `material`: 셰이더 조각을 끼울 머티리얼. (None 이면 빈 조각)
 /// - `instance_layout`: 사용자 어트리뷰트를 선언할 인스턴스 꼴. (None 이면 없음)
+/// - `is_ambient_occlusion`: 몸 조각 셰이더에 TOON_AMBIENT_OCCLUSION 을 정의해 모서리 어둠 텍스처를 바탕빛에 곱할지. (원본 기본 false)
+/// - `color_space`: 색 공간. (원본 기본은 엔진의 색 공간, Linear 면 소스마다 #define VANILLA_COLOR_SPACE_LINEAR 1 이 들어간다)
 ///
 /// # 돌려줌
 /// 세 프로그램의 소스와 어트리뷰트 자리. (ToonProgramSources)
 //==============================================================================
-pub fn compose_toon_program_sources(material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>) -> ToonProgramSources {
+pub fn compose_toon_program_sources(material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, is_ambient_occlusion: bool, color_space: ColorSpace) -> ToonProgramSources {
 	let pick = |chunk: Option<&str>, fallback: &'static str| -> String {
 		match chunk {
 			Some(chunk) if !chunk.is_empty() => {
@@ -847,13 +956,14 @@ pub fn compose_toon_program_sources(material: Option<&ToonMaterial>, instance_la
 			}
 		}
 	}
+	let solid_fragment_head = if is_ambient_occlusion { SOLID_FRAGMENT_HEAD.replacen("#version 300 es\n", "#version 300 es\n#define TOON_AMBIENT_OCCLUSION\n", 1) } else { String::from(SOLID_FRAGMENT_HEAD) };
 	ToonProgramSources {
-		solid_vertex_shader: format!("{}{}", vertex_head, SOLID_VERTEX_BODY),
-		solid_fragment_shader: format!("{}{}{}{}{}", SOLID_FRAGMENT_HEAD, uniform_chunk, surface_chunk, light_chunk, SOLID_FRAGMENT_BODY),
-		outline_vertex_shader: format!("{}{}", vertex_head, OUTLINE_VERTEX_BODY),
-		outline_fragment_shader: String::from(OUTLINE_FRAGMENT_SHADER),
-		depth_vertex_shader: format!("{}{}", vertex_head, DEPTH_VERTEX_BODY),
-		depth_fragment_shader: String::from(DEPTH_FRAGMENT_SHADER),
+		solid_vertex_shader: add_color_space_define(&format!("{}{}", vertex_head, SOLID_VERTEX_BODY), color_space),
+		solid_fragment_shader: add_color_space_define(&format!("{}{}{}{}{}", solid_fragment_head, uniform_chunk, surface_chunk, light_chunk, SOLID_FRAGMENT_BODY), color_space),
+		outline_vertex_shader: add_color_space_define(&format!("{}{}", vertex_head, OUTLINE_VERTEX_BODY), color_space),
+		outline_fragment_shader: add_color_space_define(OUTLINE_FRAGMENT_SHADER, color_space),
+		depth_vertex_shader: add_color_space_define(&format!("{}{}", vertex_head, DEPTH_VERTEX_BODY), color_space),
+		depth_fragment_shader: add_color_space_define(DEPTH_FRAGMENT_SHADER, color_space),
 		attribute_locations,
 	}
 }
@@ -1062,6 +1172,8 @@ pub struct ToonTextureOptions {
 	pub is_repeated: bool,
 	/// 고르게 읽을지. (기본 true, false 면 가까운 화소)
 	pub is_filtered: bool,
+	/// 색인지. (기본 true 면 색, false 면 노멀이나 마스크 같은 자료, 선형 색 공간에서만 가른다: 색은 SRGB8_ALPHA8, 자료는 RGBA8, 감마 색 공간은 늘 RGBA)
+	pub is_color_data: bool,
 }
 
 impl Default for ToonTextureOptions {
@@ -1069,7 +1181,7 @@ impl Default for ToonTextureOptions {
 	/// 기본값. (원본의 기본 꼴과 같다)
 	//==============================================================================
 	fn default() -> Self {
-		ToonTextureOptions { is_mipmapped: true, is_repeated: true, is_filtered: true }
+		ToonTextureOptions { is_mipmapped: true, is_repeated: true, is_filtered: true, is_color_data: true }
 	}
 }
 
@@ -1543,6 +1655,53 @@ pub struct ToonRenderer {
 	outline_fade_distance: [f64; 2],
 	/// 받을 점광과 스포트라이트 그림자.
 	local_shadow_input: Option<ToonLocalShadowInput>,
+	/// 색 공간. (원본 #colorSpace, 생성 때 정함, 프로그램의 정의와 색 텍스처 형식을 가른다)
+	color_space: ColorSpace,
+	/// 모서리 어둠. (원본 #ambientOcclusionInput, None 이면 기본 몸 프로그램)
+	ambient_occlusion_input: Option<ToonAmbientOcclusionInput>,
+	/// (머티리얼 번호, 인스턴스 꼴 번호) → 모서리 어둠 몸 프로그램. (원본 열쇠 "번호/번호/ao" 의 칸, 바깥선과 그림자 깊이는 기본 칸 것을 같이 쓴다, 짓지 못했으면 None 이라 기본 칸으로 그린다)
+	ambient_occlusion_program_table: HashMap<(u32, u32), Option<ToonProgramEntry>>,
+}
+
+//==============================================================================
+/// 모서리 어둠 입력. (원본 { texture, origin, directLightingStrength })
+//==============================================================================
+struct ToonAmbientOcclusionInput {
+	texture: GlTexture,
+	/// 이번 프레임 뷰포트의 왼쪽 아래. (begin_frame 이 적는다)
+	origin: [f64; 2],
+	/// 직접 빛에 미치는 몫. (0 ~ 1)
+	direct_lighting_strength: f64,
+}
+
+//==============================================================================
+/// 툰 렌더러를 지을 때의 꼴. (원본 생성 options)
+///
+/// # 예제
+/// 선형 색 공간 렌더러 짓기
+/// ```rust,no_run
+/// use vanilla::{ColorSpace, ToonRenderer, ToonRendererOptions};
+///
+/// fn create_linear_renderer(gl: &vanilla::GlContext) -> Result<ToonRenderer, String> {
+/// 	let renderer = ToonRenderer::new_with_options(gl, ToonRendererOptions { color_space: ColorSpace::Linear })?;
+/// 	assert_eq!(renderer.get_color_space(), ColorSpace::Linear);
+/// 	Ok(renderer)
+/// }
+/// ```
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToonRendererOptions {
+	/// 색 공간. (원본 colorSpace, 기본은 엔진의 색 공간 EngineConfiguration::color_space, 엔진이 없으면 Gamma)
+	pub color_space: ColorSpace,
+}
+
+impl Default for ToonRendererOptions {
+	//==============================================================================
+	/// 기본값. (색 공간은 엔진의 것)
+	//==============================================================================
+	fn default() -> Self {
+		ToonRendererOptions { color_space: read_engine_color_space() }
+	}
 }
 
 //==============================================================================
@@ -1878,9 +2037,9 @@ fn read_bounding_sphere(positions: &[f32], stride: usize) -> ([f64; 3], f64) {
 }
 
 //==============================================================================
-/// RGBA 텍스처 올리기. (create_texture 와 흰 텍스처가 함께 쓴다)
+/// RGBA 텍스처 올리기. (create_texture 와 흰 텍스처가 함께 쓴다, 선형 색 공간의 색 텍스처는 SRGB8_ALPHA8)
 //==============================================================================
-fn upload_texture(gl: &crate::GlContext, width: u32, height: u32, pixels: &[u8], options: ToonTextureOptions) -> Result<GlTexture, String> {
+fn upload_texture(gl: &crate::GlContext, width: u32, height: u32, pixels: &[u8], options: ToonTextureOptions, color_space: ColorSpace) -> Result<GlTexture, String> {
 	let byte_count = width as usize * height as usize * 4;
 	if width == 0 || height == 0 || pixels.len() < byte_count {
 		return Err(format!("텍스처 바이트가 모자란다: {} x {} 에 {} 바이트", width, height, pixels.len()));
@@ -1889,7 +2048,12 @@ fn upload_texture(gl: &crate::GlContext, width: u32, height: u32, pixels: &[u8],
 		let texture = crate::core::glstatecache::create_texture(gl)?;
 		crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + BASE_COLOR_TEXTURE_UNIT);
 		crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
-		gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA as i32, width as i32, height as i32, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&pixels[..byte_count])));
+		// 선형 색 공간의 색 텍스처는 sRGB 형식으로 올려 GPU 가 선형으로 풀어 읽게 한다. (감마 색 공간은 지금까지처럼 RGBA)
+		let mut internal_format = glow::RGBA;
+		if color_space == ColorSpace::Linear {
+			internal_format = if options.is_color_data { glow::SRGB8_ALPHA8 } else { glow::RGBA8 };
+		}
+		gl.tex_image_2d(glow::TEXTURE_2D, 0, internal_format as i32, width as i32, height as i32, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&pixels[..byte_count])));
 		let wrap = if options.is_repeated { glow::REPEAT } else { glow::CLAMP_TO_EDGE };
 		let magnify_filter = if options.is_filtered { glow::LINEAR } else { glow::NEAREST };
 		let mut minify_filter = magnify_filter;
@@ -1915,7 +2079,7 @@ impl ToonRenderer {
 	/// (정점, 조각) 소스 세 벌. (몸, 바깥선, 그림자 깊이)
 	//==============================================================================
 	pub fn read_program_sources() -> [(String, String); 3] {
-		ToonRenderer::read_material_program_sources(None, None)
+		ToonRenderer::read_material_program_sources(None, None, false, read_engine_color_space())
 	}
 
 	//==============================================================================
@@ -1924,17 +2088,19 @@ impl ToonRenderer {
 	/// # 인자
 	/// - `material`: 셰이더 조각을 끼울 머티리얼. (None 이면 빈 조각)
 	/// - `instance_layout`: 인스턴스 꼴. (None 이면 없음)
+	/// - `is_ambient_occlusion`: 모서리 어둠을 켠 프레임의 몸 프로그램인지. (원본 기본 false, set_ambient_occlusion_texture 로 텍스처를 건 프레임은 이 몸 프로그램을 쓴다)
+	/// - `color_space`: 색 공간. (원본 기본은 엔진의 색 공간, 렌더러가 짓는 것과 같은 값을 준다)
 	///
 	/// # 돌려줌
 	/// (정점, 조각) 소스 세 벌. (몸, 바깥선, 그림자 깊이)
 	//==============================================================================
-	pub fn read_material_program_sources(material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>) -> [(String, String); 3] {
-		let sources = compose_toon_program_sources(material, instance_layout);
+	pub fn read_material_program_sources(material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, is_ambient_occlusion: bool, color_space: ColorSpace) -> [(String, String); 3] {
+		let sources = compose_toon_program_sources(material, instance_layout, is_ambient_occlusion, color_space);
 		[(sources.solid_vertex_shader, sources.solid_fragment_shader), (sources.outline_vertex_shader, sources.outline_fragment_shader), (sources.depth_vertex_shader, sources.depth_fragment_shader)]
 	}
 
 	//==============================================================================
-	/// 생성. (기본 세 프로그램을 짓는다)
+	/// 생성. (기본 세 프로그램을 짓는다, 색 공간은 엔진의 것)
 	///
 	/// # 인자
 	/// - `gl`: 그릴 GL 컨텍스트.
@@ -1943,9 +2109,29 @@ impl ToonRenderer {
 	/// 새 렌더러. 기본 프로그램이나 텍스처를 짓지 못하면 Err(오류 글).
 	//==============================================================================
 	pub fn new(gl: &crate::GlContext) -> Result<ToonRenderer, String> {
-		let default_program_set = ToonRenderer::create_program_set(gl, None, None)?;
+		ToonRenderer::new_with_options(gl, ToonRendererOptions::default())
+	}
+
+	//==============================================================================
+	/// 꼴을 주어 생성. (원본 new ToonRenderer(gl, options), 기본 세 프로그램을 짓는다)
+	/// - 색 공간은 생성 때 정하고 바뀌지 않는다. (get_color_space)
+	///   Gamma(기본): 넘기는 색(꼭짓점 색, 틴트, 빛남 색, 데칼 색, 바깥선 색)과 색 텍스처는 sRGB 이고 바탕색, 틴트, 데칼은 sRGB 로 곱하고 섞은 뒤 pow(색, 2.2) 로 선형으로 바꿔 빛을 셈한다.
+	///     화면에 낼 때 pow(1 / 2.2) 를 건다. (HDR 출력이면 선형 그대로)
+	///   Linear: 색 텍스처를 sRGB 형식으로 올려 GPU 가 선형으로 풀고, 넘기는 색은 sRGB 표준 곡선(IEC 61966-2-1)으로 선형으로 바꿔 곱하고 섞는다. 화면에 낼 때 같은 곡선으로 sRGB 로 바꾼다.
+	///     셰이더 소스마다 #define VANILLA_COLOR_SPACE_LINEAR 1 이 들어간다. (ToonPostProcess, ToonScreenOutline 도 같은 값으로 짓는다)
+	///
+	/// # 인자
+	/// - `gl`: 그릴 GL 컨텍스트.
+	/// - `options`: 색 공간. (ToonRendererOptions)
+	///
+	/// # 돌려줌
+	/// 새 렌더러. 기본 프로그램이나 텍스처를 짓지 못하면 Err(오류 글).
+	//==============================================================================
+	pub fn new_with_options(gl: &crate::GlContext, options: ToonRendererOptions) -> Result<ToonRenderer, String> {
+		let color_space = options.color_space;
+		let default_program_set = ToonRenderer::create_program_set(gl, None, None, color_space)?;
 		let empty_shadow_texture = ToonRenderer::create_empty_shadow_texture(gl)?;
-		let white_texture = upload_texture(gl, 1, 1, &[255, 255, 255, 255], ToonTextureOptions { is_mipmapped: false, ..ToonTextureOptions::default() })?;
+		let white_texture = upload_texture(gl, 1, 1, &[255, 255, 255, 255], ToonTextureOptions { is_mipmapped: false, ..ToonTextureOptions::default() }, ColorSpace::Gamma)?;
 		let mut program_set_table = HashMap::new();
 		program_set_table.insert((0, 0), Some(default_program_set));
 		Ok(ToonRenderer {
@@ -1975,14 +2161,17 @@ impl ToonRenderer {
 			outline_distance_scale: [0.0, 0.5, 4.0],
 			outline_fade_distance: [0.0, 0.0],
 			local_shadow_input: None,
+			color_space,
+			ambient_occlusion_input: None,
+			ambient_occlusion_program_table: HashMap::new(),
 		})
 	}
 
 	//==============================================================================
 	/// 세 프로그램 짓기. (짓지 못하면 Err, 몸 프로그램의 텍스처 유닛을 정해 둔다)
 	//==============================================================================
-	fn create_program_set(gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>) -> Result<ToonProgramSet, String> {
-		let sources = compose_toon_program_sources(material, instance_layout);
+	fn create_program_set(gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, color_space: ColorSpace) -> Result<ToonProgramSet, String> {
+		let sources = compose_toon_program_sources(material, instance_layout, false, color_space);
 		let attribute_locations: Vec<(&str, u32)> = sources.attribute_locations.iter().map(|(name, location)| (name.as_str(), *location)).collect();
 		let solid_program = ShaderProgram::create_with_attribute_locations(gl, &sources.solid_vertex_shader, &sources.solid_fragment_shader, &attribute_locations)?;
 		let outline_program = match ShaderProgram::create_with_attribute_locations(gl, &sources.outline_vertex_shader, &sources.outline_fragment_shader, &attribute_locations) {
@@ -2024,6 +2213,45 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
+	/// 모서리 어둠 몸 프로그램 짓기. (원본 createProgramSet 의 baseProgramSet 이 있는 길, 몸만 짓고 텍스처 유닛과 모서리 어둠 유닛을 정해 둔다)
+	//==============================================================================
+	fn create_ambient_occlusion_solid_entry(gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, color_space: ColorSpace) -> Result<ToonProgramEntry, String> {
+		let sources = compose_toon_program_sources(material, instance_layout, true, color_space);
+		let attribute_locations: Vec<(&str, u32)> = sources.attribute_locations.iter().map(|(name, location)| (name.as_str(), *location)).collect();
+		let solid_program = ShaderProgram::create_with_attribute_locations(gl, &sources.solid_vertex_shader, &sources.solid_fragment_shader, &attribute_locations)?;
+		unsafe {
+			let previous_program = crate::graphics3d::read_program_binding(gl);
+			solid_program.use_program(gl);
+			for (name, unit) in [("shadowTexture", SHADOW_TEXTURE_UNIT), ("baseColorTexture", BASE_COLOR_TEXTURE_UNIT), ("emissiveTexture", EMISSIVE_TEXTURE_UNIT), ("decalTexture", DECAL_TEXTURE_UNIT), ("rampTexture", RAMP_TEXTURE_UNIT), ("matcapTexture", MATCAP_TEXTURE_UNIT), ("localShadowTexture", LOCAL_SHADOW_TEXTURE_UNIT), ("angelRingTexture", ANGEL_RING_TEXTURE_UNIT), ("ambientOcclusionTexture", AMBIENT_OCCLUSION_TEXTURE_UNIT)] {
+				gl.uniform_1_i32(solid_program.get_uniform_location(gl, name).as_ref(), unit as i32);
+			}
+			crate::core::glstatecache::use_program(gl, previous_program);
+		}
+		Ok(ToonProgramEntry::new(solid_program, ToonProgramKind::Solid))
+	}
+
+	//==============================================================================
+	/// 모서리 어둠 몸 프로그램이 있게 하기. (원본 readProgramSetVariant 의 "/ao" 칸, 짓지 못하면 알리고 None 을 기억해 기본 칸으로 그린다)
+	//==============================================================================
+	fn ensure_ambient_occlusion_program(&mut self, gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>) {
+		let key = (material.map(|material| material.get_id()).unwrap_or(0), instance_layout.map(|instance_layout| instance_layout.get_id()).unwrap_or(0));
+		if self.ambient_occlusion_program_table.contains_key(&key) {
+			return;
+		}
+		let entry = match ToonRenderer::create_ambient_occlusion_solid_entry(gl, material, instance_layout, self.color_space) {
+			Ok(entry) => {
+				Some(entry)
+			}
+			Err(error) => {
+				let name = material.map(|material| String::from(material.get_name())).filter(|name| !name.is_empty()).unwrap_or_else(|| format!("{}/{}", key.0, key.1));
+				eprintln!("[ToonRenderer] 머티리얼 {} 의 모서리 어둠 셰이더를 짓지 못해 모서리 어둠 없이 그린다. {}", name, error);
+				None
+			}
+		};
+		self.ambient_occlusion_program_table.insert(key, entry);
+	}
+
+	//==============================================================================
 	/// 머티리얼과 인스턴스 꼴의 프로그램이 있게 하기. (없으면 짓고, 짓지 못한 것은 알리고 None 을 기억해 다시 짓지 않는다, 있으면 true)
 	//==============================================================================
 	fn ensure_program_set(&mut self, gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>) -> bool {
@@ -2031,7 +2259,7 @@ impl ToonRenderer {
 		if let Some(program_set) = self.program_set_table.get(&key) {
 			return program_set.is_some();
 		}
-		let program_set = match ToonRenderer::create_program_set(gl, material, instance_layout) {
+		let program_set = match ToonRenderer::create_program_set(gl, material, instance_layout, self.color_space) {
 			Ok(program_set) => {
 				Some(program_set)
 			}
@@ -2083,7 +2311,8 @@ impl ToonRenderer {
 	//==============================================================================
 	pub fn delete_material(&mut self, gl: &crate::GlContext, material: &ToonMaterial) {
 		let material_id = material.get_id();
-		let key_list: Vec<(u32, u32)> = self.program_set_table.keys().filter(|key| key.0 == material_id).copied().collect();
+		let mut key_list: Vec<(u32, u32)> = self.program_set_table.keys().filter(|key| key.0 == material_id).copied().collect();
+		key_list.extend(self.ambient_occlusion_program_table.keys().filter(|key| key.0 == material_id && !self.program_set_table.contains_key(key)).copied());
 		for key in key_list {
 			if let Some(Some(program_set)) = self.program_set_table.remove(&key) {
 				ToonRenderer::delete_program_set(gl, &program_set);
@@ -2092,6 +2321,13 @@ impl ToonRenderer {
 				for program in [&program_set.solid.program, &program_set.outline.program, &program_set.depth.program] {
 					uniform_slot_table.remove(&program.get_program());
 				}
+			}
+			// 모서리 어둠 칸은 몸만 제 것이다. (바깥선과 그림자 깊이는 기본 칸이 지운다)
+			if let Some(Some(entry)) = self.ambient_occlusion_program_table.remove(&key) {
+				unsafe {
+					crate::core::glstatecache::delete_program(gl, entry.program.get_program());
+				}
+				self.uniform_slot_table.get_mut().remove(&entry.program.get_program());
 			}
 		}
 	}
@@ -2216,19 +2452,23 @@ impl ToonRenderer {
 
 	//==============================================================================
 	/// 텍스처 짓기. (RGBA 바이트 너비 x 높이 x 4, 그림 풀기는 decode_glb_image 나 image 크레이트)
+	/// - 선형 색 공간(ColorSpace::Linear)이면 색 텍스처(바탕색, 빛남, 데칼, 매트캡, 천사 고리, 램프)를 sRGB 형식(SRGB8_ALPHA8)으로 올린다.
+	///   GPU 가 읽을 때 선형으로 풀어 거르기와 밉맵이 선형 공간에서 일어나고, 셰이더는 받은 값을 선형 색으로 그대로 쓴다. (유니티, 언리얼의 sRGB 텍스처와 같음)
+	///   노멀, 마스크, 번호 같은 자료 텍스처는 is_color_data: false 로 RGBA8 에 그대로 올린다. (머티리얼 조각이 읽는 자료)
+	/// - 감마 색 공간(기본)은 is_color_data 와 상관없이 RGBA 로 올리고 셰이더가 색 텍스처를 pow 2.2 로 선형으로 바꾼다. (지금까지와 같음)
 	///
 	/// # 인자
 	/// - `gl`: 텍스처를 지을 GL 컨텍스트.
 	/// - `width`: 너비. (픽셀)
 	/// - `height`: 높이. (픽셀)
 	/// - `pixels`: RGBA 바이트. (너비 x 높이 x 4 개 이상)
-	/// - `options`: 밉맵, 되풀이, 고르게 읽기. (ToonTextureOptions)
+	/// - `options`: 밉맵, 되풀이, 고르게 읽기, 색인지. (ToonTextureOptions)
 	///
 	/// # 돌려줌
 	/// 지은 RGBA 텍스처. 너비나 높이가 0 이거나 바이트가 모자라거나 텍스처를 짓지 못하면 Err(오류 글).
 	//==============================================================================
 	pub fn create_texture(&self, gl: &crate::GlContext, width: u32, height: u32, pixels: &[u8], options: ToonTextureOptions) -> Result<GlTexture, String> {
-		upload_texture(gl, width, height, pixels, options)
+		upload_texture(gl, width, height, pixels, options, self.color_space)
 	}
 
 	//==============================================================================
@@ -2277,6 +2517,11 @@ impl ToonRenderer {
 	pub fn destroy(&self, gl: &crate::GlContext) {
 		for program_set in self.program_set_table.values().flatten() {
 			ToonRenderer::delete_program_set(gl, program_set);
+		}
+		for entry in self.ambient_occlusion_program_table.values().flatten() {
+			unsafe {
+				crate::core::glstatecache::delete_program(gl, entry.program.get_program());
+			}
 		}
 		self.uniform_slot_table.borrow_mut().clear();
 		unsafe {
@@ -2711,6 +2956,14 @@ impl ToonRenderer {
 		self.frame_serial += 1;
 		self.save_state(gl);
 		self.apply_screen_rect(gl);
+		// 모서리 어둠 텍스처의 화면 원점. (이번 프레임 뷰포트의 왼쪽 아래)
+		if let Some(ambient_occlusion_input) = self.ambient_occlusion_input.as_mut() {
+			let mut viewport = [0i32; 4];
+			unsafe {
+				crate::core::glstatecache::get_parameter_i32_slice(gl, glow::VIEWPORT, &mut viewport);
+			}
+			ambient_occlusion_input.origin = [viewport[0] as f64, viewport[1] as f64];
+		}
 		self.apply_frame_state(gl);
 	}
 
@@ -3092,6 +3345,11 @@ impl ToonRenderer {
 						}
 					}
 					self.upload_local_shadow_uniforms(gl, program);
+					// 모서리 어둠 텍스처의 화면 원점과 직접 빛 몫. (원본 프레임 블록의 ambientOcclusionOrigin, ambientOcclusionDirectLightingStrength 칸, 러스트는 모서리 어둠 몸 프로그램의 유니폼)
+					if let Some(ambient_occlusion_input) = self.ambient_occlusion_input.as_ref() {
+						gl.uniform_2_f64(program.get_uniform_location(gl, "ambientOcclusionOrigin").as_ref(), ambient_occlusion_input.origin[0], ambient_occlusion_input.origin[1]);
+						gl.uniform_1_f64(program.get_uniform_location(gl, "ambientOcclusionDirectLightingStrength").as_ref(), ambient_occlusion_input.direct_lighting_strength);
+					}
 				}
 				ToonProgramKind::Depth => {}
 			}
@@ -3392,6 +3650,9 @@ impl ToonRenderer {
 		if !self.ensure_program_set(gl, options.material, instance_layout) {
 			return;
 		}
+		if self.ambient_occlusion_input.is_some() && !self.is_shadow_pass {
+			self.ensure_ambient_occlusion_program(gl, options.material, instance_layout);
+		}
 		let is_skinned = mesh.is_skinned && options.joint_matrices.is_some();
 		let is_instanced = instance_count > 0;
 		let (body_vertex_array, outline_vertex_array, instanced_mode) = match instance_buffer {
@@ -3524,8 +3785,15 @@ impl ToonRenderer {
 			return;
 		}
 
-		// 몸.
-		let solid_entry = &program_set.solid;
+		// 몸. (모서리 어둠을 걸었으면 모서리 어둠 몸 프로그램, 짓지 못했으면 기본 칸)
+		let solid_entry = match (self.ambient_occlusion_input.is_some(), self.ambient_occlusion_program_table.get(&key)) {
+			(true, Some(Some(entry))) => {
+				entry
+			}
+			_ => {
+				&program_set.solid
+			}
+		};
 		let solid_program = &solid_entry.program;
 		solid_program.use_program(gl);
 		self.upload_frame_uniforms(gl, solid_entry);
@@ -3566,6 +3834,9 @@ impl ToonRenderer {
 		self.bind_texture_unit(gl, MATCAP_TEXTURE_UNIT, options.matcap_texture);
 		self.bind_texture_unit(gl, ANGEL_RING_TEXTURE_UNIT, options.angel_ring_texture);
 		ToonRenderer::bind_texture_2d(gl, LOCAL_SHADOW_TEXTURE_UNIT, self.local_shadow_input.as_ref().map(|local_shadow_input| local_shadow_input.depth_texture).unwrap_or(self.empty_shadow_texture));
+		if let Some(ambient_occlusion_input) = self.ambient_occlusion_input.as_ref() {
+			ToonRenderer::bind_texture_2d(gl, AMBIENT_OCCLUSION_TEXTURE_UNIT, ambient_occlusion_input.texture);
+		}
 		for (texture_index, (uniform_name, texture)) in options.textures.iter().take(TOON_MAXIMUM_MATERIAL_TEXTURES).enumerate() {
 			let unit = FIRST_MATERIAL_TEXTURE_UNIT + texture_index as u32;
 			self.bind_texture_unit(gl, unit, Some(*texture));
@@ -3920,6 +4191,68 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
+	/// 색 공간 반환. (원본 getColorSpace, 생성 때 정한 값, 바뀌지 않는다)
+	///
+	/// # 돌려줌
+	/// ColorSpace::Gamma 나 ColorSpace::Linear.
+	///
+	/// # 예제
+	/// 선형 색 공간 렌더러를 짓고 같은 값으로 후처리와 화면 바깥선 짓기
+	/// ```rust,no_run
+	/// use vanilla::{ColorSpace, ToonPostProcess, ToonPostProcessOptions, ToonRenderer, ToonRendererOptions, ToonScreenOutline, ToonScreenOutlineOptions};
+	///
+	/// fn create_linear_set(gl: &vanilla::GlContext) -> Result<(), String> {
+	/// 	let renderer = ToonRenderer::new_with_options(gl, ToonRendererOptions { color_space: ColorSpace::Linear })?;
+	/// 	let post_process = ToonPostProcess::new_with_options(gl, 320, 180, ToonPostProcessOptions { color_space: renderer.get_color_space(), ..ToonPostProcessOptions::default() })?;
+	/// 	let screen_outline = ToonScreenOutline::new_with_options(gl, ToonScreenOutlineOptions { color_space: renderer.get_color_space() })?;
+	/// 	assert_eq!(post_process.get_color_space(), ColorSpace::Linear);
+	/// 	assert_eq!(screen_outline.get_color_space(), ColorSpace::Linear);
+	/// 	Ok(())
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn get_color_space(&self) -> ColorSpace {
+		self.color_space
+	}
+
+	//==============================================================================
+	/// 모서리 어둠 텍스처 설정. (원본 setAmbientOcclusionTexture, ToonPostProcess::draw_ambient_occlusion 의 결과나 None, 다음 begin_frame 부터)
+	/// - 텍스처를 건 동안 몸은 모서리 어둠 몸 프로그램(TOON_AMBIENT_OCCLUSION)으로 그리고, 화면 자리의 보임을 바탕빛(하늘과 땅 빛)에 곱한다.
+	///   direct_lighting_strength 만큼 해, 채움빛, 점광의 확산과 반사광에도 1 - 몫 x (1 - 보임) 을 곱한다. (칸을 고른 뒤라 칸 경계는 그대로, URP 의 Direct Lighting Strength)
+	///   테두리빛, 빛남, 매트캡, 천사 고리는 그대로다. 비치는 것(alpha 나 틴트 알파가 1 보다 작음)과 텍스처의 깊이와 다른 면(선의 판에 없던 것)은 곱하지 않는다.
+	/// - None 이면 기본 몸 프로그램으로 돌아가 텍스처를 읽지 않는다. (끈 화면은 건 적이 없을 때와 같다)
+	/// - 머티리얼 텍스처 8 개를 다 쓰는 머티리얼은 조각 셰이더 유닛이 16 개인 기기에서 모서리 어둠 없이 그린다.
+	///
+	/// # 인자
+	/// - `texture`: 모서리 어둠 결과 텍스처. (r 세기를 건 보임, gba 깊이 24 비트, None 이면 끔)
+	/// - `direct_lighting_strength`: 직접 빛에 미치는 몫. (0 ~ 1 로 자름, 원본 기본 0)
+	//==============================================================================
+	pub fn set_ambient_occlusion_texture(&mut self, texture: Option<GlTexture>, direct_lighting_strength: f64) {
+		self.frame_serial += 1;
+		self.ambient_occlusion_input = texture.map(|texture| ToonAmbientOcclusionInput { texture, origin: [0.0, 0.0], direct_lighting_strength: direct_lighting_strength.clamp(0.0, 1.0) });
+	}
+
+	//==============================================================================
+	/// 모서리 어둠 텍스처 반환. (원본 getAmbientOcclusionTexture)
+	///
+	/// # 돌려줌
+	/// 건 텍스처. (걸지 않았으면 None)
+	//==============================================================================
+	pub fn get_ambient_occlusion_texture(&self) -> Option<GlTexture> {
+		self.ambient_occlusion_input.as_ref().map(|ambient_occlusion_input| ambient_occlusion_input.texture)
+	}
+
+	//==============================================================================
+	/// 모서리 어둠이 직접 빛에 미치는 몫 반환. (원본 getAmbientOcclusionDirectLightingStrength)
+	///
+	/// # 돌려줌
+	/// set_ambient_occlusion_texture 의 둘째 인자. (0 ~ 1, 걸지 않았으면 0)
+	//==============================================================================
+	pub fn get_ambient_occlusion_direct_lighting_strength(&self) -> f64 {
+		self.ambient_occlusion_input.as_ref().map(|ambient_occlusion_input| ambient_occlusion_input.direct_lighting_strength).unwrap_or(0.0)
+	}
+
+	//==============================================================================
 	/// 기본 프로그램 셋 반환. (생성에서 지어 늘 있다)
 	//==============================================================================
 	fn read_default_program_set(&self) -> &ToonProgramSet {
@@ -4120,14 +4453,14 @@ mod tests {
 	fn material_sources_insert_chunks_and_instance_attributes() {
 		let material = ToonMaterial::new(ToonMaterialChunks { name: String::from("test"), uniform_chunk: String::from("uniform float markValue;\n"), surface_chunk: String::from("void applySurface(inout ToonSurface surface) {\n\tsurface.alpha *= markValue;\n}\n"), ..ToonMaterialChunks::default() });
 		let instance_layout = ToonInstanceLayout::new(&[("instanceOffset", 3)]).unwrap();
-		let sources = compose_toon_program_sources(Some(&material), Some(&instance_layout));
+		let sources = compose_toon_program_sources(Some(&material), Some(&instance_layout), false, ColorSpace::Gamma);
 		assert!(sources.solid_fragment_shader.contains("uniform float markValue;"));
 		assert!(sources.solid_fragment_shader.contains("surface.alpha *= markValue;"));
 		assert!(sources.solid_fragment_shader.contains(DEFAULT_LIGHT_CHUNK));
 		assert!(sources.solid_vertex_shader.contains("in vec3 instanceOffset;"));
 		assert!(sources.depth_vertex_shader.contains(DEFAULT_VERTEX_CHUNK));
 		assert!(sources.attribute_locations.contains(&(String::from("instanceOffset"), 13)));
-		let default_sources = compose_toon_program_sources(None, None);
+		let default_sources = compose_toon_program_sources(None, None, false, ColorSpace::Gamma);
 		assert!(default_sources.solid_fragment_shader.contains(DEFAULT_SURFACE_CHUNK));
 		assert_eq!(default_sources.attribute_locations.len(), TOON_ATTRIBUTE_LOCATIONS.len());
 	}
