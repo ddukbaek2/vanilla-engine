@@ -12,7 +12,7 @@ use crate::base::color::Color;
 use crate::base::rect::Rect;
 use crate::core::component::sprite::{Sprite, SpriteBlendMode, SpriteDrawMode};
 use crate::core::component::{Component, ComponentBase};
-use crate::core::graphic::Graphic;
+use crate::core::graphic::{GeometryKey, Graphic};
 use crate::core::image::Image;
 use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
@@ -353,6 +353,16 @@ impl Component for UIImageView {
 	//==============================================================================
 	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
+		true
+	}
+
+	//==============================================================================
+	/// 그리기 입력 적기. (배경과 품은 Sprite 의 입력)
+	//==============================================================================
+	#[reflect(skip)]
+	fn write_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) -> bool {
+		self.ui_view.write_background_geometry_key(transform, geometry_key);
+		self.sprite.write_sprite_geometry_key(transform, geometry_key);
 		true
 	}
 

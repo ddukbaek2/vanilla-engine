@@ -50,6 +50,8 @@ const SECTION_EXAMPLES: &str = "# 예제";
 const MEMBER_KINDS: [&str; 5] = ["method", "property", "constructor", "static", "field"];
 /// 원본의 여러 클래스를 합친 타입이 멤버의 짝을 더 찾아볼 원본 클래스. (ARCHITECTURE.md '원본과의 대응': 씬 매니저는 엔진과 씬에, 노드 셋은 NodeTree 와 WorldNode 에, 터치 레이캐스터는 씬에 합쳤다)
 const COUNTERPART_CLASS_ALIASES: [(&str, &[&str]); 3] = [("Engine", &["SceneManager"]), ("SceneBase", &["SceneManager", "TouchRaycaster"]), ("NodeTree", &["WorldNode", "TransformNode", "ComponentNode", "Node"])];
+/// 러스트 멤버 하나가 원본의 기본 인자 있는 멤버 하나와 짝이 되는 이름. (러스트 이름, 원본 이름)
+const COUNTERPART_MEMBER_ALIASES: [(&str, &str); 1] = [("resolve_with_attachment_kept", "resolve")];
 /// 클래스 자리에 두는 것의 종류. (러스트 struct, trait, 꼴 별칭)
 const CLASS_KINDS: [&str; 3] = ["struct", "trait", "type"];
 /// 초안 모듈 이름. (이 이름이거나 "이름/" 으로 시작하는 모듈은 자료에 넣지 않는다, 두 엔진 같음)
@@ -1775,6 +1777,14 @@ fn read_module_stem(module_name: &str) -> &str {
 /// 멤버의 짝 찾기. (같은 이름의 camelCase, 밑줄과 대소문자를 뺀 이름, get_ / set_ / is_ / has_ 를 뗀 속성과 필드, new 와 constructor)
 //==============================================================================
 fn find_counterpart_member(member: &Member, candidates: &[CounterpartMember]) -> Option<String> {
+	// 원본은 기본 인자 하나로 받는 것을 러스트가 이름 둘로 나눈 것. (원본 resolve(isAttachmentKept = false) 가 러스트 resolve 와 resolve_with_attachment_kept)
+	for (own_name, counterpart_name) in COUNTERPART_MEMBER_ALIASES {
+		if member.name == own_name {
+			if let Some(found) = candidates.iter().find(|candidate| candidate.name == counterpart_name) {
+				return Some(found.name.clone());
+			}
+		}
+	}
 	if let Some(found) = find_counterpart_member_by_name(member.kind, &member.name, candidates) {
 		return Some(found);
 	}

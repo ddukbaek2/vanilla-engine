@@ -287,6 +287,8 @@ pub struct TextEntry {
 	pub glyph_textures: Rc<[crate::core::graphic::GlTexture]>,
 	/// 글리프 사각형. (문자열 사각형 왼쪽 위 기준 논리 좌표의 왼, 위, 오른, 아래와 아틀라스 텍스처 좌표 u0, v0, u1, v1)
 	pub glyph_rects: Rc<[[f64; 8]]>,
+	/// 글 캐시의 엔트리 열쇠. (touch_entry 가 찾는다)
+	pub(crate) entry_hash: u64,
 	/// 전진폭.
 	pub advance_width: f64,
 	/// 글꼴의 기준선 위 길이. (양수)
@@ -1828,12 +1830,13 @@ impl TextStringTextureCache {
 			return Some(entry);
 		}
 
-		let (entry, atlas_page_id_list) = self.build_entry(gl, text_draw_kind, text, font_string, line_width, bake_scale, direction)?;
+		let (mut entry, atlas_page_id_list) = self.build_entry(gl, text_draw_kind, text, font_string, line_width, bake_scale, direction)?;
 		if self.entry_count >= MAXIMUM_ENTRY_COUNT {
 			self.evict_oldest_entry();
 		}
 		let is_antialias = self.is_text_antialias_enabled;
 		let entry_hash = create_entry_hash(text_draw_kind, is_antialias, direction, text, font_string, line_width, bake_scale);
+		entry.entry_hash = entry_hash;
 		self.entry_table.entry(entry_hash).or_default().push(CachedTextEntry {
 			text_draw_kind,
 			is_antialias,
@@ -1885,6 +1888,40 @@ impl TextStringTextureCache {
 			}
 		}
 		Some(cached_text_entry.entry.clone())
+	}
+
+	//==============================================================================
+	/// 받아 둔 엔트리를 다시 쓴 것으로 적기. (find_entry 가 찾았을 때와 같게 LRU 를 갱신한다, Graphic 의 기하 캐시가 draw 없이 글을 그릴 때 부른다, 원본 touchEntry)
+	///
+	/// # 돌려줌
+	/// 엔트리가 아직 캐시에 있으면 true. (버려졌으면 false, 다시 get_entry 로 받아야 한다)
+	//==============================================================================
+	pub(crate) fn touch_entry(&mut self, entry: &TextEntry) -> bool {
+		let cached_text_entry_list = match self.entry_table.get_mut(&entry.entry_hash) {
+			Some(cached_text_entry_list) => {
+				cached_text_entry_list
+			}
+			None => {
+				return false;
+			}
+		};
+		let cached_text_entry = match cached_text_entry_list.iter_mut().find(|cached_text_entry| Rc::ptr_eq(&cached_text_entry.entry.glyph_rects, &entry.glyph_rects)) {
+			Some(cached_text_entry) => {
+				cached_text_entry
+			}
+			None => {
+				return false;
+			}
+		};
+		self.use_serial += 1;
+		let use_serial = self.use_serial;
+		cached_text_entry.last_use_serial = use_serial;
+		for atlas_page_id in &cached_text_entry.atlas_page_id_list {
+			if let Some(atlas_page) = self.atlas_page_list.iter_mut().find(|atlas_page| atlas_page.id == *atlas_page_id) {
+				atlas_page.last_use_serial = use_serial;
+			}
+		}
+		true
 	}
 
 	//==============================================================================
@@ -2341,7 +2378,15 @@ impl TextStringTextureCache {
 				0.0
 			}
 		};
-		let padding = stroke_radius.ceil() as i32 + 1;
+		// 잉크 둘레 여백. (원본 getTextInkPadding: 채우기 2, 외곽선 ceil(max(두께 * 배율 / 2, 0.5)) + 2)
+		let padding = match text_draw_kind {
+			TextDrawKind::Stroke => {
+				stroke_radius.ceil() as i32 + 2
+			}
+			TextDrawKind::Fill => {
+				2
+			}
+		};
 		// 원본은 글 크기에 배율을 double 로 곱해 글꼴 글을 짓고, 블링크가 float 로 든다. 글꼴은 크롬 EffectiveFontSize 처럼 0.01px 아래를 버린 크기로 짓는다.
 		let pixel_size = calculate_effective_font_size((f64::from(font_description.font_size) * bake_scale) as f32);
 		let system_font_measure = create_system_font_measure(&font_description, pixel_size);
@@ -2557,6 +2602,7 @@ impl TextStringTextureCache {
 
 		Some((
 			TextEntry {
+				entry_hash: 0,
 				glyph_textures: Rc::from(glyph_texture_list),
 				glyph_rects: Rc::from(glyph_rect_list),
 				advance_width: f64::from(advance_width) / bake_scale,
@@ -2624,6 +2670,7 @@ impl TextStringTextureCache {
 		}
 		Some((
 			TextEntry {
+				entry_hash: 0,
 				glyph_textures: Rc::from(glyph_texture_list),
 				glyph_rects: Rc::from(glyph_rect_list),
 				advance_width: whole_text_bitmap.advance_width / bake_scale,
@@ -4966,6 +5013,7 @@ mod tests {
 		assert_ne!(first_hash, create_entry_hash(TextDrawKind::Fill, true, ShapingDirection::LeftToRight, "가나다", "16px default", 0.0, 2.0));
 		assert_ne!(first_hash, create_entry_hash(TextDrawKind::Fill, false, ShapingDirection::LeftToRight, "가나다", "16px default", 0.0, 1.5));
 		let texture_entry = TextEntry {
+			entry_hash: 0,
 			glyph_textures: Rc::from(vec![glow::NativeTexture(std::num::NonZeroU32::new(1).expect("one"))]),
 			glyph_rects: Rc::from(vec![[0.0; 8]]),
 			advance_width: 0.0,

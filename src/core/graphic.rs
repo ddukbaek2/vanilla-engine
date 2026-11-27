@@ -33,8 +33,11 @@ use crate::core::textshaping::ShapingDirection;
 use crate::core::textstringtexturecache::{TextDrawKind, TextEntry, TextMetrics, TextStringTextureCache};
 use glow::HasContext;
 use crate::core::gluniform::GlUniformF64;
+use std::any::Any;
 use std::collections::HashMap;
 use std::rc::Rc;
+use crate::core::component::Component;
+use crate::core::node::worldnode::NodeTransform;
 
 /// GL 객체 타입. (데스크탑은 glow::Native*, 웹은 WebGL 객체. glow 컨텍스트가 정한 것을 그대로 쓴다)
 pub type GlTexture = <glow::Context as glow::HasContext>::Texture;
@@ -446,6 +449,15 @@ const VERTEX_CAPACITY: usize = 4096;
 
 /// 묶어 그리기 버퍼 용량. (버텍스 수, 넘으면 내보내고 다시 모은다)
 const BATCH_VERTEX_CAPACITY: usize = 6 * 8192;
+/// 묶음 CPU 배열을 처음 지을 때의 정점 수. (사각형 512 개, 모자라면 BATCH_VERTEX_CAPACITY 까지 두 배씩 늘린다, 원본 BATCH_INITIAL_VERTEX_CAPACITY)
+const BATCH_INITIAL_VERTEX_CAPACITY: usize = 6 * 512;
+/// 남긴 묶음에서 바뀐 범위 사이가 이 정점 수 이하면 한 범위로 합쳐 올린다. (원본 BATCH_RETAINED_MERGE_GAP_VERTEX_COUNT)
+const BATCH_RETAINED_MERGE_GAP_VERTEX_COUNT: usize = 256;
+/// 남긴 묶음 하나를 고쳐 올리는 buffer_sub_data 수 한도. (넘으면 첫 범위부터 끝 범위까지 한 번에 올린다, 원본 BATCH_RETAINED_RANGE_LIMIT)
+const BATCH_RETAINED_RANGE_LIMIT: usize = 4;
+
+/// 묶음을 GPU 버퍼에 남겨 두는 프레임당 그리기 차례 수. (넘는 차례는 남기지 않고 늘 올린다, 원본 BATCH_RETAINED_FLUSH_CAPACITY)
+const BATCH_RETAINED_FLUSH_CAPACITY: usize = 32;
 
 /// 라운드 사각형 / 원의 코너 아크 분할 수.
 const CORNER_SEGMENT_COUNT: usize = 8;
@@ -1065,6 +1077,479 @@ struct ClipEntry {
 }
 
 //==============================================================================
+/// 기하 캐시 열쇠에 적은 값 하나. (수는 비트로, 글은 글자로, 객체는 가리키는 자리로 견준다)
+//==============================================================================
+#[derive(Clone, Debug)]
+enum GeometryKeyEntry {
+	Number(u64),
+	Text(String),
+	Object(Rc<dyn Any>),
+}
+
+//==============================================================================
+/// 기하 캐시 열쇠. (Component::write_geometry_key 가 그리기 입력을 적는 곳, 원본 GeometryKey)
+/// - add 로 적은 값을 지난번에 적은 값과 차례대로 견준다. 하나라도 다르거나 수가 다르면 바뀐 것으로 본다.
+/// - 견주며 바로 덮어 적으므로 프레임마다 배열을 새로 만들지 않는다. (글은 바뀐 때만 새로 담는다)
+///
+/// # 예제
+/// 그리기 입력을 적고 바뀌었는지 보기
+/// ```rust
+/// use vanilla::GeometryKey;
+///
+/// let mut geometry_key = GeometryKey::new();
+/// geometry_key.begin();
+/// geometry_key.add(10.0);
+/// geometry_key.add("#ff0000");
+/// println!("{}", geometry_key.end());
+/// geometry_key.begin();
+/// geometry_key.add(10.0);
+/// geometry_key.add("#ff0000");
+/// println!("{}", geometry_key.end());
+/// geometry_key.begin();
+/// geometry_key.add(12.0);
+/// geometry_key.add("#ff0000");
+/// println!("{}", geometry_key.end());
+/// ```
+//==============================================================================
+#[derive(Clone, Debug)]
+pub struct GeometryKey {
+	/// 지난번에 적은 값.
+	value_list: Vec<GeometryKeyEntry>,
+	/// 이번에 적은 값 수.
+	value_count: usize,
+	/// 이번에 적은 값이 지난번과 다른지.
+	is_changed: bool,
+}
+
+impl GeometryKey {
+	//==============================================================================
+	/// 생성.
+	///
+	/// # 돌려줌
+	/// 빈 열쇠. (처음 end 는 false)
+	//==============================================================================
+	pub fn new() -> GeometryKey {
+		GeometryKey {
+			value_list: Vec::new(),
+			value_count: 0,
+			is_changed: true,
+		}
+	}
+
+	//==============================================================================
+	/// 적기 시작. (Graphic 이 write_geometry_key 앞에 부른다)
+	//==============================================================================
+	pub fn begin(&mut self) {
+		self.value_count = 0;
+		self.is_changed = false;
+	}
+
+	//==============================================================================
+	/// 값 하나 적기. (수, 참거짓, 글, 색, 벡터, 사각형, 공유 객체(Rc), Option)
+	///
+	/// # 인자
+	/// - `value`: 그리기가 읽는 값. (Rc 는 가리키는 자리로 견준다, 원본의 객체 참조 견주기)
+	//==============================================================================
+	pub fn add(&mut self, value: impl GeometryKeyValue) {
+		value.add_to_geometry_key(self);
+	}
+
+	//==============================================================================
+	/// 적기 끝. (지난번과 같으면 true)
+	///
+	/// # 돌려줌
+	/// 이번에 적은 값이 지난번과 모두 같으면 true. (처음 적은 때는 false)
+	//==============================================================================
+	pub fn end(&mut self) -> bool {
+		if self.value_list.len() != self.value_count {
+			self.value_list.truncate(self.value_count);
+			self.is_changed = true;
+		}
+		!self.is_changed
+	}
+
+	//==============================================================================
+	/// 수 하나를 비트로 적기. (0 과 -0 은 원본 === 처럼 같게 본다)
+	//==============================================================================
+	fn add_number_bits(&mut self, value: f64) {
+		let bits = if value == 0.0 { 0 } else { value.to_bits() };
+		let value_index = self.value_count;
+		if value_index >= self.value_list.len() {
+			self.value_list.push(GeometryKeyEntry::Number(bits));
+			self.is_changed = true;
+		}
+		else if !matches!(self.value_list[value_index], GeometryKeyEntry::Number(old_bits) if old_bits == bits) {
+			self.value_list[value_index] = GeometryKeyEntry::Number(bits);
+			self.is_changed = true;
+		}
+		self.value_count = value_index + 1;
+	}
+
+	//==============================================================================
+	/// 글 하나 적기. (같으면 담지 않는다)
+	//==============================================================================
+	fn add_text(&mut self, text: &str) {
+		let value_index = self.value_count;
+		if value_index >= self.value_list.len() {
+			self.value_list.push(GeometryKeyEntry::Text(text.to_string()));
+			self.is_changed = true;
+		}
+		else {
+			match &mut self.value_list[value_index] {
+				GeometryKeyEntry::Text(old_text) => {
+					if old_text != text {
+						old_text.clear();
+						old_text.push_str(text);
+						self.is_changed = true;
+					}
+				}
+				other => {
+					*other = GeometryKeyEntry::Text(text.to_string());
+					self.is_changed = true;
+				}
+			}
+		}
+		self.value_count = value_index + 1;
+	}
+
+	//==============================================================================
+	/// 공유 객체 하나 적기. (가리키는 자리로 견준다, 다르면 새 것을 쥔다)
+	//==============================================================================
+	fn add_object(&mut self, object: Rc<dyn Any>) {
+		let value_index = self.value_count;
+		let object_address = Rc::as_ptr(&object) as *const ();
+		if value_index >= self.value_list.len() {
+			self.value_list.push(GeometryKeyEntry::Object(object));
+			self.is_changed = true;
+		}
+		else if !matches!(&self.value_list[value_index], GeometryKeyEntry::Object(old_object) if Rc::as_ptr(old_object) as *const () == object_address) {
+			self.value_list[value_index] = GeometryKeyEntry::Object(object);
+			self.is_changed = true;
+		}
+		self.value_count = value_index + 1;
+	}
+}
+
+impl Default for GeometryKey {
+	//==============================================================================
+	/// 생성. (GeometryKey::new 와 같다)
+	//==============================================================================
+	fn default() -> GeometryKey {
+		GeometryKey::new()
+	}
+}
+
+//==============================================================================
+/// GeometryKey::add 로 적을 수 있는 값. (원본 add 가 받는 수, 글, 참거짓, 객체 참조, null)
+//==============================================================================
+pub trait GeometryKeyValue {
+	//==============================================================================
+	/// 열쇠에 이 값을 적기.
+	///
+	/// # 인자
+	/// - `geometry_key`: 적을 열쇠.
+	//==============================================================================
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey);
+}
+
+impl GeometryKeyValue for f64 {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		geometry_key.add_number_bits(self);
+	}
+}
+
+impl GeometryKeyValue for f32 {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		geometry_key.add_number_bits(self as f64);
+	}
+}
+
+impl GeometryKeyValue for i32 {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		geometry_key.add_number_bits(self as f64);
+	}
+}
+
+impl GeometryKeyValue for u32 {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		geometry_key.add_number_bits(self as f64);
+	}
+}
+
+impl GeometryKeyValue for u64 {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		geometry_key.add_number_bits(f64::from_bits(self));
+	}
+}
+
+impl GeometryKeyValue for usize {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		geometry_key.add_number_bits(f64::from_bits(self as u64));
+	}
+}
+
+impl GeometryKeyValue for bool {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		geometry_key.add_number_bits(if self { 1.0 } else { 2.0 });
+	}
+}
+
+impl GeometryKeyValue for &str {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		geometry_key.add_text(self);
+	}
+}
+
+impl GeometryKeyValue for &String {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		geometry_key.add_text(self);
+	}
+}
+
+impl GeometryKeyValue for Color {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		geometry_key.add_number_bits(self.red);
+		geometry_key.add_number_bits(self.green);
+		geometry_key.add_number_bits(self.blue);
+		geometry_key.add_number_bits(self.alpha);
+	}
+}
+
+impl GeometryKeyValue for Vector2 {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		geometry_key.add_number_bits(self.x);
+		geometry_key.add_number_bits(self.y);
+	}
+}
+
+impl GeometryKeyValue for Rect {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		geometry_key.add_number_bits(self.position.x);
+		geometry_key.add_number_bits(self.position.y);
+		geometry_key.add_number_bits(self.size.x);
+		geometry_key.add_number_bits(self.size.y);
+	}
+}
+
+impl<T: Any> GeometryKeyValue for &Rc<T> {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		let object: Rc<dyn Any> = self.clone();
+		geometry_key.add_object(object);
+	}
+}
+
+impl<T: GeometryKeyValue> GeometryKeyValue for Option<T> {
+	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
+		match self {
+			Some(value) => {
+				geometry_key.add_number_bits(1.0);
+				value.add_to_geometry_key(geometry_key);
+			}
+			None => {
+				geometry_key.add_number_bits(2.0);
+			}
+		}
+	}
+}
+
+//==============================================================================
+/// 기하 캐시 명령 종류. (원본 GEOMETRY_COMMAND_SPRITE, GEOMETRY_COMMAND_TEXT)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GeometryCommandType {
+	/// 스크래치 정점을 묶음에 넣은 것. (지역 정점, 색, 틴트)
+	Sprite,
+	/// 글 배치 엔트리를 그린 것. (엔트리, 자리, 색, 정렬)
+	Text,
+}
+
+//==============================================================================
+/// 묶음에 넣은 디바이스 정점 조각 하나. (칸 번호까지 그대로 떠 둔다)
+//==============================================================================
+#[derive(Debug)]
+struct GeometrySubAppend {
+	texture: GlTexture,
+	vertex_count: usize,
+	/// 떠 둔 디바이스 정점. (묶음 정점 꼴, 미뤄 둔 묶음이 함께 쥔다)
+	world_vertex_data: Rc<Vec<f32>>,
+	texture_slot: usize,
+	clip_slot: usize,
+	/// 정점을 고쳐 쓸 때마다 새로 받는 번호. (남긴 묶음이 견준다)
+	version: u64,
+	/// 이 조각을 미뤄 둔 묶음 번호. (-1 이면 없음)
+	segment_batch_generation: i64,
+}
+
+//==============================================================================
+/// 기하 캐시 명령 하나. (그림 명령이나 글 명령)
+//==============================================================================
+#[derive(Debug)]
+struct GeometryCommand {
+	command_type: GeometryCommandType,
+	texture: Option<GlTexture>,
+	vertex_count: usize,
+	/// 그림 명령의 지역 정점. (x, y, u, v)
+	local_vertex_data: Vec<f32>,
+	/// 행렬 곱의 앞부분. (a * x + c * y, b * x + d * y, 이동만 바뀌는 동안 쓴다)
+	linear_position_data: Vec<f64>,
+	is_linear_position_valid: bool,
+	color: Option<Color>,
+	tint_color: Option<Color>,
+	entry: Option<TextEntry>,
+	position_x: f64,
+	position_y: f64,
+	text_direction: TextDirection,
+	text_align: TextAlign,
+	text_baseline: TextBaseline,
+	sub_append_list: Vec<GeometrySubAppend>,
+	sub_append_count: usize,
+}
+
+//==============================================================================
+/// 컴포넌트 하나의 기하 캐시. (Graphic::draw_component 가 컴포넌트마다 하나 둔다)
+//==============================================================================
+#[derive(Debug)]
+pub(crate) struct GeometryCache {
+	key: GeometryKey,
+	is_valid: bool,
+	is_broken: bool,
+	is_translatable: bool,
+	is_world_vertex_stale: bool,
+	generation: u64,
+	matrix: TransformMatrix,
+	global_alpha: f64,
+	blend_mode: BlendMode,
+	text_direction: TextDirection,
+	is_text_bake_scale_moving: bool,
+	tint_color: Option<Color>,
+	command_list: Vec<GeometryCommand>,
+	command_count: usize,
+	end_fill_color: Color,
+	end_stroke_color: Color,
+	end_image_tint_color: Option<Color>,
+	end_font_string: String,
+	end_text_align: TextAlign,
+	end_text_baseline: TextBaseline,
+	end_text_direction: TextDirection,
+}
+
+impl GeometryCache {
+	//==============================================================================
+	/// 빈 기하 캐시. (원본 createGeometryCache)
+	//==============================================================================
+	fn new() -> GeometryCache {
+		GeometryCache {
+			key: GeometryKey::new(),
+			is_valid: false,
+			is_broken: false,
+			is_translatable: true,
+			is_world_vertex_stale: false,
+			generation: u64::MAX,
+			matrix: TransformMatrix::identity(),
+			global_alpha: 0.0,
+			blend_mode: BlendMode::Normal,
+			text_direction: TextDirection::Ltr,
+			is_text_bake_scale_moving: false,
+			tint_color: None,
+			command_list: Vec::new(),
+			command_count: 0,
+			end_fill_color: Color::white(),
+			end_stroke_color: Color::white(),
+			end_image_tint_color: None,
+			end_font_string: String::new(),
+			end_text_align: TextAlign::Left,
+			end_text_baseline: TextBaseline::Alphabetic,
+			end_text_direction: TextDirection::Ltr,
+		}
+	}
+
+	//==============================================================================
+	/// 다음 명령 칸 받기. (지난번 칸을 다시 쓴다, 원본 acquireGeometryCommand)
+	///
+	/// # 돌려줌
+	/// 받은 명령의 번호.
+	//==============================================================================
+	fn acquire_command(&mut self, command_type: GeometryCommandType) -> usize {
+		let command_index = self.command_count;
+		if command_index >= self.command_list.len() {
+			self.command_list.push(GeometryCommand {
+				command_type,
+				texture: None,
+				vertex_count: 0,
+				local_vertex_data: Vec::new(),
+				linear_position_data: Vec::new(),
+				is_linear_position_valid: false,
+				color: None,
+				tint_color: None,
+				entry: None,
+				position_x: 0.0,
+				position_y: 0.0,
+				text_direction: TextDirection::Ltr,
+				text_align: TextAlign::Left,
+				text_baseline: TextBaseline::Alphabetic,
+				sub_append_list: Vec::new(),
+				sub_append_count: 0,
+			});
+		}
+		let geometry_command = &mut self.command_list[command_index];
+		geometry_command.command_type = command_type;
+		geometry_command.entry = None;
+		geometry_command.sub_append_count = 0;
+		self.command_count = command_index + 1;
+		command_index
+	}
+}
+
+//==============================================================================
+/// 컴포넌트가 쥐는 기하 캐시 자리. (복제한 컴포넌트는 빈 자리로 시작한다)
+//==============================================================================
+#[derive(Default)]
+pub(crate) struct GeometryCacheSlot {
+	pub(crate) geometry_cache: Option<Box<GeometryCache>>,
+}
+
+impl Clone for GeometryCacheSlot {
+	fn clone(&self) -> GeometryCacheSlot {
+		GeometryCacheSlot::default()
+	}
+}
+
+impl std::fmt::Debug for GeometryCacheSlot {
+	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		formatter.write_str(if self.geometry_cache.is_some() { "GeometryCacheSlot(Some)" } else { "GeometryCacheSlot(None)" })
+	}
+}
+
+//==============================================================================
+/// 프레임의 그리기 차례 하나에 남겨 둔 묶음. (버텍스 어레이와 버퍼, 담은 조각의 판)
+//==============================================================================
+struct RetainedFlush {
+	vertex_array: Option<GlVertexArray>,
+	vertex_buffer: Option<GlBuffer>,
+	/// GPU 버퍼에 든 지난 조각 목록. (정점 수, 판, 판 0 은 바로 쓴 구간)
+	previous_segment_list: Vec<(usize, u64)>,
+	/// 지난 프레임 바로 쓴 구간의 정점을 이어 붙여 떠 둔 것. (이번 프레임에 같은 자리의 구간과 값을 견준다)
+	previous_direct_data: Vec<f32>,
+	/// 조각마다 previous_direct_data 안의 시작 자리. (float 수)
+	previous_direct_offset_list: Vec<usize>,
+	/// GPU 버퍼 저장소의 정점 수.
+	buffer_vertex_count: usize,
+	is_valid: bool,
+}
+
+//==============================================================================
+/// 지금 묶음에 적은 조각 하나. (캐시 조각이거나 캐시 없이 바로 쓴 구간)
+//==============================================================================
+struct BatchSegment {
+	/// 조각의 정점 수.
+	vertex_count: usize,
+	/// 캐시 조각의 판. (0 이면 바로 쓴 구간, 판은 1 부터 올라간다)
+	version: u64,
+	/// 묶음 배열에 옮기지 않고 미룬 정점. (캐시를 적으며 이미 쓴 조각과 바로 쓴 구간은 None)
+	deferred_vertex_data: Option<Rc<Vec<f32>>>,
+}
+
+//==============================================================================
 /// 이미지 스무딩 퀄리티. (원본 setImageSmoothingQuality 의 "low", "medium", "high")
 /// - GL 은 LINEAR / NEAREST 둘뿐이라 원본처럼 보관만 한다.
 //==============================================================================
@@ -1274,6 +1759,42 @@ pub struct Graphic {
 	is_drawing_buffer_preserved: bool,
 	/// 3D 색 공간. (원본 #colorSpace, 생성 때 정함, 2D 묶음은 어느 값이든 감마 공간에서 합성한다)
 	color_space: crate::core::colorspace::ColorSpace,
+	/// 컴포넌트가 그린 정점을 캐시해 두고 바뀐 것만 다시 셈할지. (기본 켜짐)
+	is_geometry_caching_enabled: bool,
+	/// 지금 적는 기하 캐시. (draw_component 가 컴포넌트의 draw 를 부르는 동안만)
+	geometry_active_cache: Option<Box<GeometryCache>>,
+	/// 정점을 적을 명령. (글 명령 안이나 이동만 다시 걸며 떠 두는 동안의 명령 번호)
+	geometry_capture_target: Option<usize>,
+	/// 정점 셈을 바꾸는 설정이 바뀔 때마다 늘린다. (다르면 캐시를 다시 적는다)
+	geometry_cache_generation: u64,
+	/// 기하 캐시가 마지막으로 본 글꼴 등록 수. (늘면 세대를 올린다)
+	geometry_font_registration_count: u64,
+	geometry_cache_hit_count: u32,
+	last_frame_geometry_cache_hit_count: u32,
+	geometry_rebuild_count: u32,
+	last_frame_geometry_rebuild_count: u32,
+	/// 캐시 조각의 디바이스 정점을 고쳐 쓸 때마다 올리는 수.
+	geometry_version_counter: u64,
+	/// 이번 프레임에 그린 묶음 수. (남김 칸 번호)
+	batch_flush_index: usize,
+	/// 그리기 차례마다의 남김 칸.
+	batch_retained_flush_list: Vec<RetainedFlush>,
+	/// 지금 묶음이 쓰는 남김 칸 번호. (None 이면 남기지 않는 묶음)
+	batch_retained_flush: Option<usize>,
+	/// 지금 묶음의 조각. (캐시 조각과 바로 쓴 구간)
+	batch_segment_list: Vec<BatchSegment>,
+	batch_deferred_segment_count: usize,
+	/// 남긴 묶음에서 고쳐 올릴 정점 범위. ((시작, 끝), 묶음을 그릴 때마다 다시 쓴다)
+	batch_dirty_range_list: Vec<(usize, usize)>,
+	/// 이번 묶음 바로 쓴 구간의 정점을 이어 붙인 것과 조각마다의 시작 자리. (그린 뒤 남김 칸의 지난 값과 맞바꾼다)
+	batch_direct_data: Vec<f32>,
+	batch_direct_offset_list: Vec<usize>,
+	/// 묶음 GPU 버퍼로 올린 바이트의 누적. (시험이 프레임 앞뒤 차이로 읽는다)
+	batch_upload_byte_count: u64,
+	/// 캐시 조각의 정점을 묶음 배열에 옮기지 않고 미루는지. (지난 프레임 같은 차례가 조각만으로 찼을 때만)
+	is_batch_segment_deferring: bool,
+	retained_batch_count: u32,
+	last_frame_retained_batch_count: u32,
 }
 
 //==============================================================================
@@ -1457,7 +1978,7 @@ impl Graphic {
 			round_rect_unit_table: build_round_rect_unit_table(),
 			is_batching_enabled: true,
 			batch_suspend_depth: 0,
-			batch_vertex_data: vec![0.0; BATCH_VERTEX_CAPACITY * BATCH_FLOATS_PER_VERTEX],
+			batch_vertex_data: vec![0.0; BATCH_INITIAL_VERTEX_CAPACITY * BATCH_FLOATS_PER_VERTEX],
 			batch_vertex_count: 0,
 			batch_texture_list: [None; BATCH_TEXTURE_SLOT_LIMIT],
 			batch_texture_count: 0,
@@ -1475,6 +1996,28 @@ impl Graphic {
 			is_culling_enabled: true,
 			is_drawing_buffer_preserved: preserve_drawing_buffer,
 			color_space,
+			is_geometry_caching_enabled: true,
+			geometry_active_cache: None,
+			geometry_capture_target: None,
+			geometry_cache_generation: 0,
+			geometry_font_registration_count: 0,
+			geometry_cache_hit_count: 0,
+			last_frame_geometry_cache_hit_count: 0,
+			geometry_rebuild_count: 0,
+			last_frame_geometry_rebuild_count: 0,
+			geometry_version_counter: 0,
+			batch_flush_index: 0,
+			batch_retained_flush_list: Vec::new(),
+			batch_retained_flush: None,
+			batch_segment_list: Vec::new(),
+			batch_deferred_segment_count: 0,
+			batch_dirty_range_list: Vec::new(),
+			batch_direct_data: Vec::new(),
+			batch_direct_offset_list: Vec::new(),
+			batch_upload_byte_count: 0,
+			is_batch_segment_deferring: false,
+			retained_batch_count: 0,
+			last_frame_retained_batch_count: 0,
 		})
 	}
 
@@ -1740,6 +2283,7 @@ impl Graphic {
 	/// ```
 	//==============================================================================
 	pub fn run_external_pass<R>(&mut self, is_depth_cleared: bool, pass: impl FnOnce(&GlContext) -> R) -> R {
+		self.break_geometry_record();
 		self.flush_batch();
 		if is_depth_cleared {
 			self.clear_depth_buffer();
@@ -1760,6 +2304,7 @@ impl Graphic {
 	/// - `value`: true 면 LINEAR 로 부드럽게, false 면 NEAREST 로 픽셀 그대로. (처음 true)
 	//==============================================================================
 	pub fn set_image_smoothing_enabled(&mut self, value: bool) {
+		self.geometry_cache_generation += 1;
 		self.is_image_smoothing_enabled = value;
 	}
 
@@ -1780,6 +2325,7 @@ impl Graphic {
 	/// - `value`: 스무딩 퀄리티. (보관만 하고 그리기에는 쓰지 않는다)
 	//==============================================================================
 	pub fn set_image_smoothing_quality(&mut self, value: ImageSmoothingQuality) {
+		self.geometry_cache_generation += 1;
 		self.image_smoothing_quality = value;
 	}
 
@@ -1800,6 +2346,7 @@ impl Graphic {
 	/// - `value`: true 면 이미지 텍스처를 줄일 때 밉맵 필터를 쓴다. (처음 false)
 	//==============================================================================
 	pub fn set_image_mipmap_enabled(&mut self, value: bool) {
+		self.geometry_cache_generation += 1;
 		self.is_image_mipmap_enabled = value;
 	}
 
@@ -2050,6 +2597,7 @@ impl Graphic {
 		if blend_mode == self.blend_mode {
 			return;
 		}
+		self.break_geometry_record();
 		self.flush_batch();
 		self.apply_blend_mode(blend_mode);
 	}
@@ -2243,6 +2791,7 @@ impl Graphic {
 			self.append_batch_vertices(vertex_count, texture, color);
 			return;
 		}
+		self.break_geometry_record();
 		self.flush_batch();
 		self.apply_draw_state();
 		self.bind_default_vertex_array();
@@ -2702,8 +3251,15 @@ impl Graphic {
 	/// 묶음에 정점 더하기. (현재 변환을 CPU 에서 곱하고, 기본 셰이더와 같은 색 셈을 정점 색 하나로 미리 곱해 틴트와 함께 정점마다 싣는다)
 	//==============================================================================
 	fn append_batch_vertices(&mut self, vertex_count: usize, texture: GlTexture, color: Color) {
-		let texture_slot = self.prepare_batch(vertex_count, texture) as f32;
-		let clip_slot = self.shader_clip_slot as f32;
+		let texture_slot_index = self.prepare_batch(vertex_count, texture);
+		let clip_slot_index = self.shader_clip_slot;
+		let texture_slot = texture_slot_index as f32;
+		let clip_slot = clip_slot_index as f32;
+		// 기하 캐시를 적는 쓰기는 조각으로, 그 밖의 바로 쓰기는 바로 쓴 구간으로 적는다. (바로 쓰기가 껴도 묶음의 나머지는 남긴다)
+		let is_capturing = self.geometry_active_cache.is_some();
+		if self.batch_vertex_count == 0 {
+			self.begin_batch_segments();
+		}
 		let matrix = self.transform_matrix;
 		let color_alpha = color.alpha * self.global_alpha;
 		let color_red = color.red * color_alpha;
@@ -2736,6 +3292,13 @@ impl Graphic {
 			batch_vertex[13] = clip_slot;
 			write_offset += BATCH_FLOATS_PER_VERTEX;
 		}
+		// 기하 캐시를 적는 중이면 넣은 정점을 캐시에도 적는다.
+		if is_capturing {
+			self.capture_geometry_append(vertex_count, texture, color, texture_slot_index, clip_slot_index);
+		}
+		else if self.batch_retained_flush.is_some() {
+			self.add_batch_direct_span(vertex_count);
+		}
 		self.batch_vertex_count += vertex_count;
 	}
 
@@ -2754,6 +3317,7 @@ impl Graphic {
 			self.flush_batch();
 			texture_slot = None;
 		}
+		self.ensure_batch_vertex_capacity(self.batch_vertex_count + vertex_count);
 		let texture_slot = match texture_slot {
 			Some(texture_slot) => {
 				texture_slot
@@ -2808,6 +3372,12 @@ impl Graphic {
 	fn append_batch_colored_quads(&mut self, vertex_count: usize, texture: GlTexture) {
 		let texture_slot = self.prepare_batch(vertex_count, texture) as f32;
 		let clip_slot = self.shader_clip_slot as f32;
+		if self.batch_vertex_count == 0 {
+			self.begin_batch_segments();
+		}
+		if self.batch_retained_flush.is_some() {
+			self.add_batch_direct_span(vertex_count);
+		}
 		let global_alpha = self.global_alpha as f32;
 		let matrix = self.transform_matrix;
 		let mut write_offset = self.batch_vertex_count * BATCH_FLOATS_PER_VERTEX;
@@ -2832,6 +3402,821 @@ impl Graphic {
 	}
 
 	//==============================================================================
+	/// 묶음 셰이더의 정점 속성을 지금 묶인 버텍스 어레이와 버퍼에 걸기. (묶음 버퍼와 남김 칸 버퍼가 같은 꼴을 쓴다)
+	//==============================================================================
+	fn setup_batch_vertex_attributes(&self, batch_shader_program: &ShaderProgram) {
+		let stride_bytes = (BATCH_FLOATS_PER_VERTEX * 4) as i32;
+		let attribute_layout: [(&str, i32, i32); 5] = [("vertexPosition", 2, 0), ("vertexTextureCoordinate", 2, 8), ("vertexColor", 4, 16), ("vertexTintColor", 4, 32), ("vertexSlot", 2, 48)];
+		for (attribute_name, component_count, byte_offset) in attribute_layout {
+			let attribute_location = batch_shader_program.get_attribute_location(GlContext::from_context(&self.gl), attribute_name);
+			if let Some(attribute_location) = attribute_location {
+				unsafe {
+					self.gl.enable_vertex_attrib_array(attribute_location);
+					self.gl.vertex_attrib_pointer_f32(attribute_location, component_count, glow::FLOAT, false, stride_bytes, byte_offset);
+				}
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 빈 묶음에 캐시 조각을 미뤄 쌓기 시작. (이번 프레임 그리기 차례의 남김 칸을 고른다, 원본 beginBatchSegments)
+	/// - 묶음이 캐시 조각만으로 차면 정점을 묶음 배열에 옮기지 않고 조각 목록만 적는다. 그릴 때 지난 프레임 같은 차례의 조각과 모두 같으면 남긴 GPU 버퍼를 그대로 그린다.
+	///   (유니티 UGUI Canvas 가 바뀐 것이 없으면 지난 묶음 메시를 다시 짓지 않고 그대로 그리는 꼴)
+	//==============================================================================
+	fn begin_batch_segments(&mut self) {
+		let flush_index = self.batch_flush_index;
+		self.batch_segment_list.clear();
+		self.batch_deferred_segment_count = 0;
+		if flush_index >= BATCH_RETAINED_FLUSH_CAPACITY {
+			self.batch_retained_flush = None;
+			return;
+		}
+		while self.batch_retained_flush_list.len() <= flush_index {
+			self.batch_retained_flush_list.push(RetainedFlush {
+				vertex_array: None,
+				vertex_buffer: None,
+				previous_segment_list: Vec::new(),
+				previous_direct_data: Vec::new(),
+				previous_direct_offset_list: Vec::new(),
+				buffer_vertex_count: 0,
+				is_valid: false,
+			});
+		}
+		let is_valid = self.batch_retained_flush_list[flush_index].is_valid;
+		self.batch_retained_flush = Some(flush_index);
+		// 지난 프레임 같은 차례를 남기지 못했으면(GPU 버퍼에 쓸 것이 없다) 미루지 않고 옮기며 조각만 적는다.
+		self.is_batch_segment_deferring = is_valid;
+	}
+
+	//==============================================================================
+	/// 지금 묶음에 캐시 조각 하나 적기. (지난 프레임 같은 차례 같은 자리의 조각 판과 견준다, 원본 addBatchSegment)
+	///
+	/// # 인자
+	/// - `version`: 조각의 판.
+	/// - `vertex_count`: 조각의 정점 수.
+	/// - `deferred_vertex_data`: 묶음 배열에 옮기지 않고 미룬 정점. (캐시를 적으며 이미 쓴 조각은 None)
+	//==============================================================================
+	fn add_batch_segment(&mut self, version: u64, vertex_count: usize, deferred_vertex_data: Option<Rc<Vec<f32>>>) {
+		if self.batch_retained_flush.is_none() {
+			return;
+		}
+		if deferred_vertex_data.is_some() {
+			self.batch_deferred_segment_count += 1;
+		}
+		self.batch_segment_list.push(BatchSegment {
+			vertex_count,
+			version,
+			deferred_vertex_data,
+		});
+	}
+
+	//==============================================================================
+	/// 지금 묶음에 캐시 없이 바로 쓴 정점 적기. (바로 앞 조각도 바로 쓴 구간이면 그 구간을 늘린다, 그릴 때 지난 프레임 같은 자리의 값과 견준다, 원본 addBatchDirectSpan)
+	//==============================================================================
+	fn add_batch_direct_span(&mut self, vertex_count: usize) {
+		if self.batch_retained_flush.is_none() {
+			return;
+		}
+		if let Some(last_segment) = self.batch_segment_list.last_mut() {
+			if last_segment.version == 0 {
+				last_segment.vertex_count += vertex_count;
+				return;
+			}
+		}
+		self.batch_segment_list.push(BatchSegment {
+			vertex_count,
+			version: 0,
+			deferred_vertex_data: None,
+		});
+	}
+
+	//==============================================================================
+	/// 묶음 CPU 배열이 정점 수만큼 들 수 있게 늘리기. (두 배씩, BATCH_VERTEX_CAPACITY 까지, 쌓인 정점은 그대로 둔다, 원본 ensureBatchVertexCapacity)
+	//==============================================================================
+	fn ensure_batch_vertex_capacity(&mut self, vertex_count: usize) {
+		let current_vertex_capacity = self.batch_vertex_data.len() / BATCH_FLOATS_PER_VERTEX;
+		if vertex_count <= current_vertex_capacity {
+			return;
+		}
+		let mut vertex_capacity = current_vertex_capacity;
+		while vertex_capacity < vertex_count {
+			vertex_capacity *= 2;
+		}
+		vertex_capacity = vertex_capacity.min(BATCH_VERTEX_CAPACITY);
+		self.batch_vertex_data.resize(vertex_capacity * BATCH_FLOATS_PER_VERTEX, 0.0);
+	}
+
+	//==============================================================================
+	/// 남긴 묶음에서 지난번과 달라 고쳐 올릴 정점 범위 모으기. (batch_dirty_range_list 에 적고 범위 수를 돌려준다, None 이면 지난번과 견주지 않고 모두 올린다, 원본 collectBatchDirtyRanges)
+	/// - 같은 자리에 같은 판의 캐시 조각(같은 정점 수)이 있으면 GPU 버퍼에 이미 있다. 바로 쓴 구간은 지난 프레임 같은 자리의 바로 쓴 구간과 정점 값을 견준다.
+	///   앞 조각의 정점 수가 달라 자리가 밀린 뒤로는 모두 바뀐 것이다.
+	/// - 바로 쓴 구간의 정점은 다음 프레임에 견주게 떠 두고 조각 목록과 함께 남김 칸의 지난 값으로 넘긴다.
+	/// - 사이가 BATCH_RETAINED_MERGE_GAP_VERTEX_COUNT 이하인 범위는 합치고, 범위가 BATCH_RETAINED_RANGE_LIMIT 개를 넘으면 첫 범위부터 끝 범위까지 하나로 합친다.
+	//==============================================================================
+	fn collect_batch_dirty_ranges(&mut self, retained_index: usize, is_comparable: bool) -> Option<usize> {
+		self.batch_dirty_range_list.clear();
+		self.batch_direct_data.clear();
+		self.batch_direct_offset_list.clear();
+		let retained_flush = &mut self.batch_retained_flush_list[retained_index];
+		let mut is_layout_same = is_comparable;
+		let mut start_vertex = 0;
+		for (segment_index, segment) in self.batch_segment_list.iter().enumerate() {
+			let vertex_count = segment.vertex_count;
+			if is_layout_same {
+				match retained_flush.previous_segment_list.get(segment_index) {
+					Some((previous_count, _)) if *previous_count == vertex_count => {}
+					_ => {
+						is_layout_same = false;
+					}
+				}
+			}
+			let mut is_dirty = !is_layout_same || retained_flush.previous_segment_list[segment_index].1 != segment.version;
+			let float_start = start_vertex * BATCH_FLOATS_PER_VERTEX;
+			let float_count = vertex_count * BATCH_FLOATS_PER_VERTEX;
+			let direct_offset = self.batch_direct_data.len();
+			if segment.version == 0 {
+				if !is_dirty {
+					let previous_offset = retained_flush.previous_direct_offset_list[segment_index];
+					is_dirty = self.batch_vertex_data[float_start..float_start + float_count] != retained_flush.previous_direct_data[previous_offset..previous_offset + float_count];
+				}
+				self.batch_direct_data.extend_from_slice(&self.batch_vertex_data[float_start..float_start + float_count]);
+			}
+			self.batch_direct_offset_list.push(direct_offset);
+			let end_vertex = start_vertex + vertex_count;
+			if is_dirty && is_comparable {
+				match self.batch_dirty_range_list.last_mut() {
+					Some(last_range) if start_vertex - last_range.1 <= BATCH_RETAINED_MERGE_GAP_VERTEX_COUNT => {
+						last_range.1 = end_vertex;
+					}
+					_ => {
+						self.batch_dirty_range_list.push((start_vertex, end_vertex));
+					}
+				}
+			}
+			start_vertex = end_vertex;
+		}
+		retained_flush.previous_segment_list.clear();
+		retained_flush.previous_segment_list.extend(self.batch_segment_list.iter().map(|segment| (segment.vertex_count, segment.version)));
+		std::mem::swap(&mut retained_flush.previous_direct_data, &mut self.batch_direct_data);
+		std::mem::swap(&mut retained_flush.previous_direct_offset_list, &mut self.batch_direct_offset_list);
+		if !is_comparable {
+			return None;
+		}
+		if self.batch_dirty_range_list.len() > BATCH_RETAINED_RANGE_LIMIT {
+			let last_end = self.batch_dirty_range_list[self.batch_dirty_range_list.len() - 1].1;
+			self.batch_dirty_range_list[0].1 = last_end;
+			self.batch_dirty_range_list.truncate(1);
+		}
+		Some(self.batch_dirty_range_list.len())
+	}
+
+	//==============================================================================
+	/// 고쳐 올릴 범위에 드는 미룬 조각의 정점만 묶음 배열의 제자리에 옮겨 쓰기. (범위 밖의 미룬 조각은 GPU 버퍼에 이미 있어 옮기지 않는다, 원본 writeBatchSegmentsInRanges)
+	//==============================================================================
+	fn write_batch_segments_in_ranges(&mut self) {
+		if self.batch_deferred_segment_count == 0 {
+			return;
+		}
+		let mut range_index = 0;
+		let mut start_vertex = 0;
+		for segment in self.batch_segment_list.iter_mut() {
+			if range_index >= self.batch_dirty_range_list.len() {
+				break;
+			}
+			// 범위는 조각 경계로 지었으므로 조각은 범위 안에 통째로 들거나 밖에 있다.
+			while range_index < self.batch_dirty_range_list.len() && self.batch_dirty_range_list[range_index].1 <= start_vertex {
+				range_index += 1;
+			}
+			if range_index < self.batch_dirty_range_list.len() && start_vertex >= self.batch_dirty_range_list[range_index].0 {
+				if let Some(world_vertex_data) = segment.deferred_vertex_data.take() {
+					let float_start = start_vertex * BATCH_FLOATS_PER_VERTEX;
+					let float_count = segment.vertex_count * BATCH_FLOATS_PER_VERTEX;
+					self.batch_vertex_data[float_start..float_start + float_count].copy_from_slice(&world_vertex_data[..float_count]);
+				}
+			}
+			start_vertex += segment.vertex_count;
+		}
+		self.batch_deferred_segment_count = 0;
+	}
+
+	//==============================================================================
+	/// 미뤄 둔 캐시 조각의 디바이스 정점을 묶음 배열의 제자리에 옮겨 쓰기. (캐시를 적으며 이미 쓴 조각은 건너뛴다, 원본 writeBatchSegments)
+	//==============================================================================
+	fn write_batch_segments(&mut self) {
+		if self.batch_deferred_segment_count == 0 {
+			return;
+		}
+		let mut target_offset = 0;
+		for segment in self.batch_segment_list.iter_mut() {
+			let float_count = segment.vertex_count * BATCH_FLOATS_PER_VERTEX;
+			if let Some(world_vertex_data) = segment.deferred_vertex_data.take() {
+				self.batch_vertex_data[target_offset..target_offset + float_count].copy_from_slice(&world_vertex_data[..float_count]);
+			}
+			target_offset += float_count;
+		}
+		self.batch_deferred_segment_count = 0;
+	}
+
+	//==============================================================================
+	/// 미뤄 쌓던 묶음에 정점을 바로 쓰는 그리기가 끼면, 미뤄 둔 조각을 옮겨 쓰고 이 묶음은 남기지 않는다. (원본 endBatchSegments)
+	//==============================================================================
+	fn end_batch_segments(&mut self) {
+		self.write_batch_segments();
+		if let Some(retained_index) = self.batch_retained_flush {
+			self.batch_retained_flush_list[retained_index].is_valid = false;
+		}
+		self.batch_retained_flush = None;
+		self.batch_segment_list.clear();
+	}
+
+	//==============================================================================
+	/// 기하 캐시 켜기 / 끄기. (기본 켜짐, 원본 setGeometryCachingEnabled)
+	/// - 켜져 있으면 write_geometry_key 로 그리기 입력을 알리는 컴포넌트(Paint, UIView, Text, Sprite 등)가 그린 정점을 컴포넌트마다 캐시해 둔다.
+	///   입력, 변환, 투명도가 그대로면 draw 를 부르지 않고 캐시를 묶음에 옮기고, 이동(스크롤 등)만 바뀌면 캐시한 지역 정점에 새 행렬만 곱한다.
+	/// - 캐시 조각만으로 찬 묶음은 프레임의 그리기 차례마다 GPU 버퍼에 남겨, 바뀐 것이 없으면 정점을 올리지 않고 드로 콜만 낸다.
+	/// - 끄면 늘 draw 를 부른다. (화면은 같다)
+	///
+	/// # 인자
+	/// - `is_geometry_caching_enabled`: 켤지.
+	///
+	/// # 예제
+	/// 기하 캐시를 켜고 지난 프레임에 캐시로 그린 수 보기
+	/// ```rust,no_run
+	/// use vanilla::Graphic;
+	///
+	/// fn draw(graphic: &mut Graphic) {
+	/// 	graphic.set_geometry_caching_enabled(true);
+	/// 	println!("{} {}", graphic.is_geometry_caching_enabled(), graphic.get_last_frame_geometry_cache_hit_count());
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn set_geometry_caching_enabled(&mut self, is_geometry_caching_enabled: bool) {
+		if self.is_geometry_caching_enabled == is_geometry_caching_enabled {
+			return;
+		}
+		self.is_geometry_caching_enabled = is_geometry_caching_enabled;
+		self.geometry_cache_generation += 1;
+	}
+
+	//==============================================================================
+	/// 기하 캐시가 켜져 있는지.
+	///
+	/// # 돌려줌
+	/// 켜져 있으면 true. (처음 true)
+	//==============================================================================
+	pub fn is_geometry_caching_enabled(&self) -> bool {
+		self.is_geometry_caching_enabled
+	}
+
+	//==============================================================================
+	/// 지난 프레임에 기하 캐시로 그린 컴포넌트 수. (draw 를 부르지 않은 것)
+	///
+	/// # 돌려줌
+	/// 캐시한 정점을 옮기거나 행렬만 다시 걸어 그린 컴포넌트 수.
+	//==============================================================================
+	pub fn get_last_frame_geometry_cache_hit_count(&self) -> u32 {
+		self.last_frame_geometry_cache_hit_count
+	}
+
+	//==============================================================================
+	/// 지난 프레임에 기하 캐시를 다시 적은 컴포넌트 수. (캐시하는 컴포넌트 가운데 draw 를 부른 것)
+	///
+	/// # 돌려줌
+	/// 입력이나 배율, 회전 등이 바뀌어 draw 를 다시 부른 컴포넌트 수.
+	//==============================================================================
+	pub fn get_last_frame_geometry_rebuild_count(&self) -> u32 {
+		self.last_frame_geometry_rebuild_count
+	}
+
+	//==============================================================================
+	/// 지난 프레임에 정점을 다시 올리지 않고 GPU 에 남겨 둔 버퍼로 그린 묶음 수.
+	/// - 기하 캐시 조각만으로 찬 묶음이 지난 프레임 같은 차례의 묶음과 조각까지 같으면 정점을 옮기지도 올리지도 않고 드로 콜만 낸다.
+	///
+	/// # 돌려줌
+	/// 남긴 버퍼로 그린 묶음 수.
+	///
+	/// # 예제
+	/// 멈춘 UI 가 남긴 묶음으로 그려지는지 보기
+	/// ```rust,no_run
+	/// use vanilla::Graphic;
+	///
+	/// fn draw(graphic: &mut Graphic) {
+	/// 	println!("{} {}", graphic.get_last_frame_retained_batch_count(), graphic.get_last_frame_draw_call_count());
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn get_last_frame_retained_batch_count(&self) -> u32 {
+		self.last_frame_retained_batch_count
+	}
+
+	//==============================================================================
+	/// 컴포넌트 그리기. (노드가 컴포넌트마다 부른다, 기하 캐시를 거친다, 원본 drawComponent)
+	/// - 컴포넌트가 write_geometry_key 로 입력을 알리지 않거나, 캐시가 꺼졌거나, 묶어 그리지 않는 상태면 draw 를 그대로 부른다.
+	/// - 입력과 그리는 상태(배율, 회전, 섞기, 틴트, 글 방향)가 지난번과 같으면:
+	///   이동과 투명도도 같으면 캐시한 디바이스 정점을 묶음에 그대로 옮기고, 다르면 캐시한 지역 정점에 지금 행렬과 투명도를 다시 건다.
+	///   (스크롤은 부모의 이동만 바뀌므로 자식 컴포넌트는 draw 없이 행렬 곱만 한다, 글은 픽셀 스냅까지 같게 다시 셈한다)
+	/// - 그 밖에는 draw 를 불러 캐시를 다시 적는다. 그리기 중에 자르기, 층, 섞기 바꾸기 등 묶음 밖의 일을 하면 그 컴포넌트는 캐시하지 않는다.
+	///
+	/// # 인자
+	/// - `component`: 그릴 컴포넌트. (캐시는 컴포넌트가 쥔다)
+	/// - `transform`: 컴포넌트가 붙은 노드의 트랜스폼.
+	//==============================================================================
+	pub fn draw_component(&mut self, component: &mut dyn Component, transform: &NodeTransform) {
+		if !self.is_geometry_caching_enabled || self.geometry_active_cache.is_some() || !self.is_batching_enabled || self.shader_program_override.is_some() || self.batch_suspend_depth > 0 {
+			component.draw(transform, self);
+			return;
+		}
+		// 글꼴이 새로 들어오면 글 배치가 바뀔 수 있어 모두 다시 적는다.
+		let font_registration_count = self.text_string_texture_cache.get_font_registration_count();
+		if font_registration_count != self.geometry_font_registration_count {
+			self.geometry_font_registration_count = font_registration_count;
+			self.geometry_cache_generation += 1;
+		}
+		let mut geometry_cache = match component.get_component_base_mut().take_geometry_cache() {
+			Some(geometry_cache) => {
+				geometry_cache
+			}
+			None => {
+				Box::new(GeometryCache::new())
+			}
+		};
+		geometry_cache.key.begin();
+		let is_key_written = component.write_geometry_key(transform, &mut geometry_cache.key);
+		let is_input_same = geometry_cache.key.end();
+		if !is_key_written {
+			component.get_component_base_mut().put_geometry_cache(geometry_cache);
+			component.draw(transform, self);
+			return;
+		}
+
+		let matrix = self.transform_matrix;
+		let mut is_state_same = is_input_same && geometry_cache.is_valid && geometry_cache.generation == self.geometry_cache_generation;
+		is_state_same = is_state_same && geometry_cache.blend_mode == self.blend_mode && geometry_cache.text_direction == self.text_direction && geometry_cache.is_text_bake_scale_moving == self.is_text_bake_scale_moving;
+		is_state_same = is_state_same && geometry_cache.matrix.a == matrix.a && geometry_cache.matrix.b == matrix.b && geometry_cache.matrix.c == matrix.c && geometry_cache.matrix.d == matrix.d;
+		if is_state_same {
+			is_state_same = match (geometry_cache.tint_color, self.image_tint_color) {
+				(None, None) => {
+					true
+				}
+				(Some(cached_tint_color), Some(image_tint_color)) => {
+					cached_tint_color.red == image_tint_color.red && cached_tint_color.green == image_tint_color.green && cached_tint_color.blue == image_tint_color.blue && cached_tint_color.alpha == image_tint_color.alpha
+				}
+				_ => {
+					false
+				}
+			};
+		}
+		if is_state_same {
+			// 묶음 밖의 일을 해 캐시하지 못한 컴포넌트는 입력이 그대로인 동안 적지 않고 그린다.
+			if geometry_cache.is_broken {
+				component.get_component_base_mut().put_geometry_cache(geometry_cache);
+				component.draw(transform, self);
+				return;
+			}
+			// 이동이 바뀌는 동안(스크롤 등)은 정점을 떠 두지 않고 셈만 하고, 멈춘 첫 프레임에 한 번 떠 둔 뒤로는 그대로 옮긴다.
+			let is_placement_same = geometry_cache.matrix.e == matrix.e && geometry_cache.matrix.f == matrix.f && geometry_cache.global_alpha == self.global_alpha;
+			let mut is_replayed = false;
+			if is_placement_same && !geometry_cache.is_world_vertex_stale {
+				is_replayed = self.replay_geometry_cache(&mut geometry_cache);
+			}
+			else if geometry_cache.is_translatable {
+				let (retranslated_cache, is_retranslated) = self.retranslate_geometry_cache(geometry_cache, is_placement_same);
+				geometry_cache = retranslated_cache;
+				is_replayed = is_retranslated;
+			}
+			if is_replayed {
+				self.restore_geometry_end_state(&geometry_cache);
+				self.geometry_cache_hit_count += 1;
+				component.get_component_base_mut().put_geometry_cache(geometry_cache);
+				return;
+			}
+		}
+		let geometry_cache = self.record_geometry_cache(geometry_cache, component, transform);
+		component.get_component_base_mut().put_geometry_cache(geometry_cache);
+	}
+
+	//==============================================================================
+	/// 컴포넌트의 draw 를 불러 기하 캐시를 다시 적기. (원본 recordGeometryCache)
+	//==============================================================================
+	fn record_geometry_cache(&mut self, mut geometry_cache: Box<GeometryCache>, component: &mut dyn Component, transform: &NodeTransform) -> Box<GeometryCache> {
+		geometry_cache.is_valid = false;
+		geometry_cache.is_broken = false;
+		geometry_cache.is_translatable = true;
+		geometry_cache.is_world_vertex_stale = false;
+		geometry_cache.command_count = 0;
+		geometry_cache.generation = self.geometry_cache_generation;
+		geometry_cache.matrix = self.transform_matrix;
+		geometry_cache.global_alpha = self.global_alpha;
+		geometry_cache.blend_mode = self.blend_mode;
+		geometry_cache.text_direction = self.text_direction;
+		geometry_cache.is_text_bake_scale_moving = self.is_text_bake_scale_moving;
+		geometry_cache.tint_color = self.image_tint_color;
+		self.geometry_rebuild_count += 1;
+		self.geometry_active_cache = Some(geometry_cache);
+		component.draw(transform, self);
+		self.geometry_capture_target = None;
+		let mut geometry_cache = match self.geometry_active_cache.take() {
+			Some(geometry_cache) => {
+				geometry_cache
+			}
+			None => {
+				Box::new(GeometryCache::new())
+			}
+		};
+
+		// 그리기가 변환, 투명도, 섞기를 되돌리지 않았으면 자식에게도 번지므로 캐시하지 않는다.
+		let end_matrix = self.transform_matrix;
+		let begin_matrix = geometry_cache.matrix;
+		let is_state_restored = end_matrix.a == begin_matrix.a && end_matrix.b == begin_matrix.b && end_matrix.c == begin_matrix.c && end_matrix.d == begin_matrix.d && end_matrix.e == begin_matrix.e && end_matrix.f == begin_matrix.f && self.global_alpha == geometry_cache.global_alpha && self.blend_mode == geometry_cache.blend_mode;
+		if !is_state_restored {
+			geometry_cache.is_broken = true;
+		}
+		geometry_cache.end_fill_color = self.fill_color;
+		geometry_cache.end_stroke_color = self.stroke_color;
+		geometry_cache.end_image_tint_color = self.image_tint_color;
+		if geometry_cache.end_font_string != self.font_string {
+			geometry_cache.end_font_string.clear();
+			geometry_cache.end_font_string.push_str(&self.font_string);
+		}
+		geometry_cache.end_text_align = self.text_align;
+		geometry_cache.end_text_baseline = self.text_baseline;
+		geometry_cache.end_text_direction = self.text_direction;
+		geometry_cache.is_valid = true;
+		geometry_cache
+	}
+
+	//==============================================================================
+	/// 그리기가 남긴 상태(채우기 색, 글꼴, 정렬 등) 되돌려 적기. (캐시로 그렸을 때 draw 가 남겼을 상태와 같게, 원본 restoreGeometryEndState)
+	//==============================================================================
+	fn restore_geometry_end_state(&mut self, geometry_cache: &GeometryCache) {
+		self.fill_color = geometry_cache.end_fill_color;
+		self.stroke_color = geometry_cache.end_stroke_color;
+		self.image_tint_color = geometry_cache.end_image_tint_color;
+		if self.font_string != geometry_cache.end_font_string {
+			self.font_string.clear();
+			self.font_string.push_str(&geometry_cache.end_font_string);
+		}
+		self.text_align = geometry_cache.end_text_align;
+		self.text_baseline = geometry_cache.end_text_baseline;
+		self.text_direction = geometry_cache.end_text_direction;
+	}
+
+	//==============================================================================
+	/// 기하 캐시를 적는 중이면 캐시하지 못하는 것으로 표시. (자르기, 층, 섞기 바꾸기, 묶지 않는 그리기 등, 원본 breakGeometryRecord)
+	//==============================================================================
+	fn break_geometry_record(&mut self) {
+		if let Some(geometry_cache) = self.geometry_active_cache.as_mut() {
+			geometry_cache.is_broken = true;
+		}
+	}
+
+	//==============================================================================
+	/// 지금 행렬과 투명도가 캐시를 적기 시작한 때와 다르면 이동만으로 다시 옮길 수 없는 것으로 표시. (그리기가 제 변환을 건 때, 원본 checkGeometryTranslatable)
+	//==============================================================================
+	fn check_geometry_translatable(geometry_cache: &mut GeometryCache, matrix: TransformMatrix, global_alpha: f64) {
+		let begin_matrix = geometry_cache.matrix;
+		let is_begin_state = matrix.a == begin_matrix.a && matrix.b == begin_matrix.b && matrix.c == begin_matrix.c && matrix.d == begin_matrix.d && matrix.e == begin_matrix.e && matrix.f == begin_matrix.f && global_alpha == geometry_cache.global_alpha;
+		if !is_begin_state {
+			geometry_cache.is_translatable = false;
+		}
+	}
+
+	//==============================================================================
+	/// 묶음에 넣은 정점을 기하 캐시에 적기. (append_batch_vertices 가 적는 중에 부른다, 원본 captureGeometryAppend)
+	/// - 글 명령 안이면 그 명령에, 아니면 새 그림 명령을 열어 지역 정점, 색, 틴트와 함께 적는다.
+	/// - 지금 묶음을 남기는 중이면 적은 조각을 묶음의 조각 목록에도 적는다.
+	//==============================================================================
+	fn capture_geometry_append(&mut self, vertex_count: usize, texture: GlTexture, color: Color, texture_slot: usize, clip_slot: usize) {
+		let matrix = self.transform_matrix;
+		let global_alpha = self.global_alpha;
+		let image_tint_color = self.image_tint_color;
+		let geometry_cache = match self.geometry_active_cache.as_mut() {
+			Some(geometry_cache) => {
+				geometry_cache
+			}
+			None => {
+				return;
+			}
+		};
+		let command_index = match self.geometry_capture_target {
+			Some(command_index) => {
+				command_index
+			}
+			None => {
+				let command_index = geometry_cache.acquire_command(GeometryCommandType::Sprite);
+				let local_float_count = vertex_count * FLOATS_PER_VERTEX;
+				let geometry_command = &mut geometry_cache.command_list[command_index];
+				geometry_command.texture = Some(texture);
+				geometry_command.vertex_count = vertex_count;
+				geometry_command.local_vertex_data.clear();
+				geometry_command.local_vertex_data.extend_from_slice(&self.vertex_data[..local_float_count]);
+				geometry_command.is_linear_position_valid = false;
+				geometry_command.color = Some(color);
+				geometry_command.tint_color = image_tint_color;
+				Graphic::check_geometry_translatable(geometry_cache, matrix, global_alpha);
+				command_index
+			}
+		};
+
+		// 지금 묶음이 이 조각을 미뤄 두었으면(한 묶음에 같은 컴포넌트를 두 번 그림) 덮어쓰기 전에 옮겨 쓴다.
+		let sub_append_index = geometry_cache.command_list[command_index].sub_append_count;
+		let is_deferred_here = match geometry_cache.command_list[command_index].sub_append_list.get(sub_append_index) {
+			Some(sub_append) => {
+				self.batch_retained_flush.is_some() && sub_append.segment_batch_generation == self.batch_generation
+			}
+			None => {
+				false
+			}
+		};
+		if is_deferred_here {
+			self.end_batch_segments();
+		}
+		let geometry_cache = match self.geometry_active_cache.as_mut() {
+			Some(geometry_cache) => {
+				geometry_cache
+			}
+			None => {
+				return;
+			}
+		};
+		let geometry_command = &mut geometry_cache.command_list[command_index];
+		if sub_append_index >= geometry_command.sub_append_list.len() {
+			geometry_command.sub_append_list.push(GeometrySubAppend {
+				texture,
+				vertex_count: 0,
+				world_vertex_data: Rc::new(Vec::new()),
+				texture_slot: 0,
+				clip_slot: 0,
+				version: 0,
+				segment_batch_generation: -1,
+			});
+		}
+
+		// 넣은 디바이스 정점을 칸 번호까지 그대로 떠 둔다.
+		let world_float_count = vertex_count * BATCH_FLOATS_PER_VERTEX;
+		let start_offset = self.batch_vertex_count * BATCH_FLOATS_PER_VERTEX;
+		let sub_append = &mut geometry_command.sub_append_list[sub_append_index];
+		let world_vertex_data = Rc::make_mut(&mut sub_append.world_vertex_data);
+		world_vertex_data.clear();
+		world_vertex_data.extend_from_slice(&self.batch_vertex_data[start_offset..start_offset + world_float_count]);
+		sub_append.texture = texture;
+		sub_append.vertex_count = vertex_count;
+		sub_append.texture_slot = texture_slot;
+		sub_append.clip_slot = clip_slot;
+		self.geometry_version_counter += 1;
+		let version = self.geometry_version_counter;
+		sub_append.version = version;
+		let is_retained = self.batch_retained_flush.is_some();
+		if is_retained {
+			sub_append.segment_batch_generation = self.batch_generation;
+		}
+		geometry_command.sub_append_count = sub_append_index + 1;
+
+		// 캐시를 적는 쓰기는 떠 둔 조각과 같으므로 묶음을 남길 수 있다. (이미 쓴 조각이라 미루지 않는다)
+		if is_retained {
+			self.add_batch_segment(version, vertex_count, None);
+		}
+	}
+
+	//==============================================================================
+	/// 글 명령의 엔트리를 글 캐시에서 다시 쓴 것으로 적기. (draw 가 엔트리를 찾았을 때와 같게 LRU 를 갱신한다, 원본 touchGeometryTextEntries)
+	///
+	/// # 돌려줌
+	/// 모든 엔트리가 아직 글 캐시에 있으면 true. (버려졌으면 다시 적어야 한다)
+	//==============================================================================
+	fn touch_geometry_text_entries(&mut self, geometry_cache: &GeometryCache) -> bool {
+		if self.text_string_texture_cache.has_pending_deleted_textures() {
+			return false;
+		}
+		for geometry_command in &geometry_cache.command_list[..geometry_cache.command_count] {
+			if geometry_command.command_type != GeometryCommandType::Text {
+				continue;
+			}
+			let is_touched = match &geometry_command.entry {
+				Some(entry) => {
+					self.text_string_texture_cache.touch_entry(entry)
+				}
+				None => {
+					false
+				}
+			};
+			if !is_touched {
+				return false;
+			}
+		}
+		true
+	}
+
+	//==============================================================================
+	/// 기하 캐시의 디바이스 정점을 묶음에 그대로 옮기기. (변환과 투명도가 적은 때와 같을 때, 원본 replayGeometryCache)
+	///
+	/// # 돌려줌
+	/// 옮겼으면 true.
+	//==============================================================================
+	fn replay_geometry_cache(&mut self, geometry_cache: &mut GeometryCache) -> bool {
+		if !self.touch_geometry_text_entries(geometry_cache) {
+			return false;
+		}
+		let command_count = geometry_cache.command_count;
+		for geometry_command in &mut geometry_cache.command_list[..command_count] {
+			let sub_append_count = geometry_command.sub_append_count;
+			for sub_append in &mut geometry_command.sub_append_list[..sub_append_count] {
+				let vertex_count = sub_append.vertex_count;
+				let texture_slot = self.prepare_batch(vertex_count, sub_append.texture);
+				let clip_slot = self.shader_clip_slot;
+				if sub_append.texture_slot != texture_slot || sub_append.clip_slot != clip_slot {
+					if self.batch_retained_flush.is_some() && sub_append.segment_batch_generation == self.batch_generation {
+						self.end_batch_segments();
+					}
+					let world_vertex_data = Rc::make_mut(&mut sub_append.world_vertex_data);
+					for vertex_index in 0..vertex_count {
+						world_vertex_data[vertex_index * BATCH_FLOATS_PER_VERTEX + 12] = texture_slot as f32;
+						world_vertex_data[vertex_index * BATCH_FLOATS_PER_VERTEX + 13] = clip_slot as f32;
+					}
+					sub_append.texture_slot = texture_slot;
+					sub_append.clip_slot = clip_slot;
+					self.geometry_version_counter += 1;
+					sub_append.version = self.geometry_version_counter;
+				}
+				if self.batch_vertex_count == 0 {
+					self.begin_batch_segments();
+				}
+				let is_retained = self.batch_retained_flush.is_some();
+				let is_deferred = is_retained && self.is_batch_segment_deferring;
+				if is_retained {
+					// 미뤄 쌓는 묶음이면 정점을 옮기지 않고 조각만 적는다.
+					let deferred_vertex_data = if is_deferred { Some(sub_append.world_vertex_data.clone()) } else { None };
+					self.add_batch_segment(sub_append.version, vertex_count, deferred_vertex_data);
+					sub_append.segment_batch_generation = self.batch_generation;
+				}
+				if !is_deferred {
+					let float_count = vertex_count * BATCH_FLOATS_PER_VERTEX;
+					let start_offset = self.batch_vertex_count * BATCH_FLOATS_PER_VERTEX;
+					self.batch_vertex_data[start_offset..start_offset + float_count].copy_from_slice(&sub_append.world_vertex_data[..float_count]);
+				}
+				self.batch_vertex_count += vertex_count;
+			}
+		}
+		true
+	}
+
+	//==============================================================================
+	/// 기하 캐시의 지역 정점에 지금 행렬과 투명도를 다시 걸어 묶음에 넣기. (배율과 회전은 같고 이동이나 투명도만 바뀐 때, 스크롤 등, 원본 retranslateGeometryCache)
+	/// - 그림 명령은 적어 둔 지역 정점으로 append_batch_vertices 를, 글 명령은 적어 둔 엔트리로 글리프 쿼드 그리기를 다시 부른다. (draw 를 부른 것과 셈이 같다)
+	///
+	/// # 인자
+	/// - `geometry_cache`: 다시 넣을 캐시.
+	/// - `is_capturing`: 넣은 디바이스 정점을 캐시에 떠 둘지. (이동이 멈춘 첫 프레임만, 움직이는 동안은 셈만 한다)
+	///
+	/// # 돌려줌
+	/// 캐시와, 넣었으면 true.
+	//==============================================================================
+	fn retranslate_geometry_cache(&mut self, mut geometry_cache: Box<GeometryCache>, is_capturing: bool) -> (Box<GeometryCache>, bool) {
+		if !self.touch_geometry_text_entries(&geometry_cache) {
+			return (geometry_cache, false);
+		}
+		let command_count = geometry_cache.command_count;
+		if is_capturing {
+			self.geometry_active_cache = Some(geometry_cache);
+			for command_index in 0..command_count {
+				let (command_type, vertex_count, texture, color, tint_color, entry, position_x, position_y, text_direction, text_align, text_baseline) = {
+					let geometry_command = match self.geometry_active_cache.as_mut() {
+						Some(geometry_cache) => {
+							&mut geometry_cache.command_list[command_index]
+						}
+						None => {
+							break;
+						}
+					};
+					geometry_command.sub_append_count = 0;
+					if geometry_command.command_type == GeometryCommandType::Sprite {
+						let local_float_count = geometry_command.vertex_count * FLOATS_PER_VERTEX;
+						self.vertex_data[..local_float_count].copy_from_slice(&geometry_command.local_vertex_data[..local_float_count]);
+					}
+					(geometry_command.command_type, geometry_command.vertex_count, geometry_command.texture, geometry_command.color, geometry_command.tint_color, geometry_command.entry.clone(), geometry_command.position_x, geometry_command.position_y, geometry_command.text_direction, geometry_command.text_align, geometry_command.text_baseline)
+				};
+				self.geometry_capture_target = Some(command_index);
+				self.image_tint_color = tint_color;
+				match command_type {
+					GeometryCommandType::Sprite => {
+						if let (Some(texture), Some(color)) = (texture, color) {
+							self.append_batch_vertices(vertex_count, texture, color);
+						}
+					}
+					GeometryCommandType::Text => {
+						self.text_align = text_align;
+						self.text_baseline = text_baseline;
+						if let Some(entry) = entry {
+							self.write_text_entry_quads(&entry, position_x, position_y, color, text_direction);
+						}
+					}
+				}
+			}
+			self.geometry_capture_target = None;
+			geometry_cache = match self.geometry_active_cache.take() {
+				Some(geometry_cache) => {
+					geometry_cache
+				}
+				None => {
+					return (Box::new(GeometryCache::new()), false);
+				}
+			};
+		}
+		else {
+			let begin_matrix = geometry_cache.matrix;
+			for geometry_command in &mut geometry_cache.command_list[..command_count] {
+				self.image_tint_color = geometry_command.tint_color;
+				match geometry_command.command_type {
+					GeometryCommandType::Sprite => {
+						self.append_translated_geometry_command(geometry_command, begin_matrix);
+					}
+					GeometryCommandType::Text => {
+						self.text_align = geometry_command.text_align;
+						self.text_baseline = geometry_command.text_baseline;
+						if let Some(entry) = &geometry_command.entry {
+							self.write_text_entry_quads(entry, geometry_command.position_x, geometry_command.position_y, geometry_command.color, geometry_command.text_direction);
+						}
+					}
+				}
+			}
+		}
+		geometry_cache.matrix.e = self.transform_matrix.e;
+		geometry_cache.matrix.f = self.transform_matrix.f;
+		geometry_cache.global_alpha = self.global_alpha;
+		geometry_cache.is_world_vertex_stale = !is_capturing;
+		(geometry_cache, true)
+	}
+
+	//==============================================================================
+	/// 그림 명령을 지금 이동과 투명도로 묶음에 넣기. (이동만 바뀌는 동안 부른다, 원본 appendTranslatedGeometryCommand)
+	/// - 행렬 곱의 앞부분(a * x + c * y, b * x + d * y)을 f64 로 떠 두고 이동만 더한다.
+	///   append_batch_vertices 와 셈 차례가 같아((a * x + c * y) + e 를 배정밀도로 셈한 뒤 f32 로 적음) 결과가 비트까지 같다.
+	//==============================================================================
+	fn append_translated_geometry_command(&mut self, geometry_command: &mut GeometryCommand, begin_matrix: TransformMatrix) {
+		let (texture, color) = match (geometry_command.texture, geometry_command.color) {
+			(Some(texture), Some(color)) => {
+				(texture, color)
+			}
+			_ => {
+				return;
+			}
+		};
+		let vertex_count = geometry_command.vertex_count;
+		if !geometry_command.is_linear_position_valid {
+			geometry_command.linear_position_data.clear();
+			for vertex_index in 0..vertex_count {
+				let position_x = geometry_command.local_vertex_data[vertex_index * FLOATS_PER_VERTEX] as f64;
+				let position_y = geometry_command.local_vertex_data[vertex_index * FLOATS_PER_VERTEX + 1] as f64;
+				geometry_command.linear_position_data.push(begin_matrix.a * position_x + begin_matrix.c * position_y);
+				geometry_command.linear_position_data.push(begin_matrix.b * position_x + begin_matrix.d * position_y);
+			}
+			geometry_command.is_linear_position_valid = true;
+		}
+		let texture_slot = self.prepare_batch(vertex_count, texture) as f32;
+		let clip_slot = self.shader_clip_slot as f32;
+		if self.batch_vertex_count == 0 {
+			self.begin_batch_segments();
+		}
+		if self.batch_retained_flush.is_some() {
+			self.add_batch_direct_span(vertex_count);
+		}
+
+		// append_batch_vertices 와 같은 색 셈.
+		let color_alpha = color.alpha * self.global_alpha;
+		let color_red = color.red * color_alpha;
+		let color_green = color.green * color_alpha;
+		let color_blue = color.blue * color_alpha;
+		let tint_color_value_list = match geometry_command.tint_color {
+			Some(tint_color) => {
+				[tint_color.red as f32, tint_color.green as f32, tint_color.blue as f32, tint_color.alpha as f32]
+			}
+			None => {
+				[0.0, 0.0, 0.0, 0.0]
+			}
+		};
+		let matrix_e = self.transform_matrix.e;
+		let matrix_f = self.transform_matrix.f;
+		let mut write_offset = self.batch_vertex_count * BATCH_FLOATS_PER_VERTEX;
+		for vertex_index in 0..vertex_count {
+			let read_offset = vertex_index * FLOATS_PER_VERTEX;
+			let batch_vertex = &mut self.batch_vertex_data[write_offset..write_offset + BATCH_FLOATS_PER_VERTEX];
+			batch_vertex[0] = (geometry_command.linear_position_data[vertex_index * 2] + matrix_e) as f32;
+			batch_vertex[1] = (geometry_command.linear_position_data[vertex_index * 2 + 1] + matrix_f) as f32;
+			batch_vertex[2] = geometry_command.local_vertex_data[read_offset + 2];
+			batch_vertex[3] = geometry_command.local_vertex_data[read_offset + 3];
+			batch_vertex[4] = color_red as f32;
+			batch_vertex[5] = color_green as f32;
+			batch_vertex[6] = color_blue as f32;
+			batch_vertex[7] = color_alpha as f32;
+			batch_vertex[8..12].copy_from_slice(&tint_color_value_list);
+			batch_vertex[12] = texture_slot;
+			batch_vertex[13] = clip_slot;
+			write_offset += BATCH_FLOATS_PER_VERTEX;
+		}
+		self.batch_vertex_count += vertex_count;
+	}
+
+	//==============================================================================
 	/// 모아 둔 묶음 내보내기. (GL 상태를 바꾸기 전, 프레임 끝, GL 을 직접 쓰기 전에 부른다)
 	/// - 묶음의 텍스처를 0 번부터의 유닛에 묶는다. 쓰지 않는 칸의 유닛에는 흰 텍스처를 묶어, 지난 그리기의 텍스처가 지금 그리는 칸(렌더 타겟)이어도 되먹임이 생기지 않게 한다. (원본과 같음)
 	//==============================================================================
@@ -2848,6 +4233,44 @@ impl Graphic {
 		let clip_rect_count = self.batch_clip_rect_count;
 		self.batch_clip_rect_count = 1;
 		self.batch_generation += 1;
+
+		// 조각을 적은 묶음은 이 차례의 남김 칸 버퍼로 그린다. 지난번과 같은 자리의 같은 조각은 올리지 않고 바뀐 범위만 고쳐 올린다.
+		let flush_index = self.batch_flush_index;
+		self.batch_flush_index += 1;
+		let retained_index = self.batch_retained_flush.take();
+		// 남긴 묶음의 올리기 계획. (None 이면 모두 올린다, Some(0) 이면 바뀐 것이 없다, 그 밖에는 batch_dirty_range_list 의 범위만 올린다)
+		let mut dirty_range_count: Option<usize> = None;
+		let mut is_full_upload = true;
+		match retained_index {
+			Some(retained_index) => {
+				let retained_flush = &self.batch_retained_flush_list[retained_index];
+				let is_partial_uploadable = retained_flush.is_valid && retained_flush.buffer_vertex_count >= vertex_count && retained_flush.vertex_array.is_some() && retained_flush.vertex_buffer.is_some();
+				dirty_range_count = self.collect_batch_dirty_ranges(retained_index, is_partial_uploadable);
+				is_full_upload = match dirty_range_count {
+					None => {
+						true
+					}
+					Some(range_count) => {
+						range_count == 1 && self.batch_dirty_range_list[0] == (0, vertex_count)
+					}
+				};
+				if is_full_upload {
+					self.write_batch_segments();
+				}
+				else if dirty_range_count != Some(0) {
+					self.write_batch_segments_in_ranges();
+				}
+				self.batch_retained_flush_list[retained_index].is_valid = false;
+			}
+			None => {
+				// 정점을 바로 쓴 묶음은 남기지 않는다. (이 차례의 남김 칸은 다음 프레임에 다시 올리게 한다)
+				if flush_index < self.batch_retained_flush_list.len() {
+					self.batch_retained_flush_list[flush_index].is_valid = false;
+				}
+			}
+		}
+		self.batch_segment_list.clear();
+		self.batch_deferred_segment_count = 0;
 		let first_texture = match first_texture {
 			Some(first_texture) if texture_count > 0 => {
 				first_texture
@@ -2872,9 +4295,54 @@ impl Graphic {
 		let clip_rect_list_location = batch_shader_program.get_uniform_location(GlContext::from_context(&self.gl), "clipRectList");
 		let vertex_bytes = float_slice_to_bytes(&self.batch_vertex_data[..vertex_count * BATCH_FLOATS_PER_VERTEX]);
 		unsafe {
-			crate::core::glstatecache::bind_vertex_array(&self.gl, self.batch_vertex_array);
-			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, self.batch_vertex_buffer);
-			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
+			match retained_index {
+				Some(retained_index) => {
+					let (vertex_array, vertex_buffer) = match (self.batch_retained_flush_list[retained_index].vertex_array, self.batch_retained_flush_list[retained_index].vertex_buffer) {
+						(Some(vertex_array), Some(vertex_buffer)) => {
+							crate::core::glstatecache::bind_vertex_array(&self.gl, Some(vertex_array));
+							(Some(vertex_array), Some(vertex_buffer))
+						}
+						_ => {
+							let vertex_array = crate::core::glstatecache::create_vertex_array(&self.gl).ok();
+							let vertex_buffer = crate::core::glstatecache::create_buffer(&self.gl).ok();
+							crate::core::glstatecache::bind_vertex_array(&self.gl, vertex_array);
+							crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, vertex_buffer);
+							self.setup_batch_vertex_attributes(batch_shader_program);
+							(vertex_array, vertex_buffer)
+						}
+					};
+					let retained_flush = &mut self.batch_retained_flush_list[retained_index];
+					retained_flush.vertex_array = vertex_array;
+					retained_flush.vertex_buffer = vertex_buffer;
+					if dirty_range_count == Some(0) {
+						self.retained_batch_count += 1;
+					}
+					else if is_full_upload {
+						// 처음이거나, 지난번보다 정점이 많거나, 모두 바뀌었으면 새 저장소를 잡으며 모두 올린다.
+						crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, vertex_buffer);
+						self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
+						retained_flush.buffer_vertex_count = vertex_count;
+						self.batch_upload_byte_count += vertex_bytes.len() as u64;
+					}
+					else {
+						// 바뀐 범위만 buffer_sub_data 로 고쳐 올린다.
+						crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, vertex_buffer);
+						let stride_bytes = BATCH_FLOATS_PER_VERTEX * 4;
+						for (start_vertex, end_vertex) in self.batch_dirty_range_list.iter() {
+							let range_bytes = &vertex_bytes[start_vertex * stride_bytes..end_vertex * stride_bytes];
+							self.gl.buffer_sub_data_u8_slice(glow::ARRAY_BUFFER, (start_vertex * stride_bytes) as i32, range_bytes);
+							self.batch_upload_byte_count += range_bytes.len() as u64;
+						}
+					}
+					self.batch_retained_flush_list[retained_index].is_valid = vertex_array.is_some() && vertex_buffer.is_some();
+				}
+				None => {
+					crate::core::glstatecache::bind_vertex_array(&self.gl, self.batch_vertex_array);
+					crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, self.batch_vertex_buffer);
+					self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
+					self.batch_upload_byte_count += vertex_bytes.len() as u64;
+				}
+			}
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 			self.gl.uniform_1_f32(framebuffer_height_location.as_ref(), self.applied_viewport_height as f32);
 			self.gl.uniform_4_f32_slice(clip_rect_list_location.as_ref(), &self.batch_clip_rect_data[..clip_rect_count * 4]);
@@ -3267,6 +4735,13 @@ impl Graphic {
 		self.last_frame_draw_vertex_count = self.draw_vertex_count;
 		self.last_frame_culled_node_count = self.culled_node_count;
 		self.last_frame_culled_subtree_count = self.culled_subtree_count;
+		self.last_frame_geometry_cache_hit_count = self.geometry_cache_hit_count;
+		self.last_frame_geometry_rebuild_count = self.geometry_rebuild_count;
+		self.last_frame_retained_batch_count = self.retained_batch_count;
+		self.geometry_cache_hit_count = 0;
+		self.geometry_rebuild_count = 0;
+		self.retained_batch_count = 0;
+		self.batch_flush_index = 0;
 		self.draw_call_count = 0;
 		self.draw_vertex_count = 0;
 		self.culled_node_count = 0;
@@ -3330,15 +4805,7 @@ impl Graphic {
 			let batch_vertex_buffer = crate::core::glstatecache::create_buffer(&self.gl)?;
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(batch_vertex_array));
 			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(batch_vertex_buffer));
-			let stride_bytes = (BATCH_FLOATS_PER_VERTEX * 4) as i32;
-			let attribute_layout: [(&str, i32, i32); 5] = [("vertexPosition", 2, 0), ("vertexTextureCoordinate", 2, 8), ("vertexColor", 4, 16), ("vertexTintColor", 4, 32), ("vertexSlot", 2, 48)];
-			for (attribute_name, component_count, byte_offset) in attribute_layout {
-				let attribute_location = batch_shader_program.get_attribute_location(GlContext::from_context(&self.gl), attribute_name);
-				if let Some(attribute_location) = attribute_location {
-					self.gl.enable_vertex_attrib_array(attribute_location);
-					self.gl.vertex_attrib_pointer_f32(attribute_location, component_count, glow::FLOAT, false, stride_bytes, byte_offset);
-				}
-			}
+			self.setup_batch_vertex_attributes(&batch_shader_program);
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
 			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 			self.batch_vertex_array = Some(batch_vertex_array);
@@ -3443,6 +4910,7 @@ impl Graphic {
 	/// ```
 	//==============================================================================
 	pub fn draw_colored_quads(&mut self, vertex_count: usize, texture: GlTexture) {
+		self.break_geometry_record();
 		if vertex_count == 0 {
 			return;
 		}
@@ -3532,6 +5000,7 @@ impl Graphic {
 	///   모은 쿼드와 겹치는 쿼드가 나오거나 SHADER_BLEND_PARTICLE_GROUP_CAPACITY 개가 차면 거기서 끊는다. (모두 겹치면 쿼드 하나에 복사 한 번, 드로우 콜 한 번)
 	//==============================================================================
 	fn draw_colored_quad_groups(&mut self, vertex_count: usize, texture: GlTexture) {
+		self.break_geometry_record();
 		let framebuffer = read_framebuffer_binding(GlContext::from_context(&self.gl));
 		let quad_float_count = 6 * PARTICLE_FLOATS_PER_VERTEX;
 		let quad_count = vertex_count / 6;
@@ -4574,6 +6043,7 @@ impl Graphic {
 	/// - `text_bake_scale_step`: 양자화 단위. (0 미만은 0)
 	//==============================================================================
 	pub fn set_text_bake_scale_step(&mut self, text_bake_scale_step: f64) {
+		self.geometry_cache_generation += 1;
 		self.text_bake_scale_step = text_bake_scale_step.max(0.0);
 	}
 
@@ -4598,6 +6068,7 @@ impl Graphic {
 	/// - `text_bake_motion_scale_step`: 배율이 움직이는 동안의 양자화 단위. (0 미만은 0)
 	//==============================================================================
 	pub fn set_text_bake_motion_scale_step(&mut self, text_bake_motion_scale_step: f64) {
+		self.geometry_cache_generation += 1;
 		self.text_bake_motion_scale_step = text_bake_motion_scale_step.max(0.0);
 	}
 
@@ -4660,6 +6131,7 @@ impl Graphic {
 	/// - `is_text_pixel_snap_enabled`: true 면 글자를 디바이스 픽셀에 맞춘다. (처음 false)
 	//==============================================================================
 	pub fn set_text_pixel_snap_enabled(&mut self, is_text_pixel_snap_enabled: bool) {
+		self.geometry_cache_generation += 1;
 		self.is_text_pixel_snap_enabled = is_text_pixel_snap_enabled;
 	}
 
@@ -4682,7 +6154,12 @@ impl Graphic {
 	/// - `is_text_antialias_enabled`: true 면 켠다. (처음 true)
 	//==============================================================================
 	pub fn set_text_antialias_enabled(&mut self, is_text_antialias_enabled: bool) {
+		if self.text_string_texture_cache.is_text_antialias_on() == is_text_antialias_enabled {
+			return;
+		}
+		self.break_geometry_record();
 		self.text_string_texture_cache.set_text_antialias_enabled(is_text_antialias_enabled);
+		self.geometry_cache_generation += 1;
 	}
 
 	//==============================================================================
@@ -4729,6 +6206,38 @@ impl Graphic {
 	/// - `text_direction`: 정렬 Start, End 를 가를 방향.
 	//==============================================================================
 	pub fn draw_text_entry(&mut self, entry: TextEntry, x: f64, y: f64, color: Option<Color>, text_direction: TextDirection) {
+		// 기하 캐시를 적는 중이면 글 명령 하나로 적는다. (변환만 바뀌면 글리프 쿼드 그리기를 다시 불러 픽셀 스냅까지 같게 셈한다)
+		if self.geometry_capture_target.is_none() {
+			let matrix = self.transform_matrix;
+			let global_alpha = self.global_alpha;
+			let image_tint_color = self.image_tint_color;
+			let text_align = self.text_align;
+			let text_baseline = self.text_baseline;
+			if let Some(geometry_cache) = self.geometry_active_cache.as_mut() {
+				let command_index = geometry_cache.acquire_command(GeometryCommandType::Text);
+				let geometry_command = &mut geometry_cache.command_list[command_index];
+				geometry_command.entry = Some(entry.clone());
+				geometry_command.position_x = x;
+				geometry_command.position_y = y;
+				geometry_command.color = color;
+				geometry_command.text_direction = text_direction;
+				geometry_command.text_align = text_align;
+				geometry_command.text_baseline = text_baseline;
+				geometry_command.tint_color = image_tint_color;
+				Graphic::check_geometry_translatable(geometry_cache, matrix, global_alpha);
+				self.geometry_capture_target = Some(command_index);
+				self.write_text_entry_quads(&entry, x, y, color, text_direction);
+				self.geometry_capture_target = None;
+				return;
+			}
+		}
+		self.write_text_entry_quads(&entry, x, y, color, text_direction);
+	}
+
+	//==============================================================================
+	/// 글 배치 엔트리의 글리프 쿼드를 그리기. (draw_text_entry 의 몸통, 기하 캐시가 변환만 바뀐 글을 다시 그릴 때도 부른다, 원본 writeTextEntryQuads)
+	//==============================================================================
+	fn write_text_entry_quads(&mut self, entry: &TextEntry, x: f64, y: f64, color: Option<Color>, text_direction: TextDirection) {
 		// 가로 정렬 오프셋.
 		let text_align = self.resolve_text_align(self.get_text_align(), text_direction);
 		let align_offset = match text_align {
@@ -4895,6 +6404,7 @@ impl Graphic {
 	/// ```
 	//==============================================================================
 	pub fn begin_clip_rect(&mut self, rect: Rect, round_size: f64) {
+		self.break_geometry_record();
 		// 상태 저장. (Canvas2D save 대응)
 		self.push_state();
 
@@ -5035,6 +6545,7 @@ impl Graphic {
 	/// ```
 	//==============================================================================
 	pub fn begin_opacity_layer(&mut self) {
+		self.break_geometry_record();
 		self.flush_batch();
 		let previous_framebuffer = read_framebuffer_binding(GlContext::from_context(&self.gl));
 		let global_alpha = self.global_alpha;
@@ -5089,7 +6600,10 @@ impl Graphic {
 				return;
 			}
 		};
+		// 층 칸의 깊이와 스텐실은 다시 읽지 않으므로 판 끝에 버린다. (모바일 타일 GPU 가 메모리에 쓰지 않는다, 다음 층은 깊이와 스텐실을 비우고 쓴다)
 		unsafe {
+			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, Some(target.framebuffer));
+			crate::core::glstatecache::invalidate_framebuffer(&self.gl, glow::FRAMEBUFFER, &[glow::DEPTH_STENCIL_ATTACHMENT]);
 			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, opacity_layer.previous_framebuffer);
 		}
 
@@ -5173,6 +6687,7 @@ impl Graphic {
 	/// 출력 영역 제한 종료.
 	//==============================================================================
 	pub fn end_clip_rect(&mut self) {
+		self.break_geometry_record();
 		let clip_entry = match self.clip_stack.pop() {
 			Some(clip_entry) => {
 				clip_entry
@@ -5299,6 +6814,7 @@ impl Graphic {
 	/// 적거나 지운 셰이더 자르기 수.
 	//==============================================================================
 	fn write_shader_clips_to_stencil(&mut self, is_writing: bool) -> usize {
+		self.break_geometry_record();
 		let shader_clip_list: Vec<(Rect, TransformMatrix)> = self.clip_stack.iter().filter(|clip_entry| clip_entry.is_shader_clip).map(|clip_entry| (clip_entry.rect, clip_entry.transform_matrix)).collect();
 		let shader_clip_count = shader_clip_list.len();
 		if shader_clip_count == 0 {
@@ -5375,6 +6891,7 @@ impl Graphic {
 	/// - `shader_program`: 바꿔 끼울 프로그램. (resolve_shader_program 으로 받는다, None 이면 기본 프로그램)
 	//==============================================================================
 	pub fn set_shader_program_override(&mut self, shader_program: Option<Rc<ShaderProgram>>) {
+		self.break_geometry_record();
 		self.flush_batch();
 		self.shader_program_override = shader_program;
 		let active_shader_program = self.get_shader_program();
@@ -6440,6 +7957,197 @@ mod tests {
 		}
 
 		/// 게임이 run_external_pass 밖에서 GlContext 로 상태를 바꿔 두고 돌아와도 다음 2D 그리기가 제 상태를 다시 거는지. (원본 db99208, externalglstatechrome)
+		/// 글 엔트리의 잉크 둘레 여백이 원본과 같다. (원본 getTextInkPadding: 채우기 2, 외곽선 ceil(max(두께 * 배율 / 2, 0.5)) + 2, 왼쪽으로 넘는 잉크가 없는 글은 펜 원점이 여백만큼 안쪽)
+		#[test]
+		fn text_entry_ink_padding_matches_original() {
+			let mut graphic = match create_test_graphic() {
+				Some(graphic) => {
+					graphic
+				}
+				None => {
+					return;
+				}
+			};
+			let system_font_description = crate::core::textstringtexturecache::parse_font_string(&format!("10px {}", crate::base::platform::SYSTEM_FONT_STRING));
+			graphic.get_text_string_texture_cache().set_system_font_chain(system_font_description.family_name_list);
+			graphic.set_font_string("16px default");
+			let fill_entry = graphic.get_text_entry(TextDrawKind::Fill, "Hamburg", 0.0, 1.0, TextDirection::Ltr).expect("fill entry");
+			assert_eq!(fill_entry.pen_offset_x, 2.0, "채우기 여백");
+			let fill_entry_twice = graphic.get_text_entry(TextDrawKind::Fill, "Hamburg", 0.0, 2.0, TextDirection::Ltr).expect("fill entry 2x");
+			assert_eq!(fill_entry_twice.pen_offset_x, 1.0, "채우기 여백 (배율 2, 논리 픽셀)");
+		}
+
+		/// 기하 캐시 시험의 칸 하나. (둥근 칸, 배경, 글)
+		struct GeometryCachePanel {
+			transform: NodeTransform,
+			paint: crate::core::component::paint::Paint,
+			view: crate::ui::uiview::UIView,
+			text: crate::core::component::text::Text,
+		}
+
+		/// 기하 캐시 시험 칸 목록 만들기. (4 x 6 칸)
+		fn create_geometry_cache_panels() -> Vec<GeometryCachePanel> {
+			let mut panel_list = Vec::new();
+			for panel_index in 0..24 {
+				let mut transform = NodeTransform::default();
+				transform.set_content_size(Vector2::create(56.0, 36.0));
+				let mut paint = crate::core::component::paint::Paint::new();
+				paint.set_color(Color::create_from_bytes(40 + panel_index as u8 * 8, 90, 160, 255));
+				paint.set_round_size(8.0);
+				let mut view = crate::ui::uiview::UIView::new();
+				view.set_background_color(Color::create_from_bytes(255, 255, 255, 40));
+				let mut text = crate::core::component::text::Text::new();
+				text.set_font_size(14.0);
+				text.set_text(&format!("칸 {}", panel_index));
+				panel_list.push(GeometryCachePanel { transform, paint, view, text });
+			}
+			panel_list
+		}
+
+		/// 기하 캐시 시험의 한 프레임. (프레임 통계를 넘겨 (화소, 남긴 묶음, 드로 콜, 캐시로 그린 수, 다시 적은 수) 를 돌려준다)
+		fn render_geometry_cache_frame(graphic: &mut Graphic, panel_list: &mut [GeometryCachePanel], size: i32, scroll_y: f64) -> (Vec<u8>, u32, u32, u32, u32, u64) {
+			let upload_byte_count_before = graphic.batch_upload_byte_count;
+			unsafe {
+				graphic.get_gl().clear_color(0.1, 0.1, 0.12, 1.0);
+				graphic.get_gl().clear(glow::COLOR_BUFFER_BIT | glow::STENCIL_BUFFER_BIT);
+			}
+			graphic.begin_clip_rect(Rect::create(0.0, 0.0, size as f64, size as f64 - 8.0), 0.0);
+			for (panel_index, panel) in panel_list.iter_mut().enumerate() {
+				graphic.push_state();
+				graphic.translate(4.0 + (panel_index % 4) as f64 * 62.0, 4.0 + (panel_index / 4) as f64 * 42.0 - scroll_y);
+				graphic.draw_component(&mut panel.paint, &panel.transform);
+				graphic.draw_component(&mut panel.view, &panel.transform);
+				graphic.draw_component(&mut panel.text, &panel.transform);
+				graphic.pop_state();
+			}
+			graphic.end_clip_rect();
+			graphic.flush_batch();
+			let (_, _, pixel_list) = graphic.read_framebuffer_pixels();
+			graphic.begin_frame_statistics();
+			(pixel_list, graphic.get_last_frame_retained_batch_count(), graphic.get_last_frame_draw_call_count(), graphic.get_last_frame_geometry_cache_hit_count(), graphic.get_last_frame_geometry_rebuild_count(), graphic.batch_upload_byte_count - upload_byte_count_before)
+		}
+
+		/// 기하 캐시 켬과 끔의 화면이 프레임마다 같고, 멈춘 프레임은 남긴 묶음으로만 그리며, 스크롤은 다시 적지 않는다. (원본 uigeometrycachechrome 과 같은 내용)
+		#[test]
+		fn geometry_cache_matches_uncached_and_retains_still_batches() {
+			const SIZE: i32 = 256;
+			let gl = match crate::core::glstatecache::tests::create_surfaceless_context() {
+				Some(gl) => {
+					gl
+				}
+				None => {
+					return;
+				}
+			};
+			let gl = match Rc::try_unwrap(gl) {
+				Ok(gl) => {
+					gl
+				}
+				Err(_) => {
+					return;
+				}
+			};
+			let mut graphic = Graphic::new(gl, false).unwrap();
+			unsafe {
+				let gl = graphic.get_gl();
+				let texture = gl.create_texture().unwrap();
+				gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+				gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, SIZE, SIZE, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None));
+				let renderbuffer = gl.create_renderbuffer().unwrap();
+				gl.bind_renderbuffer(glow::RENDERBUFFER, Some(renderbuffer));
+				gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, SIZE, SIZE);
+				let framebuffer = gl.create_framebuffer().unwrap();
+				gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+				gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
+				gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(renderbuffer));
+			}
+			graphic.apply_settings(SIZE, SIZE);
+			// 엔진과 같게 기본 글꼴을 시스템 글꼴 사슬로 잇는다.
+			let system_font_description = crate::core::textstringtexturecache::parse_font_string(&format!("10px {}", crate::base::platform::SYSTEM_FONT_STRING));
+			graphic.get_text_string_texture_cache().set_system_font_chain(system_font_description.family_name_list);
+			graphic.get_text_string_texture_cache().set_system_font_fallback_enabled(true);
+
+			// 프레임 차례: 0 ~ 9 멈춤, 10 ~ 19 스크롤, 20 ~ 29 멈춤, 30 에 글 하나 바꿈, 31 ~ 39 멈춤.
+			let scroll_list: Vec<f64> = (0..40).map(|frame_index| if frame_index < 10 { 0.0 } else if frame_index < 20 { (frame_index - 9) as f64 * 3.0 } else { 30.0 }).collect();
+			let mut frame_list_by_mode: Vec<Vec<(Vec<u8>, u32, u32, u32, u32, u64)>> = Vec::new();
+			for is_enabled in [true, false] {
+				graphic.set_geometry_caching_enabled(is_enabled);
+				graphic.begin_frame_statistics();
+				let mut panel_list = create_geometry_cache_panels();
+				let mut frame_list = Vec::new();
+				for (frame_index, scroll_y) in scroll_list.iter().enumerate() {
+					if frame_index == 30 {
+						panel_list[5].text.set_text("바뀐 칸");
+					}
+					frame_list.push(render_geometry_cache_frame(&mut graphic, &mut panel_list, SIZE, *scroll_y));
+				}
+				frame_list_by_mode.push(frame_list);
+			}
+			let (cached_frame_list, plain_frame_list) = (&frame_list_by_mode[0], &frame_list_by_mode[1]);
+			let mut failure_list = Vec::new();
+			for frame_index in 0..scroll_list.len() {
+				let (cached_pixel_list, retained_count, draw_call_count, hit_count, rebuild_count, _) = &cached_frame_list[frame_index];
+				let (plain_pixel_list, plain_retained_count, plain_draw_call_count, plain_hit_count, _, plain_upload_byte_count) = &plain_frame_list[frame_index];
+				if cached_pixel_list != plain_pixel_list {
+					let different_count = cached_pixel_list.iter().zip(plain_pixel_list.iter()).filter(|(cached, plain)| cached != plain).count();
+					failure_list.push(format!("프레임 {} 켬과 끔 화소 다름 {} 칸", frame_index, different_count));
+				}
+				if *plain_hit_count != 0 {
+					failure_list.push(format!("프레임 {} 끈 길이 캐시로 그림 {}", frame_index, plain_hit_count));
+				}
+				let is_still = (2..10).contains(&frame_index) || (22..30).contains(&frame_index) || (32..40).contains(&frame_index);
+				// 캐시를 꺼도 바로 쓴 정점이 지난 프레임과 같으면 다시 올리지 않고(남긴 묶음, 올린 바이트 0), 바꾼 프레임은 다시 올린다.
+				if is_still && (*plain_draw_call_count == 0 || plain_retained_count != plain_draw_call_count || *plain_upload_byte_count != 0) {
+					failure_list.push(format!("프레임 {} 끈 길의 멈춘 프레임인데 남긴 묶음 {} 드로 콜 {} 올린 바이트 {}", frame_index, plain_retained_count, plain_draw_call_count, plain_upload_byte_count));
+				}
+				if frame_index == 30 && (*plain_retained_count >= *plain_draw_call_count || *plain_upload_byte_count == 0) {
+					failure_list.push(format!("프레임 30 끈 길의 바꾼 프레임은 다시 올려야 함: 남김 {} 드로 콜 {} 올린 바이트 {}", plain_retained_count, plain_draw_call_count, plain_upload_byte_count));
+				}
+				if is_still && (*draw_call_count == 0 || retained_count != draw_call_count) {
+					failure_list.push(format!("프레임 {} 멈춤인데 남긴 묶음 {} 드로 콜 {}", frame_index, retained_count, draw_call_count));
+				}
+				let is_scrolling = (11..20).contains(&frame_index);
+				if is_scrolling && (*rebuild_count != 0 || *hit_count != 72) {
+					failure_list.push(format!("프레임 {} 스크롤인데 다시 적음 {} 캐시 {}", frame_index, rebuild_count, hit_count));
+				}
+				if frame_index == 30 && (*rebuild_count != 1 || retained_count >= draw_call_count) {
+					failure_list.push(format!("프레임 30 바꾼 것만 다시 적어야 함: 다시 적음 {} 남김 {} 드로 콜 {}", rebuild_count, retained_count, draw_call_count));
+				}
+			}
+			// 글이 실제로 그려졌는지. (흰 글 화소)
+			// 캐시를 켠 채 칸 하나의 색만 바꾸면(정점 수 그대로) 그 조각만 다시 적고 바뀐 범위만 올려, 처음 올린 바이트보다 적고 0 보다 많다.
+			graphic.set_geometry_caching_enabled(true);
+			let mut panel_list = create_geometry_cache_panels();
+			let first_upload_byte_count = render_geometry_cache_frame(&mut graphic, &mut panel_list, SIZE, 0.0).5;
+			let still_upload_byte_count = render_geometry_cache_frame(&mut graphic, &mut panel_list, SIZE, 0.0).5;
+			let still_upload_byte_count_again = render_geometry_cache_frame(&mut graphic, &mut panel_list, SIZE, 0.0).5;
+			panel_list[20].paint.set_color(Color::create_from_bytes(250, 20, 20, 255));
+			let changed_upload_byte_count = render_geometry_cache_frame(&mut graphic, &mut panel_list, SIZE, 0.0).5;
+			assert!(still_upload_byte_count_again == 0, "멈춘 프레임이 올렸다: {} (처음 {}, 둘째 {})", still_upload_byte_count_again, first_upload_byte_count, still_upload_byte_count);
+			assert!(changed_upload_byte_count > 0 && changed_upload_byte_count < first_upload_byte_count, "색만 바꾼 프레임이 바뀐 범위만 올리지 않았다: 처음 {} 바꾼 프레임 {}", first_upload_byte_count, changed_upload_byte_count);
+			let text_pixel_count = cached_frame_list[0].0.chunks(4).filter(|pixel| pixel[0] > 200 && pixel[1] > 200 && pixel[2] > 200).count();
+			assert!(text_pixel_count > 100, "글이 그려지지 않았다: 흰 화소 {}", text_pixel_count);
+			assert!(failure_list.is_empty(), "기하 캐시가 틀렸다: {:?}", failure_list);
+		}
+
+		/// 묶음 CPU 배열은 사각형 512 개로 시작해 모자라면 한도(8192)까지 두 배씩 늘고, 늘려도 쌓인 정점은 그대로다. (원본 ensureBatchVertexCapacity 와 같은 내용)
+		#[test]
+		fn batch_vertex_array_starts_small_and_doubles_to_limit() {
+			let Some(mut graphic) = create_test_graphic() else {
+				eprintln!("graphic: 창 없는 GL 컨텍스트를 짓지 못해 건너뜀");
+				return;
+			};
+			assert_eq!(graphic.batch_vertex_data.len(), 6 * 512 * BATCH_FLOATS_PER_VERTEX);
+			graphic.batch_vertex_data[7] = 3.5;
+			graphic.ensure_batch_vertex_capacity(6 * 512 + 1);
+			assert_eq!(graphic.batch_vertex_data.len(), 6 * 1024 * BATCH_FLOATS_PER_VERTEX);
+			assert_eq!(graphic.batch_vertex_data[7], 3.5);
+			graphic.ensure_batch_vertex_capacity(6 * 3000);
+			assert_eq!(graphic.batch_vertex_data.len(), 6 * 4096 * BATCH_FLOATS_PER_VERTEX);
+			graphic.ensure_batch_vertex_capacity(BATCH_VERTEX_CAPACITY);
+			assert_eq!(graphic.batch_vertex_data.len(), BATCH_VERTEX_CAPACITY * BATCH_FLOATS_PER_VERTEX);
+		}
+
 		#[test]
 		fn draw_after_outside_gl_change_draws_right() {
 			let Some(mut graphic) = create_test_graphic() else {

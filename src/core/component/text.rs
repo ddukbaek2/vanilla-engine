@@ -35,7 +35,7 @@ use crate::base::math;
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
-use crate::core::graphic::{detect_text_direction, Graphic, TextAlign, TextBaseline, TextDirection};
+use crate::core::graphic::{detect_text_direction, GeometryKey, Graphic, TextAlign, TextBaseline, TextDirection};
 use unicode_segmentation::UnicodeSegmentation;
 use crate::core::node::worldnode::NodeTransform;
 
@@ -617,6 +617,34 @@ pub struct Text {
 	/// 그릴 때의 크기와 폰트 문자열. (맞춰 줄였으면 줄인 크기, update_layout 이 정한다)
 	fitted_font_size: f64,
 	draw_font_string: String,
+}
+
+impl Text {
+	//==============================================================================
+	/// 그리기 입력을 기하 캐시 열쇠에 적기. (UILabel 이 함께 쓴다)
+	//==============================================================================
+	pub(crate) fn write_text_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) {
+		geometry_key.add(&self.text);
+		geometry_key.add(&self.font_family);
+		geometry_key.add(self.font_size);
+		geometry_key.add(self.text_color);
+		geometry_key.add(self.stroke_color);
+		geometry_key.add(self.stroke_width);
+		geometry_key.add(self.is_bold);
+		geometry_key.add(self.is_italic);
+		geometry_key.add(self.is_underline);
+		geometry_key.add(self.is_strikethrough);
+		geometry_key.add(self.text_align as u32);
+		geometry_key.add(self.text_baseline as u32);
+		geometry_key.add(self.text_direction as u32);
+		geometry_key.add(self.word_wrap_width);
+		geometry_key.add(self.wrap_mode as u32);
+		geometry_key.add(self.line_spacing);
+		geometry_key.add(self.visible_character_count);
+		geometry_key.add(self.fit_width);
+		geometry_key.add(self.fit_minimum_ratio);
+		geometry_key.add(transform.get_content_size());
+	}
 }
 
 #[crate::reflect]
@@ -1951,6 +1979,15 @@ impl Component for Text {
 		}
 		let content_size = transform.get_content_size();
 		Some(self.calculate_text_rect(graphic, content_size.x, content_size.y))
+	}
+
+	//==============================================================================
+	/// 그리기 입력 적기. (글, 글꼴, 크기, 색, 굵기와 기울임, 밑줄, 정렬, 줄 나누기, 보일 글자 수, 맞출 너비, 내용 크기, 원본 Text.writeGeometryKey)
+	//==============================================================================
+	#[reflect(skip)]
+	fn write_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) -> bool {
+		self.write_text_geometry_key(transform, geometry_key);
+		true
 	}
 
 	//==============================================================================

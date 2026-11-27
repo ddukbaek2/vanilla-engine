@@ -18,7 +18,7 @@ use crate::base::vector2::Vector2;
 use crate::core::component::richtext::{RichText, RichTextAttributes};
 use crate::core::component::text::{Text, TextWrapMode};
 use crate::core::component::{Component, ComponentBase};
-use crate::core::graphic::{Graphic, TextAlign, TextBaseline, TextDirection};
+use crate::core::graphic::{GeometryKey, Graphic, TextAlign, TextBaseline, TextDirection};
 use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
 use crate::ui::uiview::UIView;
@@ -751,6 +751,19 @@ impl Component for UILabel {
 		let right_x = (text_rect.position.x + text_rect.size.x).max(content_size.x);
 		let bottom_y = (text_rect.position.y + text_rect.size.y).max(content_size.y);
 		Some(Rect::create(left_x, top_y, right_x - left_x, bottom_y - top_y))
+	}
+
+	//==============================================================================
+	/// 그리기 입력 적기. (리치텍스트 모드가 아니면 배경과 품은 Text 의 입력, 리치텍스트 모드는 캐시하지 않는다)
+	//==============================================================================
+	#[reflect(skip)]
+	fn write_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) -> bool {
+		if self.use_rich_text {
+			return false;
+		}
+		self.ui_view.write_background_geometry_key(transform, geometry_key);
+		self.rich_text.get_text_component().write_text_geometry_key(transform, geometry_key);
+		true
 	}
 
 	//==============================================================================

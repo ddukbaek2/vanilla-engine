@@ -6331,6 +6331,7 @@
 						"Default",
 						"From<&str>",
 						"From<&String>",
+						"GeometryKeyValue",
 						"ToReflectValue",
 						"FromReflectValue<'a>"
 					],
@@ -12743,6 +12744,7 @@
 						"Debug",
 						"Default",
 						"PartialEq",
+						"GeometryKeyValue",
 						"ToReflectValue"
 					],
 					"counterpart": {
@@ -15323,6 +15325,7 @@
 						"Mul<f64>",
 						"AddAssign",
 						"SubAssign",
+						"GeometryKeyValue",
 						"ToReflectValue",
 						"FromReflectValue<'a>"
 					],
@@ -21732,6 +21735,58 @@
 								"class": "Component",
 								"name": "draw"
 							}
+						},
+						{
+							"kind": "method",
+							"name": "write_geometry_key",
+							"signature": "fn write_geometry_key(&self, _transform: &NodeTransform, _geometry_key: &mut GeometryKey) -> bool",
+							"params": [
+								{
+									"name": "_transform",
+									"type": "&NodeTransform",
+									"description": {
+										"ko": "이 노드의 트랜스폼. (content_size 를 읽는다)",
+										"en": "The transform of this node. (content_size is read)"
+									}
+								},
+								{
+									"name": "_geometry_key",
+									"type": "&mut GeometryKey",
+									"description": {
+										"ko": "적을 열쇠.",
+										"en": "The key to write into."
+									}
+								}
+							],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "입력을 다 적었으면 true.",
+									"en": "true if all inputs were written."
+								}
+							},
+							"description": {
+								"ko": "그리기 입력을 기하 캐시 열쇠에 적기. (Graphic::draw_component 가 draw 앞에 부른다, 원본 writeGeometryKey)\n- true 를 돌려주는 컴포넌트만 Graphic 이 그린 정점을 캐시해, 적은 입력과 변환이 그대로면 draw 를 부르지 않는다.\n- draw 가 읽는 값(색, 크기, 글, 그림 등)을 모두 적어야 한다. 하나라도 빠지면 바뀐 것을 놓친다. (기본 false, 캐시하지 않음)",
+								"en": "Writes the drawing inputs into the geometry cache key. (Graphic::draw_component calls it before draw, original writeGeometryKey)\n- Only a component that returns true has the vertices Graphic drew cached; if the written inputs and the transform are unchanged, draw is not called.\n- Every value draw reads (color, size, text, image and so on) must be written. If one is missing, a change is missed. (Default false, not cached)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/component.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/component",
+								"class": "Component",
+								"name": "writeGeometryKey"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "색과 크기로만 그리는 컴포넌트의 입력 적기",
+										"en": "Write the inputs of a component drawn only with a color and a size"
+									},
+									"code": "use vanilla::{Color, Component, ComponentBase, GeometryKey, Graphic, NodeTransform, Rect};\n\n#[derive(Default)]\nstruct Box2D {\n\tcomponent_base: ComponentBase,\n\tcolor: Color,\n}\n\nimpl Component for Box2D {\n\tfn get_component_base(&self) -> &ComponentBase {\n\t\t&self.component_base\n\t}\n\n\tfn get_component_base_mut(&mut self) -> &mut ComponentBase {\n\t\t&mut self.component_base\n\t}\n\n\tfn write_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) -> bool {\n\t\tgeometry_key.add(self.color);\n\t\tgeometry_key.add(transform.get_content_size());\n\t\ttrue\n\t}\n\n\tfn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {\n\t\tlet content_size = transform.get_content_size();\n\t\tgraphic.set_fill_color(self.color);\n\t\tgraphic.draw_rect(Rect::create(0.0, 0.0, content_size.x, content_size.y));\n\t}\n}\n\nlet box_2d = Box2D::default();\nlet mut geometry_key = GeometryKey::new();\ngeometry_key.begin();\nprintln!(\"{} {}\", box_2d.write_geometry_key(&NodeTransform::default(), &mut geometry_key), geometry_key.end());",
+									"language": "rust"
+								}
+							]
 						},
 						{
 							"kind": "method",
@@ -42381,6 +42436,164 @@
 					"members": []
 				},
 				{
+					"name": "GeometryKey",
+					"kind": "struct",
+					"summary": {
+						"ko": "기하 캐시 열쇠. (Component::write_geometry_key 가 그리기 입력을 적는 곳, 원본 GeometryKey)\n- add 로 적은 값을 지난번에 적은 값과 차례대로 견준다. 하나라도 다르거나 수가 다르면 바뀐 것으로 본다.\n- 견주며 바로 덮어 적으므로 프레임마다 배열을 새로 만들지 않는다. (글은 바뀐 때만 새로 담는다)",
+						"en": "Geometry cache key. (Where Component::write_geometry_key writes the drawing inputs, original GeometryKey)\n- Values written with add are compared in order with the values written last time. If any differs or the count differs, it counts as changed.\n- It overwrites while comparing, so no array is created every frame. (Text is stored again only when it changed)"
+					},
+					"traits": [
+						"Clone",
+						"Debug",
+						"Default"
+					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "core/graphic",
+						"class": "GeometryKey"
+					},
+					"source": "src/core/graphic.rs",
+					"members": [
+						{
+							"kind": "constructor",
+							"name": "new",
+							"signature": "pub fn new() -> GeometryKey",
+							"params": [],
+							"returns": {
+								"type": "GeometryKey",
+								"description": {
+									"ko": "빈 열쇠. (처음 end 는 false)",
+									"en": "An empty key. (The first end is false)"
+								}
+							},
+							"description": {
+								"ko": "생성.",
+								"en": "Constructor."
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "GeometryKey",
+								"name": "constructor"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "begin",
+							"signature": "pub fn begin(&mut self)",
+							"params": [],
+							"description": {
+								"ko": "적기 시작. (Graphic 이 write_geometry_key 앞에 부른다)",
+								"en": "Starts writing. (Graphic calls it before write_geometry_key)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "GeometryKey",
+								"name": "begin"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "add",
+							"signature": "pub fn add(&mut self, value: impl GeometryKeyValue)",
+							"params": [
+								{
+									"name": "value",
+									"type": "impl GeometryKeyValue",
+									"description": {
+										"ko": "그리기가 읽는 값. (Rc 는 가리키는 자리로 견준다, 원본의 객체 참조 견주기)",
+										"en": "A value that drawing reads. (Rc is compared by the address it points to, like the original's object reference comparison)"
+									}
+								}
+							],
+							"description": {
+								"ko": "값 하나 적기. (수, 참거짓, 글, 색, 벡터, 사각형, 공유 객체(Rc), Option)",
+								"en": "Writes one value. (number, bool, text, color, vector, rectangle, shared object (Rc), Option)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "GeometryKey",
+								"name": "add"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "end",
+							"signature": "pub fn end(&mut self) -> bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "이번에 적은 값이 지난번과 모두 같으면 true. (처음 적은 때는 false)",
+									"en": "true if everything written this time equals what was written last time. (false the first time)"
+								}
+							},
+							"description": {
+								"ko": "적기 끝. (지난번과 같으면 true)",
+								"en": "Ends writing. (true if the same as last time)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "GeometryKey",
+								"name": "end"
+							}
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "그리기 입력을 적고 바뀌었는지 보기",
+								"en": "Write the drawing inputs and see whether they changed"
+							},
+							"code": "use vanilla::GeometryKey;\n\nlet mut geometry_key = GeometryKey::new();\ngeometry_key.begin();\ngeometry_key.add(10.0);\ngeometry_key.add(\"#ff0000\");\nprintln!(\"{}\", geometry_key.end());\ngeometry_key.begin();\ngeometry_key.add(10.0);\ngeometry_key.add(\"#ff0000\");\nprintln!(\"{}\", geometry_key.end());\ngeometry_key.begin();\ngeometry_key.add(12.0);\ngeometry_key.add(\"#ff0000\");\nprintln!(\"{}\", geometry_key.end());",
+							"language": "rust"
+						}
+					]
+				},
+				{
+					"name": "GeometryKeyValue",
+					"kind": "trait",
+					"summary": {
+						"ko": "GeometryKey::add 로 적을 수 있는 값. (원본 add 가 받는 수, 글, 참거짓, 객체 참조, null)",
+						"en": "A value that can be written with GeometryKey::add. (a number, text, bool, object reference or null, as the original add accepts)"
+					},
+					"source": "src/core/graphic.rs",
+					"members": [
+						{
+							"kind": "method",
+							"name": "add_to_geometry_key",
+							"signature": "fn add_to_geometry_key(self, geometry_key: &mut GeometryKey)",
+							"params": [
+								{
+									"name": "geometry_key",
+									"type": "&mut GeometryKey",
+									"description": {
+										"ko": "적을 열쇠.",
+										"en": "The key to write into."
+									}
+								}
+							],
+							"description": {
+								"ko": "열쇠에 이 값을 적기.",
+								"en": "Writes this value into the key."
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs"
+						}
+					]
+				},
+				{
 					"name": "Graphic",
 					"kind": "struct",
 					"summary": {
@@ -43520,6 +43733,188 @@
 									"language": "rust"
 								}
 							]
+						},
+						{
+							"kind": "method",
+							"name": "set_geometry_caching_enabled",
+							"signature": "pub fn set_geometry_caching_enabled(&mut self, is_geometry_caching_enabled: bool)",
+							"params": [
+								{
+									"name": "is_geometry_caching_enabled",
+									"type": "bool",
+									"description": {
+										"ko": "켤지.",
+										"en": "Whether to turn it on."
+									}
+								}
+							],
+							"description": {
+								"ko": "기하 캐시 켜기 / 끄기. (기본 켜짐, 원본 setGeometryCachingEnabled)\n- 켜져 있으면 write_geometry_key 로 그리기 입력을 알리는 컴포넌트(Paint, UIView, Text, Sprite 등)가 그린 정점을 컴포넌트마다 캐시해 둔다.\n  입력, 변환, 투명도가 그대로면 draw 를 부르지 않고 캐시를 묶음에 옮기고, 이동(스크롤 등)만 바뀌면 캐시한 지역 정점에 새 행렬만 곱한다.\n- 캐시 조각만으로 찬 묶음은 프레임의 그리기 차례마다 GPU 버퍼에 남겨, 바뀐 것이 없으면 정점을 올리지 않고 드로 콜만 낸다.\n- 끄면 늘 draw 를 부른다. (화면은 같다)",
+								"en": "Turns the geometry cache on or off. (On by default, original setGeometryCachingEnabled)\n- While on, components that report their drawing inputs with write_geometry_key (Paint, UIView, Text, Sprite and so on) have the vertices they drew cached per component.\n  If the inputs, transform and opacity are unchanged, draw is not called and the cache is moved into the batch; if only the translation changed (scrolling and so on), only the new matrix is applied to the cached local vertices.\n- A batch filled only with cache pieces is kept in a GPU buffer per draw order in the frame, and when nothing changed only the draw call is issued without uploading vertices.\n- When off, draw is always called. (The picture is the same)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "setGeometryCachingEnabled"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "기하 캐시를 켜고 지난 프레임에 캐시로 그린 수 보기",
+										"en": "Turn the geometry cache on and see how many were drawn from the cache last frame"
+									},
+									"code": "use vanilla::Graphic;\n\nfn draw(graphic: &mut Graphic) {\n\tgraphic.set_geometry_caching_enabled(true);\n\tprintln!(\"{} {}\", graphic.is_geometry_caching_enabled(), graphic.get_last_frame_geometry_cache_hit_count());\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "is_geometry_caching_enabled",
+							"signature": "pub fn is_geometry_caching_enabled(&self) -> bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "켜져 있으면 true. (처음 true)",
+									"en": "true if on. (true at first)"
+								}
+							},
+							"description": {
+								"ko": "기하 캐시가 켜져 있는지.",
+								"en": "Whether the geometry cache is on."
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "isGeometryCachingEnabled"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_last_frame_geometry_cache_hit_count",
+							"signature": "pub fn get_last_frame_geometry_cache_hit_count(&self) -> u32",
+							"params": [],
+							"returns": {
+								"type": "u32",
+								"description": {
+									"ko": "캐시한 정점을 옮기거나 행렬만 다시 걸어 그린 컴포넌트 수.",
+									"en": "The number of components drawn by moving the cached vertices or only re-applying the matrix."
+								}
+							},
+							"description": {
+								"ko": "지난 프레임에 기하 캐시로 그린 컴포넌트 수. (draw 를 부르지 않은 것)",
+								"en": "The number of components drawn from the geometry cache last frame. (draw was not called)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "getLastFrameGeometryCacheHitCount"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_last_frame_geometry_rebuild_count",
+							"signature": "pub fn get_last_frame_geometry_rebuild_count(&self) -> u32",
+							"params": [],
+							"returns": {
+								"type": "u32",
+								"description": {
+									"ko": "입력이나 배율, 회전 등이 바뀌어 draw 를 다시 부른 컴포넌트 수.",
+									"en": "The number of components whose draw was called again because the input, scale, rotation and so on changed."
+								}
+							},
+							"description": {
+								"ko": "지난 프레임에 기하 캐시를 다시 적은 컴포넌트 수. (캐시하는 컴포넌트 가운데 draw 를 부른 것)",
+								"en": "The number of components whose geometry cache was written again last frame. (those among cached components that called draw)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "getLastFrameGeometryRebuildCount"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_last_frame_retained_batch_count",
+							"signature": "pub fn get_last_frame_retained_batch_count(&self) -> u32",
+							"params": [],
+							"returns": {
+								"type": "u32",
+								"description": {
+									"ko": "남긴 버퍼로 그린 묶음 수.",
+									"en": "The number of batches drawn from the kept buffer."
+								}
+							},
+							"description": {
+								"ko": "지난 프레임에 정점을 다시 올리지 않고 GPU 에 남겨 둔 버퍼로 그린 묶음 수.\n- 기하 캐시 조각만으로 찬 묶음이 지난 프레임 같은 차례의 묶음과 조각까지 같으면 정점을 옮기지도 올리지도 않고 드로 콜만 낸다.",
+								"en": "The number of batches drawn last frame from a buffer left on the GPU, without uploading vertices again.\n- A batch whose pieces (geometry cache pieces and the vertex values of directly written spans) are all the same as the batch of the same order last frame issues only the draw call, without moving or uploading vertices.\n- A batch with only part changed has just the changed ranges updated with buffer_sub_data and is not counted here."
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "getLastFrameRetainedBatchCount"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "멈춘 UI 가 남긴 묶음으로 그려지는지 보기",
+										"en": "See whether a still UI is drawn from kept batches"
+									},
+									"code": "use vanilla::Graphic;\n\nfn draw(graphic: &mut Graphic) {\n\tprintln!(\"{} {}\", graphic.get_last_frame_retained_batch_count(), graphic.get_last_frame_draw_call_count());\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "draw_component",
+							"signature": "pub fn draw_component(&mut self, component: &mut dyn Component, transform: &NodeTransform)",
+							"params": [
+								{
+									"name": "component",
+									"type": "&mut dyn Component",
+									"description": {
+										"ko": "그릴 컴포넌트. (캐시는 컴포넌트가 쥔다)",
+										"en": "The component to draw. (the component holds the cache)"
+									}
+								},
+								{
+									"name": "transform",
+									"type": "&NodeTransform",
+									"description": {
+										"ko": "컴포넌트가 붙은 노드의 트랜스폼.",
+										"en": "The transform of the node the component is attached to."
+									}
+								}
+							],
+							"description": {
+								"ko": "컴포넌트 그리기. (노드가 컴포넌트마다 부른다, 기하 캐시를 거친다, 원본 drawComponent)\n- 컴포넌트가 write_geometry_key 로 입력을 알리지 않거나, 캐시가 꺼졌거나, 묶어 그리지 않는 상태면 draw 를 그대로 부른다.\n- 입력과 그리는 상태(배율, 회전, 섞기, 틴트, 글 방향)가 지난번과 같으면:\n  이동과 투명도도 같으면 캐시한 디바이스 정점을 묶음에 그대로 옮기고, 다르면 캐시한 지역 정점에 지금 행렬과 투명도를 다시 건다.\n  (스크롤은 부모의 이동만 바뀌므로 자식 컴포넌트는 draw 없이 행렬 곱만 한다, 글은 픽셀 스냅까지 같게 다시 셈한다)\n- 그 밖에는 draw 를 불러 캐시를 다시 적는다. 그리기 중에 자르기, 층, 섞기 바꾸기 등 묶음 밖의 일을 하면 그 컴포넌트는 캐시하지 않는다.",
+								"en": "Draws a component. (A node calls it per component, goes through the geometry cache, original drawComponent)\n- If the component does not report its inputs with write_geometry_key, the cache is off, or the state is not batched drawing, draw is called as is.\n- If the inputs and the drawing state (scale, rotation, blend, tint, text direction) equal last time:\n  if translation and opacity are also the same, the cached device vertices are moved into the batch as they are; otherwise the current matrix and opacity are applied again to the cached local vertices.\n  (When scrolling only the parent's translation changes, so child components only multiply the matrix without calling draw; text recomputes even the pixel snap the same way)\n- Otherwise draw is called and the cache is written again. If something outside the batch such as clipping, layers or blend changes happens during drawing, that component is not cached."
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "drawComponent"
+							}
 						},
 						{
 							"kind": "method",
@@ -74225,6 +74620,76 @@
 						},
 						{
 							"kind": "method",
+							"name": "read_position",
+							"signature": "pub fn read_position(&self, node_id: NodeId, out: &mut Vector2)",
+							"params": [
+								{
+									"name": "node_id",
+									"type": "NodeId",
+									"description": {
+										"ko": "볼 노드. (없는 노드면 멈춘다)",
+										"en": "Node to read. (panics if the node is missing)"
+									}
+								},
+								{
+									"name": "out",
+									"type": "&mut Vector2",
+									"description": {
+										"ko": "적을 자리.",
+										"en": "The place to write into."
+									}
+								}
+							],
+							"description": {
+								"ko": "전역 위치를 out 에 적는다. (원본 WorldNode.readPosition, TransformNode.readPosition, get_position 과 같은 값)",
+								"en": "Writes the global position into out. (original WorldNode.readPosition, TransformNode.readPosition, the same value as get_position)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/node/nodetree.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/worldnode",
+								"class": "WorldNode",
+								"name": "readPosition"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "read_scale",
+							"signature": "pub fn read_scale(&self, node_id: NodeId, out: &mut Vector2)",
+							"params": [
+								{
+									"name": "node_id",
+									"type": "NodeId",
+									"description": {
+										"ko": "볼 노드. (없는 노드면 멈춘다)",
+										"en": "Node to read. (panics if the node is missing)"
+									}
+								},
+								{
+									"name": "out",
+									"type": "&mut Vector2",
+									"description": {
+										"ko": "적을 자리.",
+										"en": "The place to write into."
+									}
+								}
+							],
+							"description": {
+								"ko": "전역 배율을 out 에 적는다. (원본 TransformNode.readScale, get_scale 과 같은 값)",
+								"en": "Writes the global scale into out. (original TransformNode.readScale, the same value as get_scale)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/node/nodetree.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/transformnode",
+								"class": "TransformNode",
+								"name": "readScale"
+							}
+						},
+						{
+							"kind": "method",
 							"name": "set_scale",
 							"signature": "pub fn set_scale(&mut self, node_id: NodeId, scale: Vector2)",
 							"params": [
@@ -77070,6 +77535,154 @@
 										"en": ""
 									},
 									"code": "use vanilla::{Vector2, WorldNode};\n\nlet mut node = WorldNode::new(\"panel\");\nnode.set_content_size(Vector2::create(30.0, 40.0));\nlet mut content_size = Vector2::zero();\nnode.copy_content_size_to(&mut content_size);\nassert_eq!(content_size, Vector2::create(30.0, 40.0));",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "read_content_size",
+							"signature": "pub fn read_content_size(&self, out: &mut Vector2)",
+							"params": [
+								{
+									"name": "out",
+									"type": "&mut Vector2",
+									"description": {
+										"ko": "적을 자리.",
+										"en": "The place to write into."
+									}
+								}
+							],
+							"description": {
+								"ko": "내용 크기를 out 에 적는다. (원본 readContentSize, get_content_size 과 같은 값, 새 값을 만들지 않고 받을 자리에 적는다)",
+								"en": "Writes the content size into out. (original readContentSize, the same value as get_content_size, writes into the given place without creating a new value)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/node/worldnode.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/worldnode",
+								"class": "WorldNode",
+								"name": "readContentSize"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "",
+										"en": ""
+									},
+									"code": "use vanilla::{Vector2, WorldNode};\n\nlet mut node = WorldNode::new(\"panel\");\nnode.set_content_size(Vector2::create(30.0, 40.0));\nlet mut out = Vector2::zero();\nnode.read_content_size(&mut out);\nassert_eq!(out, Vector2::create(30.0, 40.0));",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "read_pivot",
+							"signature": "pub fn read_pivot(&self, out: &mut Vector2)",
+							"params": [
+								{
+									"name": "out",
+									"type": "&mut Vector2",
+									"description": {
+										"ko": "적을 자리.",
+										"en": "The place to write into."
+									}
+								}
+							],
+							"description": {
+								"ko": "피봇을 out 에 적는다. (원본 readPivot, get_pivot 과 같은 값, 새 값을 만들지 않고 받을 자리에 적는다)",
+								"en": "Writes the pivot into out. (original readPivot, the same value as get_pivot, writes into the given place without creating a new value)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/node/worldnode.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/worldnode",
+								"class": "WorldNode",
+								"name": "readPivot"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "",
+										"en": ""
+									},
+									"code": "use vanilla::{Vector2, WorldNode};\n\nlet mut node = WorldNode::new(\"panel\");\nnode.set_pivot(Vector2::create(0.5, 1.0));\nlet mut out = Vector2::zero();\nnode.read_pivot(&mut out);\nassert_eq!(out, Vector2::create(0.5, 1.0));",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "read_local_position",
+							"signature": "pub fn read_local_position(&self, out: &mut Vector2)",
+							"params": [
+								{
+									"name": "out",
+									"type": "&mut Vector2",
+									"description": {
+										"ko": "적을 자리.",
+										"en": "The place to write into."
+									}
+								}
+							],
+							"description": {
+								"ko": "로컬 위치를 out 에 적는다. (원본 readLocalPosition, get_local_position 과 같은 값, 새 값을 만들지 않고 받을 자리에 적는다)",
+								"en": "Writes the local position into out. (original readLocalPosition, the same value as get_local_position, writes into the given place without creating a new value)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/node/worldnode.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/transformnode",
+								"class": "TransformNode",
+								"name": "readLocalPosition"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "",
+										"en": ""
+									},
+									"code": "use vanilla::{Vector2, WorldNode};\n\nlet mut node = WorldNode::new(\"panel\");\nnode.set_local_position(Vector2::create(3.0, 4.0));\nlet mut out = Vector2::zero();\nnode.read_local_position(&mut out);\nassert_eq!(out, Vector2::create(3.0, 4.0));",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "read_local_scale",
+							"signature": "pub fn read_local_scale(&self, out: &mut Vector2)",
+							"params": [
+								{
+									"name": "out",
+									"type": "&mut Vector2",
+									"description": {
+										"ko": "적을 자리.",
+										"en": "The place to write into."
+									}
+								}
+							],
+							"description": {
+								"ko": "로컬 배율을 out 에 적는다. (원본 readLocalScale, get_local_scale 과 같은 값, 새 값을 만들지 않고 받을 자리에 적는다)",
+								"en": "Writes the local scale into out. (original readLocalScale, the same value as get_local_scale, writes into the given place without creating a new value)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/node/worldnode.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/transformnode",
+								"class": "TransformNode",
+								"name": "readLocalScale"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "",
+										"en": ""
+									},
+									"code": "use vanilla::{Vector2, WorldNode};\n\nlet mut node = WorldNode::new(\"panel\");\nnode.set_local_scale(Vector2::create(2.0, 0.5));\nlet mut out = Vector2::zero();\nnode.read_local_scale(&mut out);\nassert_eq!(out, Vector2::create(2.0, 0.5));",
 									"language": "rust"
 								}
 							]
@@ -106289,8 +106902,8 @@
 								}
 							],
 							"description": {
-								"ko": "멀티샘플을 텍스처로 풀기. (멀티샘플이 아니면 아무것도 하지 않음, 컬러 어태치먼트마다와 깊이 텍스처, 묶여 있던 프레임버퍼로 돌림)",
-								"en": "Resolves multisample into textures. (Does nothing if not multisampled, for each color attachment and the depth texture, restores the previously bound framebuffer)"
+								"ko": "멀티샘플을 텍스처로 풀기. (컬러 어태치먼트마다와 깊이 텍스처, 묶여 있던 프레임버퍼로 돌림, 원본 resolve())\n- 그리기를 끝낸 뒤 다시 읽지 않는 첨부(멀티샘플 색과 깊이, 텍스처가 아닌 깊이 렌더버퍼)를 버린다. (invalidate_framebuffer, 모바일 타일 GPU 가 메모리에 쓰지 않는다)\n- 풀고 나서 같은 판에 이어 그리려면 resolve_with_attachment_kept(gl, true).",
+								"en": "Resolves multisample into textures. (each color attachment and the depth texture, returns to the previously bound framebuffer, original resolve())\n- Discards the attachments not read again after drawing (multisample color and depth, a depth renderbuffer that is not a texture). (invalidate_framebuffer, a mobile tile GPU does not write them to memory)\n- To keep drawing on the same pass after resolving, use resolve_with_attachment_kept(gl, true)."
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/rendertarget.rs",
@@ -106300,6 +106913,51 @@
 								"class": "RenderTarget",
 								"name": "resolve"
 							}
+						},
+						{
+							"kind": "method",
+							"name": "resolve_with_attachment_kept",
+							"signature": "pub fn resolve_with_attachment_kept(&self, gl: &GlContext, is_attachment_kept: bool)",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&GlContext",
+									"description": {
+										"ko": "GL 컨텍스트.",
+										"en": "GL context."
+									}
+								},
+								{
+									"name": "is_attachment_kept",
+									"type": "bool",
+									"description": {
+										"ko": "true 면 첨부를 버리지 않는다. (풀고 나서 같은 판에 이어 그릴 때)",
+										"en": "If true the attachments are not discarded. (when continuing to draw on the same pass after resolving)"
+									}
+								}
+							],
+							"description": {
+								"ko": "멀티샘플을 텍스처로 풀기. (첨부를 남길지 고른다, 원본 resolve(isAttachmentKept))",
+								"en": "Resolves multisample into textures. (chooses whether to keep the attachments, original resolve(isAttachmentKept))"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/rendertarget.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/rendertarget",
+								"class": "RenderTarget",
+								"name": "resolve"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "풀고 나서 같은 판에 이어 그리기",
+										"en": "Keep drawing after resolving"
+									},
+									"code": "use vanilla::{RenderTarget, RenderTargetOptions};\n\nfn render_twice(gl: &vanilla::GlContext) -> Result<(), String> {\n\tlet options = RenderTargetOptions { sample_count: 4, ..RenderTargetOptions::default() };\n\tlet render_target = RenderTarget::new(gl, 128, 128, true, Some(options))?;\n\trender_target.bind(gl);\n\trender_target.resolve_with_attachment_kept(gl, true);\n\trender_target.bind(gl);\n\trender_target.resolve(gl);\n\tprintln!(\"{}\", render_target.get_sample_count());\n\tOk(())\n}",
+									"language": "rust"
+								}
+							]
 						},
 						{
 							"kind": "method",
