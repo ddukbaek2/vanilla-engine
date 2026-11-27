@@ -2729,7 +2729,7 @@ fn read_family_name(face: &rustybuzz::Face<'_>) -> String {
 ///   skrifa 의 Target::Smooth 에 symmetric_rendering 참, preserve_linear_metrics 거짓. 힌팅이 꼭 있어야 하는 글꼴은 Strong. (스키아 src/ports/fontations/src/hinting.rs, SkTypeface_fontations.cpp)
 /// - 서브픽셀 자리: 블링크는 힌팅이 꽉이 아니면 서브픽셀 자리를 켠다. (WebFontRenderStyle::ApplyToSkFont)
 /// - 감마 전보정: 크롬 리눅스의 감마 1.2, 대비 0.2. (크로미엄 skia/BUILD.gn, Fontations 의 onFilterRec 은 FreeType 과 달리 A8 의 전보정을 끄지 않는다)
-/// - 칠하기는 엔진의 면적 덮개 래스터라이저다. (스키아는 해석적 AA SkScan_AAAPath 라 끝자리가 조금 다를 수 있다)
+/// - 칠하기는 스키아 SkScan_AAAPath 와 같은 해석적 AA 다. (core/analyticrasterizer.rs, 상자는 조절점까지 넣은 경로 경계를 내림, 올림한 것)
 //==============================================================================
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 fn rasterize_hinted_outline_mask(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32, subpixel_x: f32, luminance_color: [u8; 3]) -> Option<GlyphRaster> {
@@ -2832,7 +2832,7 @@ fn rasterize_hinted_outline_mask(face: &ResolvedFontFace, glyph_index: u16, pixe
 		};
 		outline_glyph.draw(settings, &mut outline_pen).is_ok()
 	};
-	let mut glyph_raster = match colorglyph::rasterize_outline(&draw_outline, 1.0) {
+	let mut glyph_raster = match crate::core::analyticrasterizer::rasterize_outline(&draw_outline, 1.0) {
 		Some((coverage, width, height, left_x, top_y)) => {
 			GlyphRaster {
 				coverage,

@@ -42,6 +42,7 @@ pub mod textshaping;
 pub(crate) mod avifimage;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod maskgamma;
+pub(crate) mod analyticrasterizer;
 pub(crate) mod blurshadow;
 pub(crate) mod colorprofile;
 pub(crate) mod jpegimage;
