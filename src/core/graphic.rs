@@ -2945,11 +2945,11 @@ impl Graphic {
 	}
 
 	//==============================================================================
-	/// 부드러운 원 텍스처 반환. (가운데가 불투명하고 가장자리로 갈수록 투명. 지연 생성)
+	/// 부드러운 원 텍스처 반환. (가장자리가 잦아드는 64x64 원, 파티클 기본 스프라이트. 지연 생성)
 	/// - GL 텍스처를 만들지 못하면 패닉한다.
 	///
 	/// # 돌려줌
-	/// 64 x 64 픽셀 텍스처. (가운데에서 가장자리로 (1 - 거리)^2 로 흐려지는 흰 원, 프리멀티플라이드)
+	/// 64 x 64 픽셀 텍스처. (반지름 0.7 까지 꽉 차고 0.7 에서 1 까지 smoothstep 으로 사라지는 흰 원, 프리멀티플라이드)
 	//==============================================================================
 	pub fn get_soft_disc_texture(&mut self) -> GlTexture {
 		if let Some(soft_disc_texture) = self.soft_disc_texture {
@@ -2962,8 +2962,11 @@ impl Graphic {
 				let delta_x = (pixel_x as f64 + 0.5 - half_size) / half_size;
 				let delta_y = (pixel_y as f64 + 0.5 - half_size) / half_size;
 				let distance = (delta_x * delta_x + delta_y * delta_y).sqrt();
-				let falloff = math::clamp01(1.0 - distance);
-				let alpha = (falloff * falloff * 255.0).round() as u8;
+
+				// 중심은 꽉 차고 가장자리에서 부드럽게 사라진다.
+				let mut alpha_ratio = math::clamp01(1.0 - (distance - 0.7) / 0.3);
+				alpha_ratio = alpha_ratio * alpha_ratio * (3.0 - 2.0 * alpha_ratio);
+				let alpha = (alpha_ratio * 255.0).round() as u8;
 				let pixel_index = (pixel_y * SOFT_DISC_TEXTURE_SIZE + pixel_x) * 4;
 				pixels[pixel_index] = alpha;
 				pixels[pixel_index + 1] = alpha;

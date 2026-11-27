@@ -42,6 +42,7 @@
 //! 화면 넘기기는 플랫폼이 update_engine 다음에 한다.
 //==============================================================================
 use crate::base::color::Color;
+use crate::base::format::{format_fixed, number_to_string};
 use crate::core::textshaping::FontFaceDescriptors;
 use crate::base::pivot::Pivot;
 use crate::base::platform::Platform;
@@ -76,6 +77,9 @@ pub(crate) const DEFAULT_ENGINE_TITLE: &str = "바닐라엔진";
 
 /// 씬이 맡긴 애셋이 다 끝난 뒤에도 로딩 화면을 더 보이는 시간. (초, 원본 SceneManager.loadScene 의 setTimeout 300)
 const SCENE_LOAD_EXTRA_WAIT_SECONDS: f64 = 0.3;
+
+/// 찍기 모드의 한 프레임 간격. (밀리초, 1/60 초. 원본 CAPTURE_FRAME_MILLISECONDS 와 같은 셈이 되게 밀리초로 두고 0.001 을 곱한다)
+const CAPTURE_FRAME_MILLISECONDS: f64 = 1000.0 / 60.0;
 
 //==============================================================================
 /// 엔진 설정.
@@ -324,6 +328,8 @@ pub struct Engine {
 	pending_font_operation_list: Vec<PendingFontOperation>,
 	pending_default_font_handle: Option<AssetLoadHandle>,
 	platform: Platform,
+	/// 개발 정보 글이 차지한 영역. (원본 #statisticsTextRect, 배경 판은 앞 프레임의 영역으로 그린다. 너비는 늘기만 한다)
+	statistics_text_rect: Rect,
 	next_scene_number: u64,
 	pending_unload_scene_id_list: Vec<SceneId>,
 	/// 불러온(create 를 부른) 씬의 핸들. (불러온 차례, get_all_loaded_scenes)
@@ -376,6 +382,7 @@ impl Engine {
 			pending_font_operation_list: Vec::new(),
 			pending_default_font_handle: None,
 			platform: Platform::new(),
+			statistics_text_rect: Rect::zero(),
 			next_scene_number: 0,
 			pending_unload_scene_id_list: Vec::new(),
 			loaded_scene_id_list: Vec::new(),
@@ -1876,6 +1883,8 @@ impl Engine {
 /// - VANILLA_CAPTURE_EXIT:   1 이면 마지막 저장 뒤 끝낸다.
 /// - VANILLA_CAPTURE_SHOW_WINDOW: 1 이면 창을 보인다. (찍기 모드의 데스크탑 창은 기본으로 숨긴다)
 /// - 찍기 모드는 표준 오류에 프레임마다 "Engine: 찍기 진행 프레임 <번호> / <마지막 번호>, <지난 초> 초" 를, 데스크탑은 처음에 GL 렌더러와 판을 남긴다.
+/// - 찍기 모드는 결정적으로 찍게 TimeManager 의 시간이 실제 시각 대신 프레임마다 1/60 초씩 간다. (프레임 번호 x 1000 / 60 밀리초 x 0.001, 원본 ?capture 찍기 모드와 같은 셈)
+///   씬의 로딩 뒤 0.3 초 기다림은 원본 setTimeout 처럼 실제 시각이다.
 /// - 웹: ?capture=120,240 (번호, 빈 값이면 120), captureName=파일 이름("{frame}" 은 번호, 기본 capture_{frame}.png), captureExit=1. 내려받기로 저장한다.
 //==============================================================================
 struct CaptureRequest {
@@ -2323,8 +2332,15 @@ impl EngineRunner {
 		graphic.apply_settings(canvas_pixel_size.x as i32, canvas_pixel_size.y as i32);
 
 		// 시간 처리.
+		// 찍기 모드는 결정적으로 찍게 실제 시각 대신 프레임 번호 x 1/60 초를 쓴다. (기계 빠르기와 상관없이 같은 프레임에 같은 시간, 원본과 같은 셈)
 		let seconds_since_startup = self.start_instant.elapsed().as_secs_f64();
-		self.engine.time_manager.update(seconds_since_startup);
+		let engine_seconds_since_startup = if self.capture_request.is_some() {
+			read_capture_seconds_since_startup(self.engine.frame_number)
+		}
+		else {
+			seconds_since_startup
+		};
+		self.engine.time_manager.update(engine_seconds_since_startup);
 		let time_delta = self.engine.time_manager.get_time_delta();
 
 		// 입력 처리.
@@ -2440,27 +2456,94 @@ impl EngineRunner {
 }
 
 //==============================================================================
-/// 개발 정보 출력. (왼쪽 위에 FPS, 드로우 콜, 정점 수, 화면 밖이라 거른 노드 수)
+/// 개발 정보 출력. (원본 drawStatistics, 왼쪽 위 1.4 배에 엔진 판, 플랫폼, 화면, 입력, 시간, 그리기 수를 줄마다 16 씩)
+/// - 변환을 장치 픽셀 단위 기본으로 되돌리고 1.4 배로 그린다. 배경 판(검정 60%, 둥근 모서리 12)은 앞 프레임에 쌓은 글 영역으로 그린다.
+/// - 글꼴은 "16px DOSGothic"(없으면 시스템 글꼴), 왼쪽 위 기준, 흰색. 빈 글 줄은 그리지 않고 자리만 16 내린다.
 //==============================================================================
-fn draw_statistics(engine: &Engine, graphic: &mut Graphic) {
-	let view_manager = engine.get_view_manager();
-	let time_manager = engine.get_time_manager();
-	view_manager.apply_canvas_native_rect(graphic);
+fn draw_statistics(engine: &mut Engine, graphic: &mut Graphic) {
+	let mut text_position = Vector2::create(16.0, 16.0);
+	engine.statistics_text_rect.position = text_position;
 
-	let frame_per_second = time_manager.get_frame_per_second();
-	let draw_call_count = graphic.get_last_frame_draw_call_count();
-	let vertex_count = graphic.get_last_frame_vertex_count();
-	let culled_node_count = graphic.get_last_frame_culled_node_count();
-	let statistics_text = format!("FPS {}  DrawCall {}  Vertex {}  Culled {}", frame_per_second, draw_call_count, vertex_count, culled_node_count);
-
-	graphic.set_font_string("14px default");
-	let text_metrics = graphic.measure_text(&statistics_text);
+	// 배경 출력.
+	// 기본 위치인 화면 좌상단으로 이동.
+	graphic.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+	graphic.scale(1.4, 1.4);
 	graphic.set_fill_color(Color::create(0.0, 0.0, 0.0, 0.6));
-	graphic.draw_rect(Rect::create(4.0, 4.0, text_metrics.width + 12.0, 22.0));
+	let statistics_text_rect = engine.statistics_text_rect;
+	graphic.draw_round_rect(Rect::create(
+		statistics_text_rect.position.x - 10.0,
+		statistics_text_rect.position.y - 10.0,
+		statistics_text_rect.size.x + 20.0,
+		statistics_text_rect.size.y + 20.0,
+	), 12.0);
+	engine.statistics_text_rect.size.y = 0.0;
+
+	graphic.set_font_string("16px DOSGothic");
 	graphic.set_text_align(TextAlign::Left);
-	graphic.set_text_baseline(TextBaseline::Middle);
+	graphic.set_text_baseline(TextBaseline::Top);
 	graphic.set_fill_color(Color::white());
-	graphic.draw_fill_text(&statistics_text, 10.0, 15.0);
+
+	let mut text_list: Vec<String> = Vec::new();
+
+	// 플랫폼 정보 출력.
+	let (platform_type, browser_type) = engine.platform.get_platform_info();
+	text_list.push(format!("engineVersion: {}", engine.get_version_string()));
+	text_list.push(format!("platformName: {}", platform_type.get_name()));
+	text_list.push(format!("browserName: {}", browser_type.get_name()));
+	text_list.push(String::new());
+
+	// 화면 정보 출력.
+	let view_manager = engine.get_view_manager();
+	let input_manager = engine.get_input_manager();
+	let time_manager = engine.get_time_manager();
+	let canvas_native_size = view_manager.get_canvas_native_size();
+	let view_scale_mode = view_manager.get_view_scale_mode();
+	let reference_resolution_size = view_manager.get_reference_resolution_size();
+	let view_native_rect = view_manager.get_view_native_rect();
+	let view_size = view_manager.get_view_size();
+	let canvas_native_input_position = input_manager.get_canvas_native_input_position();
+	let view_input_position = input_manager.get_view_input_position();
+	let format_pair = |x: f64, y: f64| -> String {
+		format!("({}, {})", number_to_string(x), number_to_string(y))
+	};
+	text_list.push(format!("canvasNativeSize: {}", format_pair(canvas_native_size.x, canvas_native_size.y)));
+	text_list.push(format!("referenceResolutionSize: {}", format_pair(reference_resolution_size.x, reference_resolution_size.y)));
+	text_list.push(format!("viewScaleMode: {}", view_scale_mode.get_name()));
+	text_list.push(format!("viewNativeRect: {} - {}", format_pair(view_native_rect.position.x, view_native_rect.position.y), format_pair(view_native_rect.size.x, view_native_rect.size.y)));
+	text_list.push(format!("viewSize: {}", format_pair(view_size.x, view_size.y)));
+	text_list.push(format!("canvasNativeInputPosition: {}", format_pair(canvas_native_input_position.x, canvas_native_input_position.y)));
+	text_list.push(format!("viewInputPosition: {}", format_pair(view_input_position.x, view_input_position.y)));
+	text_list.push(String::new());
+
+	// 초당 프레임 정보 출력.
+	text_list.push(format!("time: {}s", format_fixed(time_manager.get_time(), 2)));
+	text_list.push(format!("framePerSecond: {}", time_manager.get_frame_per_second()));
+	text_list.push(format!("timeDelta: {}s", format_fixed(time_manager.get_time_delta(), 3)));
+	text_list.push(format!("drawCalls: {}", graphic.get_last_frame_draw_call_count()));
+	text_list.push(format!("vertices: {}", graphic.get_last_frame_vertex_count()));
+	text_list.push(format!("triangles: {}", graphic.get_last_frame_triangle_count()));
+	text_list.push(format!("culledNodes: {}", graphic.get_last_frame_culled_node_count()));
+
+	for text in text_list.iter() {
+		if !text.is_empty() {
+			graphic.draw_fill_text(text, text_position.x, text_position.y);
+		}
+
+		// 위치 증가.
+		text_position.y += 16.0;
+
+		// 영역 넓히기.
+		let text_metrics = graphic.measure_text(text);
+		engine.statistics_text_rect.size.x = engine.statistics_text_rect.size.x.max(text_metrics.width);
+		engine.statistics_text_rect.size.y += 16.0;
+	}
+}
+
+//==============================================================================
+/// 찍기 모드의 엔진 시각. (초, 프레임 번호 x 1000 / 60 밀리초 x 0.001. 원본 updateEngine 의 찍기 모드 timestamp 와 TimeManager.update 의 0.001 곱과 같은 셈)
+//==============================================================================
+fn read_capture_seconds_since_startup(frame_number: u64) -> f64 {
+	(frame_number as f64 * CAPTURE_FRAME_MILLISECONDS) * 0.001
 }
 
 //==============================================================================
@@ -2901,6 +2984,18 @@ mod tests {
 	//==============================================================================
 	/// 화면 저장 요청은 지난 번호면 지금 프레임으로, 번호 글은 쉼표로 여럿(같은 번호 한 번, 없으면 120), PNG 로 굽는다.
 	//==============================================================================
+	#[test]
+	fn capture_time_step_matches_original() {
+		// 찍기 모드는 프레임마다 1/60 초. 30 번째 프레임의 시간은 원본을 헤드리스 크롬 ?capture=30 으로 돌려 읽은 값과 같다.
+		let mut time_manager = TimeManager::new();
+		for frame_number in 1..=30 {
+			time_manager.update(read_capture_seconds_since_startup(frame_number));
+		}
+		assert_eq!(time_manager.get_time(), 0.48333333333333345);
+		assert_eq!(time_manager.get_time_delta(), 0.01666666666666672);
+		assert_eq!(time_manager.get_realtime_since_startup(), 0.5000000000000001);
+	}
+
 	#[test]
 	fn frame_capture_request_and_frame_numbers() {
 		let mut engine = Engine::new(EngineConfiguration::new());

@@ -4,6 +4,8 @@
 //   captureexamples.cjs 가 <그림 폴더>/<이름표>_<예제>_<프레임>.png 을 먼저 찍어 두어야 한다.
 // - vanilla.js 폴더를 뿌리로 정적 서버를 띄우고, 예제 페이지를 러스트 예제와 같은 값(쿼리)과 같은 크기로 연다.
 //   기기 배율은 러스트 그림 폭 / 페이지 폭이다. (러스트 창의 배율과 같게)
+// - 원본도 엔진의 찍기 모드(?capture=<프레임>)로 러스트와 같은 프레임 번호의 캔버스를 받는다. 두 엔진 모두 찍기 모드에서는 시간이 프레임마다 1/60 초씩 가서
+//   같은 프레임에 같은 시간이다. (원본이 내려받기로 넘기는 PNG data URL 을 페이지 앞에 심은 함수가 가로챈다)
 // - 크롬 그림 <이름표>_<예제>_chrome.png, 차이 그림 <이름표>_<예제>_diff.png(차이를 4 배), 크롬 콘솔 <이름표>_<예제>_chrome.log 을 쓴다.
 // - 견준 값: RGB 의 평균 절대 차이(0 ~ 1), 가장 큰 차이(0 ~ 255), 차이가 2 / 255 넘는 화소와 16 / 255 넘는 화소의 몫. <이름표>_chrome.json 에 모은다.
 // - 크롬의 WebGL 은 GPU 가 없는 기계라 SwiftShader 로, 러스트는 메사 llvmpipe 로 그려 래스터라이저가 다르다. 끝 코드는 찍지 못했을 때만 1 이다. (차이는 값으로 본다)
@@ -30,8 +32,8 @@ const PAIR_LIST = [
 	{ name: "physics2d", frame: "60", page: "examples/physics2d/index.html", query: "?prestep=180", width: 1280, height: 720 },
 	{ name: "tilemapshowcase", frame: "60", page: "examples/tilemapshowcase/index.html", query: "?time=1.25", width: 1280, height: 720 },
 ];
-// 페이지가 다 그릴 때까지 기다릴 시간. (밀리초, 네트워크가 쉰 뒤)
-const SETTLE_MILLISECONDS = 4000;
+// 원본 찍기를 기다리는 가장 긴 시간. (밀리초, 소프트웨어 WebGL 이라 느리다)
+const CAPTURE_TIMEOUT_MILLISECONDS = 180000;
 
 const contentTypeTable = {
 	".html": "text/html; charset=utf-8",
@@ -166,9 +168,23 @@ async function main() {
 		page.on("pageerror", (error) => consoleLineList.push(`[pageerror] ${error.message}`));
 		page.on("requestfailed", (request) => consoleLineList.push(`[requestfailed] ${request.url()} ${request.failure() ? request.failure().errorText : ""}`));
 		try {
+			// 원본 찍기 모드의 내려받기(a 요소 click)를 가로채 data URL 을 모은다.
+			await page.evaluateOnNewDocument(() => {
+				const originalClick = HTMLAnchorElement.prototype.click;
+				HTMLAnchorElement.prototype.click = function () {
+					if (this.download && this.href.startsWith("data:image/png")) {
+						globalThis.vanillaCaptureList = globalThis.vanillaCaptureList || [];
+						globalThis.vanillaCaptureList.push(this.href);
+						return;
+					}
+					return originalClick.call(this);
+				};
+			});
 			await page.setViewport({ width: pair.width, height: pair.height, deviceScaleFactor });
-			await page.goto(`http://127.0.0.1:${port}/${pair.page}${pair.query}`, { waitUntil: "networkidle0", timeout: 120000 });
-			await new Promise((resolve) => setTimeout(resolve, SETTLE_MILLISECONDS));
+			const queryText = (pair.query ? pair.query + "&" : "?") + `capture=${pair.frame}`;
+			await page.goto(`http://127.0.0.1:${port}/${pair.page}${queryText}`, { waitUntil: "load", timeout: 120000 });
+			await page.waitForFunction(() => globalThis.vanillaCaptureList && globalThis.vanillaCaptureList.length > 0, { timeout: CAPTURE_TIMEOUT_MILLISECONDS, polling: 100 });
+			const captureDataUrl = await page.evaluate(() => globalThis.vanillaCaptureList[0]);
 			result.webGLRenderer = await page.evaluate(() => {
 				const canvas = document.createElement("canvas");
 				const context = canvas.getContext("webgl2");
@@ -178,7 +194,7 @@ async function main() {
 				const extension = context.getExtension("WEBGL_debug_renderer_info");
 				return extension ? context.getParameter(extension.UNMASKED_RENDERER_WEBGL) : context.getParameter(context.RENDERER);
 			});
-			await page.screenshot({ path: chromePath, type: "png", clip: { x: 0, y: 0, width: pair.width, height: pair.height } });
+			fs.writeFileSync(chromePath, Buffer.from(captureDataUrl.slice(captureDataUrl.indexOf(",") + 1), "base64"));
 			const chromePng = PNG.sync.read(fs.readFileSync(chromePath));
 			const comparison = comparePng(rustPng, chromePng, path.join(shotDirectory, `${tag}_${pair.name}_diff.png`));
 			if (comparison) {

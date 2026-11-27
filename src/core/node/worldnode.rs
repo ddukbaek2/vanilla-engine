@@ -1189,29 +1189,52 @@ impl WorldNode {
 	}
 
 	//==============================================================================
-	/// 기즈모 출력. (content_size 테두리와 피봇 점)
-	/// - 전역 알파를 잠깐 1 로 두고 그린 뒤 되돌린다. 기즈모 표시가 켜진 컴포넌트의 draw_gizmos 도 부른다.
+	/// 기즈모 출력. (기즈모 표시가 켜진 컴포넌트의 draw_gizmos 다음에 content_size 테두리와 피봇 점)
+	/// - 전역 알파를 잠깐 1 로 두고 그린 뒤 되돌린다. 테두리와 피봇 점은 '#00ff00', 테두리 굵기 1, 피봇 점 반지름 4.
 	///
 	/// # 인자
 	/// - `graphic`: 그릴 Graphic. (push_transform 이 걸린 상태)
 	//==============================================================================
 	pub fn draw_gizmos(&mut self, graphic: &mut Graphic) {
+		// 기존 투명도 무효화.
 		let original_alpha = graphic.get_global_alpha();
 		graphic.set_global_alpha(1.0);
 
-		let content_size = self.transform.get_content_size();
-		let pivot = self.transform.get_pivot();
-		graphic.set_stroke_color(Color::create(0.2, 1.0, 0.4, 1.0));
-		graphic.draw_stroke_rect(Rect::create(0.0, 0.0, content_size.x, content_size.y), 1.0);
-		graphic.set_fill_color(Color::create(1.0, 0.3, 0.3, 1.0));
-		graphic.draw_circle(content_size.multiply(pivot), 3.0);
-
+		// 컴포넌트 기즈모 출력.
 		for component in self.components.iter_mut() {
 			if component.is_gizmo_visible() {
 				component.draw_gizmos(&self.transform, graphic);
 			}
 		}
 
+		// 좌표.
+		let content_size = self.transform.get_content_size();
+		let pivot = self.transform.get_pivot();
+		let origin = Vector2::create(content_size.x * pivot.x, content_size.y * pivot.y);
+		let left = 0.0;
+		let top = 0.0;
+		let right = left + content_size.x;
+		let bottom = top + content_size.y;
+
+		// 색상 설정.
+		let gizmo_color = Color::create(0.0, 1.0, 0.0, 1.0);
+		graphic.set_fill_color(gizmo_color);
+		graphic.set_stroke_color(gizmo_color);
+
+		// 범위.
+		graphic.draw_line(&[
+			Vector2::create(left, top),
+			Vector2::create(right, top),
+			Vector2::create(right, bottom),
+			Vector2::create(left, bottom),
+			Vector2::create(left, top),
+		], 1.0);
+
+		// 기준점.
+		let point_size = 4.0;
+		graphic.draw_circle(origin, point_size);
+
+		// 기존 투명도 복원.
 		graphic.set_global_alpha(original_alpha);
 	}
 

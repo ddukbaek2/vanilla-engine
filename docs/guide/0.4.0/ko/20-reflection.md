@@ -584,7 +584,7 @@ node_tree[root_id].add_component(Marker {
 	component_base: ComponentBase::new(),
 });
 
-let json_text = document.to_json_text(&node_tree, root_id, false);
+let json_text = document.to_json_text(&mut node_tree, root_id, false);
 assert!(json_text.contains("\"DegreesPerSecond\":45"));
 assert!(json_text.contains("\"type\":\"Spin\""));
 assert!(json_text.contains("\"type\":\"Marker\""));
@@ -597,7 +597,7 @@ assert_eq!(loaded_spin.get_degrees_per_second(), 45.0);
 - 등록하지 않은 컴포넌트도 반사가 있으면 원본처럼 반사로 적고, `type` 은 타입 이름입니다. 읽을 때는 등록한 종류만 짓고 나머지는 경고를 내고 건너뜁니다.
 - 게터가 없는 컴포넌트(위의 `Marker`)도 반사가 있어 원본처럼 공통 속성과 `type`(타입 이름)으로 적힙니다. 반사 없는 컴포넌트는 컴파일되지 않아 빠지는 컴포넌트가 없습니다.
 - 원본 `REFLECTED_PROPERTY_EXCLUDE_NAMES` 처럼 키가 `Parent`, `Node`, `Owner`, `Scene`, `Content`, `Children`, `AllComponents`, `Component`, `Components`, `Root`, `Graphic`, `Camera`, `Target` 인 속성은 저장하지 않습니다. 게임 컴포넌트의 `get_target`, `set_target` 도 저장되지 않으니 다른 이름을 씁니다.
-- `to_json_text` 는 `&NodeTree` 만 받아 `&mut self` 게터를 읽지 못합니다. 그런 게터가 저장 속성이면 `&mut NodeTree` 를 받는 `to_json_text_mut`, `serialize_node_mut` 로 씁니다.
+- `to_json_text`, `serialize_node` 는 원본 `toJsonText`, `serializeNode` 처럼 한 함수로 `&mut self` 게터까지 읽습니다. 그래서 `&mut NodeTree` 를 받습니다.
 - 트리와 값을 받는 세터는 문서를 읽을 때 컴포넌트를 트리에서 잠깐 꺼내 그 자리에서 부릅니다. (원본과 같은 차례)
 - 쓰기, 읽기 함수를 손으로 짜고 싶으면 반사 대신 `register_component_type_with_handler(이름, 짓는 함수, 쓰기, 읽기)` 로 등록합니다. 노드를 가리키는 반사 속성은 이때도 원본 `saveNodeReferences` 처럼 따로 얹습니다.
 
@@ -644,5 +644,5 @@ assert_eq!(loaded_spin.get_degrees_per_second(), 45.0);
 - `ToReflectValue`, `FromReflectValue`
 - `vanilla::core::reflection` 의 `collect_reflected_properties`, `read_reflected_property`, `read_reflected_property_mut`, `write_reflected_property`, `write_reflected_property_in_tree`, `collect_reflected_getters`, `collect_reflected_getters_in_tree`, `collect_reflected_getters_mut`, `has_mutable_getters`, `COMPONENT_REFLECTED_PROPERTIES`
 - `Component` (상위 트레이트 `Reflect`)
-- `UIDocument` (`register_component_type`, `register_component_type_with_handler`, `save_by_reflection`, `load_by_reflection`, `get_reflected_properties`, `to_json_text_mut`)
+- `UIDocument` (`register_component_type`, `register_component_type_with_handler`, `save_by_reflection`, `load_by_reflection`, `get_reflected_properties`, `to_json_text`)
 - `DevTools` (`set_ui_document`, `get_ui_document_mut`)

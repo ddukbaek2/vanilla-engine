@@ -28147,6 +28147,18 @@
 		},
 		{
 			"vanilla-engine": {
+				"module": "misc/spriteanimator",
+				"class": "SpriteAnimator",
+				"name": "find_sprite"
+			},
+			"vanilla.js": {
+				"module": "misc/spriteanimator",
+				"class": "SpriteAnimator",
+				"name": "findSprite"
+			}
+		},
+		{
+			"vanilla-engine": {
 				"module": "misc/steering2d",
 				"class": "Steering2D"
 			},
@@ -36763,18 +36775,6 @@
 			"vanilla-engine": {
 				"module": "ui/uidocument",
 				"class": "UIDocument",
-				"name": "serialize_node_mut"
-			},
-			"vanilla.js": {
-				"module": "ui/uidocument",
-				"class": "UIDocument",
-				"name": "serializeNode"
-			}
-		},
-		{
-			"vanilla-engine": {
-				"module": "ui/uidocument",
-				"class": "UIDocument",
 				"name": "get_reflected_properties"
 			},
 			"vanilla.js": {
@@ -36836,18 +36836,6 @@
 				"module": "ui/uidocument",
 				"class": "UIDocument",
 				"name": "to_json_text"
-			},
-			"vanilla.js": {
-				"module": "ui/uidocument",
-				"class": "UIDocument",
-				"name": "toJsonText"
-			}
-		},
-		{
-			"vanilla-engine": {
-				"module": "ui/uidocument",
-				"class": "UIDocument",
-				"name": "to_json_text_mut"
 			},
 			"vanilla.js": {
 				"module": "ui/uidocument",
@@ -39153,6 +39141,30 @@
 				"module": "ui/uiscene",
 				"class": "UIScene",
 				"name": "rebuildSafeAreaLayoutGuideConstraints"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiscene",
+				"class": "UISceneBase",
+				"name": "get_dev_tools"
+			},
+			"vanilla.js": {
+				"module": "ui/uiscene",
+				"class": "UIScene",
+				"name": "getDevTools"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiscene",
+				"class": "UISceneBase",
+				"name": "get_dev_tools_mut"
+			},
+			"vanilla.js": {
+				"module": "ui/uiscene",
+				"class": "UIScene",
+				"name": "getDevTools"
 			}
 		},
 		{

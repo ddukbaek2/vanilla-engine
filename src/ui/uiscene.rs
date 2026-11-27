@@ -27,6 +27,7 @@ use crate::core::graphic::Graphic;
 use crate::core::scene::SceneBase;
 use crate::core::viewmanager::ViewScaleMode;
 use crate::game::gamescene::GameSceneBase;
+use crate::misc::devtools::DevTools;
 use crate::ui::autolayout::layoutconstraint::LayoutConstraint;
 use crate::ui::autolayout::layoutsolver::{LayoutError, LayoutSolver};
 use crate::ui::autolayout::layoutstrength::LayoutStrength;
@@ -381,6 +382,35 @@ impl UISceneBase {
 			self.solver.add_constraint(constraint)?;
 		}
 		Ok(())
+	}
+
+	//==============================================================================
+	/// 개발자 도구 반환. (원본 UIScene.getDevTools, initialize 전이거나 EngineConfiguration::use_dev_tools 가 꺼져 있으면 None)
+	///
+	/// # 돌려줌
+	/// 개발자 도구. initialize 전이거나 꺼져 있으면 None.
+	///
+	/// # 예제
+	/// 개발자 도구를 켜지 않은 바탕
+	/// ```rust
+	/// use vanilla::UISceneBase;
+	///
+	/// let ui_scene_base = UISceneBase::new();
+	/// assert!(ui_scene_base.get_dev_tools().is_none());
+	/// ```
+	//==============================================================================
+	pub fn get_dev_tools(&self) -> Option<&DevTools> {
+		self.game_scene_base.get_dev_tools()
+	}
+
+	//==============================================================================
+	/// 개발자 도구 반환. (변경용)
+	///
+	/// # 돌려줌
+	/// 개발자 도구. (변경용) initialize 전이거나 꺼져 있으면 None.
+	//==============================================================================
+	pub fn get_dev_tools_mut(&mut self) -> Option<&mut DevTools> {
+		self.game_scene_base.get_dev_tools_mut()
 	}
 
 	//==============================================================================

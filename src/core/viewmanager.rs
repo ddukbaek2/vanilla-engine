@@ -114,6 +114,52 @@ pub enum ViewScaleMode {
 	StretchShortExpandLong,
 }
 
+impl ViewScaleMode {
+	//==============================================================================
+	/// 원본과 같은 이름 글. (원본 ViewScaleMode 의 값, "stretchShort" 같은 낙타 꼴)
+	///
+	/// # 돌려줌
+	/// 이름 글. ("none", "referenceResolution", "stretchWidth", "stretchHeight", "stretchShort", "stretchWidthExpandHeight", "stretchHeightExpandWidth", "stretchShortExpandLong")
+	///
+	/// # 예제
+	/// 개발 정보 글에 모드 이름 쓰기
+	/// ```rust
+	/// use vanilla::ViewScaleMode;
+	///
+	/// assert_eq!(ViewScaleMode::StretchShort.get_name(), "stretchShort");
+	/// assert_eq!(format!("viewScaleMode: {}", ViewScaleMode::ReferenceResolution.get_name()), "viewScaleMode: referenceResolution");
+	/// ```
+	//==============================================================================
+	pub fn get_name(&self) -> &'static str {
+		match self {
+			ViewScaleMode::None => {
+				"none"
+			}
+			ViewScaleMode::ReferenceResolution => {
+				"referenceResolution"
+			}
+			ViewScaleMode::StretchWidth => {
+				"stretchWidth"
+			}
+			ViewScaleMode::StretchHeight => {
+				"stretchHeight"
+			}
+			ViewScaleMode::StretchShort => {
+				"stretchShort"
+			}
+			ViewScaleMode::StretchWidthExpandHeight => {
+				"stretchWidthExpandHeight"
+			}
+			ViewScaleMode::StretchHeightExpandWidth => {
+				"stretchHeightExpandWidth"
+			}
+			ViewScaleMode::StretchShortExpandLong => {
+				"stretchShortExpandLong"
+			}
+		}
+	}
+}
+
 //==============================================================================
 /// 뷰 매니저. (창 크기와 배율, 기준 해상도, 뷰 스케일 모드로 씬이 그리는 뷰 영역을 셈한다, 엔진이 하나 든다)
 ///

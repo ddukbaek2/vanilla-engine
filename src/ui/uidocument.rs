@@ -14,7 +14,7 @@
 //!     GizmoVisible, Enable, ComponentType 등)와 차례다. 원본 ShadowText 의 FontFace 는 글꼴 객체라 적히지 않는다. 러스트 판의 글꼴 이름 글(get_font_family)은
 //!     `#[reflect(unsaved)]` 로 속성 목록에는 두고 저장에서 뺐다.
 //!   - 트리를 받는 반사 세터(UISnapScrollView 의 SnapCurrentIndex 같은 것)도 원본처럼 읽는 그 자리에서 부른다. 읽는 컴포넌트를 트리에서 잠깐 꺼내 읽기 문맥에 트리를 쥐여 준다.
-//!   - &mut self 게터가 있는 컴포넌트는 to_json_text_mut, serialize_node_mut 가 &mut 갈래로 읽어 적는다. (원본 게터에는 &self, &mut self 구별이 없다)
+//!   - &mut self 게터가 있는 컴포넌트도 to_json_text, serialize_node 가 &mut 갈래로 미리 읽어 적는다. (원본 게터에는 &self, &mut self 구별이 없어 원본 toJsonText, serializeNode 처럼 한 함수다. 트리는 가변으로 받는다)
 //!   - 종류 등록: register_component_type(이름, 짓는 함수)은 원본 registerComponentType 이다. (반사로 쓰고 읽는다) 쓰기, 읽기 함수가 따로 있는 종류는
 //!     register_component_type_with_handler 로, 위젯(content 노드를 만드는 컴포넌트)은 register_widget_type, register_widget_type_with_handler 로 등록한다.
 //!   - 등록하지 않은 종류는 원본처럼 읽을 때 건너뛰고(노드 종류는 WorldNode 로 읽고) 경고를 낸다. 쓸 때 type 은 원본처럼 등록한 이름이고, 등록하지 않은 종류는 반사로 적고 type 은 타입 이름이다. (원본 constructor.name)
@@ -176,7 +176,7 @@ type ReadContentFunction = Box<dyn Fn(&dyn Component) -> Option<NodeId>>;
 type ApplyImageFunction = Box<dyn Fn(&mut dyn Component, Rc<Image>)>;
 /// 찾은 노드를 컴포넌트에 넣는 함수.
 type ApplyNodeFunction = Box<dyn Fn(&mut dyn Component, NodeId)>;
-/// &mut 갈래로 미리 읽어 둔 반사 속성 값. ((노드, 컴포넌트 차례) → (키, 값) 목록, to_json_text_mut)
+/// &mut 갈래로 미리 읽어 둔 반사 속성 값. ((노드, 컴포넌트 차례) → (키, 값) 목록, to_json_text, serialize_node)
 type PrefetchedValueMap = HashMap<(NodeId, usize), Vec<(&'static str, ReflectValue)>>;
 /// 컴포넌트가 이 노드 종류인지 가리는 함수. (종류만으로 가리지 못하는 것, UIWindow 의 behavior 같은 것)
 type MatchNodeTypeFunction = Box<dyn Fn(&dyn Component) -> bool>;
@@ -346,7 +346,7 @@ impl Default for UIDocumentNodeParts {
 /// let badge_id = node_tree.create_node("badge");
 /// node_tree[badge_id].add_component(create_badge()).color = Color::create(1.0, 0.0, 0.0, 1.0);
 ///
-/// let json_text = document.to_json_text(&node_tree, badge_id, false);
+/// let json_text = document.to_json_text(&mut node_tree, badge_id, false);
 /// let document_data: Value = serde_json::from_str(&json_text).expect("json");
 /// assert_eq!(document_data["root"]["type"], "Badge");
 /// assert_eq!(document_data["root"]["components"][0]["type"], "Paint");
@@ -504,7 +504,7 @@ enum ImageLookup {
 /// let follower_id = node_tree.create_child(root_id, "follower");
 /// node_tree[follower_id].add_component(create_follow()).target = Some(leader_id);
 ///
-/// let json_text = document.to_json_text(&node_tree, root_id, false);
+/// let json_text = document.to_json_text(&mut node_tree, root_id, false);
 /// let document_data: Value = serde_json::from_str(&json_text).expect("json");
 /// let component_data = &document_data["root"]["children"][1]["components"][0];
 /// assert_eq!(component_data["target"]["$nodeRef"], "/leader");
@@ -539,7 +539,7 @@ impl<'a> UIDocumentSaveContext<'a> {
 	}
 
 	//==============================================================================
-	/// 반사 속성 값 읽기. (&mut 갈래로 미리 읽어 둔 값이 있으면 그것, 없으면 &self 갈래로 읽는다. to_json_text_mut)
+	/// 반사 속성 값 읽기. (&mut 갈래로 미리 읽어 둔 값이 있으면 그것, 없으면 &self 갈래로 읽는다. to_json_text, serialize_node)
 	//==============================================================================
 	fn read_property(&self, component: &dyn Component, property_name: &str) -> Option<ReflectValue> {
 		if let Some(prefetched_value_list) = self.prefetched_value_map.and_then(|prefetched_value_map| prefetched_value_map.get(&(self.node_id, self.component_index))) {
@@ -760,12 +760,12 @@ impl<'a> UIDocumentLoadContext<'a> {
 /// node_tree.create_child(panel_id, "title");
 ///
 /// let mut document = UIDocument::new();
-/// let json_text = document.to_json_text(&node_tree, panel_id, true);
+/// let json_text = document.to_json_text(&mut node_tree, panel_id, true);
 /// let loaded_id = document.from_json_text(&mut node_tree, &json_text).expect("document");
 /// assert_eq!(node_tree[loaded_id].get_content_size(), Vector2::create(320.0, 200.0));
 /// assert_eq!(node_tree[loaded_id].get_component::<Paint>().expect("paint").get_color(), Color::create(0.2, 0.4, 0.8, 1.0));
 /// assert!(node_tree.find_child_by_name(loaded_id, "title").is_some());
-/// assert_eq!(document.to_json_text(&node_tree, loaded_id, true), json_text);
+/// assert_eq!(document.to_json_text(&mut node_tree, loaded_id, true), json_text);
 /// ```
 ///
 /// 씬 파일을 읽어 씬 뿌리에 붙이기
@@ -965,7 +965,7 @@ impl UIDocument {
 	/// let root_id = node_tree.create_node("root");
 	/// node_tree[root_id].add_component(Spin::new()).set_degrees_per_second(90.0);
 	///
-	/// let json_text = document.to_json_text(&node_tree, root_id, false);
+	/// let json_text = document.to_json_text(&mut node_tree, root_id, false);
 	/// assert!(json_text.contains("\"DegreesPerSecond\":90"));
 	/// let loaded_id = document.from_json_text(&mut node_tree, &json_text).expect("document");
 	/// assert_eq!(node_tree[loaded_id].get_component::<Spin>().expect("spin").get_degrees_per_second(), 90.0);
@@ -1039,7 +1039,7 @@ impl UIDocument {
 	/// let mut node_tree = NodeTree::new();
 	/// let root_id = document.from_json_text(&mut node_tree, json_text).expect("document");
 	/// assert_eq!(node_tree[root_id].get_component::<Spin>().expect("spin").degrees_per_second, 90.0);
-	/// assert!(document.to_json_text(&node_tree, root_id, false).contains("{\"degreesPerSecond\":90,\"type\":\"Spin\"}"));
+	/// assert!(document.to_json_text(&mut node_tree, root_id, false).contains("{\"degreesPerSecond\":90,\"type\":\"Spin\"}"));
 	/// ```
 	//==============================================================================
 	pub fn register_component_type_with_handler<T: Component + 'static>(&mut self, type_name: &str, create_component: fn() -> T, save_component: fn(&T, &UIDocumentSaveContext) -> Map<String, Value>, load_component: fn(&mut T, &Map<String, Value>, &mut UIDocumentLoadContext)) {
@@ -1070,7 +1070,7 @@ impl UIDocument {
 	/// let content_id = node_tree.add_component(view_id, UIView::new()).expect("view").get_content().expect("content");
 	/// node_tree.create_child(content_id, "item");
 	///
-	/// let json_text = document.to_json_text(&node_tree, view_id, false);
+	/// let json_text = document.to_json_text(&mut node_tree, view_id, false);
 	/// let document_data: Value = serde_json::from_str(&json_text).expect("json");
 	/// assert_eq!(document_data["root"]["children"], serde_json::json!([]));
 	/// assert_eq!(document_data["root"]["contentChildren"][0]["name"], "item");
@@ -1123,7 +1123,7 @@ impl UIDocument {
 	/// let scroll_bar_id = node_tree.create_node("scrollBar");
 	/// node_tree.add_component(scroll_bar_id, UIScrollBar::new());
 	///
-	/// let json_text = document.to_json_text(&node_tree, scroll_bar_id, false);
+	/// let json_text = document.to_json_text(&mut node_tree, scroll_bar_id, false);
 	/// let document_data: Value = serde_json::from_str(&json_text).expect("json");
 	/// assert_eq!(document_data["root"]["type"], "UIScrollBar");
 	/// assert_eq!(document_data["root"]["components"][0]["type"], "Paint");
@@ -1591,8 +1591,9 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 노드 트리 → 문서 데이터. (원본 serializeNode, 노드 참조는 이 노드 기준 경로로 적는다)
+	/// - &mut self 게터가 있는 컴포넌트도 읽는다. (원본 게터에는 &self, &mut self 구별이 없어 한 함수로 둔다. 그래서 트리를 가변으로 받는다)
 	/// # 인자
-	/// - `node_tree`: 노드가 든 트리.
+	/// - `node_tree`: 노드가 든 트리. (&mut 게터를 부르려고 가변으로 받는다)
 	/// - `node_id`: 문서 값으로 쓸 노드. (자손까지)
 	///
 	/// # 돌려줌
@@ -1609,7 +1610,7 @@ impl UIDocument {
 	/// node_tree.create_child(card_id, "icon");
 	///
 	/// let mut document = UIDocument::new();
-	/// let card_data = document.serialize_node(&node_tree, card_id);
+	/// let card_data = document.serialize_node(&mut node_tree, card_id);
 	/// assert_eq!(card_data["name"], "card");
 	/// let copy_id = document.deserialize_node(&mut node_tree, &card_data);
 	/// assert_ne!(copy_id, card_id);
@@ -1618,20 +1619,7 @@ impl UIDocument {
 	/// assert_eq!(node_tree.get_parent_id(copy_id), None);
 	/// ```
 	//==============================================================================
-	pub fn serialize_node(&self, node_tree: &NodeTree, node_id: NodeId) -> Value {
-		self.serialize_node_from_root(node_tree, node_id, node_id, None)
-	}
-
-	//==============================================================================
-	/// 노드 트리 → 문서 데이터. (&mut self 게터가 있는 컴포넌트는 &mut 갈래로 읽는다. 원본 게터에는 &self, &mut self 구별이 없다)
-	/// # 인자
-	/// - `node_tree`: 노드가 든 트리. (&mut 게터를 부르려고 가변으로 받는다)
-	/// - `node_id`: 문서 값으로 쓸 노드. (자손까지)
-	///
-	/// # 돌려줌
-	/// 노드 문서 값. 노드가 없으면 Value::Null.
-	//==============================================================================
-	pub fn serialize_node_mut(&self, node_tree: &mut NodeTree, node_id: NodeId) -> Value {
+	pub fn serialize_node(&self, node_tree: &mut NodeTree, node_id: NodeId) -> Value {
 		let prefetched_value_map = UIDocument::prefetch_mutable_values(node_tree, node_id);
 		self.serialize_node_from_root(node_tree, node_id, node_id, Some(&prefetched_value_map))
 	}
@@ -2287,29 +2275,16 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 노드 트리 → JSON 글. (원본 toJsonText, is_pretty 면 탭으로 들여 쓴다)
+	/// - serialize_node 처럼 &mut self 게터가 있는 컴포넌트도 읽는다. (그래서 트리를 가변으로 받는다)
 	/// # 인자
-	/// - `node_tree`: 노드가 든 트리.
+	/// - `node_tree`: 노드가 든 트리. (&mut 게터를 부르려고 가변으로 받는다)
 	/// - `root_id`: 문서의 뿌리 노드. (노드 참조 경로의 기준)
 	/// - `is_pretty`: true 면 탭으로 들여 쓴 여러 줄, false 면 한 줄.
 	///
 	/// # 돌려줌
 	/// 문서 글. ({ "version": 1, "root": 노드 })
 	//==============================================================================
-	pub fn to_json_text(&self, node_tree: &NodeTree, root_id: NodeId, is_pretty: bool) -> String {
-		UIDocument::write_document_text(self.serialize_node_from_root(node_tree, root_id, root_id, None), is_pretty)
-	}
-
-	//==============================================================================
-	/// 노드 트리 → JSON 글. (&mut self 게터가 있는 컴포넌트는 &mut 갈래로 읽는다)
-	/// # 인자
-	/// - `node_tree`: 노드가 든 트리. (&mut 게터를 부르려고 가변으로 받는다)
-	/// - `root_id`: 문서의 뿌리 노드.
-	/// - `is_pretty`: true 면 탭으로 들여 쓴 여러 줄, false 면 한 줄.
-	///
-	/// # 돌려줌
-	/// 문서 글.
-	//==============================================================================
-	pub fn to_json_text_mut(&self, node_tree: &mut NodeTree, root_id: NodeId, is_pretty: bool) -> String {
+	pub fn to_json_text(&self, node_tree: &mut NodeTree, root_id: NodeId, is_pretty: bool) -> String {
 		let prefetched_value_map = UIDocument::prefetch_mutable_values(node_tree, root_id);
 		UIDocument::write_document_text(self.serialize_node_from_root(node_tree, root_id, root_id, Some(&prefetched_value_map)), is_pretty)
 	}
@@ -3573,7 +3548,7 @@ mod tests {
 		let mut node_tree = NodeTree::new();
 		let mut document = UIDocument::new();
 		let scene_root_id = document.from_json_text(&mut node_tree, &scene_file_text).expect("document");
-		assert_eq!(document.to_json_text(&node_tree, scene_root_id, true), EDITOR_SCENE_TEXT);
+		assert_eq!(document.to_json_text(&mut node_tree, scene_root_id, true), EDITOR_SCENE_TEXT);
 
 		let panel_id = node_tree.find_child_by_name(scene_root_id, "Panel").expect("panel");
 		assert_eq!(node_tree[panel_id].get_component::<Paint>().expect("paint").get_round_size(), 24.0);
@@ -3613,7 +3588,7 @@ mod tests {
 		emblem.set_anchor(Vector2::create(0.0, 1.0));
 		emblem.add_component(Sprite::new()).set_image_path("emblem.png");
 		let document = UIDocument::new();
-		assert_eq!(document.to_json_text(&node_tree, scene_root_id, true), EDITOR_SCENE_TEXT);
+		assert_eq!(document.to_json_text(&mut node_tree, scene_root_id, true), EDITOR_SCENE_TEXT);
 	}
 
 	//==============================================================================
@@ -3624,7 +3599,7 @@ mod tests {
 		let mut node_tree = NodeTree::new();
 		let mut document = UIDocument::new();
 		let widget_root_id = document.from_json_text(&mut node_tree, WIDGET_SCENE_TEXT).expect("document");
-		assert_eq!(document.to_json_text(&node_tree, widget_root_id, false), WIDGET_SCENE_TEXT);
+		assert_eq!(document.to_json_text(&mut node_tree, widget_root_id, false), WIDGET_SCENE_TEXT);
 
 		let slider_id = node_tree.find_child_by_name(widget_root_id, "slider").expect("slider");
 		let thumb_id = node_tree.find_child_by_name(slider_id, "thumb").expect("thumb");
@@ -3651,7 +3626,7 @@ mod tests {
 		let mut node_tree = NodeTree::new();
 		let mut document = UIDocument::new();
 		let shadow_root_id = document.from_json_text(&mut node_tree, SHADOW_TEXT_SCENE_TEXT).expect("document");
-		assert_eq!(document.to_json_text(&node_tree, shadow_root_id, false), SHADOW_TEXT_SCENE_TEXT);
+		assert_eq!(document.to_json_text(&mut node_tree, shadow_root_id, false), SHADOW_TEXT_SCENE_TEXT);
 		let shadow_text_id = node_tree.find_child_by_name(shadow_root_id, "shadowText").expect("shadow text");
 		let shadow_text = node_tree[shadow_text_id].get_component::<ShadowText>().expect("shadow text");
 		assert_eq!(shadow_text.get_text_direction(), TextDirection::Rtl);
@@ -3738,7 +3713,7 @@ mod tests {
 		assert!(document.get_component_type_names().contains(&"Spin"));
 		let spin_root_id = document.from_json_text(&mut node_tree, document_text).expect("document");
 		assert_eq!(node_tree[spin_root_id].get_component::<Spin>().expect("spin").degrees_per_second, 90.0);
-		let saved_data: Value = serde_json::from_str(&document.to_json_text(&node_tree, spin_root_id, false)).expect("saved json");
+		let saved_data: Value = serde_json::from_str(&document.to_json_text(&mut node_tree, spin_root_id, false)).expect("saved json");
 		assert_eq!(saved_data["root"]["components"], serde_json::json!([{ "degreesPerSecond": 90, "type": "Spin" }]));
 	}
 
@@ -4055,7 +4030,7 @@ mod tests {
 		node_tree.add_component(root_id, UIProgressRing::new());
 		node_tree.add_component(root_id, ShadowImage::new());
 		let document = UIDocument::new();
-		let written_data = document.serialize_node(&node_tree, root_id);
+		let written_data = document.serialize_node(&mut node_tree, root_id);
 		let mut expected_data: Value = serde_json::from_str(REFLECTED_DEFAULTS_TEXT).expect("defaults json");
 		let shadow_image_data = expected_data[4].as_object().expect("shadow image").clone();
 		let mut extended_shadow_image_data = Map::new();
@@ -4076,7 +4051,7 @@ mod tests {
 			let mut document = UIDocument::new();
 			document.register_editor_types();
 			let root_id = document.from_json_text(&mut node_tree, document_text).expect("document");
-			let written_data: Value = serde_json::from_str(&document.to_json_text(&node_tree, root_id, false)).expect("written json");
+			let written_data: Value = serde_json::from_str(&document.to_json_text(&mut node_tree, root_id, false)).expect("written json");
 			let original_data: Value = serde_json::from_str(document_text).expect("original json");
 			assert_same_document_value(&written_data, &original_data, "");
 
@@ -4160,6 +4135,7 @@ mod tests {
 			"TextAlign": "right",
 			"Leader": { "$nodeRef": "/leader" },
 			"Slot": 0,
+			"CachedArea": 12,
 			"GizmoVisible": false,
 			"Enable": true,
 			"ComponentType": "Follower",
@@ -4168,13 +4144,13 @@ mod tests {
 
 		// 등록하지 않아도 원본처럼 반사로 적는다. (type 은 타입 이름) 읽을 때는 건너뛴다.
 		let plain_document = UIDocument::new();
-		let plain_text = plain_document.to_json_text(&node_tree, root_id, false);
+		let plain_text = plain_document.to_json_text(&mut node_tree, root_id, false);
 		let plain_data: Value = serde_json::from_str(&plain_text).expect("plain json");
 		assert_eq!(plain_data["root"]["children"][1]["components"], expected_data);
 
 		let mut document = UIDocument::new();
 		document.register_component_type("Follower", Follower::new);
-		let document_text = document.to_json_text(&node_tree, root_id, false);
+		let document_text = document.to_json_text(&mut node_tree, root_id, false);
 		assert_eq!(document_text, plain_text);
 		let mut loaded_tree = NodeTree::new();
 		let loaded_root_id = document.from_json_text(&mut loaded_tree, &document_text).expect("document");
@@ -4189,7 +4165,7 @@ mod tests {
 		assert_eq!(loaded_follower.get_leader(), Some(loaded_leader_id));
 		assert_eq!(loaded_follower.get_secret(), 0);
 		assert_eq!(loaded_follower.get_cache_count(), 0);
-		assert_eq!(document.to_json_text(&loaded_tree, loaded_root_id, false), document_text);
+		assert_eq!(document.to_json_text(&mut loaded_tree, loaded_root_id, false), document_text);
 
 		// 편집할 수 있는 속성 목록과 인스펙터 게터. (원본 getReflectedProperties, getComponentProperties)
 		let loaded_component: &dyn Component = loaded_tree[loaded_follower_id].get_all_components()[0].as_ref();
@@ -4225,7 +4201,7 @@ mod tests {
 	//==============================================================================
 	/// 러스트로 지은 노드와 원본 글을 읽어 다시 쓴 노드가 둘 다 원본과 같은지.
 	//==============================================================================
-	fn assert_built_and_round_trip_match(document: &mut UIDocument, built_node_tree: &NodeTree, built_node_id: NodeId, expected_node_data: &Value, value_path: &str) {
+	fn assert_built_and_round_trip_match(document: &mut UIDocument, built_node_tree: &mut NodeTree, built_node_id: NodeId, expected_node_data: &Value, value_path: &str) {
 		let mut expected_data = expected_node_data.clone();
 		clear_random_values(&mut expected_data);
 		let mut built_data = document.serialize_node(built_node_tree, built_node_id);
@@ -4233,7 +4209,7 @@ mod tests {
 		assert_same_document_value(&built_data, &expected_data, &format!("{} 지은 것", value_path));
 		let mut read_tree = NodeTree::new();
 		let read_id = document.deserialize_node(&mut read_tree, expected_node_data);
-		let mut round_trip_data = document.serialize_node(&read_tree, read_id);
+		let mut round_trip_data = document.serialize_node(&mut read_tree, read_id);
 		clear_random_values(&mut round_trip_data);
 		assert_same_document_value(&round_trip_data, &expected_data, &format!("{} 왕복", value_path));
 	}
@@ -4250,7 +4226,7 @@ mod tests {
 			let mut node_tree = NodeTree::new();
 			let node_id = node_tree.create_node(type_name);
 			assert!(document.create_component(&mut node_tree, node_id, type_name).is_some(), "{} 를 지을 수 없다", type_name);
-			assert_built_and_round_trip_match(&mut document, &node_tree, node_id, expected_node_data, type_name);
+			assert_built_and_round_trip_match(&mut document, &mut node_tree, node_id, expected_node_data, type_name);
 		}
 		assert_eq!(expected_data.as_object().map(|components| components.len()), Some(35));
 	}
@@ -4268,7 +4244,7 @@ mod tests {
 			let node_id = node_tree.create_node(expected_node_data["name"].as_str().unwrap_or(""));
 			let node_type = document.node_type_list.iter().find(|registered_type| registered_type.type_name == *type_name).expect("node type");
 			assert!((node_type.add_component)(&mut node_tree, node_id).is_some());
-			assert_built_and_round_trip_match(&mut document, &node_tree, node_id, expected_node_data, type_name);
+			assert_built_and_round_trip_match(&mut document, &mut node_tree, node_id, expected_node_data, type_name);
 		}
 		assert_eq!(expected_data.as_object().map(|node_types| node_types.len()), Some(12));
 	}
@@ -4422,13 +4398,13 @@ mod tests {
 			node_tree[node_id].set_local_position(Vector2::create(60.0 + cascade_offset, 60.0 + cascade_offset));
 		}
 		let expected_before_tick_data: Value = serde_json::from_str(EDITOR_PALETTE_BEFORE_TICK_TEXT).expect("palette json");
-		assert_built_and_round_trip_match(&mut document, &node_tree, document_root_id, &expected_before_tick_data["root"], "팔레트 tick 전");
+		assert_built_and_round_trip_match(&mut document, &mut node_tree, document_root_id, &expected_before_tick_data["root"], "팔레트 tick 전");
 
 		// 원본 에디터처럼 한 번 tick 하면 입력 필드의 글 라벨 자리와 스크롤바 썸이 원본과 같게 바뀐다.
 		let engine = crate::core::engine::Engine::new(crate::core::engine::EngineConfiguration::new());
 		node_tree.tick(&engine, 0.016);
 		let expected_data: Value = serde_json::from_str(EDITOR_PALETTE_TEXT).expect("palette json");
-		assert_built_and_round_trip_match(&mut document, &node_tree, document_root_id, &expected_data["root"], "팔레트 tick 뒤");
+		assert_built_and_round_trip_match(&mut document, &mut node_tree, document_root_id, &expected_data["root"], "팔레트 tick 뒤");
 	}
 
 	//==============================================================================
@@ -4482,7 +4458,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 트리를 받는 세터는 읽을 때 트리와 함께 원본처럼 그 자리에서 불리고, &mut self 게터는 &mut 갈래(to_json_text_mut)로 저장되고, 트리를 받는 게터는 인스펙터에 보인다.
+	/// 트리를 받는 세터는 읽을 때 트리와 함께 원본처럼 그 자리에서 불리고, &mut self 게터는 &mut 갈래(to_json_text 가 미리 읽음)로 저장되고, 트리를 받는 게터는 인스펙터에 보인다.
 	//==============================================================================
 	#[test]
 	fn tree_setters_and_mutable_getters_are_reflected() {
@@ -4497,10 +4473,8 @@ mod tests {
 		let mut document = UIDocument::new();
 		document.register_component_type("Follower", Follower::new);
 
-		// &self 갈래는 &mut self 게터를 읽지 못해 CachedArea 를 적지 않는다. &mut 갈래는 적는다.
-		let shared_data: Value = serde_json::from_str(&document.to_json_text(&node_tree, root_id, false)).expect("shared json");
-		assert!(shared_data["root"]["children"][1]["components"][0].get("CachedArea").is_none());
-		let mutable_text = document.to_json_text_mut(&mut node_tree, root_id, false);
+		// &mut self 게터도 읽어 CachedArea 를 적는다. (원본 toJsonText 처럼 한 함수)
+		let mutable_text = document.to_json_text(&mut node_tree, root_id, false);
 		let mutable_data: Value = serde_json::from_str(&mutable_text).expect("mutable json");
 		assert_eq!(mutable_data["root"]["children"][1]["components"][0]["CachedArea"], serde_json::json!(12));
 		assert_eq!(mutable_data["root"]["children"][1]["components"][0]["Slot"], serde_json::json!(0));
