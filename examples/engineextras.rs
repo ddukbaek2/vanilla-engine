@@ -79,9 +79,9 @@ impl Component for AliasedText {
 	}
 
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
-		graphic.get_text_string_texture_cache().set_text_antialias_enabled(false);
+		graphic.set_text_antialias_enabled(false);
 		self.text.draw(transform, graphic);
-		graphic.get_text_string_texture_cache().set_text_antialias_enabled(true);
+		graphic.set_text_antialias_enabled(true);
 	}
 }
 
