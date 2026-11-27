@@ -8,33 +8,94 @@
 //! - 카메라(get_camera_mut)의 가로 세로 비는 그릴 때마다 사각형의 비로 맞춘다. 3D 점 위의 2D 표시는 같은 카메라의 project_to_view 로 셈한다.
 //! - 깊이 비우기: 부모 Mask 의 자르기 안이면 Adreno 660 함정(Graphic::clear_depth_buffer 머리말)이 있다. 자르기를 거는 쪽이
 //!   begin_clip_rect 앞에서 clear_depth_buffer 를 부르고 이 컴포넌트는 set_depth_cleared(false) 로 둔다.
-//! - 그리기 함수: (렌더러, 카메라, 화면 사각형, GL, 드로잉 버퍼 높이). 화면 사각형은 드로잉 버퍼 픽셀이다.
+//! - 그리기 함수: (렌더러, 카메라, 화면 사각형, GL, 출력). 화면 사각형은 지금 프레임 버퍼에서 그릴 사각형(픽셀, 왼쪽 위 원점)이다.
+//!   출력(ToonViewOutput)은 지금 묶인 프레임 버퍼(None 이면 기본 프레임 버퍼)와 그 안의 GL 뷰포트([x, y, 너비, 높이], 정수, 왼쪽 아래 원점)다.
 //!   보통 ToonDrawQueue 에 담아 queue.draw(gl, renderer, camera) 하거나 begin_frame_with_camera 와 end_frame 사이에 그린다.
-//!   ToonPostProcess 를 쓰면 renderer.clear_screen_rect() 를 부르고 실수 렌더 타겟에 그린 뒤 end 의 뷰포트를 사각형으로 준다.
+//!   ToonPostProcess 를 쓰면 renderer.clear_screen_rect() 를 부르고 실수 렌더 타겟에 그린 뒤 end 에 출력의 프레임 버퍼와 뷰포트를 준다.
+//!   (그래야 렌더 스케일, 투명도 층과 상관없이 맞는 자리에 낸다)
+//! - 렌더 스케일(set_render_scale, 0.05 ~ 4, 기본 1): 1 이 아니면 3D 만 내용 영역의 화면 크기 x 배율의 판(깊이 24, 기본 프레임 버퍼가
+//!   멀티샘플이면 표본 4)에 투명하게 비운 뒤 그리고, 2D 그리기 길로 선형 거르기, source-over 로 늘여 얹는다. (UI 는 기기 화소 그대로,
+//!   유니티 URP renderScale, 언리얼 화면 비율과 같은 뜻) 판은 제 깊이를 쓰므로 set_depth_cleared(false) 로 앞의 3D 깊이를 이어 쓰던 것은 배율이 1 일 때만 된다.
+//!   판은 노드에서 떨어질 때(detach)와 버려질 때(Drop) 지운다.
 //! - 원본과 다른 것:
 //!   - 공유 렌더러는 `Rc<RefCell<ToonRenderer>>` 다. 원본은 객체 참조를 나눠 든다. 그리는 동안 렌더러를 빌려 그리기 함수에 넘긴다.
-//!   - 그리기 함수는 다섯째 인자로 드로잉 버퍼 높이를 받는다. 원본은 webGL2RenderingContext.drawingBufferHeight 로 읽지만 glow 컨텍스트에는 그 값이 없다.
+//!   - 원본 화면 사각형 객체의 outputFramebuffer, outputViewport 는 다섯째 인자 ToonViewOutput 의 output_framebuffer, output_viewport 다.
 //==============================================================================
 use std::cell::{RefCell, RefMut};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
+
+use glow::HasContext;
 
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
-use crate::core::graphic::Graphic;
+use crate::core::graphic::{BlendMode, Graphic, FLOATS_PER_VERTEX};
 use crate::core::node::worldnode::NodeTransform;
 use crate::graphics3d::camera3d::Camera3D;
+use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 use crate::graphics3d::toon::toonrenderer::ToonRenderer;
+use crate::graphics3d::{read_framebuffer_binding, GlFramebuffer};
+
+/// 렌더 스케일 최솟값.
+const MINIMUM_RENDER_SCALE: f64 = 0.05;
+/// 렌더 스케일 최댓값.
+const MAXIMUM_RENDER_SCALE: f64 = 4.0;
+/// 렌더 스케일 판의 멀티샘플 표본 수. (기본 프레임 버퍼가 멀티샘플일 때, 데스크탑 캔버스의 표본 수와 같다)
+const RENDER_SCALE_SAMPLE_COUNT: i32 = 4;
 
 //==============================================================================
-/// 그리기 함수. (렌더러, 카메라, 화면 사각형, GL, 드로잉 버퍼 높이)
+/// 그리기 함수. (렌더러, 카메라, 화면 사각형, GL, 출력)
 //==============================================================================
-pub type ToonViewDrawCallback = Box<dyn FnMut(&mut ToonRenderer, &Camera3D, Rect, &glow::Context, i32)>;
+pub type ToonViewDrawCallback = Box<dyn FnMut(&mut ToonRenderer, &Camera3D, Rect, &glow::Context, ToonViewOutput)>;
+
+//==============================================================================
+/// 그리기 함수의 출력. (원본 화면 사각형 객체의 outputFramebuffer, outputViewport)
+/// - ToonPostProcess::end 처럼 따로 내는 것은 이 둘로 내야 렌더 스케일, 투명도 층과 상관없이 맞는 자리에 낸다.
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToonViewOutput {
+	/// 지금 묶인 프레임 버퍼. (None 이면 기본 프레임 버퍼)
+	pub output_framebuffer: Option<GlFramebuffer>,
+	/// 그 안의 GL 뷰포트. ([x, y, 너비, 높이], 정수 픽셀, 왼쪽 아래 원점)
+	pub output_viewport: [i32; 4],
+}
 
 //==============================================================================
 /// 대체 그리기 함수. (렌더러를 짓지 못한 기기에서 2D 로, 노드 변환이 걸린 Graphic 과 내용 크기)
 //==============================================================================
 pub type ToonViewFallbackDrawCallback = Box<dyn FnMut(&mut Graphic, Vector2)>;
+
+//==============================================================================
+/// 렌더 스케일 판에 그리는 동안 들고, 끝나면(패닉해도) 판을 풀고 앞의 프레임 버퍼와 상태를 되돌리는 가드.
+//==============================================================================
+struct RenderScaleTargetGuard<'a> {
+	gl: &'a glow::Context,
+	target: &'a RenderTarget,
+	output_framebuffer: Option<GlFramebuffer>,
+	color_write_mask: [bool; 4],
+	is_stencil_test_enabled: bool,
+	is_scissor_test_enabled: bool,
+}
+
+impl Drop for RenderScaleTargetGuard<'_> {
+	//==============================================================================
+	/// 판 풀기(리졸브), 앞의 프레임 버퍼 묶기, 색 쓰기 가리개와 스텐실, 가위 되돌리기.
+	//==============================================================================
+	fn drop(&mut self) {
+		let gl = self.gl;
+		self.target.resolve(gl);
+		unsafe {
+			gl.bind_framebuffer(glow::FRAMEBUFFER, self.output_framebuffer);
+			gl.color_mask(self.color_write_mask[0], self.color_write_mask[1], self.color_write_mask[2], self.color_write_mask[3]);
+			if self.is_stencil_test_enabled {
+				gl.enable(glow::STENCIL_TEST);
+			}
+			if self.is_scissor_test_enabled {
+				gl.enable(glow::SCISSOR_TEST);
+			}
+		}
+	}
+}
 
 //==============================================================================
 /// 그리는 동안 렌더러를 빌려 들고, 끝나면(패닉해도) 화면 사각형을 푸는 가드.
@@ -58,7 +119,7 @@ impl Drop for ScreenRectGuard<'_> {
 /// # 예제
 /// 노드 사각형 안에 툰 3D 장면 그리기
 /// ```rust
-/// use vanilla::{create_sphere_geometry, Camera3D, Matrix4, MeshBuilder, NodeTree, Rect, ToonDrawOptions, ToonDrawQueue, ToonMesh, ToonPartOptions, ToonRenderer, ToonView3D, Vector3};
+/// use vanilla::{create_sphere_geometry, Camera3D, Matrix4, MeshBuilder, NodeTree, Rect, ToonDrawOptions, ToonDrawQueue, ToonMesh, ToonPartOptions, ToonRenderer, ToonView3D, ToonViewOutput, Vector3};
 ///
 /// let mut node_tree = NodeTree::new();
 /// let root_id = node_tree.get_root_id();
@@ -71,7 +132,7 @@ impl Drop for ScreenRectGuard<'_> {
 /// builder.add_part(&create_sphere_geometry(0.5, 24, 16, std::f64::consts::PI), &Matrix4::create_translation(0.0, 0.5, 0.0), "#f0b080", ToonPartOptions::default());
 /// let arrays = builder.read_arrays();
 /// let mut mesh: Option<ToonMesh> = None;
-/// view.set_draw_callback(Some(Box::new(move |renderer: &mut ToonRenderer, camera: &Camera3D, _screen_rect: Rect, gl: &glow::Context, _drawing_buffer_height: i32| {
+/// view.set_draw_callback(Some(Box::new(move |renderer: &mut ToonRenderer, camera: &Camera3D, _screen_rect: Rect, gl: &glow::Context, _output: ToonViewOutput| {
 /// 	if mesh.is_none() {
 /// 		mesh = renderer.create_mesh(gl, &arrays);
 /// 	}
@@ -83,6 +144,7 @@ impl Drop for ScreenRectGuard<'_> {
 /// })));
 /// assert!(view.get_renderer().is_none());
 /// assert!(view.is_depth_cleared());
+/// assert_eq!(view.get_render_scale(), 1.0);
 /// ```
 /// <!-- image: toon-view.webp -->
 //==============================================================================
@@ -98,6 +160,12 @@ pub struct ToonView3D {
 	is_depth_cleared: bool,
 	/// 이번 그리기의 화면 사각형. (드로잉 버퍼 픽셀)
 	screen_rect: Rect,
+	/// 3D 를 그리는 판의 배율. (1 이면 화면에 바로, 아니면 그 배율의 판에 그려 선형으로 늘여 얹는다)
+	render_scale: f64,
+	/// 배율 판. (처음 쓸 때 짓는다)
+	render_scale_target: Option<RenderTarget>,
+	/// 배율 판을 지은 GL 컨텍스트의 약한 손잡이. (detach 와 Drop 이 판을 지울 때 쓴다)
+	gl_context: Weak<glow::Context>,
 }
 
 #[crate::reflect]
@@ -118,14 +186,60 @@ impl ToonView3D {
 			fallback_draw_callback: None,
 			is_depth_cleared: true,
 			screen_rect: Rect::zero(),
+			render_scale: 1.0,
+			render_scale_target: None,
+			gl_context: Weak::new(),
 		}
+	}
+
+	//==============================================================================
+	/// 렌더 스케일 설정. (3D 만 이 배율의 판에 그려 선형 거르기로 늘여 얹는다, UI 는 기기 화소 그대로. 유니티 URP renderScale, 언리얼 화면 비율과 같은 뜻)
+	/// - 1(기본)이면 화면에 바로 그린다. 1 이 아니면 판(내용 영역의 화면 크기 x 배율, 깊이 포함, 기본 프레임 버퍼가 멀티샘플이면 표본 4)에
+	///   투명하게 비운 뒤 그리고, 2D 그리기 길로 source-over 로 얹는다. (2D 자르기를 따르고, 3D 가 덮지 않은 곳은 아래 2D 가 비친다)
+	/// - 판은 제 깊이를 쓰므로 set_depth_cleared(false) 로 앞의 3D 깊이를 이어 쓰던 것은 배율이 1 일 때만 된다.
+	/// - 그리기 함수는 넘겨받은 출력(ToonViewOutput)의 프레임 버퍼와 뷰포트로 내야 배율과 상관없이 맞는 자리에 낸다. (ToonPostProcess::end 같은 것)
+	///
+	/// # 인자
+	/// - `render_scale`: 배율. (0.05 ~ 4, 1 이면 화면에 바로, 유한한 수가 아니면 1)
+	///
+	/// # 예제
+	/// 3D 만 반 해상도로 그리기
+	/// ```rust
+	/// use vanilla::{NodeTree, ToonView3D};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let view_id = node_tree.create_child(root_id, "view");
+	/// node_tree[view_id].set_content_size_xy(320.0, 240.0);
+	/// let view = node_tree[view_id].add_component(ToonView3D::new());
+	/// view.set_render_scale(0.5);
+	/// assert_eq!(view.get_render_scale(), 0.5);
+	/// ```
+	//==============================================================================
+	pub fn set_render_scale(&mut self, render_scale: f64) {
+		if !render_scale.is_finite() {
+			self.render_scale = 1.0;
+			return;
+		}
+		self.render_scale = render_scale.clamp(MINIMUM_RENDER_SCALE, MAXIMUM_RENDER_SCALE);
+	}
+
+	//==============================================================================
+	/// 렌더 스케일 반환.
+	///
+	/// # 돌려줌
+	/// 배율. (1 이면 화면에 바로 그린다)
+	//==============================================================================
+	pub fn get_render_scale(&self) -> f64 {
+		self.render_scale
 	}
 
 	//==============================================================================
 	/// 그리기 함수 설정. (None 이면 그리지 않음)
 	///
 	/// # 인자
-	/// - `draw_callback`: (렌더러, 카메라, 화면 사각형, GL, 드로잉 버퍼 높이) 를 받는 함수. (None 이면 그리지 않음)
+	/// - `draw_callback`: (렌더러, 카메라, 화면 사각형, GL, 출력) 를 받는 함수. (None 이면 그리지 않음)
+	///   화면 사각형은 지금 프레임 버퍼에서 그릴 사각형(픽셀, 왼쪽 위 원점), 출력은 지금 묶인 프레임 버퍼와 그 안의 GL 뷰포트(왼쪽 아래 원점)다.
 	//==============================================================================
 	pub fn set_draw_callback(&mut self, draw_callback: Option<ToonViewDrawCallback>) {
 		self.draw_callback = draw_callback;
@@ -348,6 +462,10 @@ impl Component for ToonView3D {
 			return;
 		}
 		self.camera.set_aspect_ratio(screen_rect.size.x / screen_rect.size.y);
+		if self.render_scale != 1.0 {
+			self.draw_with_render_scale(graphic, &renderer);
+			return;
+		}
 		let camera = &self.camera;
 		let draw_callback = match self.draw_callback.as_mut() {
 			Some(draw_callback) => {
@@ -357,13 +475,167 @@ impl Component for ToonView3D {
 				return;
 			}
 		};
-		let drawing_buffer_height = graphic.get_drawing_buffer_height();
 		graphic.run_external_pass(self.is_depth_cleared, |gl| {
+			let output = read_output(gl, screen_rect.position.x, screen_rect.position.y, screen_rect.size.x, screen_rect.size.y);
 			let mut guard = ScreenRectGuard { renderer: renderer.borrow_mut() };
 			guard.renderer.set_screen_rect(screen_rect.position.x, screen_rect.position.y, screen_rect.size.x, screen_rect.size.y);
-			draw_callback(&mut guard.renderer, camera, screen_rect, gl, drawing_buffer_height);
+			draw_callback(&mut guard.renderer, camera, screen_rect, gl, output);
 		});
 	}
+
+	//==============================================================================
+	/// 노드에서 떨어짐. (배율 판을 지운다, 다시 붙으면 처음 쓸 때 다시 짓는다)
+	//==============================================================================
+	fn detach(&mut self, _transform: &mut NodeTransform) {
+		self.destroy_render_scale_target();
+	}
+}
+
+impl ToonView3D {
+	//==============================================================================
+	/// 배율 판에 그려 늘여 얹기.
+	//==============================================================================
+	fn draw_with_render_scale(&mut self, graphic: &mut Graphic, renderer: &Rc<RefCell<ToonRenderer>>) {
+		let screen_rect = self.screen_rect;
+		let render_scale = self.render_scale;
+		let target_width = ((screen_rect.size.x * render_scale).round() as i32).max(1);
+		let target_height = ((screen_rect.size.y * render_scale).round() as i32).max(1);
+		let sample_count = if graphic.is_framebuffer_multisampled() { RENDER_SCALE_SAMPLE_COUNT } else { 0 };
+		if let Some(gl_context) = crate::core::imagetexturecache::find_gl_context_handle(graphic.get_gl()) {
+			self.gl_context = gl_context;
+		}
+		let camera = &self.camera;
+		let render_scale_target = &mut self.render_scale_target;
+		let render_scale_value = &mut self.render_scale;
+		let draw_callback = match self.draw_callback.as_mut() {
+			Some(draw_callback) => {
+				draw_callback
+			}
+			None => {
+				return;
+			}
+		};
+		let color_texture = graphic.run_external_pass(false, |gl| {
+			let target = read_render_scale_target(gl, render_scale_target, render_scale_value, target_width, target_height, sample_count)?;
+			// 2D 자르기의 스텐실과 가위는 화면 것이라 판에는 걸지 않는다. (얹을 때 2D 길이 자른다)
+			let (is_stencil_test_enabled, is_scissor_test_enabled, clear_color, color_write_mask) = unsafe {
+				let mut clear_color = [0.0f32; 4];
+				gl.get_parameter_f32_slice(glow::COLOR_CLEAR_VALUE, &mut clear_color);
+				(gl.is_enabled(glow::STENCIL_TEST), gl.is_enabled(glow::SCISSOR_TEST), clear_color, gl.get_parameter_bool_array::<4>(glow::COLOR_WRITEMASK))
+			};
+			let _target_guard = RenderScaleTargetGuard {
+				gl,
+				target,
+				output_framebuffer: read_framebuffer_binding(gl),
+				color_write_mask,
+				is_stencil_test_enabled,
+				is_scissor_test_enabled,
+			};
+			unsafe {
+				gl.disable(glow::STENCIL_TEST);
+				gl.disable(glow::SCISSOR_TEST);
+				target.bind(gl);
+				gl.color_mask(true, true, true, true);
+				gl.depth_mask(true);
+				gl.clear_color(0.0, 0.0, 0.0, 0.0);
+				gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+				gl.clear_color(clear_color[0], clear_color[1], clear_color[2], clear_color[3]);
+			}
+			let output = read_output(gl, 0.0, 0.0, target_width as f64, target_height as f64);
+			let target_rect = Rect::create(0.0, 0.0, target_width as f64, target_height as f64);
+			{
+				// 렌더러 가드가 먼저 풀려(화면 사각형) 그 뒤 판 가드가 판을 풀고 앞의 프레임 버퍼를 묶는다. (원본 finally 와 같은 차례)
+				let mut guard = ScreenRectGuard { renderer: renderer.borrow_mut() };
+				guard.renderer.set_screen_rect(0.0, 0.0, target_width as f64, target_height as f64);
+				draw_callback(&mut guard.renderer, camera, target_rect, gl, output);
+			}
+			target.get_color_texture(0)
+		});
+		let color_texture = match color_texture {
+			Some(color_texture) => {
+				color_texture
+			}
+			None => {
+				return;
+			}
+		};
+
+		// 판을 화면 사각형에 단위 행렬, 흰색, 틴트 없이 source-over 로 얹는다. (판은 미리 곱한 알파, 텍스처는 아래가 0 행, 선형 거르기)
+		// 3D 를 화면에 바로 그릴 때처럼 전역 알파는 걸지 않는다.
+		graphic.push_state();
+		graphic.reset_transform();
+		graphic.set_global_alpha(1.0);
+		graphic.set_image_tint_color(None);
+		graphic.set_blend_mode(BlendMode::Normal);
+		let float_count = graphic.write_quad(0, screen_rect.position.x, screen_rect.position.y, screen_rect.position.x + screen_rect.size.x, screen_rect.position.y + screen_rect.size.y, 0.0, 1.0, 1.0, 0.0);
+		let white_color = graphic.get_white_color();
+		graphic.draw_vertices(float_count / FLOATS_PER_VERTEX, color_texture, white_color);
+		graphic.pop_state();
+	}
+
+	//==============================================================================
+	/// 배율 판 지우기. (GL 컨텍스트가 이미 사라졌으면 판도 같이 사라졌으므로 놓기만 한다)
+	//==============================================================================
+	fn destroy_render_scale_target(&mut self) {
+		let Some(mut render_scale_target) = self.render_scale_target.take() else {
+			return;
+		};
+		if let Some(gl) = self.gl_context.upgrade() {
+			render_scale_target.destroy(&gl);
+		}
+	}
+}
+
+impl Drop for ToonView3D {
+	//==============================================================================
+	/// 버려질 때 배율 판 지우기.
+	//==============================================================================
+	fn drop(&mut self) {
+		self.destroy_render_scale_target();
+	}
+}
+
+//==============================================================================
+/// 그리기 함수에 넘길 출력 읽기. (지금 묶인 프레임 버퍼와 그 안의 GL 뷰포트, 왼쪽 아래 원점, 원본 writeOutputScreenRect)
+/// - 사각형은 지금 뷰포트 안의 픽셀(왼쪽 위 원점)이다. 정수 픽셀로 반올림한다. (GL 뷰포트는 정수)
+//==============================================================================
+fn read_output(gl: &glow::Context, x: f64, y: f64, width: f64, height: f64) -> ToonViewOutput {
+	let mut viewport = [0i32; 4];
+	unsafe {
+		gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+	}
+	let output_width = (width.round() as i32).max(1);
+	let output_height = (height.round() as i32).max(1);
+	ToonViewOutput {
+		output_framebuffer: read_framebuffer_binding(gl),
+		output_viewport: [viewport[0] + x.round() as i32, viewport[1] + viewport[3] - y.round() as i32 - output_height, output_width, output_height],
+	}
+}
+
+//==============================================================================
+/// 배율 판 읽기. (없거나 크기가 다르면 짓거나 고친다, 못 지으면 렌더 스케일을 1 로 되돌리고 None)
+//==============================================================================
+fn read_render_scale_target<'a>(gl: &glow::Context, render_scale_target: &'a mut Option<RenderTarget>, render_scale: &mut f64, width: i32, height: i32, sample_count: i32) -> Option<&'a RenderTarget> {
+	if render_scale_target.is_none() {
+		let options = RenderTargetOptions { sample_count, depth_bits: 24, ..RenderTargetOptions::default() };
+		match RenderTarget::new(gl, width, height, true, Some(options)) {
+			Ok(target) => {
+				*render_scale_target = Some(target);
+			}
+			Err(error) => {
+				eprintln!("[ToonView3D] 렌더 스케일 판을 짓지 못해 화면에 바로 그립니다. {}", error);
+				*render_scale = 1.0;
+				return None;
+			}
+		}
+	}
+	let target = render_scale_target.as_mut()?;
+	if target.get_width() != width || target.get_height() != height {
+		if let Err(error) = target.resize(gl, width, height) {
+			eprintln!("[ToonView3D] 렌더 스케일 판 크기를 바꾸지 못했습니다. {}", error);
+		}
+	}
+	Some(target)
 }
 
 #[cfg(test)]
@@ -380,12 +652,31 @@ mod tests {
 		let root_id = node_tree.get_root_id();
 		let node_id = node_tree.create_child(root_id, "view");
 		let toon_view = node_tree[node_id].add_component(ToonView3D::new());
-		toon_view.set_draw_callback(Some(Box::new(|_renderer, _camera, _screen_rect, _gl, _drawing_buffer_height| {
+		toon_view.set_draw_callback(Some(Box::new(|_renderer, _camera, _screen_rect, _gl, _output| {
 		})));
 		toon_view.set_depth_cleared(false);
 		let found = node_tree[node_id].get_component_mut::<ToonView3D>().expect("ToonView3D");
 		assert!(!found.is_depth_cleared());
 		assert!(found.get_renderer().is_none());
 		assert!(!found.is_renderer_failed());
+	}
+
+	//==============================================================================
+	/// 렌더 스케일: 기본 1, 0.05 ~ 4 로 자르고, 유한하지 않으면 1. (원본 setRenderScale 과 같다)
+	//==============================================================================
+	#[test]
+	fn render_scale_is_clamped() {
+		let mut toon_view = ToonView3D::new();
+		assert_eq!(toon_view.get_render_scale(), 1.0);
+		toon_view.set_render_scale(0.5);
+		assert_eq!(toon_view.get_render_scale(), 0.5);
+		toon_view.set_render_scale(0.01);
+		assert_eq!(toon_view.get_render_scale(), 0.05);
+		toon_view.set_render_scale(8.0);
+		assert_eq!(toon_view.get_render_scale(), 4.0);
+		toon_view.set_render_scale(f64::NAN);
+		assert_eq!(toon_view.get_render_scale(), 1.0);
+		toon_view.set_render_scale(f64::INFINITY);
+		assert_eq!(toon_view.get_render_scale(), 1.0);
 	}
 }

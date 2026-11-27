@@ -97,6 +97,7 @@ const CAPTURE_FRAME_MILLISECONDS: f64 = 1000.0 / 60.0;
 /// engine_configuration.view_scale_mode = ViewScaleMode::StretchShortExpandLong;
 /// engine_configuration.asset_directory_paths = vec![PathBuf::from("examples/assets")];
 /// engine_configuration.maximum_frame_per_second = 60.0;
+/// engine_configuration.antialias = true;
 /// assert!(engine_configuration.use_vertical_sync);
 /// let engine = Engine::new(engine_configuration);
 /// assert_eq!(engine.get_engine_configuration().title, "My Game");
@@ -156,6 +157,10 @@ pub struct EngineConfiguration {
 	/// 프레임이 끝난 뒤에도 그린 것을 캔버스에 남긴다. (원본 WebGL 컨텍스트 옵션 preserveDrawingBuffer, 켜면 프레임 첫머리에 색을 비우지 않아 지난 프레임 그림 위에 그린다.
 	/// 웹은 컨텍스트 옵션으로 넘기고, 데스크탑은 다 그린 프레임을 떠 두었다가 다음 프레임 첫머리에 되그린다. platform/desktop/preserveddrawingbuffer.rs)
 	pub preserve_drawing_buffer: bool,
+	/// 캔버스(기본 프레임 버퍼)의 멀티샘플 안티에일리어싱(MSAA)을 켤지. (원본 antialias, 기본 true, 생성 때 정한다)
+	/// - 끄면 도형과 3D 의 가장자리가 계단져 보이는 대신 고해상도 모바일에서 프레임마다 드는 리졸브 비용이 빠진다.
+	/// - 웹은 WebGL 컨텍스트 속성 antialias 로 켬과 끔만 고르고 표본 수는 브라우저가 정한다. 데스크탑은 켜면 표본 4, 끄면 멀티샘플 없는 GL 설정을 고른다.
+	pub antialias: bool,
 	/// 화면 키보드: 글자 입력칸이 포커스된 동안 가로가 같고 세로만 줄었으면 크기를 그대로 둔다. (auto_resize_on_window_resize 일 때,
 	/// 데스크탑은 크롬 윈도우처럼 터치 키보드가 visualViewport 를 줄인다. 맥과 리눅스는 크롬처럼 줄지 않는다)
 	pub ignore_virtual_keyboard_resize: bool,
@@ -176,7 +181,7 @@ impl EngineConfiguration {
 	/// 생성.
 	///
 	/// # 돌려줌
-	/// 기본 설정. (기준 해상도 1280x720, StretchShort, 제목 바닐라엔진, 창 크기 0(기준 해상도), 크기 바꾸기 켬, 수직 동기 켬, 최대 FPS 0(제한 없음), 개발자 도구 켬, 캔버스 id mainCanvas, 나머지는 끔이거나 빈 값)
+	/// 기본 설정. (기준 해상도 1280x720, StretchShort, 제목 바닐라엔진, 창 크기 0(기준 해상도), 크기 바꾸기 켬, 수직 동기 켬, 최대 FPS 0(제한 없음), 개발자 도구 켬, 캔버스 id mainCanvas, 안티에일리어싱 켬, 나머지는 끔이거나 빈 값)
 	//==============================================================================
 	pub fn new() -> EngineConfiguration {
 		EngineConfiguration {
@@ -202,6 +207,7 @@ impl EngineConfiguration {
 			asset_base_url: String::new(),
 			auto_resize_on_window_resize: false,
 			preserve_drawing_buffer: false,
+			antialias: true,
 			ignore_virtual_keyboard_resize: false,
 			max_canvas_aspect_ratio: 0.0,
 			rebake_text_on_font_load: false,

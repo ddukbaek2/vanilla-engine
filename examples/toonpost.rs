@@ -11,7 +11,7 @@
 use std::f64::consts::PI;
 use vanilla::{
 	create_box_geometry, create_part_matrix, create_sphere_geometry, Camera3D, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, NodeId, NodeTree, Paint, Pivot, Rect, Scene, SceneBase, Text, TextAlign, ToonBlobShadowOptions, ToonDecalOptions, ToonDrawOptions, ToonDrawQueue,
-	ToonFireballOptions, ToonGeometry, ToonGlintOptions, ToonMesh, ToonMeshArrays, ToonParticleOptions, ToonPartOptions, ToonPostProcess, ToonPostProcessOptions, ToonRenderer, ToonRibbonOptions, ToonShockwaveOptions, ToonView3D, ToonVfx, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange,
+	ToonFireballOptions, ToonGeometry, ToonGlintOptions, ToonMesh, ToonMeshArrays, ToonParticleOptions, ToonPartOptions, ToonPostProcess, ToonPostProcessOptions, ToonRenderer, ToonRibbonOptions, ToonShockwaveOptions, ToonView3D, ToonViewOutput, ToonVfx, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange,
 	ToonVfxShape, ToonVfxSlot, Vector2, Vector3, TOON_VFX_DEFAULT_PARTICLE_CAPACITY,
 };
 
@@ -162,7 +162,7 @@ impl PanelDrawer {
 	//==============================================================================
 	// 판 그리기. (ToonView3D 의 그리기 함수)
 	//==============================================================================
-	fn draw(&mut self, renderer: &mut ToonRenderer, camera: &Camera3D, screen_rect: Rect, gl: &glow::Context, drawing_buffer_height: i32) {
+	fn draw(&mut self, renderer: &mut ToonRenderer, camera: &Camera3D, screen_rect: Rect, gl: &glow::Context, output: ToonViewOutput) {
 		if self.meshes.is_none() {
 			self.meshes = PanelDrawer::create_meshes(renderer, gl);
 		}
@@ -220,8 +220,7 @@ impl PanelDrawer {
 		vfx.update(if self.frame_count == 0 { 0.0 } else { FRAME_SECONDS });
 		PanelDrawer::emit_effects(vfx, elapsed_seconds);
 		vfx.draw(gl, &camera.get_view_matrix(), &camera.get_projection_matrix());
-		let bottom = drawing_buffer_height - screen_rect.position.y.round() as i32 - height;
-		post_process.end(gl, None, [screen_rect.position.x.round() as i32, bottom, width, height]);
+		post_process.end(gl, output.output_framebuffer, output.output_viewport);
 		self.frame_count += 1;
 		if self.frame_count == 30 {
 			println!("toonpost: 판 {} 표본 수 {} 실수 판 {} 블룸 단 {}", self.panel_mode, post_process.get_sample_count(), post_process.get_use_float_color(), post_process.get_bloom_level_count());
@@ -295,8 +294,8 @@ impl Scene for ToonPostScene {
 			let panel_id = create_panel(node_tree, root_id, Rect::create(panel_x, 80.0, 400.0, 420.0), "#000000");
 			let mut panel_drawer = PanelDrawer::new(*panel_mode);
 			let toon_view = node_tree[panel_id].add_component(ToonView3D::new());
-			toon_view.set_draw_callback(Some(Box::new(move |renderer, camera, screen_rect, gl, drawing_buffer_height| {
-				panel_drawer.draw(renderer, camera, screen_rect, gl, drawing_buffer_height);
+			toon_view.set_draw_callback(Some(Box::new(move |renderer, camera, screen_rect, gl, output| {
+				panel_drawer.draw(renderer, camera, screen_rect, gl, output);
 			})));
 			toon_view.set_fallback_draw_callback(Some(Box::new(draw_fallback)));
 			let camera = toon_view.get_camera_mut();

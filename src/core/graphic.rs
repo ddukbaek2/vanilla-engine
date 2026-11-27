@@ -4845,7 +4845,7 @@ impl Graphic {
 	/// 기본 프레임버퍼가 멀티샘플인지. (프레임 첫머리에 한 번 읽어 둔다, 모르면 멀티샘플로 본다)
 	/// - 멀티샘플로 보면 셰이더 자르기를 정수 경계에만 써 어느 쪽이든 스텐실과 화소가 같다.
 	//==============================================================================
-	fn is_framebuffer_multisampled(&self) -> bool {
+	pub(crate) fn is_framebuffer_multisampled(&self) -> bool {
 		self.framebuffer_sample_state != 0
 	}
 

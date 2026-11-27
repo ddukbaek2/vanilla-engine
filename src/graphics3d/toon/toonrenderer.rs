@@ -3194,16 +3194,19 @@ impl ToonRenderer {
 		let premultiplied_output = if options.blend_mode != ToonBlendMode::Alpha { 1.0 } else { 0.0 };
 		unsafe {
 			if is_transparent {
+				// 알파 칸은 덮은 정도(미리 곱한 알파의 over)로 쌓는다. (원본과 같고, 유니티 Blend SrcAlpha OneMinusSrcAlpha, One OneMinusSrcAlpha 와 같다)
+				// 캔버스(알파 없음)에는 색이 같고, 투명하게 비운 판(ToonView3D 렌더 스케일, 투명도 층)에 그려 얹을 때 아래가 맞게 비친다.
+				// 더하기는 덮지 않으므로 알파를 바꾸지 않는다.
 				gl.enable(glow::BLEND);
 				match options.blend_mode {
 					ToonBlendMode::Additive => {
-						gl.blend_func(glow::ONE, glow::ONE);
+						gl.blend_func_separate(glow::ONE, glow::ONE, glow::ZERO, glow::ONE);
 					}
 					ToonBlendMode::Premultiplied => {
 						gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
 					}
 					ToonBlendMode::Alpha => {
-						gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+						gl.blend_func_separate(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
 					}
 				}
 			}
