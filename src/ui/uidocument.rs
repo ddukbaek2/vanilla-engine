@@ -854,7 +854,7 @@ impl UIDocument {
 		self.register_editor_component_type("Sprite", Sprite::new);
 		self.register_editor_component_type("SpriteAnimator", SpriteAnimator::new);
 		self.register_editor_component_type("Text", Text::new);
-		self.register_editor_component_type("ToastMotion", || ToastMotion::new(-1.0));
+		self.register_editor_component_type("ToastMotion", ToastMotion::new);
 		self.register_editor_component_type("ToonView3D", ToonView3D::new);
 		self.register_editor_component_type("TrailRenderer", TrailRenderer::new);
 		self.register_editor_component_type("UIBarChart", UIBarChart::new);

@@ -177,7 +177,7 @@ pub use crate::resource::imageasset::ImageAsset;
 pub use crate::resource::textasset::{JsonAsset, TextAsset};
 pub use crate::ui::buttonmotion::{set_button_motion_area, shake_button, ButtonLitHandler, ButtonMotion, ButtonMotionArea, ButtonMotionStyle};
 pub use crate::ui::popupmotion::{PopupMotion, PopupMotionEvent, PopupMotionOptions, PopupMotionState};
-pub use crate::ui::toastmotion::{read_toast_seconds, ToastApplyTextHandler, ToastMotion, ToastPhase};
+pub use crate::ui::toastmotion::{read_toast_seconds, ToastApplyText, ToastMotion, ToastPhase};
 pub use crate::ui::touchrecognizer::TouchRecognizer;
 pub use crate::ui::uibutton::{ButtonState, UIButton, UIButtonEvent};
 pub use crate::ui::uichart::{UIBarChart, UILineChart};

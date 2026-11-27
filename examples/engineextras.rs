@@ -169,7 +169,7 @@ impl EngineExtrasScene {
 		let shadow_text_id = create_box_node(node_tree, bright_id, "shadowText", Vector2::create(20.0, 110.0), Vector2::create(300.0, 36.0));
 		let shadow_text = node_tree[shadow_text_id].add_component(ShadowText::create_with_text("ShadowText 그림자 글", 26.0));
 		shadow_text.set_text_style(26.0, true, "#ffffff");
-		shadow_text.set_shadow(vanilla::Color::create(0.0, 0.0, 0.0, 0.8), 3.0, 4.0);
+		shadow_text.set_shadow("#000000", 0.8, 3.0, 4.0);
 		let mut icon_pixels = vec![0u8; 64 * 64 * 4];
 		for y in 0..64usize {
 			for x in 0..64usize {
@@ -184,7 +184,7 @@ impl EngineExtrasScene {
 		let shadow_image_id = create_box_node(node_tree, bright_id, "shadowImage", Vector2::create(440.0, 20.0), Vector2::create(100.0, 100.0));
 		let shadow_image = node_tree[shadow_image_id].add_component(ShadowImage::new());
 		shadow_image.set_image(Some(icon_image), None);
-		shadow_image.set_shadow(vanilla::Color::create(0.0, 0.0, 0.0, 0.7), 6.0, 8.0);
+		shadow_image.set_shadow("#000000", 0.7, 6.0, 8.0);
 
 		let bottom_id = create_box_node(node_tree, root_id, "bottomShade", Vector2::create(0.0, 620.0), Vector2::create(VIEW_WIDTH, 100.0));
 		let bottom = node_tree[bottom_id].add_component(SoftShade::new());
@@ -222,7 +222,7 @@ impl EngineExtrasScene {
 		shadow_text.set_text_align(TextAlign::Left);
 		shadow_text.set_italic(true);
 		shadow_text.set_underline(true);
-		shadow_text.set_shadow(vanilla::Color::create(0.0, 0.0, 0.0, 0.9), 2.0, 2.0);
+		shadow_text.set_shadow("#000000", 0.9, 2.0, 2.0);
 		let wrap_id = create_label_node(node_tree, root_id, "characterWrap", Vector2::create(960.0, 214.0), Vector2::create(280.0, 36.0), "Character 줄바꿈은 낱말도 Characters 글자 단위로 끊는다", 14.0, TEXT_COLOR);
 		if let Some(label) = node_tree[wrap_id].get_component_mut::<UILabel>() {
 			label.set_text_baseline(TextBaseline::Top);
@@ -251,12 +251,7 @@ impl EngineExtrasScene {
 		let toast_label = node_tree.add_component(toast_id, UILabel::create_with_text("", 20.0)).expect("label");
 		toast_label.set_text_color("#ffffff");
 		node_tree[toast_id].set_visible(false);
-		let toast_motion = node_tree.add_component(toast_id, ToastMotion::new(-1.0)).expect("toast");
-		toast_motion.set_apply_text_handler(Box::new(|context: &mut ComponentContext, text: &str| {
-			if let Some(label) = context.get_node_mut().get_component_mut::<UILabel>() {
-				label.set_text(text);
-			}
-		}));
+		node_tree.add_component(toast_id, ToastMotion::new()).expect("toast");
 
 		let button = node_tree.add_component(button_id, UIButton::new()).expect("button");
 		button.set_click_event(Box::new(move |_button: &mut UIButton, context: &mut ComponentContext| {
@@ -267,7 +262,13 @@ impl EngineExtrasScene {
 				counter_label.set_text(&format!("클릭 {}번", next_click_count));
 			}
 			if let Some(toast_motion) = context.get_node_tree_mut().get_node_mut(toast_id).and_then(|toast_node| toast_node.get_component_mut::<ToastMotion>()) {
-				toast_motion.show(&format!("{}번 눌렀어요", next_click_count), 1.5);
+				let toast_text = format!("{}번 눌렀어요", next_click_count);
+				let applied_text = toast_text.clone();
+				toast_motion.show(&toast_text, 1.5, move |context: &mut ComponentContext| {
+					if let Some(label) = context.get_node_mut().get_component_mut::<UILabel>() {
+						label.set_text(&applied_text);
+					}
+				});
 			}
 		}));
 		node_tree.add_component(button_id, ButtonMotion::new());

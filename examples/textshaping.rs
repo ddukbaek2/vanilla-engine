@@ -159,7 +159,7 @@ impl Scene for MainScene {
 		shadow_text.set_italic(true);
 		shadow_text.set_underline(true);
 		shadow_text.set_strikethrough(true);
-		shadow_text.set_shadow("#000000", 3.0, 2.0);
+		shadow_text.set_shadow("#000000", 1.0, 3.0, 2.0);
 
 		// 낱말 줄바꿈과 표시 글자 수.
 		create_caption_node(node_tree, root_id, 640.0, 84.0, "word wrap 260 (한중일 낱말 사이), visible 12 (글자 묶음)");
@@ -190,7 +190,7 @@ impl Scene for MainScene {
 		let emoji_shadow_text = node_tree[emoji_shadow_id].add_component(ShadowText::create_with_text("그림자 \u{1F389}\u{1F680}\u{1F308}", 30.0));
 		emoji_shadow_text.set_text_style(30.0, false, "#ffffff");
 		emoji_shadow_text.set_text_align(TextAlign::Left);
-		emoji_shadow_text.set_shadow("#000000", 3.0, 2.0);
+		emoji_shadow_text.set_shadow("#000000", 1.0, 3.0, 2.0);
 		let emoji_italic_id = create_box_node(node_tree, root_id, "emojiItalic", 40.0, 650.0, 560.0, 40.0);
 		let emoji_italic_text = node_tree[emoji_italic_id].add_component(Text::create_with_text("기울임 \u{1F600}\u{1F431}", 30.0));
 		emoji_italic_text.set_text_color("#ffffff");

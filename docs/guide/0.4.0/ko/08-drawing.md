@@ -447,11 +447,11 @@ fn main() {
 | --- | --- | --- |
 | `Mask` | 노드의 내용 영역으로 자식 그리기를 자릅니다. 돌아간 노드도 맞게 자르고, 잘린 곳의 자식은 터치도 받지 않습니다 | `set_round_size` (0) |
 | `Outline` | 테만 그립니다. 둥근 네모 테나 동그라미 테 (선은 내용 영역 안쪽에 들어옵니다) | `set_color` (흰색), `set_line_width` (1), `set_round_size` (0), `set_circle` (false) |
-| `ShadowText` | 그림자를 깐 한 줄 글을 그림 한 장에 구워 그립니다. 노드를 흐리게 해도 글과 그림자가 한 장으로 흐려집니다. 넘치면 줄여 맞춥니다 | `set_text`, `set_text_style(font_size, is_bold, text_color)` (16, false, 흰색), `set_shadow(color, offset, blur)` (검정, 0, 0), `set_fit_minimum_ratio` (0.6) |
+| `ShadowText` | 그림자를 깐 한 줄 글을 그림 한 장에 구워 그립니다. 노드를 흐리게 해도 글과 그림자가 한 장으로 흐려집니다. 넘치면 줄여 맞춥니다 | `set_text`, `set_text_style(font_size, is_bold, text_color)` (16, false, 흰색), `set_shadow(color, opacity, offset, blur)` (검정, 1, 0, 0), `set_fit_minimum_ratio` (0.6) |
 | `SoftShade` | 글 뒤를 부드럽게 어둡게 누르는 그늘 | `set_shade(shape, color, opacity, fade_width)` (`SoftShadeShape::Band`, 검정, 0.5, 0) |
-| `ShadowImage` | 그림자를 깐 그림. 노드 안에 비를 지켜 가장 크게, 가운데로 | `set_image(image, image_rect)`, `set_image_color`, `set_shadow(color, offset, blur)` |
+| `ShadowImage` | 그림자를 깐 그림. 노드 안에 비를 지켜 가장 크게, 가운데로 | `set_image(image, image_rect)`, `set_image_color`, `set_shadow(color, opacity, offset, blur)` |
 
-`SoftShadeShape::Band` 는 가운데 가로줄이 가장 짙고 위아래로 엷어지는 띠, `SoftShadeShape::Bottom` 은 아래 끝이 가장 짙은 세로 그라데이션입니다. 원본의 `setShadow(color, opacity, offset, blur)` 는 러스트 판에서 불투명도를 색의 알파로 받아 `set_shadow(color, offset, blur)` 입니다.
+`SoftShadeShape::Band` 는 가운데 가로줄이 가장 짙고 위아래로 엷어지는 띠, `SoftShadeShape::Bottom` 은 아래 끝이 가장 짙은 세로 그라데이션입니다. 원본의 `setShadow(color, opacity, offset, blur)` 와 같은 인자입니다(색의 알파는 읽지 않고 불투명도를 씁니다).
 
 ```rust,no_run
 use vanilla::{Color, Engine, EngineConfiguration, Graphic, Mask, Outline, Paint, Rect, Scene, SceneBase, ShadowText, SoftShade, SoftShadeShape, Vector2};
@@ -502,7 +502,7 @@ impl Scene for DecorationScene {
 		node_tree[caption_id].set_local_position(Vector2::create(960.0, 360.0));
 		let shadow_text = node_tree[caption_id].add_component(ShadowText::create_with_text("Shadow Text", 48.0));
 		shadow_text.set_text_style(48.0, true, Color::white());
-		shadow_text.set_shadow(Color::create(0.0, 0.0, 0.0, 0.8), 4.0, 6.0);
+		shadow_text.set_shadow("#000000", 0.8, 4.0, 6.0);
 	}
 
 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {

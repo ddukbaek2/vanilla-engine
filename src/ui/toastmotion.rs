@@ -5,7 +5,7 @@
 //! - 떠 있는 동안 다른 글이 오면 앞 것이 빨리 비키고 새 글이 들어오며, 같은 글이 또 오면 시간만 다시 채우고 통 튄다.
 //! - 노드의 자리는 놓인 자리를 기준으로 그 둘레에서만 움직인다. (그 사이 다시 놓으면 그 자리가 새 기준)
 //! - 원본과 다른 것: show 는 요청만 받아 두고 다음 tick 에서 노드를 움직인다. (장면 코드는 노드 문맥 없이 부르므로)
-//!   글은 set_apply_text_handler 로 건 함수가 노드에 넣는다. 숨은 동안 노드는 끄지 않고 보이지 않게만 한다. (tick 이 계속 돌게)
+//!   글은 show 에 준 함수가 나오기 시작할 때 노드에 넣는다. (원본 show(text, seconds, applyText) 와 같다) 숨은 동안 노드는 끄지 않고 보이지 않게만 한다. (tick 이 계속 돌게)
 //! - UIToast 는 줄 세운 알약 알림을 스스로 만들고, 이것은 게임이 만든 알림 노드를 움직인다.
 //==============================================================================
 use std::f64::consts::PI;
@@ -32,8 +32,8 @@ const LONG_TEXT_CHARACTERS: usize = 20;
 const LONG_TEXT_EXTRA_SECONDS: f64 = 0.5;
 const MAXIMUM_STAY_SECONDS: f64 = 4.0;
 
-/// 노드에 글을 넣는 함수. (같은 노드의 다른 컴포넌트, 예를 들어 UILabel 은 문맥의 노드에서 찾는다)
-pub type ToastApplyTextHandler = Box<dyn FnMut(&mut ComponentContext, &str)>;
+/// 노드에 글과 색을 넣는 함수. (원본 show 의 applyText, 나오기 시작할 때 한 번 부른다, 같은 노드의 UILabel 같은 컴포넌트는 문맥의 노드에서 찾는다)
+pub type ToastApplyText = Box<dyn FnOnce(&mut ComponentContext)>;
 
 //==============================================================================
 /// 알림의 단계.
@@ -101,12 +101,11 @@ pub fn read_toast_seconds(text: &str, base_seconds: f64) -> f64 {
 /// node_tree[toast_id].add_component(Text::create_with_text("", 24.0));
 /// node_tree[toast_id].set_visible(false);
 /// let toast_motion = attach_toast_motion(&mut node_tree, toast_id, -1.0).expect("toast motion");
-/// toast_motion.set_apply_text_handler(Box::new(|context: &mut ComponentContext, text: &str| {
+/// toast_motion.show("Saved", 1.0, |context: &mut ComponentContext| {
 /// 	if let Some(text_component) = context.get_node_mut().get_component_mut::<Text>() {
-/// 		text_component.set_text(text);
+/// 		text_component.set_text("Saved");
 /// 	}
-/// }));
-/// toast_motion.show("Saved", 1.0);
+/// });
 /// assert!(toast_motion.is_showing());
 ///
 /// node_tree.tick(&engine, 0.016);
@@ -131,29 +130,25 @@ pub struct ToastMotion {
 	stay_seconds: f64,
 	repeat_seconds: f64,
 	text: String,
-	requested: Option<(String, f64)>,
-	pending: Option<(String, f64)>,
+	requested: Option<(String, f64, ToastApplyText)>,
+	pending: Option<(String, f64, ToastApplyText)>,
 	is_hide_requested: bool,
 	base_position: Option<Vector2>,
 	applied_position: Option<Vector2>,
-	apply_text_handler: Option<ToastApplyTextHandler>,
 }
 
 #[crate::reflect]
 impl ToastMotion {
 	//==============================================================================
-	/// 생성. (들어오는 쪽: -1 이면 위에서, 1 이면 아래에서)
-	///
-	/// # 인자
-	/// - `enter_side`: 들어오는 쪽. (-1 이면 위에서, 1 이면 아래에서, 미끄러지는 거리 10 에 곱한다)
+	/// 생성. (원본 new ToastMotion(), 위에서 들어온다, 들어오는 쪽은 set_enter_side 로 바꾼다)
 	///
 	/// # 돌려줌
 	/// 숨은 새 모션. (노드에 붙일 때는 attach_toast_motion 을 쓴다)
 	//==============================================================================
-	pub fn new(enter_side: f64) -> ToastMotion {
+	pub fn new() -> ToastMotion {
 		ToastMotion {
 			component_base: ComponentBase::new(),
-			enter_side,
+			enter_side: -1.0,
 			phase: ToastPhase::Hidden,
 			phase_seconds: 0.0,
 			exit_length: EXIT_SECONDS,
@@ -165,18 +160,7 @@ impl ToastMotion {
 			is_hide_requested: false,
 			base_position: None,
 			applied_position: None,
-			apply_text_handler: None,
 		}
-	}
-
-	//==============================================================================
-	/// 노드에 글을 넣는 함수 설정.
-	///
-	/// # 인자
-	/// - `apply_text_handler`: 글이 나오기 시작할 때 문맥과 글을 받아 노드에 넣을 함수. (같은 노드의 UILabel 이나 Text 는 문맥의 노드에서 찾는다)
-	//==============================================================================
-	pub fn set_apply_text_handler(&mut self, apply_text_handler: ToastApplyTextHandler) {
-		self.apply_text_handler = Some(apply_text_handler);
 	}
 
 	//==============================================================================
@@ -185,9 +169,10 @@ impl ToastMotion {
 	/// # 인자
 	/// - `text`: 띄울 글. (떠 있는 글과 같고 사라지는 중이 아니면 머무는 시간만 다시 채우고 통 튄다)
 	/// - `seconds`: 머무는 시간. (초, 나오는 시간과 사라지는 시간은 빼고, read_toast_seconds 로 글 길이에 맞출 수 있다)
+	/// - `apply_text`: 노드에 글과 색을 넣는 함수. (나오기 시작할 때 문맥을 받아 한 번 부른다, 원본 applyText)
 	//==============================================================================
-	pub fn show(&mut self, text: &str, seconds: f64) {
-		self.requested = Some((String::from(text), seconds));
+	pub fn show(&mut self, text: &str, seconds: f64, apply_text: impl FnOnce(&mut ComponentContext) + 'static) {
+		self.requested = Some((String::from(text), seconds, Box::new(apply_text)));
 	}
 
 	//==============================================================================
@@ -241,7 +226,7 @@ impl ToastMotion {
 			self.base_position = None;
 			self.applied_position = None;
 		}
-		let (text, seconds) = match self.requested.take() {
+		let (text, seconds, apply_text) = match self.requested.take() {
 			Some(requested) => {
 				requested
 			}
@@ -256,20 +241,18 @@ impl ToastMotion {
 			return;
 		}
 		if is_shown {
-			self.pending = Some((text, seconds));
+			self.pending = Some((text, seconds, apply_text));
 			self.start_exit(QUICK_EXIT_SECONDS);
 			return;
 		}
-		self.start_enter(context, &text, seconds);
+		self.start_enter(context, &text, seconds, apply_text);
 	}
 
 	//==============================================================================
 	/// 나오기 시작.
 	//==============================================================================
-	fn start_enter(&mut self, context: &mut ComponentContext, text: &str, seconds: f64) {
-		if let Some(apply_text_handler) = self.apply_text_handler.as_mut() {
-			apply_text_handler(context, text);
-		}
+	fn start_enter(&mut self, context: &mut ComponentContext, text: &str, seconds: f64, apply_text: ToastApplyText) {
+		apply_text(context);
 		self.text = String::from(text);
 		self.stay_seconds = seconds;
 		self.repeat_seconds = 0.0;
@@ -321,7 +304,9 @@ impl ToastMotion {
 /// 붙인 ToastMotion. 노드가 없으면 None.
 //==============================================================================
 pub fn attach_toast_motion(node_tree: &mut NodeTree, node_id: NodeId, enter_side: f64) -> Option<&mut ToastMotion> {
-	node_tree.add_component(node_id, ToastMotion::new(enter_side))
+	let mut toast_motion = ToastMotion::new();
+	toast_motion.set_enter_side(enter_side);
+	node_tree.add_component(node_id, toast_motion)
 }
 
 #[crate::reflect]
@@ -396,8 +381,8 @@ impl Component for ToastMotion {
 					self.base_position = None;
 					self.applied_position = None;
 					match self.pending.take() {
-						Some((text, seconds)) => {
-							self.start_enter(context, &text, seconds);
+						Some((text, seconds, apply_text)) => {
+							self.start_enter(context, &text, seconds, apply_text);
 						}
 						None => {
 							self.phase = ToastPhase::Hidden;
