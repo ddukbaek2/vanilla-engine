@@ -23,7 +23,7 @@ use crate::base::vector2::Vector2;
 use crate::core::component::mask::Mask;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::engine::Engine;
-use crate::core::graphic::Graphic;
+use crate::core::graphic::{Graphic, NodeVisibility};
 use crate::core::node::worldnode::{take_draw_bounds_dirty, DrawBoundsKey, NodeTransform, WorldNode, DRAW_BOUNDS_DIRTY, DRAW_BOUNDS_KNOWN, DRAW_BOUNDS_UNKNOWN};
 use slotmap::{new_key_type, SlotMap};
 use std::ops::{Index, IndexMut};
@@ -1608,7 +1608,15 @@ impl NodeTree {
 		}
 
 		// 부모가 셈해 둔 이 노드의 경계(부모 좌표)가 부모 좌표의 보이는 사각형 밖이면 변환을 걸지 않고 건너뛴다. (스크롤 목록의 많은 줄을 하나씩 들어가지 않는다)
-		if self.is_node_culled_in_parent(node_id, graphic) {
+		// - 하위 트리가 보이는 사각형 안에 다 든 조상 아래면 견주지 않고 경계 크기만 본다. (원본 '다 안' 표시)
+		let is_inside_visible = graphic.is_inside_visible_bounds();
+		let mut visibility = if is_inside_visible {
+			self.read_inside_node_visibility(node_id, graphic, false)
+		}
+		else {
+			self.read_node_visibility_in_parent(node_id, graphic)
+		};
+		if visibility == NodeVisibility::Outside {
 			graphic.add_culled_subtree_count(1);
 			return;
 		}
@@ -1629,12 +1637,28 @@ impl NodeTree {
 
 		// 하위 트리 그리기 경계가 화면과 자르기 밖이면 이 노드와 자손의 그리기를 통째로 건너뛴다. (기즈모를 모두 그리면 건너뛰지 않는다)
 		let is_force_gizmos_visible = graphic.is_force_gizmos_visible();
-		if self.is_node_subtree_culled(node_id, graphic, is_force_gizmos_visible) {
+		if visibility == NodeVisibility::Unknown {
+			visibility = if is_inside_visible {
+				self.read_inside_node_visibility(node_id, graphic, true)
+			}
+			else {
+				self.read_node_subtree_visibility(node_id, graphic, is_force_gizmos_visible)
+			};
+		}
+		if visibility == NodeVisibility::Outside {
 			graphic.add_culled_subtree_count(1);
 			graphic.set_text_bake_scale_moving(false);
 			self.nodes[node_id].pop_transform(graphic);
 			return;
 		}
+
+		// 하위 트리가 보이는 사각형 안에 다 들면 이 노드를 그리는 동안 자손은 하위 트리 견주기, 컴포넌트 거르기, 보이는 자식 범위 찾기를 건너뛴다. (새 자르기 안에서는 다시 견준다)
+		let previous_inside_visible_state = if visibility == NodeVisibility::Inside && !is_inside_visible {
+			Some(graphic.begin_inside_visible_state())
+		}
+		else {
+			None
+		};
 
 		let node = &mut self.nodes[node_id];
 		node.push_component_transforms(graphic);
@@ -1675,6 +1699,9 @@ impl NodeTree {
 		let node = &mut self.nodes[node_id];
 		if is_force_gizmos_visible || node.is_gizmo_visible() {
 			node.draw_gizmos(graphic);
+		}
+		if let Some(previous_inside_visible_state) = previous_inside_visible_state {
+			graphic.restore_inside_visible_state(previous_inside_visible_state);
 		}
 		node.pop_component_transforms(graphic);
 		node.pop_transform(graphic);
@@ -1744,6 +1771,9 @@ impl NodeTree {
 		if child_count < 2 || cache.child_range_stamp != cache.stamp || cache.child_range_count != child_count || cache.state == DRAW_BOUNDS_DIRTY {
 			return None;
 		}
+		if graphic.is_inside_visible_bounds() {
+			return None;
+		}
 		if cache.generation != ComponentBase::get_drawn_rect_generation() {
 			return None;
 		}
@@ -1799,55 +1829,101 @@ impl NodeTree {
 	}
 
 	//==============================================================================
-	/// 노드를 부모 좌표에서 보아 화면 밖이라 건너뛸지. (draw_node 가 노드에 변환을 걸기 전에 부른다, 지금 변환은 부모의 내용 좌표)
+	/// 노드를 부모 좌표에서 보아 다 밖인지, 다 안인지. (draw_node 가 노드에 변환을 걸기 전에 부른다, 지금 변환은 부모의 내용 좌표, 원본 #readNodeVisibilityInParent)
+	/// - 부모가 셈해 둔 노드의 경계가 없으면 모름. (변환을 건 뒤 read_node_subtree_visibility 가 본다)
+	/// - 다 안은 변환이 축에 맞아 안쪽 사각형을 셈한 때만 본다.
 	//==============================================================================
-	fn is_node_culled_in_parent(&self, node_id: NodeId, graphic: &mut Graphic) -> bool {
+	fn read_node_visibility_in_parent(&self, node_id: NodeId, graphic: &mut Graphic) -> NodeVisibility {
 		if !graphic.is_culling_enabled() || !graphic.is_subtree_culling_enabled() || graphic.is_force_gizmos_visible() {
-			return false;
+			return NodeVisibility::Unknown;
 		}
 		let draw_bounds = match self.read_parent_draw_bounds(node_id) {
 			Some(draw_bounds) => {
 				draw_bounds
 			}
 			None => {
-				return false;
+				return NodeVisibility::Unknown;
 			}
 		};
 		if !(draw_bounds.size.x > 0.0 && draw_bounds.size.y > 0.0) {
-			return true;
+			return NodeVisibility::Outside;
 		}
 		let visible_rect = match graphic.read_local_visible_bounds() {
 			Some(visible_rect) => {
 				visible_rect
 			}
 			None => {
-				return false;
+				return NodeVisibility::Unknown;
 			}
 		};
 		let left_x = draw_bounds.position.x;
 		let top_y = draw_bounds.position.y;
-		left_x > visible_rect.position.x + visible_rect.size.x || top_y > visible_rect.position.y + visible_rect.size.y || left_x + draw_bounds.size.x < visible_rect.position.x || top_y + draw_bounds.size.y < visible_rect.position.y
+		let right_x = left_x + draw_bounds.size.x;
+		let bottom_y = top_y + draw_bounds.size.y;
+		if left_x > visible_rect.position.x + visible_rect.size.x || top_y > visible_rect.position.y + visible_rect.size.y || right_x < visible_rect.position.x || bottom_y < visible_rect.position.y {
+			return NodeVisibility::Outside;
+		}
+		if let Some(inner_bounds) = graphic.read_local_inner_bounds() {
+			if left_x >= inner_bounds[0] && top_y >= inner_bounds[1] && right_x <= inner_bounds[2] && bottom_y <= inner_bounds[3] {
+				return NodeVisibility::Inside;
+			}
+		}
+		NodeVisibility::Unknown
 	}
 
 	//==============================================================================
-	/// 하위 트리 그리기 경계가 화면과 자르기 밖이라 건너뛸지. (draw_node 가 노드에 변환을 건 뒤 부른다)
+	/// 하위 트리 그리기 경계가 화면과 자르기에 다 밖인지, 다 안인지. (draw_node 가 노드에 변환을 건 뒤 부른다, 디바이스 좌표로 견준다, 원본 #readNodeSubtreeVisibility)
 	//==============================================================================
-	fn is_node_subtree_culled(&mut self, node_id: NodeId, graphic: &mut Graphic, is_force_gizmos_visible: bool) -> bool {
+	fn read_node_subtree_visibility(&mut self, node_id: NodeId, graphic: &mut Graphic, is_force_gizmos_visible: bool) -> NodeVisibility {
 		if !graphic.is_culling_enabled() || !graphic.is_subtree_culling_enabled() || is_force_gizmos_visible {
-			return false;
+			return NodeVisibility::Unknown;
 		}
 		let draw_bounds = match self.read_subtree_draw_bounds_now(node_id, graphic) {
 			Some(draw_bounds) => {
 				draw_bounds
 			}
 			None => {
-				return false;
+				return NodeVisibility::Unknown;
 			}
 		};
 		if !(draw_bounds.size.x > 0.0 && draw_bounds.size.y > 0.0) {
-			return true;
+			return NodeVisibility::Outside;
 		}
-		!graphic.is_local_rect_visible(draw_bounds)
+		graphic.read_local_rect_visibility(draw_bounds)
+	}
+
+	//==============================================================================
+	/// 하위 트리가 보이는 사각형 안에 다 든 조상 아래의 노드. (견주지 않고 경계 크기만 본다, 원본 #readInsideNodeVisibility)
+	/// - 변환을 걸기 전(is_transformed false): 부모가 셈해 둔 경계가 없으면 모름(변환을 건 뒤 다시 본다), 크기가 0 이면 다 밖, 아니면 다 안.
+	/// - 변환을 건 뒤(is_transformed true): 하위 트리 경계를 모르면 다 안(조상의 경계가 이 노드를 품는다), 크기가 0 이면 다 밖, 아니면 다 안.
+	//==============================================================================
+	fn read_inside_node_visibility(&mut self, node_id: NodeId, graphic: &mut Graphic, is_transformed: bool) -> NodeVisibility {
+		let draw_bounds = if !is_transformed {
+			match self.read_parent_draw_bounds(node_id) {
+				Some(draw_bounds) => {
+					draw_bounds
+				}
+				None => {
+					return NodeVisibility::Unknown;
+				}
+			}
+		}
+		else {
+			match self.read_subtree_draw_bounds_now(node_id, graphic) {
+				Some(draw_bounds) => {
+					draw_bounds
+				}
+				None => {
+					return NodeVisibility::Inside;
+				}
+			}
+		};
+		if draw_bounds.size.x > 0.0 && draw_bounds.size.y > 0.0 {
+			NodeVisibility::Inside
+		}
+		else {
+			NodeVisibility::Outside
+		}
 	}
 
 	//==============================================================================

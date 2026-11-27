@@ -23,6 +23,7 @@ use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::component::richtext::build_font_string;
 use crate::core::component::{Component, ComponentBase};
+use crate::core::component::text::Text;
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline, TextDirection};
 use crate::core::image::Image;
 use crate::core::node::worldnode::NodeTransform;
@@ -200,12 +201,11 @@ fn compose_color_text_shape(coverage: &[u8], color_pixels: &[u8], text_color: Co
 }
 
 //==============================================================================
-/// 구운 한 장. (그림, 논리 좌표의 펜 자리와 기준선, 전진폭, 위아래, 배율, 구울 때의 노드 너비)
+/// 구운 한 장. (그림, 논리 좌표의 펜 자리와 기준선, 전진폭, 위아래, 배율)
 //==============================================================================
 struct BakedText {
 	image: Rc<Image>,
 	scale: f64,
-	content_width: f64,
 	pen_offset_x: f64,
 	baseline_offset_y: f64,
 	advance_width: f64,
@@ -318,6 +318,20 @@ impl ShadowText {
 		shadow_text.set_text(text);
 		shadow_text.font_size = font_size;
 		shadow_text
+	}
+
+	//==============================================================================
+	/// 그리는 사각형 셈. (원본 ShadowText.calculateDrawnRect 의 셈, 잰 글 너비를 받는다)
+	//==============================================================================
+	fn calculate_shadow_drawn_rect(text_width: f64, font_size: f64, shadow_blur: f64, shadow_offset: f64, text_align: TextAlign, content_size: Vector2) -> Rect {
+		let (left_x, right_x) = Text::calculate_aligned_span(text_align, content_size.x, text_width);
+		let blur_margin = shadow_blur.max(0.0) * 2.0 + BAKE_PADDING as f64;
+		let horizontal_margin = font_size * 0.5 + blur_margin;
+		let vertical_margin = font_size * 1.5 + blur_margin;
+		let middle_y = content_size.y * 0.5;
+		let top_y = middle_y - vertical_margin + shadow_offset.min(0.0);
+		let bottom_y = middle_y + vertical_margin + shadow_offset.max(0.0);
+		Rect::create(left_x - horizontal_margin, top_y, right_x - left_x + horizontal_margin * 2.0, bottom_y - top_y)
 	}
 
 	//==============================================================================
@@ -456,7 +470,7 @@ impl ShadowText {
 		#[cfg(target_arch = "wasm32")]
 		{
 			if graphic.get_text_string_texture_cache().is_browser_raster() {
-				return self.bake_with_browser(&font_string, fit_width, bake_scale);
+				return self.bake_with_browser(&font_string, bake_scale);
 			}
 		}
 		let scaled_blur = self.shadow_blur * bake_scale;
@@ -482,7 +496,6 @@ impl ShadowText {
 		Some(BakedText {
 			image,
 			scale: bake_scale,
-			content_width: fit_width,
 			pen_offset_x: text_raster.origin_x / bake_scale,
 			baseline_offset_y: text_raster.baseline_y / bake_scale,
 			advance_width: text_raster.advance_width / bake_scale,
@@ -495,13 +508,12 @@ impl ShadowText {
 	/// 브라우저 캔버스로 굽기. (웹, 원본 bakeText: 글자 색으로 fillText, 그림자는 캔버스의 shadowColor / shadowBlur / shadowOffsetY, 밑줄과 취소선은 fillRect)
 	//==============================================================================
 	#[cfg(target_arch = "wasm32")]
-	fn bake_with_browser(&self, font_string: &str, fit_width: f64, bake_scale: f64) -> Option<BakedText> {
+	fn bake_with_browser(&self, font_string: &str, bake_scale: f64) -> Option<BakedText> {
 		let font_description = crate::core::textstringtexturecache::parse_font_string(font_string);
 		let browser_bake = crate::platform::web::systemfont::bake_shadow_text(&self.text, &font_description, bake_scale, self.resolve_shaping_text_direction().to_shaping_direction(), self.text_color, self.shadow_color, self.shadow_offset, self.shadow_blur, self.is_underline, self.is_strikethrough)?;
 		Some(BakedText {
 			image: Image::create_from_pixels(browser_bake.bitmap.width, browser_bake.bitmap.height, browser_bake.bitmap.pixels),
 			scale: bake_scale,
-			content_width: fit_width,
 			pen_offset_x: browser_bake.pen_x / bake_scale,
 			baseline_offset_y: browser_bake.baseline_y / bake_scale,
 			advance_width: browser_bake.advance_width / bake_scale,
@@ -862,21 +874,17 @@ impl Component for ShadowText {
 	}
 
 	//==============================================================================
-	/// 화면 밖 거르기에 쓰는, 실제로 그리는 사각형. (글이 비면 빈 사각형, 바꾼 뒤 아직 굽지 않았거나 노드 너비, 굽는 배율이 구울 때와 다르면 None)
+	/// 화면 밖 거르기에 쓰는, 실제로 그리는 사각형. (원본 ShadowText.calculateDrawnRect, 굽기와 상관없이 글꼴 크기와 그림자 값으로 넉넉히 잡는다)
+	/// - 정렬로 놓은 글의 너비에 글꼴 크기의 반과 흐림 여유(흐림 x 2 + 굽는 여백)를 양옆에 더한다.
+	/// - 세로는 가운데에서 위아래로 글꼴 크기의 1.5 배와 흐림 여유, 그림자를 내린 만큼 더 잡는다.
+	/// - 글이 비면 빈 사각형.
 	//==============================================================================
 	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {
 		if self.text.is_empty() {
 			return Some(Rect::create(0.0, 0.0, 0.0, 0.0));
 		}
-		if self.is_bake_dirty {
-			return None;
-		}
-		let baked_text = self.baked_text.as_ref()?;
-		let content_size = transform.get_content_size();
-		if baked_text.content_width != content_size.x || baked_text.scale != graphic.calculate_text_bake_scale() {
-			return None;
-		}
-		Some(self.calculate_quad_rect(graphic, baked_text, content_size.x, content_size.y))
+		let text_width = graphic.measure_text_with_font_string(&self.build_font_string(self.font_size), &self.text).width;
+		Some(ShadowText::calculate_shadow_drawn_rect(text_width, self.font_size, self.shadow_blur, self.shadow_offset, self.text_align, transform.get_content_size()))
 	}
 
 	//==============================================================================
@@ -890,6 +898,19 @@ impl Component for ShadowText {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	//==============================================================================
+	/// 그리는 사각형이 원본과 같다. (헤드리스 크롬에서 원본 ShadowText.calculateDrawnRect 로 뽑은 값, 글 너비는 원본이 잰 것)
+	/// - 120 x 30, "SCORE" 16 px 가운데, 그림자 내림 3 흐림 4: 원본 (18.912017822265625, -19, 82.17596435546875, 71)
+	//==============================================================================
+	#[test]
+	fn shadow_drawn_rect_matches_original() {
+		let rect = ShadowText::calculate_shadow_drawn_rect(46.17596435546875, 16.0, 4.0, 3.0, TextAlign::Center, Vector2::create(120.0, 30.0));
+		assert_eq!((rect.position.x, rect.position.y, rect.size.x, rect.size.y), (18.912017822265625, -19.0, 82.17596435546875, 71.0));
+		// 그림자를 올리면 위로 넓어진다.
+		let raised_rect = ShadowText::calculate_shadow_drawn_rect(46.17596435546875, 16.0, 0.0, -5.0, TextAlign::Left, Vector2::create(120.0, 30.0));
+		assert_eq!((raised_rect.position.x, raised_rect.position.y, raised_rect.size.y), (-10.0, -16.0, 57.0));
+	}
 
 	//==============================================================================
 	/// 흐림은 한 점을 둘레로 번지게 하고 가운데를 낮춘다. 반지름 0 이면 그대로다.

@@ -1027,6 +1027,19 @@ struct GraphicState {
 }
 
 //==============================================================================
+// 노드 하위 트리가 보이는 사각형에 놓인 꼴. (원본 NODE_VISIBILITY_UNKNOWN, OUTSIDE, INSIDE)
+//==============================================================================
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum NodeVisibility {
+	/// 모른다, 또는 걸친다. (자손을 저마다 본다)
+	Unknown,
+	/// 다 밖이다. (건너뛴다)
+	Outside,
+	/// 다 안이다. (그 아래 자손은 견주지 않고 그린다)
+	Inside,
+}
+
+//==============================================================================
 /// 클립 스택 항목.
 //==============================================================================
 struct ClipEntry {
@@ -1047,6 +1060,8 @@ struct ClipEntry {
 	cull_minimum_y: f64,
 	cull_maximum_x: f64,
 	cull_maximum_y: f64,
+	/// 이 자르기를 걸기 전의 자르기 상태 번호. (풀면 돌아간다)
+	previous_clip_state_serial: u64,
 }
 
 //==============================================================================
@@ -1214,6 +1229,16 @@ pub struct Graphic {
 	/// 지역 좌표의 보이는 경계 상자. (최소 x, 최소 y, 최대 x, 최대 y)
 	local_visible_bounds: [f64; 4],
 	is_local_visible_bounds_known: bool,
+	/// 보이는 사각형을 한 디바이스 픽셀 좁혀 지금 변환의 지역 좌표로 옮긴 사각형. (최소 x, 최소 y, 최대 x, 최대 y, 이 안에 다 든 것은 보이는 사각형 안에 다 든다)
+	local_inner_bounds: [f64; 4],
+	/// 안쪽 사각형을 셈했는지. (변환이 축에 맞을 때만, 돌림이나 기울임이 있으면 false)
+	is_local_inner_bounds_known: bool,
+	/// 지금 자르기 상태의 번호. (자르기를 걸면 새 번호, 풀면 걸기 전 번호로 돌아간다, 자르기가 없으면 0)
+	clip_state_serial: u64,
+	/// 자르기를 걸 때마다 하나씩 오르는 수.
+	clip_state_serial_counter: u64,
+	/// 하위 트리가 보이는 사각형 안에 다 든 노드를 그리는 동안 그 때의 자르기 상태 번호와 뷰포트 크기. (None 이면 없음)
+	inside_visible_state: Option<(u64, i32, i32)>,
 	frame_number: u64,
 	round_rect_unit_table: [(f64, f64); ROUND_RECT_POSITION_COUNT],
 	is_batching_enabled: bool,
@@ -1420,6 +1445,11 @@ impl Graphic {
 			local_visible_key_list: [f64::NAN; 10],
 			local_visible_bounds: [0.0; 4],
 			is_local_visible_bounds_known: false,
+			local_inner_bounds: [0.0; 4],
+			is_local_inner_bounds_known: false,
+			clip_state_serial: 0,
+			clip_state_serial_counter: 0,
+			inside_visible_state: None,
 			frame_number: 0,
 			round_rect_unit_table: build_round_rect_unit_table(),
 			is_batching_enabled: true,
@@ -1521,6 +1551,8 @@ impl Graphic {
 				self.clip_stack.clear();
 				crate::core::glstatecache::disable(&self.gl, glow::STENCIL_TEST);
 			}
+			self.clip_state_serial = 0;
+			self.inside_visible_state = None;
 			self.stencil_clip_depth = 0;
 			self.is_shader_clip_active = false;
 			self.shader_clip_slot = 0;
@@ -2940,6 +2972,13 @@ impl Graphic {
 	/// 변환한 네 꼭짓점의 경계 상자가 드로잉 버퍼(0, 0 에서 너비, 높이까지)와 걸린 자르기의 경계 상자 안에 걸치면 true. (경계에 닿기만 해도 true)
 	//==============================================================================
 	pub fn is_local_rect_visible(&self, rect: Rect) -> bool {
+		self.read_local_rect_visibility(rect) != NodeVisibility::Outside
+	}
+
+	//==============================================================================
+	/// 현재 변환 기준의 사각형이 화면과 걸린 자르기에 다 밖인지, 다 안인지(한 디바이스 픽셀 안쪽), 걸치는지. (원본 #readLocalRectVisibility, 뷰포트가 없으면 모름)
+	//==============================================================================
+	pub(crate) fn read_local_rect_visibility(&self, rect: Rect) -> NodeVisibility {
 		let matrix = self.transform_matrix;
 		let left_x = rect.position.x;
 		let top_y = rect.position.y;
@@ -2972,7 +3011,13 @@ impl Graphic {
 			visible_maximum_x = clip_entry.cull_maximum_x.min(visible_maximum_x);
 			visible_maximum_y = clip_entry.cull_maximum_y.min(visible_maximum_y);
 		}
-		maximum_x >= visible_minimum_x && maximum_y >= visible_minimum_y && minimum_x <= visible_maximum_x && minimum_y <= visible_maximum_y
+		if !(maximum_x >= visible_minimum_x && maximum_y >= visible_minimum_y && minimum_x <= visible_maximum_x && minimum_y <= visible_maximum_y) {
+			return NodeVisibility::Outside;
+		}
+		if minimum_x >= visible_minimum_x + 1.0 && minimum_y >= visible_minimum_y + 1.0 && maximum_x <= visible_maximum_x - 1.0 && maximum_y <= visible_maximum_y - 1.0 {
+			return NodeVisibility::Inside;
+		}
+		NodeVisibility::Unknown
 	}
 
 	//==============================================================================
@@ -3092,6 +3137,7 @@ impl Graphic {
 
 		// 거꾸로 건다. (지역 = 역행렬 x (디바이스 - 옮김))
 		let determinant = matrix.a * matrix.d - matrix.b * matrix.c;
+		self.is_local_inner_bounds_known = false;
 		if determinant == 0.0 || !determinant.is_finite() {
 			self.is_local_visible_bounds_known = false;
 			return false;
@@ -3117,7 +3163,74 @@ impl Graphic {
 		let is_finite = minimum_x.is_finite() && minimum_y.is_finite() && maximum_x.is_finite() && maximum_y.is_finite();
 		self.local_visible_bounds = [minimum_x, minimum_y, maximum_x, maximum_y];
 		self.is_local_visible_bounds_known = is_finite;
+
+		// 축에 맞는 변환이면 한 디바이스 픽셀 좁힌 안쪽 사각형도 옮겨 둔다. (부모 좌표에서 '다 안' 을 볼 때 쓴다)
+		if is_finite && matrix.b == 0.0 && matrix.c == 0.0 && visible_maximum_x - visible_minimum_x > 2.0 && visible_maximum_y - visible_minimum_y > 2.0 {
+			let inner_left_x = (visible_minimum_x + 1.0 - matrix.e) / matrix.a;
+			let inner_right_x = (visible_maximum_x - 1.0 - matrix.e) / matrix.a;
+			let inner_top_y = (visible_minimum_y + 1.0 - matrix.f) / matrix.d;
+			let inner_bottom_y = (visible_maximum_y - 1.0 - matrix.f) / matrix.d;
+			self.local_inner_bounds = [inner_left_x.min(inner_right_x), inner_top_y.min(inner_bottom_y), inner_left_x.max(inner_right_x), inner_top_y.max(inner_bottom_y)];
+			self.is_local_inner_bounds_known = self.local_inner_bounds.iter().all(|value| value.is_finite());
+		}
 		is_finite
+	}
+
+	//==============================================================================
+	/// 지역 좌표의 보이는 사각형 안쪽 사각형. (read_local_visible_bounds 를 부른 뒤, 변환이 축에 맞을 때만, 최소 x, 최소 y, 최대 x, 최대 y)
+	//==============================================================================
+	pub(crate) fn read_local_inner_bounds(&self) -> Option<[f64; 4]> {
+		if !self.is_local_inner_bounds_known {
+			return None;
+		}
+		Some(self.local_inner_bounds)
+	}
+
+	//==============================================================================
+	/// 하위 트리가 보이는 사각형(화면과 걸린 자르기) 안에 다 든 노드를 그리는 중인지. (원본 Graphic.isInsideVisibleBounds)
+	/// - 참이면 그 노드의 자손은 화면 밖 견주기 없이 그려도 된다. 그 아래에서 자르기를 새로 걸면 그 자르기 안에서는 거짓이다(다시 견준다).
+	/// - 화면 밖 거르기나 하위 트리 거르기가 꺼졌거나 기즈모를 모두 그리면 거짓.
+	///
+	/// # 돌려줌
+	/// 다 안이면 true.
+	///
+	/// # 예제
+	/// 그리는 컴포넌트에서 '다 안' 인지 보기
+	/// ```rust,no_run
+	/// use vanilla::Graphic;
+	///
+	/// fn draw_marker(graphic: &mut Graphic) {
+	/// 	if graphic.is_inside_visible_bounds() {
+	/// 		assert!(graphic.is_subtree_culling_enabled());
+	/// 	}
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn is_inside_visible_bounds(&self) -> bool {
+		match self.inside_visible_state {
+			Some(inside_visible_state) => {
+				inside_visible_state == (self.clip_state_serial, self.applied_viewport_width, self.applied_viewport_height) && self.is_culling_enabled && self.is_subtree_culling_enabled && !self.is_force_gizmos_visible()
+			}
+			None => {
+				false
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 지금 노드의 하위 트리가 보이는 사각형 안에 다 들었다고 적는다. (NodeTree::draw_node 가 부른다, 지난 상태를 돌려주니 그 노드를 다 그린 뒤 restore_inside_visible_state 로 돌린다)
+	//==============================================================================
+	pub(crate) fn begin_inside_visible_state(&mut self) -> Option<(u64, i32, i32)> {
+		let previous_state = self.inside_visible_state;
+		self.inside_visible_state = Some((self.clip_state_serial, self.applied_viewport_width, self.applied_viewport_height));
+		previous_state
+	}
+
+	//==============================================================================
+	/// '다 안' 상태 돌리기. (begin_inside_visible_state 가 돌려준 것)
+	//==============================================================================
+	pub(crate) fn restore_inside_visible_state(&mut self, previous_state: Option<(u64, i32, i32)>) {
+		self.inside_visible_state = previous_state;
 	}
 
 	//==============================================================================
@@ -4836,6 +4949,7 @@ impl Graphic {
 			cull_minimum_y: minimum_y,
 			cull_maximum_x: maximum_x,
 			cull_maximum_y: maximum_y,
+			previous_clip_state_serial: self.clip_state_serial,
 		};
 		if let Some(parent_entry) = self.clip_stack.last() {
 			clip_entry.cull_minimum_x = parent_entry.cull_minimum_x.max(minimum_x);
@@ -4855,6 +4969,8 @@ impl Graphic {
 			}
 		}
 		self.clip_stack.push(clip_entry);
+		self.clip_state_serial_counter += 1;
+		self.clip_state_serial = self.clip_state_serial_counter;
 		self.apply_shader_clip_from_stack();
 		if is_shader_clip {
 			return;
@@ -5061,6 +5177,7 @@ impl Graphic {
 				return;
 			}
 		};
+		self.clip_state_serial = clip_entry.previous_clip_state_serial;
 
 		// 셰이더 자르기는 바깥 자르기로 돌아가기만 한다. (묶음을 끊지 않는다)
 		if clip_entry.is_shader_clip {

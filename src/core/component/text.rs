@@ -611,8 +611,6 @@ pub struct Text {
 	/// 나눈 줄과 줄마다 잰 폭, 글꼴의 위아래 길이. (한 줄로 그릴 때는 글 전체가 한 줄)
 	line_list: Vec<String>,
 	line_width_list: Vec<f64>,
-	layout_font_ascent: f64,
-	layout_font_descent: f64,
 	/// 한 줄 글을 맞출 너비와 줄이는 가장 작은 비율. (너비가 0 이면 맞추지 않는다)
 	fit_width: f64,
 	fit_minimum_ratio: f64,
@@ -655,8 +653,6 @@ impl Text {
 			layout_font_registration_count: 0,
 			line_list: Vec::new(),
 			line_width_list: Vec::new(),
-			layout_font_ascent: 0.0,
-			layout_font_descent: 0.0,
 			fit_width: 0.0,
 			fit_minimum_ratio: 0.55,
 			fitted_font_size: 32.0,
@@ -791,13 +787,9 @@ impl Text {
 			vec![self.text.clone()]
 		};
 		self.line_width_list.clear();
-		self.layout_font_ascent = 0.0;
-		self.layout_font_descent = 0.0;
 		for line_text in &line_list {
 			let line_metrics = graphic.measure_text(line_text);
 			self.line_width_list.push(line_metrics.width);
-			self.layout_font_ascent = self.layout_font_ascent.max(line_metrics.font_ascent);
-			self.layout_font_descent = self.layout_font_descent.max(line_metrics.font_descent);
 		}
 		self.line_list = line_list;
 		self.layout_wrap_width = wrap_width;
@@ -806,81 +798,91 @@ impl Text {
 	}
 
 	//==============================================================================
-	/// 그리는 사각형 셈하기. (content 좌표. 정렬, 넘침, 줄바꿈 결과를 따르고, 글자 삐침, 외곽선, 기울임, 밑줄 몫을 넉넉히 더한다)
+	/// 그리는 사각형 셈하기. (content 좌표, 원본 Text.calculateDrawnRect 와 calculateWrappedDrawnRect)
+	/// - 한 줄 글: 정렬로 놓은 글의 너비(맞춘 크기, 넘쳐도 그 너비)에 외곽선과 글꼴 크기의 반만큼을 양옆에 더하고,
+	///   세로는 기준선 자리에서 위아래로 글꼴 크기의 1.5 배씩 넉넉히 잡는다.
+	/// - 줄을 바꾸는 글: 나눈 줄 가운데 가장 넓은 줄로 가로를 잡고, 세로는 줄 묶음(줄 수 x 줄 높이)에 글꼴 크기만큼씩 넉넉히 잡는다.
 	//==============================================================================
 	fn calculate_text_rect(&mut self, graphic: &mut Graphic, content_width: f64, content_height: f64) -> Rect {
 		self.update_layout(graphic, content_width);
+		let content_size = Vector2::create(content_width, content_height);
 		let maximum_line_width = self.line_width_list.iter().fold(0.0f64, |maximum_width, line_width| maximum_width.max(*line_width));
-		let text_direction = self.resolve_draw_direction(graphic, &self.text);
-		let left_x = match graphic.resolve_text_align(self.text_align, text_direction) {
+		if self.is_wrapped() {
+			return Text::calculate_wrapped_drawn_rect(maximum_line_width, self.line_list.len(), self.font_size, self.line_spacing, self.stroke_width, self.text_align, self.text_baseline, content_size);
+		}
+		Text::calculate_line_drawn_rect(maximum_line_width, self.fitted_font_size, self.stroke_width, self.text_align, self.text_baseline, content_size)
+	}
+
+	//==============================================================================
+	/// 정렬로 놓은 글의 왼쪽, 오른쪽 끝. (원본 calculateDrawnRect 의 가로 셈, Start 와 End 는 그릴 때의 방향으로 왼쪽이나 오른쪽이 되므로 둘 다 품는다)
+	//==============================================================================
+	pub(crate) fn calculate_aligned_span(text_align: TextAlign, content_width: f64, text_width: f64) -> (f64, f64) {
+		match text_align {
 			TextAlign::Left => {
-				0.0
+				(0.0, text_width)
 			}
 			TextAlign::Right => {
-				content_width - maximum_line_width
+				(content_width - text_width, content_width)
 			}
-			_ => {
-				(content_width - maximum_line_width) * 0.5
+			TextAlign::Center => {
+				let left_x = (content_width - text_width) * 0.5;
+				(left_x, left_x + text_width)
 			}
-		};
-		let font_ascent = self.layout_font_ascent;
-		let font_descent = self.layout_font_descent;
-		let (top_y, bottom_y) = if self.is_wrapped() {
-			// 줄마다 가운데 기준선으로 그린다. (draw_wrapped_text 와 같은 자리)
-			let line_height = self.font_size * self.line_spacing;
-			let line_count = self.line_list.len().max(1) as f64;
-			let block_height = line_count * line_height;
-			let block_top = match self.text_baseline {
-				TextBaseline::Top | TextBaseline::Hanging => {
-					0.0
-				}
-				TextBaseline::Bottom | TextBaseline::Ideographic | TextBaseline::Alphabetic => {
-					content_height - block_height
-				}
-				TextBaseline::Middle => {
-					(content_height - block_height) * 0.5
-				}
-			};
-			let half_text_height = (font_ascent + font_descent) * 0.5;
-			let first_line_y = block_top + 0.5 * line_height;
-			let last_line_y = block_top + (line_count - 0.5) * line_height;
-			(first_line_y.min(last_line_y) - half_text_height, first_line_y.max(last_line_y) + half_text_height)
+			TextAlign::Start | TextAlign::End => {
+				((content_width - text_width).min(0.0), text_width.max(content_width))
+			}
 		}
-		else {
-			// 기준선 자리는 draw_plain_text 와, 기준선 맞춤은 Graphic.draw_text_entry 와 같은 셈이다.
-			let draw_y = match self.text_baseline {
-				TextBaseline::Top | TextBaseline::Hanging => {
-					0.0
-				}
-				TextBaseline::Bottom | TextBaseline::Ideographic | TextBaseline::Alphabetic => {
-					content_height
-				}
-				TextBaseline::Middle => {
-					content_height * 0.5
-				}
-			};
-			let baseline_offset = match self.text_baseline {
-				TextBaseline::Top => {
-					font_ascent
-				}
-				TextBaseline::Hanging => {
-					font_ascent * 0.8
-				}
-				TextBaseline::Middle => {
-					(font_ascent - font_descent) * 0.5
-				}
-				TextBaseline::Ideographic | TextBaseline::Bottom => {
-					-font_descent
-				}
-				TextBaseline::Alphabetic => {
-					0.0
-				}
-			};
-			let baseline_y = draw_y + baseline_offset;
-			(baseline_y - font_ascent, baseline_y + font_descent)
+	}
+
+	//==============================================================================
+	/// 기준선 자리. (원본 calculateDrawnRect 의 세로 셈, Top 과 Hanging 은 위 끝, Bottom 과 Ideographic 과 Alphabetic 은 아래 끝, Middle 은 가운데)
+	//==============================================================================
+	pub(crate) fn calculate_baseline_anchor_y(text_baseline: TextBaseline, content_height: f64) -> f64 {
+		match text_baseline {
+			TextBaseline::Top | TextBaseline::Hanging => {
+				0.0
+			}
+			TextBaseline::Bottom | TextBaseline::Ideographic | TextBaseline::Alphabetic => {
+				content_height
+			}
+			TextBaseline::Middle => {
+				content_height * 0.5
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 한 줄 글의 그리는 사각형. (원본 calculateDrawnRect, 가로 여유 글꼴 크기의 반 + 외곽선, 세로 여유 글꼴 크기의 1.5 배 + 외곽선)
+	//==============================================================================
+	pub(crate) fn calculate_line_drawn_rect(text_width: f64, font_size: f64, stroke_width: f64, text_align: TextAlign, text_baseline: TextBaseline, content_size: Vector2) -> Rect {
+		let (left_x, right_x) = Text::calculate_aligned_span(text_align, content_size.x, text_width);
+		let anchor_y = Text::calculate_baseline_anchor_y(text_baseline, content_size.y);
+		let horizontal_margin = font_size * 0.5 + stroke_width;
+		let vertical_margin = font_size * 1.5 + stroke_width;
+		Rect::create(left_x - horizontal_margin, anchor_y - vertical_margin, right_x - left_x + horizontal_margin * 2.0, vertical_margin * 2.0)
+	}
+
+	//==============================================================================
+	/// 줄을 바꾸는 글의 그리는 사각형. (원본 calculateWrappedDrawnRect, 가로 여유 글꼴 크기의 반 + 외곽선, 세로 여유 글꼴 크기 + 외곽선)
+	//==============================================================================
+	fn calculate_wrapped_drawn_rect(maximum_line_width: f64, line_count: usize, font_size: f64, line_spacing: f64, stroke_width: f64, text_align: TextAlign, text_baseline: TextBaseline, content_size: Vector2) -> Rect {
+		let (left_x, right_x) = Text::calculate_aligned_span(text_align, content_size.x, maximum_line_width);
+		let line_height = font_size * line_spacing;
+		let block_height = line_count as f64 * line_height;
+		let block_top = match text_baseline {
+			TextBaseline::Top | TextBaseline::Hanging => {
+				0.0
+			}
+			TextBaseline::Bottom | TextBaseline::Ideographic | TextBaseline::Alphabetic => {
+				content_size.y - block_height
+			}
+			TextBaseline::Middle => {
+				(content_size.y - block_height) * 0.5
+			}
 		};
-		let margin = self.font_size.abs() * 0.5 + self.stroke_width.max(0.0) + 2.0;
-		Rect::create(left_x - margin, top_y - margin, maximum_line_width + margin * 2.0, (bottom_y - top_y).max(0.0) + margin * 2.0)
+		let horizontal_margin = font_size * 0.5 + stroke_width;
+		let vertical_margin = font_size + stroke_width;
+		Rect::create(left_x - horizontal_margin, block_top - vertical_margin, right_x - left_x + horizontal_margin * 2.0, block_height + vertical_margin * 2.0)
 	}
 
 	//==============================================================================
@@ -1993,6 +1995,32 @@ impl Component for Text {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	//==============================================================================
+	/// 그리는 사각형이 원본과 같다. (헤드리스 크롬에서 원본 Text.calculateDrawnRect, RichText.calculateDrawnRect 로 뽑은 값, 글 너비와 줄 수는 원본이 잰 것)
+	//==============================================================================
+	#[test]
+	fn drawn_rect_matches_original() {
+		let to_tuple = |rect: Rect| (rect.position.x, rect.position.y, rect.size.x, rect.size.y);
+		// 엔진 장면 줄 제목. (180 x 30, 14 px 왼쪽 가운데)
+		let title_rect = Text::calculate_line_drawn_rect(81.78790283203125 - 14.0, 14.0, 0.0, TextAlign::Left, TextBaseline::Middle, Vector2::create(180.0, 30.0));
+		assert_eq!(to_tuple(title_rect), (-7.0, -6.0, 81.78790283203125, 42.0));
+		// 오른쪽 아래, 외곽선 3. (100 x 40, 20 px)
+		let right_rect = Text::calculate_line_drawn_rect(35.219970703125, 20.0, 3.0, TextAlign::Right, TextBaseline::Bottom, Vector2::create(100.0, 40.0));
+		assert_eq!(to_tuple(right_rect), (51.780029296875, 7.0, 61.219970703125, 66.0));
+		// 넘친 글의 Start 는 양쪽을 다 품는다. (60 x 30, 18 px 위)
+		let start_rect = Text::calculate_line_drawn_rect(217.97988891601562, 18.0, 0.0, TextAlign::Start, TextBaseline::Top, Vector2::create(60.0, 30.0));
+		assert_eq!(to_tuple(start_rect), (-166.97988891601562, -27.0, 393.95977783203125, 54.0));
+		// 줄바꿈 폭 100 의 세 줄, 가운데 위, 외곽선 2. (120 x 40, 16 px, 줄 간격 1.25)
+		let wrapped_rect = Text::calculate_wrapped_drawn_rect(87.24797058105469, 3, 16.0, 1.25, 2.0, TextAlign::Center, TextBaseline::Top, Vector2::create(120.0, 40.0));
+		assert_eq!(to_tuple(wrapped_rect), (6.376014709472656, -18.0, 107.24797058105469, 96.0));
+		// 줄바꿈 문자 세 줄, 왼쪽 아래. (80 x 50, 12 px, 줄 간격 1.5)
+		let newline_rect = Text::calculate_wrapped_drawn_rect(23.91596984863281, 3, 12.0, 1.5, 0.0, TextAlign::Left, TextBaseline::Bottom, Vector2::create(80.0, 50.0));
+		assert_eq!(to_tuple(newline_rect), (-6.0, -16.0, 35.91596984863281, 78.0));
+		// 리치텍스트 두 조각 ("HP " 굵게, "42" 32 px 외곽선 2), 200 x 40 왼쪽 가운데. (합산 폭, 가장 큰 글꼴 크기, 가장 굵은 외곽선)
+		let rich_rect = Text::calculate_line_drawn_rect(120.31997680664062 - 36.0, 32.0, 2.0, TextAlign::Left, TextBaseline::Middle, Vector2::create(200.0, 40.0));
+		assert_eq!(to_tuple(rich_rect), (-18.0, -30.0, 120.31997680664062, 100.0));
+	}
 
 	//==============================================================================
 	/// 줄바꿈 낱말 조각은 크롬의 원본 splitWords 처럼 마침표(숫자 사이 빼고)와 쌍점에서 나뉜다. (크롬 158 에서 원본 splitWords 로 잰 값)

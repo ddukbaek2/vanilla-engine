@@ -1397,13 +1397,18 @@ impl WorldNode {
 	//==============================================================================
 	pub fn draw_components(&mut self, graphic: &mut Graphic) -> (Option<f64>, bool) {
 		let mut is_culled = false;
-		if !self.components.is_empty() && graphic.is_culling_enabled() {
+		// 하위 트리가 보이는 사각형 안에 다 든 노드 아래면 견주지 않는다. (원본 #isComponentDrawCulled)
+		if !self.components.is_empty() && graphic.is_culling_enabled() && !graphic.is_inside_visible_bounds() {
 			let mut drawn_rect: Option<Rect> = None;
 			let mut is_drawn_rect_known = true;
+			let mut is_inside_content_reported = false;
 			for component in self.components.iter_mut() {
 				// 그리지 않는 컴포넌트(draw 를 덮어쓰지 않은 것)는 아무것도 그리지 않는 것으로 본다.
 				if !component.is_enable() || !component.is_draw_overridden() {
 					continue;
+				}
+				if component.is_drawn_inside_content() {
+					is_inside_content_reported = true;
 				}
 				let component_rect = match component.calculate_drawn_rect(&self.transform, graphic) {
 					Some(component_rect) => {
@@ -1414,6 +1419,10 @@ impl WorldNode {
 						break;
 					}
 				};
+				// 크기 0 은 그리는 것이 없다. (원본 #isComponentDrawCulled)
+				if !(component_rect.size.x > 0.0 && component_rect.size.y > 0.0) {
+					continue;
+				}
 				drawn_rect = match drawn_rect {
 					Some(drawn_rect) => {
 						let left_x = drawn_rect.position.x.min(component_rect.position.x);
@@ -1426,6 +1435,28 @@ impl WorldNode {
 						Some(component_rect)
 					}
 				};
+			}
+			// 내용 영역 안에서만 그리는 컴포넌트는 내용 영역을 한 단위씩 넓혀 본다. (나인 슬라이스가 크기를 올림해 한 단위 안쪽으로 넘칠 수 있다, 원본 #isComponentDrawCulled 와 하위 트리 경계와 같다)
+			if is_drawn_rect_known && is_inside_content_reported {
+				let content_size = self.transform.get_content_size();
+				if content_size.x > 0.0 && content_size.y > 0.0 {
+					let content_rect = Rect::create(-1.0, -1.0, content_size.x + 2.0, content_size.y + 2.0);
+					drawn_rect = match drawn_rect {
+						Some(drawn_rect) => {
+							let left_x = drawn_rect.position.x.min(content_rect.position.x);
+							let top_y = drawn_rect.position.y.min(content_rect.position.y);
+							let right_x = (drawn_rect.position.x + drawn_rect.size.x).max(content_rect.position.x + content_rect.size.x);
+							let bottom_y = (drawn_rect.position.y + drawn_rect.size.y).max(content_rect.position.y + content_rect.size.y);
+							Some(Rect::create(left_x, top_y, right_x - left_x, bottom_y - top_y))
+						}
+						None => {
+							Some(content_rect)
+						}
+					};
+				}
+				else {
+					is_drawn_rect_known = false;
+				}
 			}
 			if is_drawn_rect_known {
 				if let Some(drawn_rect) = drawn_rect {
