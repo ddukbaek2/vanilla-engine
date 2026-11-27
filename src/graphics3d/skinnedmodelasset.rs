@@ -27,7 +27,6 @@
 use crate::core::shaderprogram::ShaderProgram;
 use crate::graphics3d::material::Material;
 use crate::graphics3d::skinnedmodel::{AnimationClip, Drawable, Skin, SkinnedModelNode};
-use glow::HasContext;
 use std::cell::{Cell, Ref, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -342,10 +341,10 @@ impl SkinnedModelAsset {
 			unsafe {
 				crate::core::glstatecache::delete_vertex_array(gl, drawable.vertex_array);
 				for vertex_buffer in drawable.vertex_buffer_list.iter() {
-					gl.delete_buffer(*vertex_buffer);
+					crate::core::glstatecache::delete_buffer(gl, *vertex_buffer);
 				}
 				if let Some(index_buffer) = drawable.index_buffer {
-					gl.delete_buffer(index_buffer);
+					crate::core::glstatecache::delete_buffer(gl, index_buffer);
 				}
 				if let Some(morph_texture) = drawable.morph_texture {
 					crate::core::glstatecache::delete_texture(gl, morph_texture);

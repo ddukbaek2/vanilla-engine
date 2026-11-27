@@ -10,12 +10,12 @@
 //! - 엔진은 GL 을 넘기는 자리에서 상태 캐시를 스스로 잊지 않는다. (원본과 같음) 상태 캐시를 거치지 않은 호출은 VANILLA_GL_STATE_CHECK=1 로 돌려 찾는다.
 //==============================================================================
 use crate::core::glstatecache::{self, GlStatePart};
-use crate::core::graphic::{GlFramebuffer, GlProgram, GlTexture, GlVertexArray};
+use crate::core::graphic::{GlBuffer, GlFramebuffer, GlProgram, GlTexture, GlVertexArray};
 use glow::HasContext;
 
 //==============================================================================
 /// 엔진 GL 컨텍스트. (원본 WebGL2RenderingContext, Graphic::get_gl 이 준다, 상태 함수가 상태 캐시를 거친다)
-/// - 상태 함수(묶기, 켜고 끄기, 뷰포트, 가위, 섞기, 깊이, 면, 프로그램, 버텍스 어레이, 텍스처, 비우기 색, 픽셀 저장)는 상태 캐시를 거쳐 GL 을 부르고,
+/// - 상태 함수(묶기, 켜고 끄기, 뷰포트, 가위, 섞기, 깊이, 면, 프로그램, 버텍스 어레이, 버퍼 묶기, 텍스처, 비우기 색, 픽셀 저장)는 상태 캐시를 거쳐 GL 을 부르고,
 ///   읽기(get_parameter_*, is_enabled)는 기억한 값으로 답한다. 그 밖의 함수는 안의 glow::Context 를 그대로 부른다.
 /// - 게임 코드가 이것으로 상태를 바꾼 직후 같은 콜백 안에서 엔진 그리기를 이어 불러도 엔진이 바뀐 상태를 안다.
 ///
@@ -493,6 +493,37 @@ impl GlContext {
 	//==============================================================================
 	pub unsafe fn delete_vertex_array(&self, vertex_array: GlVertexArray) {
 		unsafe { glstatecache::delete_vertex_array(&self.context, vertex_array) }
+	}
+
+	//==============================================================================
+	/// 버퍼 만들기. (glow 의 같은 이름, 지운 이름을 GL 이 다시 주면 상태 캐시가 지운 기억과 처음 묶은 대상을 뺀다)
+	///
+	/// # 돌려줌
+	/// 새 버퍼. 못 만들면 까닭.
+	//==============================================================================
+	pub unsafe fn create_buffer(&self) -> Result<GlBuffer, String> {
+		unsafe { glstatecache::create_buffer(&self.context) }
+	}
+
+	//==============================================================================
+	/// 버퍼 묶기. (원본 bindBuffer, 상태 캐시는 ARRAY_BUFFER 묶음을 기억해 엔진 2D 그리기가 제 정점 버퍼를 다시 묶을지 견준다)
+	///
+	/// # 인자
+	/// - `target`: 묶을 대상. (ARRAY_BUFFER, ELEMENT_ARRAY_BUFFER 같은 것)
+	/// - `buffer`: 묶을 버퍼. None 이면 풀기.
+	//==============================================================================
+	pub unsafe fn bind_buffer(&self, target: u32, buffer: Option<GlBuffer>) {
+		unsafe { glstatecache::bind_buffer(&self.context, target, buffer) }
+	}
+
+	//==============================================================================
+	/// 버퍼 지우기. (원본 deleteBuffer)
+	///
+	/// # 인자
+	/// - `buffer`: 지울 버퍼.
+	//==============================================================================
+	pub unsafe fn delete_buffer(&self, buffer: GlBuffer) {
+		unsafe { glstatecache::delete_buffer(&self.context, buffer) }
 	}
 
 	//==============================================================================

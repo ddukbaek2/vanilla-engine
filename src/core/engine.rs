@@ -77,6 +77,8 @@ pub(crate) const DEFAULT_ENGINE_TITLE: &str = "바닐라엔진";
 
 /// 씬이 맡긴 애셋이 다 끝난 뒤에도 로딩 화면을 더 보이는 시간. (초, 원본 SceneManager.loadScene 의 setTimeout 300)
 const SCENE_LOAD_EXTRA_WAIT_SECONDS: f64 = 0.3;
+/// 로딩 화면 동안 한 프레임에 그림을 올리는 시간 한도. (밀리초, 원본 IMAGE_UPLOAD_TIME_SLICE_MILLISECONDS, 유니티 asyncUploadTimeSlice 기본 2)
+const IMAGE_UPLOAD_TIME_SLICE_MILLISECONDS: f64 = 2.0;
 
 /// 찍기 모드의 한 프레임 간격. (밀리초, 1/60 초. 원본 CAPTURE_FRAME_MILLISECONDS 와 같은 셈이 되게 밀리초로 두고 0.001 을 곱한다)
 const CAPTURE_FRAME_MILLISECONDS: f64 = 1000.0 / 60.0;
@@ -2088,12 +2090,13 @@ impl EngineRunner {
 	}
 
 	//==============================================================================
-	/// 그래픽의 묶음 기억 잊기. (웹 플랫폼이 GL 컨텍스트를 잃거나 되살릴 때, 원본 Graphic 의 webglcontextlost / webglcontextrestored)
+	/// 그래픽의 GL 상태 기억 잊기. (웹 플랫폼이 GL 컨텍스트를 잃거나 되살릴 때, 원본 WebGLStateCache 의 webglcontextlost / webglcontextrestored)
+	/// - Graphic 은 묶음과 2D 상태를 따로 기억하지 않고 상태 캐시에 견주므로 상태 캐시만 잊는다. (원본 Graphic 도 묶음 기억을 따로 잊지 않는다)
 	//==============================================================================
 	#[cfg(target_arch = "wasm32")]
-	pub(crate) fn invalidate_render_state_cache(&self) {
+	pub(crate) fn reset_gl_state_cache(&self) {
 		if let Some(graphic) = self.engine.get_graphic() {
-			graphic.invalidate_render_state_cache();
+			graphic.reset_gl_state_cache();
 		}
 	}
 
@@ -2464,6 +2467,13 @@ impl EngineRunner {
 		else {
 			seconds_since_startup
 		};
+		// 로딩 화면 동안 한 프레임에 그림을 올리는 시간 한도. (찍기 모드는 한 번에 다 올린다, 시간 한도로 나누면 기계 빠르기에 따라 프레임 수가 달라진다, 원본과 같다)
+		let image_upload_time_limit_milliseconds = if self.capture_request.is_some() {
+			f64::INFINITY
+		}
+		else {
+			IMAGE_UPLOAD_TIME_SLICE_MILLISECONDS
+		};
 
 		// 입력 처리.
 		self.engine.input_manager.borrow_mut().tick(time_delta);
@@ -2503,7 +2513,7 @@ impl EngineRunner {
 		for scene in scene_list.iter_mut() {
 			// 맡긴 애셋을 기다리는 씬은 로딩 화면만. (다 읽혔으면 이번 프레임부터 돈다, 원본처럼 내리는 중이어도 불러오기가 끝나면 initialize 한다)
 			if !scene.get_scene_base().is_loaded() {
-				advance_loading_scene(self.engine, scene.as_mut(), scene_load_seconds);
+				advance_loading_scene(self.engine, scene.as_mut(), scene_load_seconds, image_upload_time_limit_milliseconds);
 			}
 			if !scene.get_scene_base().is_loaded() {
 				self.engine.with_graphic(|engine, graphic| {
@@ -2801,10 +2811,20 @@ fn apply_scene_root_to_view_size(engine: &Engine, scene: &mut dyn Scene) {
 /// - 로딩 문은 엔진 시계(시간 관리자의 실제 경과 시간, 찍기 모드는 엔진 시계)와 엔진 입력으로 로딩 시각과 터치 건너뛰기를 잡는다. (원본 GameScene.load 가 거는 엔진 프레임 함수)
 ///   덮어쓸 수 있는 draw_on_load 에 기대지 않아, 씬이 바탕 draw_on_load 를 부르지 않아도 최소 노출 시간 뒤 문이 열린다.
 //==============================================================================
-fn advance_loading_scene(engine: &Engine, scene: &mut dyn Scene, scene_load_seconds: f64) {
+fn advance_loading_scene(engine: &Engine, scene: &mut dyn Scene, scene_load_seconds: f64, image_upload_time_limit_milliseconds: f64) {
 	let current_time = engine.get_time_manager().get_realtime_since_startup();
 	let is_touch_pressed = engine.get_input_manager().is_touch_pressed();
 	scene.get_scene_base_mut().update_loading_gate(current_time, is_touch_pressed);
+
+	// 맡긴 것이 다 읽혔으면 읽은 그림을 로딩 화면 동안 GPU 에 올린다. (첫 그리기 프레임에 올리기가 몰리지 않게, 유니티와 언리얼의 로딩 때 올리기, 원본 SceneManager.loadScene)
+	// 0.3 초 더 보이기와 같이 센다. 다 올려야 initialize 한다.
+	if !scene.get_scene_base().is_loaded() && scene.get_scene_base().are_tracked_assets_finished() {
+		scene.get_scene_base_mut().mark_tracked_assets_finished(scene_load_seconds);
+		let remaining_count = engine.get_graphic_mut().map(|mut graphic| graphic.prepare_loaded_images(image_upload_time_limit_milliseconds)).unwrap_or(0);
+		if remaining_count > 0 {
+			return;
+		}
+	}
 	initialize_scene_if_ready(engine, scene, scene_load_seconds);
 }
 
@@ -2951,7 +2971,7 @@ mod tests {
 		for _ in 0..120 {
 			current_seconds += 1.0 / 60.0;
 			engine.get_time_manager_mut().update(current_seconds);
-			advance_loading_scene(engine, scene.as_mut(), current_seconds);
+			advance_loading_scene(engine, scene.as_mut(), current_seconds, f64::INFINITY);
 			if scene.get_scene_base().is_loaded() {
 				break;
 			}

@@ -9,7 +9,7 @@
 //! - 페이지: visibilitychange, blur, focus, pointerdown 을 엔진의 페이지 이벤트로 넘기고, 다시 보이면 on_page_visibility_restored,
 //!   문서 resume 과 pageshow(persisted) 면 on_page_process_restored 를 부른다. (원본 setupAllDocumentEvents)
 //! - 최대 FPS 는 원본처럼 세기 시작한 뒤 처리한 프레임 수로 차례를 정한다. (platform/framelimiter.rs, 90 Hz 에서 60 FPS 도 평균 60)
-//! - 캔버스의 webglcontextlost, webglcontextrestored 에서 원본 Graphic 처럼 묶음 기억을 잊는다.
+//! - 캔버스의 webglcontextlost, webglcontextrestored 에서 원본 WebGLStateCache 처럼 GL 상태 기억을 잊는다.
 //! - 키, 마우스, 손가락, 페이지 사건은 프레임 콜백 안에서 다시 들어와도(게임 코드의 dispatchEvent, focus() 같은 것) 겹쳐 빌리지 않는다.
 //!   바로 빌릴 수 있으면 그 자리에서 처리하고, 못 빌리면 줄에 쌓았다가 프레임 콜백 끝에 온 차례대로 처리한다. (platform/eventqueue.rs)
 //! - exit_application: 원본처럼 Capacitor 의 App.exitApp, 없으면 window.close 를 시도한다.
@@ -974,7 +974,7 @@ fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Res
 }
 
 //==============================================================================
-/// GL 컨텍스트를 잃거나 되살림. (원본 Graphic 생성자처럼 캔버스의 webglcontextlost, webglcontextrestored 에서 그래픽의 묶음 기억을 잊는다)
+/// GL 컨텍스트를 잃거나 되살림. (원본 WebGLStateCache 처럼 캔버스의 webglcontextlost, webglcontextrestored 에서 GL 상태 기억을 잊는다)
 /// - 컨텍스트를 잃거나 되살리면 GL 의 묶음이 처음으로 돌아가므로 기억을 잊는다. 프레임 콜백 안에서 겹쳐 불리지 않게 try_borrow 로 본다.
 //==============================================================================
 fn add_context_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
@@ -982,7 +982,7 @@ fn add_context_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 	let web_application_cell_for_context = web_application_cell.clone();
 	let context_change_callback: Closure<dyn FnMut()> = Closure::new(move || {
 		if let Ok(web_application) = web_application_cell_for_context.try_borrow() {
-			web_application.engine_runner.invalidate_render_state_cache();
+			web_application.engine_runner.reset_gl_state_cache();
 		}
 	});
 	canvas.add_event_listener_with_callback("webglcontextlost", context_change_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;

@@ -617,9 +617,9 @@ impl SkinnedModelRenderer {
 			self.apply_morph_uniforms(gl, wireframe_shader_program, drawable);
 			unsafe {
 				crate::core::glstatecache::bind_vertex_array(gl, Some(drawable.vertex_array));
-				gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(wireframe_index_buffer));
+				crate::core::glstatecache::bind_buffer(gl, glow::ELEMENT_ARRAY_BUFFER, Some(wireframe_index_buffer));
 				crate::core::glstatecache::draw_elements(gl, glow::LINES, drawable.wireframe_index_count as i32, drawable.wireframe_index_component_type, 0);
-				gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, drawable.index_buffer);
+				crate::core::glstatecache::bind_buffer(gl, glow::ELEMENT_ARRAY_BUFFER, drawable.index_buffer);
 			}
 		}
 		unsafe {
