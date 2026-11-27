@@ -9,11 +9,13 @@
 //! - 로캘: 원본은 브라우저의 Intl(ICU)에 맡긴다. 러스트 std 에는 그런 것이 없어서 소수점, 천 단위 기호, 음수 앞붙이, 숫자 모양,
 //!   위 묶음 길이(인도식은 3 다음 2), 최소 묶음 자리(1234 는 묶지 않는 es, pl 등), NaN 글을 node 25(ICU 78.3, CLDR 48)의 Intl 에서 뽑아 표로 넣었다.
 //!   무한대는 모든 로캘이 ∞ 다. 언어 태그는 대소문자를 가리지 않고 뒤 조각부터 하나씩 떼며 표에서 찾는다. (zh-Hant-TW → zh-hant)
-//!   유니코드 확장(-u-...)은 보지 않고, 밑줄은 하이픈으로 본다. 표에 없는 태그는 원본이 브라우저의 기본 로캘로 쓰듯 시스템 언어로 쓴다.
+//!   유니코드 확장(-u-...)은 숫자 꼴을 고르는 데 보지 않는다. 표에 없는 태그는 원본이 브라우저의 기본 로캘로 쓰듯 시스템 언어로 쓴다.
 //!   시스템 언어는 Localization.detect_language 와 같은 공용 함수(localization::read_preferred_language_tags)의 첫째다.
 //!   (웹은 navigator.languages, 데스크탑은 sys-locale 이 읽은 시스템 선호 언어 차례: 윈도우 GetUserPreferredUILanguages, 맥 CFLocaleCopyPreferredLanguages,
 //!   리눅스 LANGUAGE / LC_ALL / LC_MESSAGES / LANG. 그것도 표에 없으면 en-US)
-//!   (원본은 틀린 태그면 RangeError 를 던진다. 러스트 판은 던지지 않고 표에 없는 태그처럼 쓴다)
+//! - 언어 태그 검사: 원본 toLocaleString 은 BCP 47(유니코드 로캘 식별자, UTS 35) 꼴이 아닌 태그에 RangeError 를 던진다.
+//!   러스트 판도 크롬(V8 의 CanonicalizeLanguageTag, ECMA-402 IsStructurallyValidLanguageTag)과 같은 검사를 하고 틀린 태그는 Err(FormatError::InvalidLanguageTag) 다.
+//!   (밑줄 "EN_gb", 빈 글, 4 글자 언어 "root", 겹친 변이형이나 확장 글자, 끝이 빈 확장 "en-u" 같은 것. 오류 글도 크롬의 "Invalid language tag: ..." 와 같다)
 //! - fraction_digits 는 원본 toFixed 처럼 0 ~ 100 이 맞다. 넘겨도 던지지 않고 그 자릿수로 낸다.
 //!
 //! # 예제
@@ -21,8 +23,8 @@
 //! ```rust
 //! use vanilla::format;
 //!
-//! assert_eq!(format::format_number(12480.0, "en-US"), "12,480");
-//! assert_eq!(format::format_number_with_unit(1200000.0, " G", "ko-KR"), "1,200,000 G");
+//! assert_eq!(format::format_number(12480.0, "en-US").unwrap(), "12,480");
+//! assert_eq!(format::format_number_with_unit(1200000.0, " G", "ko-KR").unwrap(), "1,200,000 G");
 //! assert_eq!(format::format_compact_number(5600000.0, 1), "5.6M");
 //! assert_eq!(format::format_padded_number(7.0, 3, 0.0, 999.0), "007");
 //! assert_eq!(format::format_minutes_seconds(75.0), "1:15");
@@ -46,6 +48,41 @@ const FALLBACK_LOCALE_TAG: &str = "en";
 const MAXIMUM_TIE_BINARY_FRACTION_DIGITS: u32 = 25;
 /// 큰 수를 줄이는 단위의 나눌 수와 붙일 글. (작은 것부터, 원본 COMPACT_UNIT_LIST)
 const COMPACT_UNIT_LIST: [(f64, &str); 3] = [(1000.0, "K"), (1000000.0, "M"), (1000000000.0, "B")];
+
+//==============================================================================
+/// 표기 오류. (원본이 던지는 RangeError 자리)
+///
+/// # 예제
+/// 틀린 언어 태그
+/// ```rust
+/// use vanilla::format::{self, FormatError};
+///
+/// let error = format::format_number(1234.5, "EN_gb").unwrap_err();
+/// assert_eq!(error, FormatError::InvalidLanguageTag(String::from("EN_gb")));
+/// assert_eq!(error.to_string(), "Invalid language tag: EN_gb");
+/// ```
+//==============================================================================
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FormatError {
+	/// 언어 태그가 BCP 47(유니코드 로캘 식별자) 꼴이 아니다. (원본 RangeError "Invalid language tag: ..." 의 태그 글)
+	/// - 태그 글은 크롬이 오류에 찍는 것과 같다: 앞의 언어 식별자 조각이 틀리면 받은 그대로, 뒤의 확장이나 겹침이 틀리면 소문자로 바꾼 것.
+	InvalidLanguageTag(String),
+}
+
+impl std::fmt::Display for FormatError {
+	//==============================================================================
+	/// 오류 글. (원본 RangeError 의 message 와 같다)
+	//==============================================================================
+	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			FormatError::InvalidLanguageTag(tag) => {
+				write!(formatter, "Invalid language tag: {}", tag)
+			}
+		}
+	}
+}
+
+impl std::error::Error for FormatError {}
 
 //==============================================================================
 /// 로캘 하나의 숫자 표기. (Intl.NumberFormat 기본 옵션의 결과)
@@ -213,21 +250,24 @@ const NUMBER_LOCALES: &[NumberLocale] = &[
 ///
 /// # 돌려줌
 /// 로캘 표기 글. (소수는 0 ~ 3 자리로 반 올림하고 끝의 0 은 뺀다. NaN 은 로캘의 NaN 글, 무한대는 ∞)
+/// 언어 태그가 BCP 47 꼴이 아니면 원본의 RangeError 처럼 Err(FormatError::InvalidLanguageTag). (밑줄 "en_US", 빈 글 같은 것)
 ///
 /// # 예제
 /// 로캘마다 다른 소수점과 묶음 기호
 /// ```rust
 /// use vanilla::format;
 ///
-/// assert_eq!(format::format_number(1234.5678, "en-US"), "1,234.568");
-/// assert_eq!(format::format_number(1234567.891, "de-DE"), "1.234.567,891");
-/// assert_eq!(format::format_number(123456789.123, "hi-IN"), "12,34,56,789.123");
-/// assert_eq!(format::format_number(-0.0001, "en-US"), "-0");
+/// assert_eq!(format::format_number(1234.5678, "en-US").unwrap(), "1,234.568");
+/// assert_eq!(format::format_number(1234567.891, "de-DE").unwrap(), "1.234.567,891");
+/// assert_eq!(format::format_number(123456789.123, "hi-IN").unwrap(), "12,34,56,789.123");
+/// assert_eq!(format::format_number(-0.0001, "en-US").unwrap(), "-0");
+/// assert!(format::format_number(1234.5, "en_US").is_err());
 /// ```
 //==============================================================================
-pub fn format_number(value: f64, locale: &str) -> String {
+pub fn format_number(value: f64, locale: &str) -> Result<String, FormatError> {
+	validate_language_tag(locale)?;
 	let number_locale = find_number_locale(locale);
-	format_locale_number(value, number_locale)
+	Ok(format_locale_number(value, number_locale))
 }
 
 //==============================================================================
@@ -239,11 +279,20 @@ pub fn format_number(value: f64, locale: &str) -> String {
 /// - `locale`: 언어 태그. (format_number 와 같다)
 ///
 /// # 돌려줌
-/// format_number 의 글 뒤에 unit_suffix 를 붙인 글.
+/// format_number 의 글 뒤에 unit_suffix 를 붙인 글. 언어 태그가 틀리면 format_number 처럼 Err(FormatError::InvalidLanguageTag).
+///
+/// # 예제
+/// 원과 점수 단위
+/// ```rust
+/// use vanilla::format;
+///
+/// assert_eq!(format::format_number_with_unit(1200000.0, "원", "ko-KR").unwrap(), "1,200,000원");
+/// assert_eq!(format::format_number_with_unit(-5.0, "점", "ko-KR").unwrap(), "-5점");
+/// ```
 //==============================================================================
-pub fn format_number_with_unit(value: f64, unit_suffix: &str, locale: &str) -> String {
-	let number_text = format_number(value, locale);
-	format!("{}{}", number_text, unit_suffix)
+pub fn format_number_with_unit(value: f64, unit_suffix: &str, locale: &str) -> Result<String, FormatError> {
+	let number_text = format_number(value, locale)?;
+	Ok(format!("{}{}", number_text, unit_suffix))
 }
 
 //==============================================================================
@@ -358,6 +407,251 @@ fn trim_trailing_zero(number_text: &str) -> String {
 }
 
 //==============================================================================
+/// 언어 태그 검사. (크롬 V8 의 Intl::CanonicalizeLanguageTag 차례, 틀리면 원본 RangeError 자리의 오류)
+/// 1. 비었거나 아스키가 아닌 글이 있으면 틀림. (오류 글은 받은 글의 바이트를 한 글자씩 Latin-1 로 읽은 것, V8 의 NewStringFromAsciiChecked)
+/// 2. 앞의 유니코드 언어 식별자 조각이 틀리면 틀림. (V8 JSLocale::StartsWithUnicodeLanguageId, 오류 글은 받은 그대로)
+/// 3. 소문자로 바꾼 전체가 ECMA-402 IsStructurallyValidLanguageTag 가 아니면 틀림. (UTS 35 unicode_locale_id 문법과 겹친 변이형, 겹친 확장 글자, 오류 글은 소문자)
+//==============================================================================
+fn validate_language_tag(locale: &str) -> Result<(), FormatError> {
+	if locale.is_empty() || !locale.is_ascii() {
+		let latin1_text: String = locale.bytes().map(|byte| byte as char).collect();
+		return Err(FormatError::InvalidLanguageTag(latin1_text));
+	}
+	if !starts_with_unicode_language_id(locale) {
+		return Err(FormatError::InvalidLanguageTag(locale.to_string()));
+	}
+	let lowercase_locale = locale.to_ascii_lowercase();
+	if !is_structurally_valid_language_tag(&lowercase_locale) {
+		return Err(FormatError::InvalidLanguageTag(lowercase_locale));
+	}
+	Ok(())
+}
+
+//==============================================================================
+/// 앞이 유니코드 언어 식별자인지. (V8 JSLocale::StartsWithUnicodeLanguageId, 확장 글자가 나오면 거기서 맞다고 본다)
+/// - 조각은 std::getline 처럼 나눈다. (끝의 '-' 하나는 빈 조각을 만들지 않는다)
+//==============================================================================
+fn starts_with_unicode_language_id(locale: &str) -> bool {
+	let mut subtag_list: Vec<&str> = locale.split('-').collect();
+	if locale.ends_with('-') {
+		subtag_list.pop();
+	}
+	if subtag_list.is_empty() || !is_unicode_language_subtag(subtag_list[0]) {
+		return false;
+	}
+	if subtag_list.len() == 1 || is_extension_singleton(subtag_list[1]) {
+		return true;
+	}
+	let mut subtag_index = 1;
+	if is_unicode_script_subtag(subtag_list[subtag_index]) {
+		subtag_index += 1;
+		if subtag_index == subtag_list.len() {
+			return true;
+		}
+	}
+	if is_unicode_region_subtag(subtag_list[subtag_index]) {
+		subtag_index += 1;
+	}
+	while subtag_index < subtag_list.len() {
+		if is_extension_singleton(subtag_list[subtag_index]) {
+			return true;
+		}
+		if !is_unicode_variant_subtag(subtag_list[subtag_index]) {
+			return false;
+		}
+		subtag_index += 1;
+	}
+	true
+}
+
+//==============================================================================
+/// 전체가 올바른 언어 태그인지. (ECMA-402 IsStructurallyValidLanguageTag, 소문자 글을 받는다)
+/// - unicode_locale_id = unicode_language_id extensions* pu_extensions? (구분은 '-' 만, root 와 문자 체계로 시작하는 꼴은 안 된다)
+/// - 언어 식별자와 t 확장의 tlang 에 같은 변이형이 둘이면, 확장 글자(x 앞)가 둘이면 틀림.
+//==============================================================================
+fn is_structurally_valid_language_tag(locale: &str) -> bool {
+	let subtag_list: Vec<&str> = locale.split('-').collect();
+	let mut subtag_index = 0;
+	if !read_language_id(&subtag_list, &mut subtag_index) {
+		return false;
+	}
+	let mut singleton_list: Vec<&str> = Vec::new();
+	while subtag_index < subtag_list.len() {
+		let singleton = subtag_list[subtag_index];
+		if !is_extension_singleton(singleton) {
+			return false;
+		}
+		subtag_index += 1;
+		if singleton == "x" {
+			// 사사로운 확장은 끝까지. (조각 1 ~ 8 글자 하나 이상)
+			if subtag_index == subtag_list.len() {
+				return false;
+			}
+			return subtag_list[subtag_index..].iter().all(|subtag| is_alphanumeric_subtag(subtag, 1, 8));
+		}
+		if singleton_list.contains(&singleton) {
+			return false;
+		}
+		singleton_list.push(singleton);
+		let is_extension_valid = match singleton {
+			"u" => {
+				read_unicode_locale_extension(&subtag_list, &mut subtag_index)
+			}
+			"t" => {
+				read_transformed_extension(&subtag_list, &mut subtag_index)
+			}
+			_ => {
+				read_other_extension(&subtag_list, &mut subtag_index)
+			}
+		};
+		if !is_extension_valid {
+			return false;
+		}
+	}
+	true
+}
+
+//==============================================================================
+/// 언어 식별자 읽기. (언어 (- 문자 체계)? (- 지역)? (- 변이형)*, 같은 변이형이 둘이면 틀림. t 확장의 tlang 도 같은 꼴)
+//==============================================================================
+fn read_language_id(subtag_list: &[&str], subtag_index: &mut usize) -> bool {
+	if *subtag_index >= subtag_list.len() || !is_unicode_language_subtag(subtag_list[*subtag_index]) {
+		return false;
+	}
+	*subtag_index += 1;
+	if *subtag_index < subtag_list.len() && is_unicode_script_subtag(subtag_list[*subtag_index]) {
+		*subtag_index += 1;
+	}
+	if *subtag_index < subtag_list.len() && is_unicode_region_subtag(subtag_list[*subtag_index]) {
+		*subtag_index += 1;
+	}
+	let mut variant_list: Vec<&str> = Vec::new();
+	while *subtag_index < subtag_list.len() && is_unicode_variant_subtag(subtag_list[*subtag_index]) {
+		let variant = subtag_list[*subtag_index];
+		if variant_list.contains(&variant) {
+			return false;
+		}
+		variant_list.push(variant);
+		*subtag_index += 1;
+	}
+	true
+}
+
+//==============================================================================
+/// u 확장 읽기. ((- 속성)* (- 열쇠 (- 값)*)*, 속성이나 열쇠가 하나는 있어야 한다. 속성과 값은 3 ~ 8 글자, 열쇠는 글자나 숫자 + 글자)
+//==============================================================================
+fn read_unicode_locale_extension(subtag_list: &[&str], subtag_index: &mut usize) -> bool {
+	let start_index = *subtag_index;
+	while *subtag_index < subtag_list.len() && is_alphanumeric_subtag(subtag_list[*subtag_index], 3, 8) {
+		*subtag_index += 1;
+	}
+	while *subtag_index < subtag_list.len() && is_unicode_extension_key(subtag_list[*subtag_index]) {
+		*subtag_index += 1;
+		while *subtag_index < subtag_list.len() && is_alphanumeric_subtag(subtag_list[*subtag_index], 3, 8) {
+			*subtag_index += 1;
+		}
+	}
+	*subtag_index > start_index
+}
+
+//==============================================================================
+/// t 확장 읽기. (tlang? (- 칸 열쇠 (- 값 3 ~ 8 글자)+)*, tlang 이나 칸이 하나는 있어야 한다. 칸 열쇠는 글자 + 숫자)
+//==============================================================================
+fn read_transformed_extension(subtag_list: &[&str], subtag_index: &mut usize) -> bool {
+	let start_index = *subtag_index;
+	if *subtag_index < subtag_list.len() && is_unicode_language_subtag(subtag_list[*subtag_index]) && !read_language_id(subtag_list, subtag_index) {
+		return false;
+	}
+	while *subtag_index < subtag_list.len() && is_transformed_extension_key(subtag_list[*subtag_index]) {
+		*subtag_index += 1;
+		let value_start_index = *subtag_index;
+		while *subtag_index < subtag_list.len() && is_alphanumeric_subtag(subtag_list[*subtag_index], 3, 8) {
+			*subtag_index += 1;
+		}
+		if *subtag_index == value_start_index {
+			return false;
+		}
+	}
+	*subtag_index > start_index
+}
+
+//==============================================================================
+/// 다른 확장 읽기. ((- 2 ~ 8 글자)+)
+//==============================================================================
+fn read_other_extension(subtag_list: &[&str], subtag_index: &mut usize) -> bool {
+	let start_index = *subtag_index;
+	while *subtag_index < subtag_list.len() && is_alphanumeric_subtag(subtag_list[*subtag_index], 2, 8) {
+		*subtag_index += 1;
+	}
+	*subtag_index > start_index
+}
+
+//==============================================================================
+/// 글자나 숫자로만 된 minimum_length ~ maximum_length 글자 조각인지.
+//==============================================================================
+fn is_alphanumeric_subtag(subtag: &str, minimum_length: usize, maximum_length: usize) -> bool {
+	subtag.len() >= minimum_length && subtag.len() <= maximum_length && subtag.bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
+//==============================================================================
+/// 글자로만 된 조각인지. (길이 범위 안)
+//==============================================================================
+fn is_alphabetic_subtag(subtag: &str, minimum_length: usize, maximum_length: usize) -> bool {
+	subtag.len() >= minimum_length && subtag.len() <= maximum_length && subtag.bytes().all(|byte| byte.is_ascii_alphabetic())
+}
+
+//==============================================================================
+/// 언어 조각인지. (글자 2 ~ 3 이나 5 ~ 8)
+//==============================================================================
+fn is_unicode_language_subtag(subtag: &str) -> bool {
+	is_alphabetic_subtag(subtag, 2, 3) || is_alphabetic_subtag(subtag, 5, 8)
+}
+
+//==============================================================================
+/// 문자 체계 조각인지. (글자 4)
+//==============================================================================
+fn is_unicode_script_subtag(subtag: &str) -> bool {
+	is_alphabetic_subtag(subtag, 4, 4)
+}
+
+//==============================================================================
+/// 지역 조각인지. (글자 2 나 숫자 3)
+//==============================================================================
+fn is_unicode_region_subtag(subtag: &str) -> bool {
+	is_alphabetic_subtag(subtag, 2, 2) || (subtag.len() == 3 && subtag.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+//==============================================================================
+/// 변이형 조각인지. (글자나 숫자 5 ~ 8, 또는 숫자 하나 + 글자나 숫자 3)
+//==============================================================================
+fn is_unicode_variant_subtag(subtag: &str) -> bool {
+	is_alphanumeric_subtag(subtag, 5, 8) || (is_alphanumeric_subtag(subtag, 4, 4) && subtag.as_bytes()[0].is_ascii_digit())
+}
+
+//==============================================================================
+/// 확장 글자인지. (글자나 숫자 하나)
+//==============================================================================
+fn is_extension_singleton(subtag: &str) -> bool {
+	is_alphanumeric_subtag(subtag, 1, 1)
+}
+
+//==============================================================================
+/// u 확장 열쇠인지. (글자나 숫자 + 글자)
+//==============================================================================
+fn is_unicode_extension_key(subtag: &str) -> bool {
+	let bytes = subtag.as_bytes();
+	bytes.len() == 2 && bytes[0].is_ascii_alphanumeric() && bytes[1].is_ascii_alphabetic()
+}
+
+//==============================================================================
+/// t 확장 칸 열쇠인지. (글자 + 숫자)
+//==============================================================================
+fn is_transformed_extension_key(subtag: &str) -> bool {
+	let bytes = subtag.as_bytes();
+	bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1].is_ascii_digit()
+}
+
+//==============================================================================
 /// 언어 태그로 로캘 찾기. (표에 없으면 원본의 브라우저 기본 로캘 자리인 시스템 언어, 그것도 없으면 en-US)
 //==============================================================================
 fn find_number_locale(locale: &str) -> &'static NumberLocale {
@@ -382,6 +676,7 @@ fn find_number_locale(locale: &str) -> &'static NumberLocale {
 /// 언어 태그로 표에서 로캘 찾기. (뒤 조각부터 하나씩 떼며 찾고, 없으면 None)
 //==============================================================================
 fn find_table_number_locale(locale: &str) -> Option<&'static NumberLocale> {
+	// 밑줄은 시스템 언어 태그(리눅스 LANG 의 en_US 같은)를 위해 하이픈으로 본다. (format_number 가 받는 태그는 validate_language_tag 를 지난 것이라 밑줄이 없다)
 	let normalized_locale = locale.replace('_', "-").to_lowercase();
 	let mut subtag_list: Vec<&str> = Vec::new();
 	for subtag in normalized_locale.split('-') {
@@ -757,11 +1052,119 @@ mod tests {
 			("it-CH", 1234567.891, "1'234'567.891"),
 			("et-EE", -1234.5, "\u{2212}1234,5"),
 			("en-u-nu-latn", 1234567.891, "1,234,567.891"),
-			("EN_gb", 1234567.891, "1,234,567.891"),
+			("EN_gb", 1234567.891, "RangeError: Invalid language tag: EN_gb"),
 		];
 		for (locale, value, expected_text) in case_list {
-			assert_eq!(format_number(value, locale), expected_text, "{} {}", locale, value);
+			// 원본 시험처럼 던진 것은 "RangeError: " + message 로 견준다.
+			let actual_text = match format_number(value, locale) {
+				Ok(text) => {
+					text
+				}
+				Err(error) => {
+					format!("RangeError: {}", error)
+				}
+			};
+			assert_eq!(actual_text, expected_text, "{} {}", locale, value);
 		}
+	}
+
+	//==============================================================================
+	/// 언어 태그 검사: 크롬(V8, node 25.9.0 으로 확인)이 받는 태그와 던지는 태그, 오류 글의 태그. (원본 시험 tests/base/colorformat.test.mjs 와 같은 목록)
+	//==============================================================================
+	#[test]
+	fn language_tag_validation_matches_chrome() {
+		let case_list: [(&str, Option<&str>); 77] = [
+			("EN--US", Some("EN--US")),
+			("EN-US-U", Some("en-us-u")),
+			("EN-US-X", Some("en-us-x")),
+			("EN-a-B", Some("en-a-b")),
+			("EN-US-1996-1996", Some("en-us-1996-1996")),
+			("EN-U-CA-U-NU", Some("en-u-ca-u-nu")),
+			("EN-T-A1", Some("en-t-a1")),
+			("EN-T-IT", None),
+			("EN-T-A1-XYZ", None),
+			("EN-U-CA", None),
+			("EN-U-C", Some("en-u-c")),
+			("EN-U-ABC", None),
+			("EN-U-ABC-CA-GREGORY", None),
+			("EN-U-CA-GREGORY-ABC", None),
+			("root", Some("root")),
+			("ROOT", Some("ROOT")),
+			("Latn", Some("Latn")),
+			("Latn-US", Some("Latn-US")),
+			("abcde", None),
+			("ABCDEFGHI", Some("ABCDEFGHI")),
+			("en-Latn-US-fonipa", None),
+			("EN-LATN", None),
+			("en-123", None),
+			("en-1234", None),
+			("en-12", Some("en-12")),
+			("en-1abc", None),
+			("en-abcd5", None),
+			("en-US-POSIX", None),
+			("en-x-abcdefghi", Some("en-x-abcdefghi")),
+			("en-x-", Some("en-x-")),
+			("EN-X-A-B", None),
+			("de-u-co-phonebk-ka-shifted", None),
+			("zh-Hans-CN-u-nu-hanidec", None),
+			("en-a-bc-a-de", Some("en-a-bc-a-de")),
+			("en-a-bc-b-de", None),
+			("en-Latn-Cyrl", Some("en-Latn-Cyrl")),
+			("en-US-GB", Some("en-US-GB")),
+			("und", None),
+			("UND-US", None),
+			("en-t-zh-latn-cn-variant1-m0-ungegn", None),
+			("en-t-zh-Latn-CN-variant1-variant1", Some("en-t-zh-latn-cn-variant1-variant1")),
+			("en-t-m0", Some("en-t-m0")),
+			("en-t-m0-ab", Some("en-t-m0-ab")),
+			("en-t-zh-zh", None),
+			("art-lojban", None),
+			("zh-min-nan", Some("zh-min-nan")),
+			("EN-U-NU-LATN-NU-ARAB", None),
+			("en-US-u-", Some("en-us-u-")),
+			("en-_US", Some("en-_US")),
+			("en US", Some("en US")),
+			("\u{e9}\u{e9}", Some("\u{c3}\u{a9}\u{c3}\u{a9}")),
+			("en-u-0a", None),
+			("en-u-a0", Some("en-u-a0")),
+			("en-u-ab-c", Some("en-u-ab-c")),
+			("en-u-ab-cde", None),
+			("en-u-ab-cdefghij", None),
+			("en-t-a1-ab", Some("en-t-a1-ab")),
+			("en-t-a1-abc-defghijkl", Some("en-t-a1-abc-defghijkl")),
+			("en-t-zh-u-nu-latn", None),
+			("en-u-nu-latn-t-zh", None),
+			("en-a-bcdefghij", Some("en-a-bcdefghij")),
+			("en-a-b1", None),
+			("en-x-a-u-ca", None),
+			("en-US-x-12345678", None),
+			("EN-001", None),
+			("en-419-u-nu-latn", None),
+			("EN-us-POSIX-posix", Some("en-us-posix-posix")),
+			("EN-LATN-US-1901-1902", None),
+			("fil", None),
+			("FIL", None),
+			("in", None),
+			("IN", None),
+			("iw-IL", None),
+			("ab", None),
+			("AB", None),
+			("abc", None),
+			("ABCD", Some("ABCD")),
+		];
+		for (locale, expected_error_tag) in case_list {
+			let result = format_number(1.0, locale);
+			match expected_error_tag {
+				Some(error_tag) => {
+					assert_eq!(result, Err(FormatError::InvalidLanguageTag(error_tag.to_string())), "{}", locale);
+				}
+				None => {
+					assert!(result.is_ok(), "{} {:?}", locale, result);
+				}
+			}
+		}
+		assert_eq!(format_number_with_unit(1.0, "G", "en_US"), Err(FormatError::InvalidLanguageTag(String::from("en_US"))));
+		assert_eq!(FormatError::InvalidLanguageTag(String::from("EN_gb")).to_string(), "Invalid language tag: EN_gb");
 	}
 
 	//==============================================================================
@@ -773,7 +1176,7 @@ mod tests {
 		let system_language_tag_list = crate::misc::localization::read_preferred_language_tags();
 		let expected_locale = system_language_tag_list.first().and_then(|system_language_tag| find_table_number_locale(system_language_tag)).map(|number_locale| number_locale.tag).unwrap_or(FALLBACK_LOCALE_TAG);
 		assert_eq!(find_number_locale("xx-YY").tag, expected_locale);
-		assert_eq!(format_number(1234567.891, "xx-YY"), format_number(1234567.891, expected_locale));
+		assert_eq!(format_number(1234567.891, "xx-YY").unwrap(), format_number(1234567.891, expected_locale).unwrap());
 	}
 
 	//==============================================================================
@@ -781,10 +1184,10 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn format_number_with_unit_matches_original() {
-		assert_eq!(format_number_with_unit(1200000.0, "\u{c6d0}", "ko-KR"), "1,200,000\u{c6d0}");
-		assert_eq!(format_number_with_unit(-5.0, "\u{c810}", "ko-KR"), "-5\u{c810}");
-		assert_eq!(format_number_with_unit(1234.5678, "G", "en-US"), "1,234.568G");
-		assert_eq!(format_number_with_unit(1234.5, "\u{20ac}", "de-DE"), "1.234,5\u{20ac}");
+		assert_eq!(format_number_with_unit(1200000.0, "\u{c6d0}", "ko-KR").unwrap(), "1,200,000\u{c6d0}");
+		assert_eq!(format_number_with_unit(-5.0, "\u{c810}", "ko-KR").unwrap(), "-5\u{c810}");
+		assert_eq!(format_number_with_unit(1234.5678, "G", "en-US").unwrap(), "1,234.568G");
+		assert_eq!(format_number_with_unit(1234.5, "\u{20ac}", "de-DE").unwrap(), "1.234,5\u{20ac}");
 	}
 
 	//==============================================================================
@@ -892,7 +1295,7 @@ mod tests {
 	fn shortest_digits_choose_even_on_tie() {
 		assert_eq!(format_padded_number(-224567413330.078125, 6, f64::NEG_INFINITY, f64::INFINITY), "-224567413330.07812");
 		assert_eq!(format_padded_number(31122207641.6015625, 6, f64::NEG_INFINITY, f64::INFINITY), "31122207641.601562");
-		assert_eq!(format_number(-1083787679672241.25, "it"), "-1.083.787.679.672.241,2");
-		assert_eq!(format_number(-281161069869995.125, "hr"), "\u{2212}281.161.069.869.995,12");
+		assert_eq!(format_number(-1083787679672241.25, "it").unwrap(), "-1.083.787.679.672.241,2");
+		assert_eq!(format_number(-281161069869995.125, "hr").unwrap(), "\u{2212}281.161.069.869.995,12");
 	}
 }
