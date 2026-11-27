@@ -16,8 +16,8 @@
 		{
 			"name": "animation/action",
 			"summary": {
-				"ko": "액션. (차례로 스텝을 실행하는 스크립트 꼴 연출)\n- 원본 animation/action.js 를 옮긴 것이다. wait / condition / call / repeat / forever / loop 스텝을 쌓고,\n  start 뒤 매 프레임 step 을 부르면 차례로 돈다.\n- 사용:\n  ```text\n    let mut action: Action<WorldNode> = Action::new()\n        .wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))\n        .condition(|node: &WorldNode| node.is_active(), ActionConditionCallbacks::new())\n        .call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))\n        .repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))\n        .forever(Action::new().wait(2.0, ActionCallbacks::new()));\n    action.start(&mut node_tree, Some(node_id));\n    // 매 프레임:\n    action.step(&mut node_tree, time_delta);\n  ```\n- 원본과 다른 점:\n  - 원본 start(target) 는 대상을 들고 있다가 step(timeDelta) 마다 콜백에 넘긴다. 러스트는 대상을 빌려 들 수 없어서\n    노드 대상은 핸들로 든다: start(트리, Some(노드)) 가 대상을 들고 step(트리, 시간) 이 그 노드를 콜백에 넘기며,\n    get_target 이 그 노드를 돌려주고 start(트리, None) 이 원본 start() 처럼 이전 대상으로 다시 시작한다.\n  - 대상을 들지 않고 매번 넘기는 꼴은 두 엔진 다 start_with(대상), step_with(대상, 시간) 이다. (원본 startWith, stepWith)\n    노드가 아닌 대상(노드 여럿, 게임 상태)은 T 로 쓰고 이 꼴로 돌린다. (T 의 기본은 WorldNode)\n    repeat, forever, loop 의 안쪽 액션도 두 엔진 다 이 꼴로 돌아 대상을 들지 않는다. (안쪽 액션의 get_target 은 그대로)\n  - 콜백 객체({ started, updated, completed })는 wait 스텝이 ActionCallbacks(updated 가 (진행률, 대상)),\n    condition 스텝이 ActionConditionCallbacks(updated 가 (대상))다. 원본은 한 객체 꼴에 인자 수만 다르지만,\n    러스트는 콜백의 인자 꼴을 타입으로 정해야 해서 둘로 나눴다.\n  - loop 는 러스트 예약어라 r#loop 로 부른다. (Tween 의 r#in 과 같다)\n  - call 스텝이 이어지면 원본은 재귀로, 러스트 판은 반복문으로 넘긴다. (결과는 같다)\n- 조건 함수는 원본처럼 대상을 받는다(러스트는 &T). wait 은 duration 이 0 이하이면 진행률 1 로 끝낸다.\n  repeat 은 횟수가 0 이면 돌지 않고 넘어간다. (원본과 같다)",
-				"en": "Action. (script-style sequencing that runs steps in order)\n- A port of the original animation/action.js. Stack wait / condition / call / repeat / forever / loop steps,\n  and after start, calling step every frame runs them in order.\n- Usage:\n  ```text\n    let mut action: Action<WorldNode> = Action::new()\n        .wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))\n        .condition(|node: &WorldNode| node.is_active(), ActionConditionCallbacks::new())\n        .call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))\n        .repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))\n        .forever(Action::new().wait(2.0, ActionCallbacks::new()));\n    action.start(&mut node_tree, Some(node_id));\n    // Every frame:\n    action.step(&mut node_tree, time_delta);\n  ```\n- Differences from the original:\n  - The original start(target) holds the target and passes it to the callbacks on every step(timeDelta). Rust cannot hold a borrowed target, so\n    a node target is held as a handle: start(tree, Some(node)) holds the target, step(tree, time) passes that node to the callbacks,\n    get_target returns that node, and start(tree, None) restarts with the previous target like the original start().\n  - The form that passes the target every time without holding it is start_with(target), step_with(target, time) in both engines. (the original startWith, stepWith)\n    A target that is not a node (several nodes, game state) is used as T and run in this form. (T defaults to WorldNode)\n    The inner actions of repeat, forever and loop also run in this form in both engines and do not hold the target. (the inner action's get_target stays as it was)\n  - The callback objects ({ started, updated, completed }) are ActionCallbacks for wait steps (updated takes (progress, target)),\n    and ActionConditionCallbacks for condition steps (updated takes (target)). The original uses one object shape with only the argument count differing,\n    but Rust has to fix the callback argument types as types, so they are split in two.\n  - loop is a Rust keyword, so it is called as r#loop. (same as Tween's r#in)\n  - When call steps follow one another, the original moves on recursively and the Rust version with a loop. (same result)\n- The condition function takes the target as in the original (&T in Rust). wait ends with progress 1 if duration is 0 or less.\n  repeat moves on without running if the count is 0. (same as the original)"
+				"ko": "액션. (차례로 스텝을 실행하는 스크립트 꼴 연출)\n- 원본 animation/action.js 를 옮긴 것이다. wait / condition / call / repeat / forever / loop 스텝을 쌓고,\n  start 뒤 매 프레임 step 을 부르면 차례로 돈다.\n- 사용:\n  ```text\n    let mut action: Action<WorldNode> = Action::new()\n        .wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))\n        .condition(|node: &WorldNode| node.is_active(), ActionConditionCallbacks::new())\n        .call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))\n        .repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))\n        .forever(Action::new().wait(2.0, ActionCallbacks::new()));\n    action.start(&mut node_tree, Some(node_id));\n    // 매 프레임:\n    action.step(&mut node_tree, time_delta);\n  ```\n- 원본과 다른 점:\n  - 원본 start(target) 는 대상을 들고 있다가 step(timeDelta) 마다 콜백에 넘긴다. 러스트는 대상을 빌려 들 수 없어서\n    노드 대상은 핸들로 든다: start(트리, Some(노드)) 가 대상을 들고 step(트리, 시간) 이 그 노드를 콜백에 넘기며,\n    get_target 이 그 노드를 돌려주고 start(트리, None) 이 원본 start() 처럼 이전 대상으로 다시 시작한다.\n  - 대상을 들지 않고 매번 넘기는 꼴은 두 엔진 다 start_with(대상), step_with(대상, 시간) 이다. (원본 startWith, stepWith)\n    노드가 아닌 대상(노드 여럿, 게임 상태)은 T 로 쓰고 이 꼴로 돌린다. (T 의 기본은 WorldNode)\n    repeat, forever, loop 의 안쪽 액션도 두 엔진 다 이 꼴로 돌아 대상을 들지 않는다. (안쪽 액션의 get_target 은 그대로)\n  - 콜백 객체({ started, updated, completed })는 wait 스텝이 ActionCallbacks(updated 가 (진행률, 대상)),\n    condition 스텝이 ActionConditionCallbacks(updated 가 (대상))다. 원본은 한 객체 꼴에 인자 수만 다르지만,\n    러스트는 콜백의 인자 꼴을 타입으로 정해야 해서 둘로 나눴다.\n  - 조건 반복은 두 엔진 모두 repeat_while 이다. (원본 repeatWhile, 예약어 loop 를 이름으로 쓰지 않는다)\n  - call 스텝이 이어지면 원본은 재귀로, 러스트 판은 반복문으로 넘긴다. (결과는 같다)\n- 조건 함수는 원본처럼 대상을 받는다(러스트는 &T). wait 은 duration 이 0 이하이면 진행률 1 로 끝낸다.\n  repeat 은 횟수가 0 이면 돌지 않고 넘어간다. (원본과 같다)",
+				"en": ""
 			},
 			"classes": [
 				{
@@ -522,8 +522,8 @@
 						},
 						{
 							"kind": "method",
-							"name": "r#loop",
-							"signature": "pub fn r#loop(mut self, condition_function: impl FnMut(&T) -> bool + 'static, inner_action: Action<T>) -> Action<T>",
+							"name": "repeat_while",
+							"signature": "pub fn repeat_while(mut self, condition_function: impl FnMut(&T) -> bool + 'static, inner_action: Action<T>) -> Action<T>",
 							"params": [
 								{
 									"name": "condition_function",
@@ -550,18 +550,24 @@
 								}
 							},
 							"description": {
-								"ko": "조건이 참인 동안 안쪽 액션을 반복. (시작할 때와 안쪽이 끝날 때마다 묻는다)\n- loop 는 러스트 예약어라 r#loop 로 부른다.",
-								"en": "Repeats the inner action while the condition is true. (checked at the start and each time the inner action ends)\n- loop is a Rust keyword, so it is called as r#loop."
+								"ko": "조건이 참인 동안 안쪽 액션을 반복. (시작할 때와 안쪽이 끝날 때마다 묻는다)",
+								"en": ""
 							},
-							"since": "0.3.2",
+							"since": "0.4.0",
 							"source": "src/animation/action.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "animation/action",
+								"class": "Action",
+								"name": "repeatWhile"
+							},
 							"examples": [
 								{
 									"title": {
 										"ko": "값이 3 이 될 때까지 0.1초마다 하나씩 올리기",
 										"en": "Raise a value by one every 0.1 seconds until it reaches 3"
 									},
-									"code": "use vanilla::{Action, ActionCallbacks};\n\nlet mut count: u32 = 0;\nlet inner_action: Action<u32> = Action::new().wait(0.1, ActionCallbacks::new().completed(|count: &mut u32| *count += 1));\nlet mut action: Action<u32> = Action::new().r#loop(|count: &u32| *count < 3, inner_action);\naction.start_with(&mut count);\nfor _ in 0..10 {\n\taction.step_with(&mut count, 0.1);\n}\nassert_eq!(count, 3);\nassert!(action.is_done());",
+									"code": "use vanilla::{Action, ActionCallbacks};\n\nlet mut count: u32 = 0;\nlet inner_action: Action<u32> = Action::new().wait(0.1, ActionCallbacks::new().completed(|count: &mut u32| *count += 1));\nlet mut action: Action<u32> = Action::new().repeat_while(|count: &u32| *count < 3, inner_action);\naction.start_with(&mut count);\nfor _ in 0..10 {\n\taction.step_with(&mut count, 0.1);\n}\nassert_eq!(count, 3);\nassert!(action.is_done());",
 									"language": "rust"
 								}
 							]
@@ -14149,16 +14155,16 @@
 		{
 			"name": "base/timer",
 			"summary": {
-				"ko": "쿨다운과 반복 타이머. (원본 base/timer.js 의 Cooldown, RepeatTimer)\n- 시간은 초 단위 f64 다. (엔진 TimeManager::get_time_delta 와 같은 타입)\n- 원본 Cooldown.use() 는 러스트 예약어(use)라 r#use() 로 부른다. (이름은 원본 그대로, r#loop, r#move 와 같다) 원본처럼 activate() 도 같은 일을 한다.\n- 원본 기본 인자(duration = 1, interval = 1, elapsed_event = null)는 Default 와 new 의 인자로 옮겼다.\n- RepeatTimer 의 콜백은 `Box<dyn FnMut()>` 다. (씬의 set_first_touch_callback 과 같은 꼴) 게임 상태를 바꾸려면\n  `Rc<Cell>` / `Rc<RefCell>` 을 잡아 넣는다.",
-				"en": "Cooldowns and repeat timers. (Cooldown and RepeatTimer of the original base/timer.js)\n- Time is f64 in seconds. (the same type as the engine's TimeManager::get_time_delta)\n- The original Cooldown.use() is a Rust keyword (use), so it is called as r#use(). (the name kept from the original, same as r#loop and r#move) As in the original, activate() does the same.\n- The original default arguments (duration = 1, interval = 1, elapsed_event = null) moved to Default and the arguments of new.\n- RepeatTimer's callback is `Box<dyn FnMut()>`. (the same shape as the scene's set_first_touch_callback) To change game state,\n  capture `Rc<Cell>` / `Rc<RefCell>`."
+				"ko": "쿨다운과 반복 타이머. (원본 base/timer.js 의 Cooldown, RepeatTimer)\n- 시간은 초 단위 f64 다. (엔진 TimeManager::get_time_delta 와 같은 타입)\n- 발동은 두 엔진 모두 activate() 다. (예약어 use 를 이름으로 쓰지 않는다)\n- 원본 기본 인자(duration = 1, interval = 1, elapsed_event = null)는 Default 와 new 의 인자로 옮겼다.\n- RepeatTimer 의 콜백은 `Box<dyn FnMut()>` 다. (씬의 set_first_touch_callback 과 같은 꼴) 게임 상태를 바꾸려면\n  `Rc<Cell>` / `Rc<RefCell>` 을 잡아 넣는다.",
+				"en": ""
 			},
 			"classes": [
 				{
 					"name": "Cooldown",
 					"kind": "struct",
 					"summary": {
-						"ko": "쿨다운.\n- \"timer -= dt; if (timer <= 0) ...\" 를 매번 손으로 쓰던 것을 표준화했다.\n- r#use() 로 발동하면 지정한 시간 동안 is_ready() 가 거짓이 된다.",
-						"en": "Cooldown.\n- Standardizes the \"timer -= dt; if (timer <= 0) ...\" that was written by hand every time.\n- Once triggered with r#use(), is_ready() is false for the given time."
+						"ko": "쿨다운.\n- \"timer -= dt; if (timer <= 0) ...\" 를 매번 손으로 쓰던 것을 표준화했다.\n- activate() 로 발동하면 지정한 시간 동안 is_ready() 가 거짓이 된다.",
+						"en": ""
 					},
 					"traits": [
 						"Clone",
@@ -14262,8 +14268,8 @@
 						},
 						{
 							"kind": "method",
-							"name": "r#use",
-							"signature": "pub fn r#use(&mut self) -> bool",
+							"name": "activate",
+							"signature": "pub fn activate(&mut self) -> bool",
 							"params": [],
 							"returns": {
 								"type": "bool",
@@ -14273,27 +14279,8 @@
 								}
 							},
 							"description": {
-								"ko": "발동한다. (원본 use, 준비되어 있으면 쿨다운을 시작하고 참을 돌려준다)",
-								"en": "Triggers. (the original use; if ready, starts the cooldown and returns true)"
-							},
-							"since": "0.4.0",
-							"source": "src/base/timer.rs"
-						},
-						{
-							"kind": "method",
-							"name": "activate",
-							"signature": "pub fn activate(&mut self) -> bool",
-							"params": [],
-							"returns": {
-								"type": "bool",
-								"description": {
-									"ko": "발동했으면 true. 아직 쿨다운 중이면 false.",
-									"en": "true if triggered. false if still cooling down."
-								}
-							},
-							"description": {
-								"ko": "발동한다. (원본 activate, r#use 와 같다)",
-								"en": "Triggers. (the original activate, same as r#use)"
+								"ko": "발동한다. (원본 activate, 준비되어 있으면 쿨다운을 시작하고 참을 돌려준다)",
+								"en": ""
 							},
 							"since": "0.3.2",
 							"source": "src/base/timer.rs",
@@ -14431,7 +14418,7 @@
 								"ko": "발동하고 시간이 지나 다시 준비되기",
 								"en": "Trigger and become ready again over time"
 							},
-							"code": "use vanilla::Cooldown;\n\nlet mut cooldown = Cooldown::new(0.5);\nassert!(cooldown.r#use());\nassert!(!cooldown.is_ready());\nassert!(!cooldown.r#use());\ncooldown.tick(0.25);\nassert_eq!(cooldown.get_remain_seconds(), 0.25);\nassert_eq!(cooldown.get_progress(), 0.5);\ncooldown.tick(0.25);\nassert!(cooldown.is_ready());",
+							"code": "use vanilla::Cooldown;\n\nlet mut cooldown = Cooldown::new(0.5);\nassert!(cooldown.activate());\nassert!(!cooldown.is_ready());\nassert!(!cooldown.activate());\ncooldown.tick(0.25);\nassert_eq!(cooldown.get_remain_seconds(), 0.25);\nassert_eq!(cooldown.get_progress(), 0.5);\ncooldown.tick(0.25);\nassert!(cooldown.is_ready());",
 							"language": "rust"
 						}
 					]
@@ -25008,14 +24995,22 @@
 						{
 							"kind": "method",
 							"name": "set_shadow",
-							"signature": "pub fn set_shadow(&mut self, shadow_color: impl Into<Color>, shadow_offset: f64, shadow_blur: f64)",
+							"signature": "pub fn set_shadow(&mut self, shadow_color: impl Into<Color>, shadow_opacity: f64, shadow_offset: f64, shadow_blur: f64)",
 							"params": [
 								{
 									"name": "shadow_color",
 									"type": "impl Into<Color>",
 									"description": {
-										"ko": "그림자 색. (Color 또는 \"#rrggbb\" 같은 문자열, 알파가 불투명도, 처음 검정)",
-										"en": "Shadow color. (a Color or a string such as \"#rrggbb\", alpha is the opacity, initially black)"
+										"ko": "그림자 색. (Color 또는 \"#rrggbb\" 같은 문자열, 색의 알파는 읽지 않는다, 처음 검정)",
+										"en": ""
+									}
+								},
+								{
+									"name": "shadow_opacity",
+									"type": "f64",
+									"description": {
+										"ko": "그림자 불투명도. (0 ~ 1, 처음 1)",
+										"en": ""
 									}
 								},
 								{
@@ -25036,8 +25031,8 @@
 								}
 							],
 							"description": {
-								"ko": "그림자 설정. (색과 불투명도는 색의 알파로, 아래로 내려가는 만큼, 번지는 만큼, 둘 다 내용 크기 단위)",
-								"en": "Sets the shadow. (color and opacity through the color's alpha, the downward drop, the blur, both in content size units)"
+								"ko": "그림자 설정. (색, 불투명도, 아래로 내려가는 만큼, 번지는 만큼, 원본 setShadow(색, 불투명도, 내려가는 만큼, 번지는 만큼) 과 같다)",
+								"en": ""
 							},
 							"since": "0.4.0",
 							"source": "src/core/component/shadowimage.rs",
@@ -25074,7 +25069,7 @@
 								"ko": "아이콘 밑에 흐린 그림자 깔기",
 								"en": "Lay a blurred shadow beneath an icon"
 							},
-							"code": "use vanilla::{Color, Image, NodeTree, ShadowImage, Vector2};\n\nlet icon = Image::create_from_pixels(32, 32, vec![255u8; 32 * 32 * 4]);\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet icon_id = node_tree.create_child(root_id, \"Icon\");\nnode_tree[icon_id].set_content_size(Vector2::create(64.0, 64.0));\nlet shadow_image = node_tree.add_component(icon_id, ShadowImage::new()).unwrap();\nshadow_image.set_image(Some(icon.clone()), None);\nshadow_image.set_shadow(Color::black().with_alpha(0.5), 2.0, 4.0);\n\nlet shadow_image = node_tree[icon_id].get_component::<ShadowImage>().unwrap();\nassert!(shadow_image.get_image().is_some());\nassert!(icon.is_pixels_retained());\nassert!(shadow_image.get_bake_image().is_none());",
+							"code": "use vanilla::{Color, Image, NodeTree, ShadowImage, Vector2};\n\nlet icon = Image::create_from_pixels(32, 32, vec![255u8; 32 * 32 * 4]);\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet icon_id = node_tree.create_child(root_id, \"Icon\");\nnode_tree[icon_id].set_content_size(Vector2::create(64.0, 64.0));\nlet shadow_image = node_tree.add_component(icon_id, ShadowImage::new()).unwrap();\nshadow_image.set_image(Some(icon.clone()), None);\nshadow_image.set_shadow(Color::black(), 0.5, 2.0, 4.0);\n\nlet shadow_image = node_tree[icon_id].get_component::<ShadowImage>().unwrap();\nassert!(shadow_image.get_image().is_some());\nassert!(icon.is_pixels_retained());\nassert!(shadow_image.get_bake_image().is_none());",
 							"language": "rust"
 						}
 					]
@@ -25656,14 +25651,22 @@
 						{
 							"kind": "method",
 							"name": "set_shadow",
-							"signature": "pub fn set_shadow(&mut self, shadow_color: impl Into<Color>, shadow_offset: f64, shadow_blur: f64)",
+							"signature": "pub fn set_shadow(&mut self, shadow_color: impl Into<Color>, shadow_opacity: f64, shadow_offset: f64, shadow_blur: f64)",
 							"params": [
 								{
 									"name": "shadow_color",
 									"type": "impl Into<Color>",
 									"description": {
-										"ko": "그림자 색. (Color 또는 \"#rrggbb\" 같은 문자열, 알파가 불투명도, 처음 검정)",
-										"en": "Shadow color. (a Color or a string such as \"#rrggbb\", alpha is the opacity, initially black)"
+										"ko": "그림자 색. (Color 또는 \"#rrggbb\" 같은 문자열, 색의 알파는 읽지 않는다, 처음 검정)",
+										"en": ""
+									}
+								},
+								{
+									"name": "shadow_opacity",
+									"type": "f64",
+									"description": {
+										"ko": "그림자 불투명도. (0 ~ 1, 처음 1)",
+										"en": ""
 									}
 								},
 								{
@@ -25684,8 +25687,8 @@
 								}
 							],
 							"description": {
-								"ko": "그림자 설정. (색과 불투명도는 색의 알파로, 아래로 내려가는 만큼, 번지는 만큼, 둘 다 내용 크기 단위)",
-								"en": "Sets the shadow. (color and opacity through the color's alpha, the downward drop, the blur, both in content size units)"
+								"ko": "그림자 설정. (색, 불투명도, 아래로 내려가는 만큼, 번지는 만큼, 원본 setShadow(색, 불투명도, 내려가는 만큼, 번지는 만큼) 과 같다)",
+								"en": ""
 							},
 							"since": "0.4.0",
 							"source": "src/core/component/shadowtext.rs",
@@ -25784,7 +25787,7 @@
 								"ko": "굵은 제목에 흐린 그림자",
 								"en": "A blurred shadow under a bold title"
 							},
-							"code": "use vanilla::{Color, NodeTree, ShadowText, TextAlign, Vector2};\n\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet title_id = node_tree.create_child(root_id, \"Title\");\nnode_tree[title_id].set_content_size(Vector2::create(320.0, 48.0));\nlet shadow_text = node_tree.add_component(title_id, ShadowText::create_with_text(\"Stage Clear\", 32.0)).unwrap();\nshadow_text.set_text_style(32.0, true, \"#ffee88\");\nshadow_text.set_shadow(Color::black().with_alpha(0.6), 2.0, 3.0);\nshadow_text.set_text_align(TextAlign::Left);\n\nlet shadow_text = node_tree[title_id].get_component::<ShadowText>().unwrap();\nassert_eq!(shadow_text.get_text(), \"Stage Clear\");\nassert!(shadow_text.is_bold());\nassert_eq!(shadow_text.get_text_align(), TextAlign::Left);",
+							"code": "use vanilla::{Color, NodeTree, ShadowText, TextAlign, Vector2};\n\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet title_id = node_tree.create_child(root_id, \"Title\");\nnode_tree[title_id].set_content_size(Vector2::create(320.0, 48.0));\nlet shadow_text = node_tree.add_component(title_id, ShadowText::create_with_text(\"Stage Clear\", 32.0)).unwrap();\nshadow_text.set_text_style(32.0, true, \"#ffee88\");\nshadow_text.set_shadow(Color::black(), 0.6, 2.0, 3.0);\nshadow_text.set_text_align(TextAlign::Left);\n\nlet shadow_text = node_tree[title_id].get_component::<ShadowText>().unwrap();\nassert_eq!(shadow_text.get_text(), \"Stage Clear\");\nassert!(shadow_text.is_bold());\nassert_eq!(shadow_text.get_text_align(), TextAlign::Left);",
 							"language": "rust"
 						}
 					]
@@ -39927,8 +39930,8 @@
 					"name": "FullscreenPass",
 					"kind": "struct",
 					"summary": {
-						"ko": "풀스크린 패스. (화면 전체를 덮는 삼각형 하나를 프래그먼트 셰이더로 칠한다)\n- 프래그먼트 셰이더는 fragmentCoordinate(클립 좌표, -1 ~ 1)와 fragmentTextureCoordinate(텍스처 좌표, 0 ~ 1)를 in 으로 받을 수 있다.\n- 쓰는 차례: r#use(또는 use_program), 유니폼 올리기, draw. 다 쓰면 destroy 로 GL 자원을 지운다.",
-						"en": "Fullscreen pass. (paints one triangle covering the whole screen with a fragment shader)\n- The fragment shader can take fragmentCoordinate (clip coordinates, -1 ~ 1) and fragmentTextureCoordinate (texture coordinates, 0 ~ 1) as in.\n- Order of use: r#use (or use_program), upload uniforms, draw. When done, delete the GL resources with destroy."
+						"ko": "풀스크린 패스. (화면 전체를 덮는 삼각형 하나를 프래그먼트 셰이더로 칠한다)\n- 프래그먼트 셰이더는 fragmentCoordinate(클립 좌표, -1 ~ 1)와 fragmentTextureCoordinate(텍스처 좌표, 0 ~ 1)를 in 으로 받을 수 있다.\n- 쓰는 차례: use_program, 유니폼 올리기, draw. 다 쓰면 destroy 로 GL 자원을 지운다.",
+						"en": ""
 					},
 					"counterpart": {
 						"engine": "vanilla.js",
@@ -39981,27 +39984,6 @@
 						},
 						{
 							"kind": "method",
-							"name": "r#use",
-							"signature": "pub fn r#use(&self, gl: &glow::Context)",
-							"params": [
-								{
-									"name": "gl",
-									"type": "&glow::Context",
-									"description": {
-										"ko": "패스를 만든 GL 컨텍스트.",
-										"en": "GL context that created the pass."
-									}
-								}
-							],
-							"description": {
-								"ko": "패스 사용 시작. (프로그램 + 빈 버텍스 어레이 바인드, 원본 use(), 예약어라 r# 을 붙여 부른다)",
-								"en": "Starts using the pass. (binds the program + empty vertex array, the original use(), called with r# because it is a reserved word)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/fullscreenpass.rs"
-						},
-						{
-							"kind": "method",
 							"name": "use_program",
 							"signature": "pub fn use_program(&self, gl: &glow::Context)",
 							"params": [
@@ -40015,11 +39997,17 @@
 								}
 							],
 							"description": {
-								"ko": "패스 사용 시작. (r#use 와 같다)",
-								"en": "Starts using the pass. (same as r#use)"
+								"ko": "패스 사용 시작. (프로그램 + 빈 버텍스 어레이 바인드, 원본 useProgram)",
+								"en": ""
 							},
 							"since": "0.3.2",
-							"source": "src/core/fullscreenpass.rs"
+							"source": "src/core/fullscreenpass.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/fullscreenpass",
+								"class": "FullscreenPass",
+								"name": "useProgram"
+							}
 						},
 						{
 							"kind": "method",
@@ -40036,8 +40024,8 @@
 								}
 							],
 							"description": {
-								"ko": "출력. (r#use 와 유니폼 설정 이후 호출)",
-								"en": "Draws. (called after r#use and setting uniforms)"
+								"ko": "출력. (use_program 과 유니폼 설정 이후 호출)",
+								"en": ""
 							},
 							"since": "0.3.2",
 							"source": "src/core/fullscreenpass.rs",
@@ -45046,6 +45034,58 @@
 								"module": "core/graphic",
 								"class": "Graphic",
 								"name": "isTextPixelSnapEnabled"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "set_text_antialias_enabled",
+							"signature": "pub fn set_text_antialias_enabled(&mut self, is_text_antialias_enabled: bool)",
+							"params": [
+								{
+									"name": "is_text_antialias_enabled",
+									"type": "bool",
+									"description": {
+										"ko": "true 면 켠다. (처음 true)",
+										"en": ""
+									}
+								}
+							],
+							"description": {
+								"ko": "글자 안티앨리어싱 켬 / 끔. (원본 Graphic.setTextAntialiasEnabled)\n- 끄면 구운 글자의 알파를 문턱값 128 로 0 과 255 로 가르고 텍스처를 NEAREST 로 뽑는다. (도트 글꼴용)\n- 켜고 끈 다음에 굽는 글자부터 적용된다. 이미 구워 둔 글자는 그대로다.",
+								"en": ""
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "setTextAntialiasEnabled"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "is_text_antialias_enabled",
+							"signature": "pub fn is_text_antialias_enabled(&self) -> bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "켜져 있으면 true.",
+									"en": "true if enabled."
+								}
+							},
+							"description": {
+								"ko": "글자 안티앨리어싱이 켜져 있는지. (원본 Graphic.isTextAntialiasEnabled)",
+								"en": ""
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "isTextAntialiasEnabled"
 							}
 						},
 						{
@@ -60674,27 +60714,6 @@
 						},
 						{
 							"kind": "method",
-							"name": "r#use",
-							"signature": "pub fn r#use(&self, gl: &glow::Context)",
-							"params": [
-								{
-									"name": "gl",
-									"type": "&glow::Context",
-									"description": {
-										"ko": "프로그램을 만든 GL 컨텍스트.",
-										"en": "GL context that created the program."
-									}
-								}
-							],
-							"description": {
-								"ko": "사용. (원본 use(), 러스트에서 use 는 예약어라 r# 을 붙여 부른다)",
-								"en": "Use. (the original use(), use is a reserved word in Rust so it is called with r#)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/shaderprogram.rs"
-						},
-						{
-							"kind": "method",
 							"name": "use_program",
 							"signature": "pub fn use_program(&self, gl: &glow::Context)",
 							"params": [
@@ -60708,8 +60727,8 @@
 								}
 							],
 							"description": {
-								"ko": "사용. (r#use 와 같다)",
-								"en": "Use. (same as r#use)"
+								"ko": "사용. (원본 useProgram)",
+								"en": ""
 							},
 							"since": "0.3.2",
 							"source": "src/core/shaderprogram.rs"
@@ -67056,8 +67075,8 @@
 		{
 			"name": "core/tween",
 			"summary": {
-				"ko": "트윈.\n- 원본 core/tween.js 를 옮긴 것이다. 시작값 묶음(이름 → 숫자 또는 Vector2)과 목표값 묶음 사이를\n  대기(delay) 뒤 duration 초 동안 이징 함수로 보간하고, tick 마다 보간한 값 묶음을 갱신 콜백에 넘긴다.\n  다 가면 멈추고 완료 콜백을 부른다. 반복이나 요요는 원본에 없어서 옮기지 않았다.\n- 원본의 Tween.easing_function.back.out 은 easing_function::back::out 이다.\n  in 은 러스트 예약어라 easing_function::quadratic::r#in 처럼 r# 을 붙여 부른다. (이름은 원본 그대로)\n- 원본의 콜백은 노드 객체를 붙잡고 node.set_position(...) 을 부른다. 러스트 판은 노드가 씬의 NodeTree 에 있어서\n  갱신 콜백과 완료 콜백이 &mut NodeTree 를 함께 받는다. (붙잡아 둔 NodeId 로 노드를 꺼내 쓴다)\n- set_target(node_id): 값 이름이 노드 속성 이름(TweenProperty, 예: \"localPosition\")이면 tick 마다 그 노드에 바로 쓴다.\n  대상 노드가 지워지면 콜백 없이 조용히 끝난다. create_node_tween 은 그것의 줄임이다. (원본 setTarget(node), createNodeTween)\n  원본처럼 처음 돈 때의 노드 트리에서 떨어지면(맨 위 노드가 달라지면) 끝난다. 러스트 판은 destroy_node 로 지워져도 끝난다.\n- 이징은 원본과 같은 공식이다. (원본 base/math.js 의 pow 도 내장 거듭제곱이라 exponential, elastic 값이 같다)\n- duration 이 0 이하이면 바로 끝(진행률 1)으로 친다. (원본도 같다)\n- 씬은 SceneBase::start_tween 으로 트윈을 넘겨받아 들고, 노드 tick → 터치 다음에 돌리며 끝난 트윈을 뺀다.\n  원본은 트윈 객체를 들고 stop_tween(tween) 으로 가리키지만, 러스트 판은 씬이 트윈을 가져가므로(소유권이 넘어간다)\n  start_tween 이 돌려준 TweenId 로 가리킨다. get_tween / get_tween_mut 은 그 때문에 있다.",
-				"en": "Tween.\n- A port of the original core/tween.js. Between a set of start values (name → number or Vector2) and a set of target values,\n  it interpolates with an easing function for duration seconds after a delay, and passes the interpolated value set to the update callback every tick.\n  When it reaches the end it stops and calls the completion callback. Repeat and yoyo are not in the original, so they were not ported.\n- The original's Tween.easing_function.back.out is easing_function::back::out.\n  in is a Rust reserved word, so it is called with r# like easing_function::quadratic::r#in. (names are the same as the original)\n- The original's callbacks hold a node object and call node.set_position(...). In the Rust version nodes are in the scene's NodeTree, so\n  the update and completion callbacks also receive &mut NodeTree. (they fetch the node with a held NodeId)\n- set_target(node_id): if a value name is a node property name (TweenProperty, e.g. \"localPosition\"), it writes to that node directly every tick.\n  If the target node is destroyed, it ends quietly without callbacks. create_node_tween is its shorthand. (the original setTarget(node), createNodeTween)\n  As in the original, it ends if the node is detached from the node tree it first ran in (if the topmost node changes). The Rust version also ends if it is destroyed with destroy_node.\n- The easing uses the same formulas as the original. (the original base/math.js pow is the built-in power too, so exponential, elastic values match)\n- If duration is 0 or less, it counts as finished right away (progress 1). (the original does the same)\n- The scene takes ownership of tweens with SceneBase::start_tween, runs them after node tick → touch, and removes finished tweens.\n  The original holds the tween object and points to it with stop_tween(tween), but in the Rust version the scene takes the tween (ownership moves), so\n  it points to it with the TweenId returned by start_tween. That is why get_tween / get_tween_mut exist."
+				"ko": "트윈.\n- 원본 core/tween.js 를 옮긴 것이다. 시작값 묶음(이름 → 숫자 또는 Vector2)과 목표값 묶음 사이를\n  대기(delay) 뒤 duration 초 동안 이징 함수로 보간하고, tick 마다 보간한 값 묶음을 갱신 콜백에 넘긴다.\n  다 가면 멈추고 완료 콜백을 부른다. 반복이나 요요는 원본에 없어서 옮기지 않았다.\n- 원본의 Tween.easingFunction.back.easeOut 은 easing_function::back::ease_out 이다.\n  이름은 두 엔진 모두 ease_in, ease_out, ease_in_out 이다. (원본 easeIn, easeOut, easeInOut, 예약어 in 을 이름으로 쓰지 않는다)\n- 원본의 콜백은 노드 객체를 붙잡고 node.set_position(...) 을 부른다. 러스트 판은 노드가 씬의 NodeTree 에 있어서\n  갱신 콜백과 완료 콜백이 &mut NodeTree 를 함께 받는다. (붙잡아 둔 NodeId 로 노드를 꺼내 쓴다)\n- set_target(node_id): 값 이름이 노드 속성 이름(TweenProperty, 예: \"localPosition\")이면 tick 마다 그 노드에 바로 쓴다.\n  대상 노드가 지워지면 콜백 없이 조용히 끝난다. create_node_tween 은 그것의 줄임이다. (원본 setTarget(node), createNodeTween)\n  원본처럼 처음 돈 때의 노드 트리에서 떨어지면(맨 위 노드가 달라지면) 끝난다. 러스트 판은 destroy_node 로 지워져도 끝난다.\n- 이징은 원본과 같은 공식이다. (원본 base/math.js 의 pow 도 내장 거듭제곱이라 exponential, elastic 값이 같다)\n- duration 이 0 이하이면 바로 끝(진행률 1)으로 친다. (원본도 같다)\n- 씬은 SceneBase::start_tween 으로 트윈을 넘겨받아 들고, 노드 tick → 터치 다음에 돌리며 끝난 트윈을 뺀다.\n  원본은 트윈 객체를 들고 stop_tween(tween) 으로 가리키지만, 러스트 판은 씬이 트윈을 가져가므로(소유권이 넘어간다)\n  start_tween 이 돌려준 TweenId 로 가리킨다. get_tween / get_tween_mut 은 그 때문에 있다.",
+				"en": ""
 			},
 			"classes": [
 				{
@@ -68091,7 +68110,7 @@
 						"ko": "이징 값 보기와 트윈에 걸기",
 						"en": "Check easing values and apply one to a tween"
 					},
-					"code": "use vanilla::{easing_function, Tween, TweenValues};\n\nassert_eq!(easing_function::linear(0.25), 0.25);\nassert_eq!(easing_function::quadratic::r#in(0.5), 0.25);\n\nlet tween = Tween::new(TweenValues::new().with(\"x\", 0.0))\n\t.to(TweenValues::new().with(\"x\", 100.0), 0.5)\n\t.easing(easing_function::back::out);\nassert!(!tween.is_finished());",
+					"code": "use vanilla::{easing_function, Tween, TweenValues};\n\nassert_eq!(easing_function::linear(0.25), 0.25);\nassert_eq!(easing_function::quadratic::ease_in(0.5), 0.25);\n\nlet tween = Tween::new(TweenValues::new().with(\"x\", 0.0))\n\t.to(TweenValues::new().with(\"x\", 100.0), 0.5)\n\t.easing(easing_function::back::ease_out);\nassert!(!tween.is_finished());",
 					"language": "rust"
 				}
 			],
@@ -68140,7 +68159,7 @@
 						"ko": "가운데와 사분 자리 값",
 						"en": "Values at the middle and the quarter points"
 					},
-					"code": "use vanilla::easing_function::quadratic;\n\nassert_eq!(quadratic::r#in(0.5), 0.25);\nassert_eq!(quadratic::out(0.5), 0.75);\nassert_eq!(quadratic::in_out(0.25), 0.125);",
+					"code": "use vanilla::easing_function::quadratic;\n\nassert_eq!(quadratic::ease_in(0.5), 0.25);\nassert_eq!(quadratic::ease_out(0.5), 0.75);\nassert_eq!(quadratic::ease_in_out(0.25), 0.125);",
 					"language": "rust"
 				}
 			],
@@ -68148,8 +68167,8 @@
 			"functions": [
 				{
 					"kind": "method",
-					"name": "r#in",
-					"signature": "pub fn r#in(progress: f64) -> f64",
+					"name": "ease_in",
+					"signature": "pub fn ease_in(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68171,13 +68190,13 @@
 						"ko": "천천히 시작한다.",
 						"en": "Starts slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "out",
-					"signature": "pub fn out(progress: f64) -> f64",
+					"name": "ease_out",
+					"signature": "pub fn ease_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68199,13 +68218,13 @@
 						"ko": "천천히 끝난다.",
 						"en": "Ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "in_out",
-					"signature": "pub fn in_out(progress: f64) -> f64",
+					"name": "ease_in_out",
+					"signature": "pub fn ease_in_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68227,7 +68246,7 @@
 						"ko": "천천히 시작하고 천천히 끝난다.",
 						"en": "Starts slowly and ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				}
 			],
@@ -68245,7 +68264,7 @@
 						"ko": "가운데와 사분 자리 값",
 						"en": "Values at the middle and the quarter points"
 					},
-					"code": "use vanilla::easing_function::cubic;\n\nassert_eq!(cubic::r#in(0.5), 0.125);\nassert_eq!(cubic::out(0.5), 0.875);\nassert_eq!(cubic::in_out(0.75), 0.9375);",
+					"code": "use vanilla::easing_function::cubic;\n\nassert_eq!(cubic::ease_in(0.5), 0.125);\nassert_eq!(cubic::ease_out(0.5), 0.875);\nassert_eq!(cubic::ease_in_out(0.75), 0.9375);",
 					"language": "rust"
 				}
 			],
@@ -68253,8 +68272,8 @@
 			"functions": [
 				{
 					"kind": "method",
-					"name": "r#in",
-					"signature": "pub fn r#in(progress: f64) -> f64",
+					"name": "ease_in",
+					"signature": "pub fn ease_in(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68276,13 +68295,13 @@
 						"ko": "천천히 시작한다.",
 						"en": "Starts slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "out",
-					"signature": "pub fn out(progress: f64) -> f64",
+					"name": "ease_out",
+					"signature": "pub fn ease_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68304,13 +68323,13 @@
 						"ko": "천천히 끝난다.",
 						"en": "Ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "in_out",
-					"signature": "pub fn in_out(progress: f64) -> f64",
+					"name": "ease_in_out",
+					"signature": "pub fn ease_in_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68332,7 +68351,7 @@
 						"ko": "천천히 시작하고 천천히 끝난다.",
 						"en": "Starts slowly and ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				}
 			],
@@ -68350,7 +68369,7 @@
 						"ko": "가운데와 사분 자리 값",
 						"en": "Values at the middle and the quarter points"
 					},
-					"code": "use vanilla::easing_function::quartic;\n\nassert_eq!(quartic::r#in(0.5), 0.0625);\nassert_eq!(quartic::out(0.5), 0.9375);\nassert_eq!(quartic::in_out(0.25), 0.03125);",
+					"code": "use vanilla::easing_function::quartic;\n\nassert_eq!(quartic::ease_in(0.5), 0.0625);\nassert_eq!(quartic::ease_out(0.5), 0.9375);\nassert_eq!(quartic::ease_in_out(0.25), 0.03125);",
 					"language": "rust"
 				}
 			],
@@ -68358,8 +68377,8 @@
 			"functions": [
 				{
 					"kind": "method",
-					"name": "r#in",
-					"signature": "pub fn r#in(progress: f64) -> f64",
+					"name": "ease_in",
+					"signature": "pub fn ease_in(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68381,13 +68400,13 @@
 						"ko": "천천히 시작한다.",
 						"en": "Starts slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "out",
-					"signature": "pub fn out(progress: f64) -> f64",
+					"name": "ease_out",
+					"signature": "pub fn ease_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68409,13 +68428,13 @@
 						"ko": "천천히 끝난다.",
 						"en": "Ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "in_out",
-					"signature": "pub fn in_out(progress: f64) -> f64",
+					"name": "ease_in_out",
+					"signature": "pub fn ease_in_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68437,7 +68456,7 @@
 						"ko": "천천히 시작하고 천천히 끝난다.",
 						"en": "Starts slowly and ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				}
 			],
@@ -68455,7 +68474,7 @@
 						"ko": "가운데와 사분 자리 값",
 						"en": "Values at the middle and the quarter points"
 					},
-					"code": "use vanilla::easing_function::quintic;\n\nassert_eq!(quintic::r#in(0.5), 0.03125);\nassert_eq!(quintic::out(0.5), 0.96875);\nassert_eq!(quintic::in_out(0.75), 0.984375);",
+					"code": "use vanilla::easing_function::quintic;\n\nassert_eq!(quintic::ease_in(0.5), 0.03125);\nassert_eq!(quintic::ease_out(0.5), 0.96875);\nassert_eq!(quintic::ease_in_out(0.75), 0.984375);",
 					"language": "rust"
 				}
 			],
@@ -68463,8 +68482,8 @@
 			"functions": [
 				{
 					"kind": "method",
-					"name": "r#in",
-					"signature": "pub fn r#in(progress: f64) -> f64",
+					"name": "ease_in",
+					"signature": "pub fn ease_in(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68486,13 +68505,13 @@
 						"ko": "천천히 시작한다.",
 						"en": "Starts slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "out",
-					"signature": "pub fn out(progress: f64) -> f64",
+					"name": "ease_out",
+					"signature": "pub fn ease_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68514,13 +68533,13 @@
 						"ko": "천천히 끝난다.",
 						"en": "Ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "in_out",
-					"signature": "pub fn in_out(progress: f64) -> f64",
+					"name": "ease_in_out",
+					"signature": "pub fn ease_in_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68542,7 +68561,7 @@
 						"ko": "천천히 시작하고 천천히 끝난다.",
 						"en": "Starts slowly and ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				}
 			],
@@ -68560,7 +68579,7 @@
 						"ko": "끝과 가운데 값",
 						"en": "Values at the ends and the middle"
 					},
-					"code": "use vanilla::easing_function::sinusoidal;\n\nassert_eq!(sinusoidal::r#in(0.0), 0.0);\nassert!((sinusoidal::out(1.0) - 1.0).abs() < 1e-6);\nassert!((sinusoidal::in_out(0.5) - 0.5).abs() < 1e-6);",
+					"code": "use vanilla::easing_function::sinusoidal;\n\nassert_eq!(sinusoidal::ease_in(0.0), 0.0);\nassert!((sinusoidal::ease_out(1.0) - 1.0).abs() < 1e-6);\nassert!((sinusoidal::ease_in_out(0.5) - 0.5).abs() < 1e-6);",
 					"language": "rust"
 				}
 			],
@@ -68568,8 +68587,8 @@
 			"functions": [
 				{
 					"kind": "method",
-					"name": "r#in",
-					"signature": "pub fn r#in(progress: f64) -> f64",
+					"name": "ease_in",
+					"signature": "pub fn ease_in(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68591,13 +68610,13 @@
 						"ko": "천천히 시작한다.",
 						"en": "Starts slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "out",
-					"signature": "pub fn out(progress: f64) -> f64",
+					"name": "ease_out",
+					"signature": "pub fn ease_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68619,13 +68638,13 @@
 						"ko": "천천히 끝난다.",
 						"en": "Ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "in_out",
-					"signature": "pub fn in_out(progress: f64) -> f64",
+					"name": "ease_in_out",
+					"signature": "pub fn ease_in_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68647,7 +68666,7 @@
 						"ko": "천천히 시작하고 천천히 끝난다.",
 						"en": "Starts slowly and ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				}
 			],
@@ -68665,7 +68684,7 @@
 						"ko": "끝과 가운데 값",
 						"en": "Values at the ends and the middle"
 					},
-					"code": "use vanilla::easing_function::exponential;\n\nassert_eq!(exponential::r#in(0.0), 0.0);\nassert_eq!(exponential::out(1.0), 1.0);\nassert!((exponential::r#in(0.5) - 0.03125).abs() < 1e-6);\nassert!((exponential::out(0.5) - 0.96875).abs() < 1e-6);",
+					"code": "use vanilla::easing_function::exponential;\n\nassert_eq!(exponential::ease_in(0.0), 0.0);\nassert_eq!(exponential::ease_out(1.0), 1.0);\nassert!((exponential::ease_in(0.5) - 0.03125).abs() < 1e-6);\nassert!((exponential::ease_out(0.5) - 0.96875).abs() < 1e-6);",
 					"language": "rust"
 				}
 			],
@@ -68673,8 +68692,8 @@
 			"functions": [
 				{
 					"kind": "method",
-					"name": "r#in",
-					"signature": "pub fn r#in(progress: f64) -> f64",
+					"name": "ease_in",
+					"signature": "pub fn ease_in(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68696,13 +68715,13 @@
 						"ko": "천천히 시작한다.",
 						"en": "Starts slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "out",
-					"signature": "pub fn out(progress: f64) -> f64",
+					"name": "ease_out",
+					"signature": "pub fn ease_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68724,13 +68743,13 @@
 						"ko": "천천히 끝난다.",
 						"en": "Ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "in_out",
-					"signature": "pub fn in_out(progress: f64) -> f64",
+					"name": "ease_in_out",
+					"signature": "pub fn ease_in_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68752,7 +68771,7 @@
 						"ko": "천천히 시작하고 천천히 끝난다.",
 						"en": "Starts slowly and ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				}
 			],
@@ -68770,7 +68789,7 @@
 						"ko": "원 위의 값",
 						"en": "Values on the circle"
 					},
-					"code": "use vanilla::easing_function::circular;\n\nassert!((circular::r#in(0.6) - 0.2).abs() < 1e-6);\nassert!((circular::out(0.4) - 0.8).abs() < 1e-6);\nassert_eq!(circular::in_out(0.5), 0.5);",
+					"code": "use vanilla::easing_function::circular;\n\nassert!((circular::ease_in(0.6) - 0.2).abs() < 1e-6);\nassert!((circular::ease_out(0.4) - 0.8).abs() < 1e-6);\nassert_eq!(circular::ease_in_out(0.5), 0.5);",
 					"language": "rust"
 				}
 			],
@@ -68778,8 +68797,8 @@
 			"functions": [
 				{
 					"kind": "method",
-					"name": "r#in",
-					"signature": "pub fn r#in(progress: f64) -> f64",
+					"name": "ease_in",
+					"signature": "pub fn ease_in(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68801,13 +68820,13 @@
 						"ko": "천천히 시작한다.",
 						"en": "Starts slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "out",
-					"signature": "pub fn out(progress: f64) -> f64",
+					"name": "ease_out",
+					"signature": "pub fn ease_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68829,13 +68848,13 @@
 						"ko": "천천히 끝난다.",
 						"en": "Ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "in_out",
-					"signature": "pub fn in_out(progress: f64) -> f64",
+					"name": "ease_in_out",
+					"signature": "pub fn ease_in_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68857,7 +68876,7 @@
 						"ko": "천천히 시작하고 천천히 끝난다.",
 						"en": "Starts slowly and ends slowly."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				}
 			],
@@ -68875,7 +68894,7 @@
 						"ko": "끝을 넘고 처음 아래로 내려가는 값",
 						"en": "Values that overshoot the end and dip below the start"
 					},
-					"code": "use vanilla::easing_function::elastic;\n\nassert_eq!(elastic::out(0.0), 0.0);\nassert_eq!(elastic::out(1.0), 1.0);\nassert!((elastic::out(0.2) - 1.25).abs() < 1e-5);\nassert!((elastic::r#in(0.8) + 0.25).abs() < 1e-5);",
+					"code": "use vanilla::easing_function::elastic;\n\nassert_eq!(elastic::ease_out(0.0), 0.0);\nassert_eq!(elastic::ease_out(1.0), 1.0);\nassert!((elastic::ease_out(0.2) - 1.25).abs() < 1e-5);\nassert!((elastic::ease_in(0.8) + 0.25).abs() < 1e-5);",
 					"language": "rust"
 				}
 			],
@@ -68883,8 +68902,8 @@
 			"functions": [
 				{
 					"kind": "method",
-					"name": "r#in",
-					"signature": "pub fn r#in(progress: f64) -> f64",
+					"name": "ease_in",
+					"signature": "pub fn ease_in(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68906,13 +68925,13 @@
 						"ko": "시작에서 떨다가 나아간다.",
 						"en": "Wobbles at the start, then moves forward."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "out",
-					"signature": "pub fn out(progress: f64) -> f64",
+					"name": "ease_out",
+					"signature": "pub fn ease_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68934,13 +68953,13 @@
 						"ko": "끝을 넘었다가 떨며 멈춘다.",
 						"en": "Overshoots the end, then wobbles to a stop."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "in_out",
-					"signature": "pub fn in_out(progress: f64) -> f64",
+					"name": "ease_in_out",
+					"signature": "pub fn ease_in_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -68962,7 +68981,7 @@
 						"ko": "시작과 끝에서 떤다.",
 						"en": "Wobbles at the start and the end."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				}
 			],
@@ -68980,7 +68999,7 @@
 						"ko": "0 아래와 1 위로 넘치는 값",
 						"en": "Values that overshoot below 0 and above 1"
 					},
-					"code": "use vanilla::easing_function::back;\n\nassert!(back::r#in(0.5) < 0.0);\nassert!(back::out(0.5) > 1.0);\nassert!((back::r#in(1.0) - 1.0).abs() < 1e-6);\nassert!(back::out(0.0).abs() < 1e-6);",
+					"code": "use vanilla::easing_function::back;\n\nassert!(back::ease_in(0.5) < 0.0);\nassert!(back::ease_out(0.5) > 1.0);\nassert!((back::ease_in(1.0) - 1.0).abs() < 1e-6);\nassert!(back::ease_out(0.0).abs() < 1e-6);",
 					"language": "rust"
 				}
 			],
@@ -68988,8 +69007,8 @@
 			"functions": [
 				{
 					"kind": "method",
-					"name": "r#in",
-					"signature": "pub fn r#in(progress: f64) -> f64",
+					"name": "ease_in",
+					"signature": "pub fn ease_in(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -69011,13 +69030,13 @@
 						"ko": "뒤로 물러났다가 출발한다.",
 						"en": "Pulls back, then sets off."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "out",
-					"signature": "pub fn out(progress: f64) -> f64",
+					"name": "ease_out",
+					"signature": "pub fn ease_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -69039,13 +69058,13 @@
 						"ko": "끝을 살짝 넘었다가 돌아온다.",
 						"en": "Slightly overshoots the end, then comes back."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "in_out",
-					"signature": "pub fn in_out(progress: f64) -> f64",
+					"name": "ease_in_out",
+					"signature": "pub fn ease_in_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -69067,7 +69086,7 @@
 						"ko": "시작에서 물러나고 끝에서 넘친다.",
 						"en": "Pulls back at the start and overshoots at the end."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				}
 			],
@@ -69085,7 +69104,7 @@
 						"ko": "튕기는 자리의 값",
 						"en": "Values at the bounce points"
 					},
-					"code": "use vanilla::easing_function::bounce;\n\nassert_eq!(bounce::out(0.0), 0.0);\nassert!((bounce::out(0.5) - 0.765625).abs() < 1e-6);\nassert!((bounce::out(1.0) - 1.0).abs() < 1e-6);\nassert_eq!(bounce::in_out(0.5), 0.5);",
+					"code": "use vanilla::easing_function::bounce;\n\nassert_eq!(bounce::ease_out(0.0), 0.0);\nassert!((bounce::ease_out(0.5) - 0.765625).abs() < 1e-6);\nassert!((bounce::ease_out(1.0) - 1.0).abs() < 1e-6);\nassert_eq!(bounce::ease_in_out(0.5), 0.5);",
 					"language": "rust"
 				}
 			],
@@ -69093,8 +69112,8 @@
 			"functions": [
 				{
 					"kind": "method",
-					"name": "r#in",
-					"signature": "pub fn r#in(progress: f64) -> f64",
+					"name": "ease_in",
+					"signature": "pub fn ease_in(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -69116,13 +69135,13 @@
 						"ko": "시작에서 튕기다 나아간다.",
 						"en": "Bounces at the start, then moves forward."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "out",
-					"signature": "pub fn out(progress: f64) -> f64",
+					"name": "ease_out",
+					"signature": "pub fn ease_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -69144,13 +69163,13 @@
 						"ko": "끝에 닿아 튕기다 멈춘다.",
 						"en": "Hits the end and bounces to a stop."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				},
 				{
 					"kind": "method",
-					"name": "in_out",
-					"signature": "pub fn in_out(progress: f64) -> f64",
+					"name": "ease_in_out",
+					"signature": "pub fn ease_in_out(progress: f64) -> f64",
 					"params": [
 						{
 							"name": "progress",
@@ -69172,7 +69191,7 @@
 						"ko": "시작과 끝에서 튕긴다.",
 						"en": "Bounces at the start and the end."
 					},
-					"since": "0.3.2",
+					"since": "0.4.0",
 					"source": "src/core/tween.rs"
 				}
 			],
@@ -78605,6 +78624,11 @@
 						"Debug",
 						"Default"
 					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "game/gamescene",
+						"class": "ScreenFadeHold"
+					},
 					"source": "src/game/gamescene.rs",
 					"members": [
 						{
@@ -78624,7 +78648,13 @@
 								"en": "Creates. (not released yet)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "ScreenFadeHold",
+								"name": "constructor"
+							}
 						},
 						{
 							"kind": "method",
@@ -78636,7 +78666,13 @@
 								"en": "Releases. (the curtain brightens)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "ScreenFadeHold",
+								"name": "release"
+							}
 						},
 						{
 							"kind": "method",
@@ -78655,7 +78691,13 @@
 								"en": "Whether it has been released."
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "ScreenFadeHold",
+								"name": "isReleased"
+							}
 						}
 					],
 					"examples": [
@@ -80137,6 +80179,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "fadeScreenWithHold"
+							},
 							"examples": [
 								{
 									"title": {
@@ -127629,8 +127677,8 @@
 		{
 			"name": "misc/pointergesture",
 			"summary": {
-				"ko": "포인터 제스처 인식기. (노드 없이)\n- 원본 misc/pointergesture.js 를 옮긴 것이다. 탭 / 드래그 / 롱프레스를 임계값으로 나눈다. 노드에 얽매이지 않아 어디서나 쓴다.\n- 사용: press(x, y) → move(x, y) → tick(time_delta) → release() 순으로 넘기고,\n  콜백(set_tap_event / set_drag_event / set_drag_end_event / set_long_press_event)으로 결과를 받는다.\n- 원본과 다른 점:\n  이름 move 는 러스트 예약어라 r#move 로 부른다. (pointer_gesture.r#move(x, y))\n  options 객체는 PointerGestureOptions 구조체다. 콜백은 Vector2 를 받는 FnMut 이다.",
-				"en": "Pointer gesture recognizer. (without nodes)\n- A port of the original misc/pointergesture.js. Separates tap / drag / long press by thresholds. Not tied to nodes, so usable anywhere.\n- Usage: pass press(x, y) → move(x, y) → tick(time_delta) → release() in order,\n  and receive the results through callbacks (set_tap_event / set_drag_event / set_drag_end_event / set_long_press_event).\n- Differences from the original:\n  The name move is a Rust keyword, so it is called as r#move. (pointer_gesture.r#move(x, y))\n  The options object is the PointerGestureOptions struct. Callbacks are FnMut taking Vector2."
+				"ko": "포인터 제스처 인식기. (노드 없이)\n- 원본 misc/pointergesture.js 를 옮긴 것이다. 탭 / 드래그 / 롱프레스를 임계값으로 나눈다. 노드에 얽매이지 않아 어디서나 쓴다.\n- 사용: press(x, y) → move(x, y) → tick(time_delta) → release() 순으로 넘기고,\n  콜백(set_tap_event / set_drag_event / set_drag_end_event / set_long_press_event)으로 결과를 받는다.\n- 원본과 다른 점:\n  이동은 두 엔진 모두 move_pointer 다. (원본 movePointer, 예약어 move 를 이름으로 쓰지 않는다)\n  options 객체는 PointerGestureOptions 구조체다. 콜백은 Vector2 를 받는 FnMut 이다.",
+				"en": ""
 			},
 			"classes": [
 				{
@@ -127703,8 +127751,8 @@
 					"name": "PointerGesture",
 					"kind": "struct",
 					"summary": {
-						"ko": "포인터 제스처 인식기.\n- press, r#move, tick, release 차례로 넘기고 콜백으로 탭, 드래그, 드래그 끝, 롱프레스를 받는다.",
-						"en": "Pointer gesture recognizer.\n- Pass press, r#move, tick, release in order and receive tap, drag, drag end, and long press through callbacks."
+						"ko": "포인터 제스처 인식기.\n- press, move_pointer, tick, release 차례로 넘기고 콜백으로 탭, 드래그, 드래그 끝, 롱프레스를 받는다.",
+						"en": ""
 					},
 					"traits": [
 						"Default"
@@ -127787,8 +127835,8 @@
 						},
 						{
 							"kind": "method",
-							"name": "r#move",
-							"signature": "pub fn r#move(&mut self, x: f64, y: f64)",
+							"name": "move_pointer",
+							"signature": "pub fn move_pointer(&mut self, x: f64, y: f64)",
 							"params": [
 								{
 									"name": "x",
@@ -127811,8 +127859,14 @@
 								"ko": "이동. (누른 곳에서 임계값을 넘으면 드래그로 정하고, 그 뒤 움직일 때마다 드래그 알림을 부른다)\n- 눌려 있지 않으면 아무것도 하지 않는다. 누른 곳에서 거리가 임계값 이상이면 드래그다.",
 								"en": "Move. (becomes a drag once it passes the threshold from the press point, and calls the drag notification on every move after that)\n- Does nothing if not pressed. It is a drag if the distance from the press point is at least the threshold."
 							},
-							"since": "0.3.2",
-							"source": "src/misc/pointergesture.rs"
+							"since": "0.4.0",
+							"source": "src/misc/pointergesture.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/pointergesture",
+								"class": "PointerGesture",
+								"name": "movePointer"
+							}
 						},
 						{
 							"kind": "method",
@@ -128131,7 +128185,7 @@
 								"ko": "탭과 드래그 가르기",
 								"en": "Tell a tap from a drag"
 							},
-							"code": "use std::cell::RefCell;\nuse std::rc::Rc;\nuse vanilla::{PointerGesture, PointerGestureOptions, Vector2};\n\nlet event_list = Rc::new(RefCell::new(Vec::new()));\nlet mut pointer_gesture = PointerGesture::new(PointerGestureOptions::default());\nlet tap_event_list = event_list.clone();\npointer_gesture.set_tap_event(move |position| {\n\ttap_event_list.borrow_mut().push((\"tap\", position));\n});\nlet drag_end_event_list = event_list.clone();\npointer_gesture.set_drag_end_event(move |position, _press_position| {\n\tdrag_end_event_list.borrow_mut().push((\"drag_end\", position));\n});\n\npointer_gesture.press(10.0, 10.0);\npointer_gesture.r#move(14.0, 10.0);\npointer_gesture.tick(0.1);\npointer_gesture.release();\n\npointer_gesture.press(10.0, 10.0);\npointer_gesture.r#move(40.0, 10.0);\nassert!(pointer_gesture.is_dragging());\npointer_gesture.release();\n\nassert_eq!(*event_list.borrow(), vec![(\"tap\", Vector2::create(14.0, 10.0)), (\"drag_end\", Vector2::create(40.0, 10.0))]);",
+							"code": "use std::cell::RefCell;\nuse std::rc::Rc;\nuse vanilla::{PointerGesture, PointerGestureOptions, Vector2};\n\nlet event_list = Rc::new(RefCell::new(Vec::new()));\nlet mut pointer_gesture = PointerGesture::new(PointerGestureOptions::default());\nlet tap_event_list = event_list.clone();\npointer_gesture.set_tap_event(move |position| {\n\ttap_event_list.borrow_mut().push((\"tap\", position));\n});\nlet drag_end_event_list = event_list.clone();\npointer_gesture.set_drag_end_event(move |position, _press_position| {\n\tdrag_end_event_list.borrow_mut().push((\"drag_end\", position));\n});\n\npointer_gesture.press(10.0, 10.0);\npointer_gesture.move_pointer(14.0, 10.0);\npointer_gesture.tick(0.1);\npointer_gesture.release();\n\npointer_gesture.press(10.0, 10.0);\npointer_gesture.move_pointer(40.0, 10.0);\nassert!(pointer_gesture.is_dragging());\npointer_gesture.release();\n\nassert_eq!(*event_list.borrow(), vec![(\"tap\", Vector2::create(14.0, 10.0)), (\"drag_end\", Vector2::create(40.0, 10.0))]);",
 							"language": "rust"
 						}
 					]
@@ -142830,18 +142884,18 @@
 		{
 			"name": "ui/toastmotion",
 			"summary": {
-				"ko": "알림이 나오고 사라지는 모션. (vanilla.js ui/toastmotion.js 의 ToastMotion, ToastPhase, readToastSeconds, attachToastMotion)\n- 알림 노드에 붙여 show 로 띄운다. 바깥쪽(위 알림은 위, 아래 알림은 아래)에서 미끄러져 들어오며 보이고 살짝 커졌다 돌아오고,\n  머무는 시간이 지나면 떠오르며 사라진다.\n- 떠 있는 동안 다른 글이 오면 앞 것이 빨리 비키고 새 글이 들어오며, 같은 글이 또 오면 시간만 다시 채우고 통 튄다.\n- 노드의 자리는 놓인 자리를 기준으로 그 둘레에서만 움직인다. (그 사이 다시 놓으면 그 자리가 새 기준)\n- 원본과 다른 것: show 는 요청만 받아 두고 다음 tick 에서 노드를 움직인다. (장면 코드는 노드 문맥 없이 부르므로)\n  글은 set_apply_text_handler 로 건 함수가 노드에 넣는다. 숨은 동안 노드는 끄지 않고 보이지 않게만 한다. (tick 이 계속 돌게)\n- UIToast 는 줄 세운 알약 알림을 스스로 만들고, 이것은 게임이 만든 알림 노드를 움직인다.",
-				"en": "Motion for a notification appearing and disappearing. (ToastMotion, ToastPhase, readToastSeconds, attachToastMotion of vanilla.js ui/toastmotion.js)\n- Attach it to a notification node and show it with show. It slides in from the outside (top for top notifications, bottom for bottom ones) as it appears, grows slightly and settles back,\n  and once the stay time passes it floats up and disappears.\n- If other text comes while it is up, the previous one quickly makes way and the new text comes in, and if the same text comes again it only refills the time and bounces.\n- The node's position moves only around where it was placed. (if placed again in the meantime, that position becomes the new base)\n- Differences from the original: show only takes the request and moves the node on the next tick. (because scene code calls it without a node context)\n  The text is put into the node by the function hooked with set_apply_text_handler. While hidden the node is not turned off, only made invisible. (so tick keeps running)\n- UIToast builds its own stacked pill notifications, while this moves a notification node the game made."
+				"ko": "알림이 나오고 사라지는 모션. (vanilla.js ui/toastmotion.js 의 ToastMotion, ToastPhase, readToastSeconds, attachToastMotion)\n- 알림 노드에 붙여 show 로 띄운다. 바깥쪽(위 알림은 위, 아래 알림은 아래)에서 미끄러져 들어오며 보이고 살짝 커졌다 돌아오고,\n  머무는 시간이 지나면 떠오르며 사라진다.\n- 떠 있는 동안 다른 글이 오면 앞 것이 빨리 비키고 새 글이 들어오며, 같은 글이 또 오면 시간만 다시 채우고 통 튄다.\n- 노드의 자리는 놓인 자리를 기준으로 그 둘레에서만 움직인다. (그 사이 다시 놓으면 그 자리가 새 기준)\n- 원본과 다른 것: show 는 요청만 받아 두고 다음 tick 에서 노드를 움직인다. (장면 코드는 노드 문맥 없이 부르므로)\n  글은 show 에 준 함수가 나오기 시작할 때 노드에 넣는다. (원본 show(text, seconds, applyText) 와 같다) 숨은 동안 노드는 끄지 않고 보이지 않게만 한다. (tick 이 계속 돌게)\n- UIToast 는 줄 세운 알약 알림을 스스로 만들고, 이것은 게임이 만든 알림 노드를 움직인다.",
+				"en": ""
 			},
 			"classes": [
 				{
-					"name": "ToastApplyTextHandler",
+					"name": "ToastApplyText",
 					"kind": "type",
 					"summary": {
-						"ko": "노드에 글을 넣는 함수. (같은 노드의 다른 컴포넌트, 예를 들어 UILabel 은 문맥의 노드에서 찾는다)",
-						"en": "Function that puts the text into the node. (other components on the same node, for example UILabel, are found through the context's node)"
+						"ko": "노드에 글과 색을 넣는 함수. (원본 show 의 applyText, 나오기 시작할 때 한 번 부른다, 같은 노드의 UILabel 같은 컴포넌트는 문맥의 노드에서 찾는다)",
+						"en": ""
 					},
-					"signature": "pub type ToastApplyTextHandler = Box<dyn FnMut(&mut ComponentContext, &str)>",
+					"signature": "pub type ToastApplyText = Box<dyn FnOnce(&mut ComponentContext)>",
 					"source": "src/ui/toastmotion.rs",
 					"members": []
 				},
@@ -142865,17 +142919,8 @@
 						{
 							"kind": "constructor",
 							"name": "new",
-							"signature": "pub fn new(enter_side: f64) -> ToastMotion",
-							"params": [
-								{
-									"name": "enter_side",
-									"type": "f64",
-									"description": {
-										"ko": "들어오는 쪽. (-1 이면 위에서, 1 이면 아래에서, 미끄러지는 거리 10 에 곱한다)",
-										"en": "Entry side. (-1 from the top, 1 from the bottom, multiplied by the slide distance 10)"
-									}
-								}
-							],
+							"signature": "pub fn new() -> ToastMotion",
+							"params": [],
 							"returns": {
 								"type": "ToastMotion",
 								"description": {
@@ -142884,8 +142929,8 @@
 								}
 							},
 							"description": {
-								"ko": "생성. (들어오는 쪽: -1 이면 위에서, 1 이면 아래에서)",
-								"en": "Constructor. (entry side: -1 from the top, 1 from the bottom)"
+								"ko": "생성. (원본 new ToastMotion(), 위에서 들어온다, 들어오는 쪽은 set_enter_side 로 바꾼다)",
+								"en": ""
 							},
 							"since": "0.4.0",
 							"source": "src/ui/toastmotion.rs",
@@ -142898,29 +142943,8 @@
 						},
 						{
 							"kind": "method",
-							"name": "set_apply_text_handler",
-							"signature": "pub fn set_apply_text_handler(&mut self, apply_text_handler: ToastApplyTextHandler)",
-							"params": [
-								{
-									"name": "apply_text_handler",
-									"type": "ToastApplyTextHandler",
-									"description": {
-										"ko": "글이 나오기 시작할 때 문맥과 글을 받아 노드에 넣을 함수. (같은 노드의 UILabel 이나 Text 는 문맥의 노드에서 찾는다)",
-										"en": "Function that receives the context and text when the text starts to appear and puts it into the node. (UILabel or Text on the same node are found through the context's node)"
-									}
-								}
-							],
-							"description": {
-								"ko": "노드에 글을 넣는 함수 설정.",
-								"en": "Sets the function that puts the text into the node."
-							},
-							"since": "0.4.0",
-							"source": "src/ui/toastmotion.rs"
-						},
-						{
-							"kind": "method",
 							"name": "show",
-							"signature": "pub fn show(&mut self, text: &str, seconds: f64)",
+							"signature": "pub fn show(&mut self, text: &str, seconds: f64, apply_text: impl FnOnce(&mut ComponentContext) + 'static)",
 							"params": [
 								{
 									"name": "text",
@@ -142936,6 +142960,14 @@
 									"description": {
 										"ko": "머무는 시간. (초, 나오는 시간과 사라지는 시간은 빼고, read_toast_seconds 로 글 길이에 맞출 수 있다)",
 										"en": "Stay time. (seconds, excluding the appear and disappear times, read_toast_seconds can fit it to the text length)"
+									}
+								},
+								{
+									"name": "apply_text",
+									"type": "impl FnOnce(&mut ComponentContext) + 'static",
+									"description": {
+										"ko": "노드에 글과 색을 넣는 함수. (나오기 시작할 때 문맥을 받아 한 번 부른다, 원본 applyText)",
+										"en": ""
 									}
 								}
 							],
@@ -143054,7 +143086,7 @@
 								"ko": "게임이 만든 알림 노드 띄우기",
 								"en": "Showing a notification node made by the game"
 							},
-							"code": "use vanilla::{attach_toast_motion, ComponentContext, Engine, EngineConfiguration, NodeTree, Text, ToastMotion, ToastPhase, Vector2};\n\nlet engine = Engine::new(EngineConfiguration::new());\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet toast_id = node_tree.create_child(root_id, \"Toast\");\nnode_tree[toast_id].set_local_position(Vector2::create(640.0, 80.0));\nnode_tree[toast_id].set_content_size(Vector2::create(320.0, 48.0));\nnode_tree[toast_id].add_component(Text::create_with_text(\"\", 24.0));\nnode_tree[toast_id].set_visible(false);\nlet toast_motion = attach_toast_motion(&mut node_tree, toast_id, -1.0).expect(\"toast motion\");\ntoast_motion.set_apply_text_handler(Box::new(|context: &mut ComponentContext, text: &str| {\n\tif let Some(text_component) = context.get_node_mut().get_component_mut::<Text>() {\n\t\ttext_component.set_text(text);\n\t}\n}));\ntoast_motion.show(\"Saved\", 1.0);\nassert!(toast_motion.is_showing());\n\nnode_tree.tick(&engine, 0.016);\nassert!(node_tree[toast_id].is_visible());\nassert_eq!(node_tree[toast_id].get_component::<Text>().expect(\"text\").get_text(), \"Saved\");\nlet toast_motion = node_tree[toast_id].get_component::<ToastMotion>().expect(\"toast motion\");\nassert_eq!(toast_motion.get_phase(), ToastPhase::Enter);\n\nfor _frame_index in 0..120 {\n\tnode_tree.tick(&engine, 1.0 / 60.0);\n}\nassert!(!node_tree[toast_id].is_visible());\nassert_eq!(node_tree[toast_id].get_local_position(), Vector2::create(640.0, 80.0));",
+							"code": "use vanilla::{attach_toast_motion, ComponentContext, Engine, EngineConfiguration, NodeTree, Text, ToastMotion, ToastPhase, Vector2};\n\nlet engine = Engine::new(EngineConfiguration::new());\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet toast_id = node_tree.create_child(root_id, \"Toast\");\nnode_tree[toast_id].set_local_position(Vector2::create(640.0, 80.0));\nnode_tree[toast_id].set_content_size(Vector2::create(320.0, 48.0));\nnode_tree[toast_id].add_component(Text::create_with_text(\"\", 24.0));\nnode_tree[toast_id].set_visible(false);\nlet toast_motion = attach_toast_motion(&mut node_tree, toast_id, -1.0).expect(\"toast motion\");\ntoast_motion.show(\"Saved\", 1.0, |context: &mut ComponentContext| {\n\tif let Some(text_component) = context.get_node_mut().get_component_mut::<Text>() {\n\t\ttext_component.set_text(\"Saved\");\n\t}\n});\nassert!(toast_motion.is_showing());\n\nnode_tree.tick(&engine, 0.016);\nassert!(node_tree[toast_id].is_visible());\nassert_eq!(node_tree[toast_id].get_component::<Text>().expect(\"text\").get_text(), \"Saved\");\nlet toast_motion = node_tree[toast_id].get_component::<ToastMotion>().expect(\"toast motion\");\nassert_eq!(toast_motion.get_phase(), ToastPhase::Enter);\n\nfor _frame_index in 0..120 {\n\tnode_tree.tick(&engine, 1.0 / 60.0);\n}\nassert!(!node_tree[toast_id].is_visible());\nassert_eq!(node_tree[toast_id].get_local_position(), Vector2::create(640.0, 80.0));",
 							"language": "rust"
 						}
 					]
@@ -149876,7 +149908,13 @@
 								"en": "Sets multiline. (like Chrome textarea. Web DOM input uses a hidden `<textarea>`. Not a property of the original field, so excluded from reflection)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "setMultiline"
+							}
 						},
 						{
 							"kind": "method",
@@ -149895,7 +149933,13 @@
 								"en": "Whether it is multiline."
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "isMultiline"
+							}
 						},
 						{
 							"kind": "method",
@@ -149916,7 +149960,13 @@
 								"en": "Sets the line height. (multiline fields, CSS normal if None. Like Chrome SimpleFontData, adds the rounded ascent, descent and line gap of the first font)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "setLineHeight"
+							}
 						},
 						{
 							"kind": "method",
@@ -149935,7 +149985,13 @@
 								"en": "Line height. (multiline fields)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "getLineHeight"
+							}
 						},
 						{
 							"kind": "method",
@@ -149956,7 +150012,13 @@
 								"en": "Sets the tab size. (multiline fields, width in spaces. CSS tab-size, default 8)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "setTabSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -149975,7 +150037,13 @@
 								"en": "Tab size."
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "getTabSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -149994,7 +150062,13 @@
 								"en": "Vertical scroll offset. (multiline fields, the original textarea scrollTop)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "getScrollTop"
+							}
 						},
 						{
 							"kind": "method",
@@ -150015,7 +150089,13 @@
 								"en": "Sets the vertical scroll offset. (multiline fields, clamped to within the end of the text on the next draw)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "setScrollTop"
+							}
 						},
 						{
 							"kind": "method",
@@ -150034,7 +150114,13 @@
 								"en": "Whether there is something to undo."
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "canUndo"
+							}
 						},
 						{
 							"kind": "method",
@@ -150053,7 +150139,13 @@
 								"en": "Whether there is something to redo."
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "canRedo"
+							}
 						},
 						{
 							"kind": "method",

@@ -89,6 +89,18 @@
 			"vanilla-engine": {
 				"module": "animation/action",
 				"class": "Action",
+				"name": "repeat_while"
+			},
+			"vanilla.js": {
+				"module": "animation/action",
+				"class": "Action",
+				"name": "repeatWhile"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "animation/action",
+				"class": "Action",
 				"name": "start_with"
 			},
 			"vanilla.js": {
@@ -8927,6 +8939,18 @@
 			"vanilla-engine": {
 				"module": "core/fullscreenpass",
 				"class": "FullscreenPass",
+				"name": "use_program"
+			},
+			"vanilla.js": {
+				"module": "core/fullscreenpass",
+				"class": "FullscreenPass",
+				"name": "useProgram"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/fullscreenpass",
+				"class": "FullscreenPass",
 				"name": "draw"
 			},
 			"vanilla.js": {
@@ -10587,6 +10611,30 @@
 				"module": "core/graphic",
 				"class": "Graphic",
 				"name": "isTextPixelSnapEnabled"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "set_text_antialias_enabled"
+			},
+			"vanilla.js": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "setTextAntialiasEnabled"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "is_text_antialias_enabled"
+			},
+			"vanilla.js": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "isTextAntialiasEnabled"
 			}
 		},
 		{
@@ -17518,6 +17566,52 @@
 		{
 			"vanilla-engine": {
 				"module": "game/gamescene",
+				"class": "ScreenFadeHold"
+			},
+			"vanilla.js": {
+				"module": "game/gamescene",
+				"class": "ScreenFadeHold"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "game/gamescene",
+				"class": "ScreenFadeHold",
+				"name": "new"
+			},
+			"vanilla.js": {
+				"module": "game/gamescene",
+				"class": "ScreenFadeHold",
+				"name": "constructor"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "game/gamescene",
+				"class": "ScreenFadeHold",
+				"name": "release"
+			},
+			"vanilla.js": {
+				"module": "game/gamescene",
+				"class": "ScreenFadeHold",
+				"name": "release"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "game/gamescene",
+				"class": "ScreenFadeHold",
+				"name": "is_released"
+			},
+			"vanilla.js": {
+				"module": "game/gamescene",
+				"class": "ScreenFadeHold",
+				"name": "isReleased"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "game/gamescene",
 				"class": "GameSceneBase",
 				"name": "new"
 			},
@@ -17909,6 +18003,18 @@
 				"module": "game/gamescene",
 				"class": "GameScene",
 				"name": "fadeScreen"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "game/gamescene",
+				"class": "GameSceneBase",
+				"name": "fade_screen_with_hold"
+			},
+			"vanilla.js": {
+				"module": "game/gamescene",
+				"class": "GameScene",
+				"name": "fadeScreenWithHold"
 			}
 		},
 		{
@@ -27757,6 +27863,18 @@
 			"vanilla-engine": {
 				"module": "misc/pointergesture",
 				"class": "PointerGesture",
+				"name": "move_pointer"
+			},
+			"vanilla.js": {
+				"module": "misc/pointergesture",
+				"class": "PointerGesture",
+				"name": "movePointer"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "misc/pointergesture",
+				"class": "PointerGesture",
 				"name": "tick"
 			},
 			"vanilla.js": {
@@ -33301,6 +33419,126 @@
 				"module": "ui/uiinputfield",
 				"class": "UIInputField",
 				"name": "isUsingDirectTouch"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "set_multiline"
+			},
+			"vanilla.js": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "setMultiline"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "is_multiline"
+			},
+			"vanilla.js": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "isMultiline"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "set_line_height"
+			},
+			"vanilla.js": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "setLineHeight"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "get_line_height"
+			},
+			"vanilla.js": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "getLineHeight"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "set_tab_size"
+			},
+			"vanilla.js": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "setTabSize"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "get_tab_size"
+			},
+			"vanilla.js": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "getTabSize"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "get_scroll_top"
+			},
+			"vanilla.js": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "getScrollTop"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "set_scroll_top"
+			},
+			"vanilla.js": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "setScrollTop"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "can_undo"
+			},
+			"vanilla.js": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "canUndo"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "can_redo"
+			},
+			"vanilla.js": {
+				"module": "ui/uiinputfield",
+				"class": "UIInputField",
+				"name": "canRedo"
 			}
 		},
 		{
