@@ -742,7 +742,7 @@ impl ToonScreenOutline {
 		if instance_count > 0 {
 			debug_assert_eq!(instance_data.len(), instance_count * TOON_INSTANCE_FLOAT_COUNT);
 			unsafe {
-				gl.bind_buffer(glow::ARRAY_BUFFER, Some(mesh.get_instance_buffer()));
+				crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(mesh.get_instance_buffer()));
 				gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&instance_data), glow::DYNAMIC_DRAW);
 			}
 			self.draw_with_count(gl, mesh, &Matrix4::create_identity(), instance_count as i32, line_id, true, options.is_mirrored == Some(true), options);

@@ -2128,8 +2128,8 @@ impl ToonRenderer {
 			}
 		};
 		unsafe {
-			let buffer = gl.create_buffer()?;
-			gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+			let buffer = crate::core::glstatecache::create_buffer(gl)?;
+			crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(buffer));
 			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(data), gl_usage);
 			Ok(ToonInstanceBuffer { layout: instance_layout.clone(), buffer, usage: gl_usage, float_count: Cell::new(data.len()), vertex_array_list: RefCell::new(Vec::new()) })
 		}
@@ -2145,7 +2145,7 @@ impl ToonRenderer {
 	//==============================================================================
 	pub fn update_instance_buffer(&self, gl: &glow::Context, instance_buffer: &ToonInstanceBuffer, data: &[f32]) {
 		unsafe {
-			gl.bind_buffer(glow::ARRAY_BUFFER, Some(instance_buffer.buffer));
+			crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(instance_buffer.buffer));
 			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(data), instance_buffer.usage);
 		}
 		instance_buffer.float_count.set(data.len());
@@ -2166,7 +2166,7 @@ impl ToonRenderer {
 					crate::core::glstatecache::delete_vertex_array(gl, *outline_vertex_array);
 				}
 			}
-			gl.delete_buffer(instance_buffer.buffer);
+			crate::core::glstatecache::delete_buffer(gl, instance_buffer.buffer);
 		}
 	}
 
@@ -2245,8 +2245,8 @@ impl ToonRenderer {
 	/// 꼭짓점 버퍼 만들기.
 	//==============================================================================
 	unsafe fn create_array_buffer(gl: &glow::Context, data: &[f32], usage: u32) -> Option<GlBuffer> {
-		let buffer = gl.create_buffer().ok()?;
-		gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+		let buffer = crate::core::glstatecache::create_buffer(gl).ok()?;
+		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(buffer));
 		gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(data), usage);
 		Some(buffer)
 	}
@@ -2255,8 +2255,8 @@ impl ToonRenderer {
 	/// 번호 버퍼 만들기. (지금 묶인 버텍스 어레이에 붙는다)
 	//==============================================================================
 	unsafe fn create_index_buffer(gl: &glow::Context, data: &[u32]) -> Option<GlBuffer> {
-		let buffer = gl.create_buffer().ok()?;
-		gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(buffer));
+		let buffer = crate::core::glstatecache::create_buffer(gl).ok()?;
+		crate::core::glstatecache::bind_buffer(gl, glow::ELEMENT_ARRAY_BUFFER, Some(buffer));
 		gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, index_slice_to_bytes(data), glow::STATIC_DRAW);
 		Some(buffer)
 	}
@@ -2295,7 +2295,7 @@ impl ToonRenderer {
 					crate::core::glstatecache::delete_vertex_array(gl, vertex_array);
 				}
 				for buffer in created_buffer_list {
-					gl.delete_buffer(buffer);
+					crate::core::glstatecache::delete_buffer(gl, buffer);
 				}
 			}
 		}
@@ -2408,7 +2408,7 @@ impl ToonRenderer {
 	//==============================================================================
 	unsafe fn attach_body_attributes(gl: &glow::Context, mesh: &ToonMesh) {
 		let stride = (VERTEX_FLOAT_COUNT * 4) as i32;
-		gl.bind_buffer(glow::ARRAY_BUFFER, Some(mesh.vertex_buffer));
+		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(mesh.vertex_buffer));
 		for (location, size, offset) in [(0u32, 3i32, 0i32), (1, 3, 12), (2, 3, 24), (3, 2, 36), (4, 4, 44)] {
 			gl.enable_vertex_attrib_array(location);
 			gl.vertex_attrib_pointer_f32(location, size, glow::FLOAT, false, stride, offset);
@@ -2417,18 +2417,18 @@ impl ToonRenderer {
 			ToonRenderer::attach_skin_attributes(gl, skin_buffer);
 		}
 		if let Some(uv_buffer) = mesh.uv_buffer {
-			gl.bind_buffer(glow::ARRAY_BUFFER, Some(uv_buffer));
+			crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(uv_buffer));
 			gl.enable_vertex_attrib_array(UV_LOCATION);
 			gl.vertex_attrib_pointer_f32(UV_LOCATION, if mesh.has_second_uv { 4 } else { 2 }, glow::FLOAT, false, if mesh.has_second_uv { 16 } else { 8 }, 0);
 		}
-		gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(mesh.body_index_buffer));
+		crate::core::glstatecache::bind_buffer(gl, glow::ELEMENT_ARRAY_BUFFER, Some(mesh.body_index_buffer));
 	}
 
 	//==============================================================================
 	/// 바깥선 껍데기의 바탕 자리와 미는 쪽(노멀 자리), 뼈대 어트리뷰트와 번호 버퍼를 지금 묶인 버텍스 어레이에 붙이기.
 	//==============================================================================
 	unsafe fn attach_outline_attributes(gl: &glow::Context, mesh: &ToonMesh) {
-		gl.bind_buffer(glow::ARRAY_BUFFER, mesh.outline_buffer);
+		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, mesh.outline_buffer);
 		gl.enable_vertex_attrib_array(0);
 		gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 24, 0);
 		gl.enable_vertex_attrib_array(1);
@@ -2436,7 +2436,7 @@ impl ToonRenderer {
 		if let Some(outline_skin_buffer) = mesh.outline_skin_buffer {
 			ToonRenderer::attach_skin_attributes(gl, outline_skin_buffer);
 		}
-		gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, mesh.outline_index_buffer);
+		crate::core::glstatecache::bind_buffer(gl, glow::ELEMENT_ARRAY_BUFFER, mesh.outline_index_buffer);
 	}
 
 	//==============================================================================
@@ -2444,7 +2444,7 @@ impl ToonRenderer {
 	//==============================================================================
 	unsafe fn attach_skin_attributes(gl: &glow::Context, skin_buffer: GlBuffer) {
 		let stride = (SKIN_FLOAT_COUNT * 4) as i32;
-		gl.bind_buffer(glow::ARRAY_BUFFER, Some(skin_buffer));
+		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(skin_buffer));
 		gl.enable_vertex_attrib_array(5);
 		gl.vertex_attrib_pointer_f32(5, 4, glow::FLOAT, false, stride, 0);
 		gl.enable_vertex_attrib_array(6);
@@ -2456,7 +2456,7 @@ impl ToonRenderer {
 	//==============================================================================
 	unsafe fn attach_instance_attributes(gl: &glow::Context, instance_buffer: GlBuffer) {
 		let stride = (TOON_INSTANCE_FLOAT_COUNT * 4) as i32;
-		gl.bind_buffer(glow::ARRAY_BUFFER, Some(instance_buffer));
+		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(instance_buffer));
 		for column_index in 0..5u32 {
 			let location = INSTANCE_MATRIX_LOCATION + column_index;
 			gl.enable_vertex_attrib_array(location);
@@ -2470,7 +2470,7 @@ impl ToonRenderer {
 	//==============================================================================
 	unsafe fn attach_layout_attributes(gl: &glow::Context, instance_layout: &ToonInstanceLayout, buffer: GlBuffer) {
 		let stride = (instance_layout.get_float_count() * 4) as i32;
-		gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+		crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(buffer));
 		let attach = |location: u32, size: i32, float_offset: usize| {
 			gl.enable_vertex_attrib_array(location);
 			gl.vertex_attrib_pointer_f32(location, size, glow::FLOAT, false, stride, (float_offset * 4) as i32);
@@ -2540,9 +2540,9 @@ impl ToonRenderer {
 			if let Some(outline_vertex_array) = mesh.outline_vertex_array {
 				crate::core::glstatecache::delete_vertex_array(gl, outline_vertex_array);
 			}
-			gl.delete_buffer(mesh.instance_buffer);
+			crate::core::glstatecache::delete_buffer(gl, mesh.instance_buffer);
 			for buffer in mesh.buffer_list {
-				gl.delete_buffer(buffer);
+				crate::core::glstatecache::delete_buffer(gl, buffer);
 			}
 		}
 	}
@@ -2961,7 +2961,7 @@ impl ToonRenderer {
 		self.frame_statistics.drawn_object_count += instance_count;
 		if instance_count > 0 {
 			unsafe {
-				gl.bind_buffer(glow::ARRAY_BUFFER, Some(mesh.instance_buffer));
+				crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(mesh.instance_buffer));
 				gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&instance_data), glow::DYNAMIC_DRAW);
 			}
 			self.draw_with_count(gl, mesh, &first_matrix, instance_count as i32, options, None);
