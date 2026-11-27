@@ -646,7 +646,7 @@ impl UISnapScrollView {
 		};
 		snap_tween.elapsed_seconds += time_delta;
 		let progress = math::clamp(snap_tween.elapsed_seconds / SNAP_TWEEN_DURATION, 0.0, 1.0);
-		let eased_progress = easing_function::cubic::out(progress);
+		let eased_progress = easing_function::cubic::ease_out(progress);
 		let offset_x = math::lerp(snap_tween.start_offset.x, snap_tween.target_offset.x, eased_progress);
 		let offset_y = math::lerp(snap_tween.start_offset.y, snap_tween.target_offset.y, eased_progress);
 		self.set_scroll_offset(Vector2::create(offset_x, offset_y));
@@ -1077,7 +1077,7 @@ mod tests {
 		node_tree.tick(&engine, 0.016);
 		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Release, Vector2::create(50.0, 50.0));
 		node_tree.tick(&engine, 0.15);
-		let expected_x = math::lerp(-100.0, -200.0, easing_function::cubic::out(0.5));
+		let expected_x = math::lerp(-100.0, -200.0, easing_function::cubic::ease_out(0.5));
 		let offset = get_snap_view(&mut node_tree, snap_id).get_scroll_offset();
 		assert!((offset.x - expected_x).abs() < 0.001);
 		assert!(get_snap_view(&mut node_tree, snap_id).is_snapping());

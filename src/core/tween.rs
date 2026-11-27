@@ -3,8 +3,8 @@
 //! - 원본 core/tween.js 를 옮긴 것이다. 시작값 묶음(이름 → 숫자 또는 Vector2)과 목표값 묶음 사이를
 //!   대기(delay) 뒤 duration 초 동안 이징 함수로 보간하고, tick 마다 보간한 값 묶음을 갱신 콜백에 넘긴다.
 //!   다 가면 멈추고 완료 콜백을 부른다. 반복이나 요요는 원본에 없어서 옮기지 않았다.
-//! - 원본의 Tween.easing_function.back.out 은 easing_function::back::out 이다.
-//!   in 은 러스트 예약어라 easing_function::quadratic::r#in 처럼 r# 을 붙여 부른다. (이름은 원본 그대로)
+//! - 원본의 Tween.easingFunction.back.easeOut 은 easing_function::back::ease_out 이다.
+//!   이름은 두 엔진 모두 ease_in, ease_out, ease_in_out 이다. (원본 easeIn, easeOut, easeInOut, 예약어 in 을 이름으로 쓰지 않는다)
 //! - 원본의 콜백은 노드 객체를 붙잡고 node.set_position(...) 을 부른다. 러스트 판은 노드가 씬의 NodeTree 에 있어서
 //!   갱신 콜백과 완료 콜백이 &mut NodeTree 를 함께 받는다. (붙잡아 둔 NodeId 로 노드를 꺼내 쓴다)
 //! - set_target(node_id): 값 이름이 노드 속성 이름(TweenProperty, 예: "localPosition")이면 tick 마다 그 노드에 바로 쓴다.
@@ -883,11 +883,11 @@ impl Tween {
 /// use vanilla::{easing_function, Tween, TweenValues};
 ///
 /// assert_eq!(easing_function::linear(0.25), 0.25);
-/// assert_eq!(easing_function::quadratic::r#in(0.5), 0.25);
+/// assert_eq!(easing_function::quadratic::ease_in(0.5), 0.25);
 ///
 /// let tween = Tween::new(TweenValues::new().with("x", 0.0))
 /// 	.to(TweenValues::new().with("x", 100.0), 0.5)
-/// 	.easing(easing_function::back::out);
+/// 	.easing(easing_function::back::ease_out);
 /// assert!(!tween.is_finished());
 /// ```
 //==============================================================================
@@ -915,9 +915,9 @@ pub mod easing_function {
 	/// ```rust
 	/// use vanilla::easing_function::quadratic;
 	///
-	/// assert_eq!(quadratic::r#in(0.5), 0.25);
-	/// assert_eq!(quadratic::out(0.5), 0.75);
-	/// assert_eq!(quadratic::in_out(0.25), 0.125);
+	/// assert_eq!(quadratic::ease_in(0.5), 0.25);
+	/// assert_eq!(quadratic::ease_out(0.5), 0.75);
+	/// assert_eq!(quadratic::ease_in_out(0.25), 0.125);
 	/// ```
 	//==============================================================================
 	pub mod quadratic {
@@ -930,7 +930,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn r#in(progress: f64) -> f64 {
+		pub fn ease_in(progress: f64) -> f64 {
 			progress * progress
 		}
 
@@ -943,7 +943,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn out(progress: f64) -> f64 {
+		pub fn ease_out(progress: f64) -> f64 {
 			progress * (2.0 - progress)
 		}
 
@@ -956,7 +956,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn in_out(progress: f64) -> f64 {
+		pub fn ease_in_out(progress: f64) -> f64 {
 			let doubled_progress = progress * 2.0;
 			if doubled_progress < 1.0 {
 				return 0.5 * doubled_progress * doubled_progress;
@@ -974,9 +974,9 @@ pub mod easing_function {
 	/// ```rust
 	/// use vanilla::easing_function::cubic;
 	///
-	/// assert_eq!(cubic::r#in(0.5), 0.125);
-	/// assert_eq!(cubic::out(0.5), 0.875);
-	/// assert_eq!(cubic::in_out(0.75), 0.9375);
+	/// assert_eq!(cubic::ease_in(0.5), 0.125);
+	/// assert_eq!(cubic::ease_out(0.5), 0.875);
+	/// assert_eq!(cubic::ease_in_out(0.75), 0.9375);
 	/// ```
 	//==============================================================================
 	pub mod cubic {
@@ -989,7 +989,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn r#in(progress: f64) -> f64 {
+		pub fn ease_in(progress: f64) -> f64 {
 			progress * progress * progress
 		}
 
@@ -1002,7 +1002,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn out(progress: f64) -> f64 {
+		pub fn ease_out(progress: f64) -> f64 {
 			let shifted_progress = progress - 1.0;
 			shifted_progress * shifted_progress * shifted_progress + 1.0
 		}
@@ -1016,7 +1016,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn in_out(progress: f64) -> f64 {
+		pub fn ease_in_out(progress: f64) -> f64 {
 			let doubled_progress = progress * 2.0;
 			if doubled_progress < 1.0 {
 				return 0.5 * doubled_progress * doubled_progress * doubled_progress;
@@ -1034,9 +1034,9 @@ pub mod easing_function {
 	/// ```rust
 	/// use vanilla::easing_function::quartic;
 	///
-	/// assert_eq!(quartic::r#in(0.5), 0.0625);
-	/// assert_eq!(quartic::out(0.5), 0.9375);
-	/// assert_eq!(quartic::in_out(0.25), 0.03125);
+	/// assert_eq!(quartic::ease_in(0.5), 0.0625);
+	/// assert_eq!(quartic::ease_out(0.5), 0.9375);
+	/// assert_eq!(quartic::ease_in_out(0.25), 0.03125);
 	/// ```
 	//==============================================================================
 	pub mod quartic {
@@ -1049,7 +1049,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn r#in(progress: f64) -> f64 {
+		pub fn ease_in(progress: f64) -> f64 {
 			progress * progress * progress * progress
 		}
 
@@ -1062,7 +1062,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn out(progress: f64) -> f64 {
+		pub fn ease_out(progress: f64) -> f64 {
 			let shifted_progress = progress - 1.0;
 			1.0 - (shifted_progress * shifted_progress * shifted_progress * shifted_progress)
 		}
@@ -1076,7 +1076,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn in_out(progress: f64) -> f64 {
+		pub fn ease_in_out(progress: f64) -> f64 {
 			let doubled_progress = progress * 2.0;
 			if doubled_progress < 1.0 {
 				return 0.5 * doubled_progress * doubled_progress * doubled_progress * doubled_progress;
@@ -1094,9 +1094,9 @@ pub mod easing_function {
 	/// ```rust
 	/// use vanilla::easing_function::quintic;
 	///
-	/// assert_eq!(quintic::r#in(0.5), 0.03125);
-	/// assert_eq!(quintic::out(0.5), 0.96875);
-	/// assert_eq!(quintic::in_out(0.75), 0.984375);
+	/// assert_eq!(quintic::ease_in(0.5), 0.03125);
+	/// assert_eq!(quintic::ease_out(0.5), 0.96875);
+	/// assert_eq!(quintic::ease_in_out(0.75), 0.984375);
 	/// ```
 	//==============================================================================
 	pub mod quintic {
@@ -1109,7 +1109,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn r#in(progress: f64) -> f64 {
+		pub fn ease_in(progress: f64) -> f64 {
 			progress * progress * progress * progress * progress
 		}
 
@@ -1122,7 +1122,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn out(progress: f64) -> f64 {
+		pub fn ease_out(progress: f64) -> f64 {
 			let shifted_progress = progress - 1.0;
 			shifted_progress * shifted_progress * shifted_progress * shifted_progress * shifted_progress + 1.0
 		}
@@ -1136,7 +1136,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn in_out(progress: f64) -> f64 {
+		pub fn ease_in_out(progress: f64) -> f64 {
 			let doubled_progress = progress * 2.0;
 			if doubled_progress < 1.0 {
 				return 0.5 * doubled_progress * doubled_progress * doubled_progress * doubled_progress * doubled_progress;
@@ -1154,9 +1154,9 @@ pub mod easing_function {
 	/// ```rust
 	/// use vanilla::easing_function::sinusoidal;
 	///
-	/// assert_eq!(sinusoidal::r#in(0.0), 0.0);
-	/// assert!((sinusoidal::out(1.0) - 1.0).abs() < 1e-6);
-	/// assert!((sinusoidal::in_out(0.5) - 0.5).abs() < 1e-6);
+	/// assert_eq!(sinusoidal::ease_in(0.0), 0.0);
+	/// assert!((sinusoidal::ease_out(1.0) - 1.0).abs() < 1e-6);
+	/// assert!((sinusoidal::ease_in_out(0.5) - 0.5).abs() < 1e-6);
 	/// ```
 	//==============================================================================
 	pub mod sinusoidal {
@@ -1171,7 +1171,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn r#in(progress: f64) -> f64 {
+		pub fn ease_in(progress: f64) -> f64 {
 			1.0 - crate::base::math::cos(progress * PI / 2.0)
 		}
 
@@ -1184,7 +1184,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn out(progress: f64) -> f64 {
+		pub fn ease_out(progress: f64) -> f64 {
 			crate::base::math::sin(progress * PI / 2.0)
 		}
 
@@ -1197,7 +1197,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn in_out(progress: f64) -> f64 {
+		pub fn ease_in_out(progress: f64) -> f64 {
 			0.5 * (1.0 - crate::base::math::cos(PI * progress))
 		}
 	}
@@ -1210,10 +1210,10 @@ pub mod easing_function {
 	/// ```rust
 	/// use vanilla::easing_function::exponential;
 	///
-	/// assert_eq!(exponential::r#in(0.0), 0.0);
-	/// assert_eq!(exponential::out(1.0), 1.0);
-	/// assert!((exponential::r#in(0.5) - 0.03125).abs() < 1e-6);
-	/// assert!((exponential::out(0.5) - 0.96875).abs() < 1e-6);
+	/// assert_eq!(exponential::ease_in(0.0), 0.0);
+	/// assert_eq!(exponential::ease_out(1.0), 1.0);
+	/// assert!((exponential::ease_in(0.5) - 0.03125).abs() < 1e-6);
+	/// assert!((exponential::ease_out(0.5) - 0.96875).abs() < 1e-6);
 	/// ```
 	//==============================================================================
 	pub mod exponential {
@@ -1226,7 +1226,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn r#in(progress: f64) -> f64 {
+		pub fn ease_in(progress: f64) -> f64 {
 			if progress == 0.0 {
 				return 0.0;
 			}
@@ -1242,7 +1242,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn out(progress: f64) -> f64 {
+		pub fn ease_out(progress: f64) -> f64 {
 			if progress == 1.0 {
 				return 1.0;
 			}
@@ -1258,7 +1258,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn in_out(progress: f64) -> f64 {
+		pub fn ease_in_out(progress: f64) -> f64 {
 			if progress == 0.0 {
 				return 0.0;
 			}
@@ -1281,9 +1281,9 @@ pub mod easing_function {
 	/// ```rust
 	/// use vanilla::easing_function::circular;
 	///
-	/// assert!((circular::r#in(0.6) - 0.2).abs() < 1e-6);
-	/// assert!((circular::out(0.4) - 0.8).abs() < 1e-6);
-	/// assert_eq!(circular::in_out(0.5), 0.5);
+	/// assert!((circular::ease_in(0.6) - 0.2).abs() < 1e-6);
+	/// assert!((circular::ease_out(0.4) - 0.8).abs() < 1e-6);
+	/// assert_eq!(circular::ease_in_out(0.5), 0.5);
 	/// ```
 	//==============================================================================
 	pub mod circular {
@@ -1296,7 +1296,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn r#in(progress: f64) -> f64 {
+		pub fn ease_in(progress: f64) -> f64 {
 			1.0 - (1.0 - progress * progress).sqrt()
 		}
 
@@ -1309,7 +1309,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn out(progress: f64) -> f64 {
+		pub fn ease_out(progress: f64) -> f64 {
 			let shifted_progress = progress - 1.0;
 			(1.0 - (shifted_progress * shifted_progress)).sqrt()
 		}
@@ -1323,7 +1323,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn in_out(progress: f64) -> f64 {
+		pub fn ease_in_out(progress: f64) -> f64 {
 			let doubled_progress = progress * 2.0;
 			if doubled_progress < 1.0 {
 				return -0.5 * ((1.0 - doubled_progress * doubled_progress).sqrt() - 1.0);
@@ -1342,10 +1342,10 @@ pub mod easing_function {
 	/// ```rust
 	/// use vanilla::easing_function::elastic;
 	///
-	/// assert_eq!(elastic::out(0.0), 0.0);
-	/// assert_eq!(elastic::out(1.0), 1.0);
-	/// assert!((elastic::out(0.2) - 1.25).abs() < 1e-5);
-	/// assert!((elastic::r#in(0.8) + 0.25).abs() < 1e-5);
+	/// assert_eq!(elastic::ease_out(0.0), 0.0);
+	/// assert_eq!(elastic::ease_out(1.0), 1.0);
+	/// assert!((elastic::ease_out(0.2) - 1.25).abs() < 1e-5);
+	/// assert!((elastic::ease_in(0.8) + 0.25).abs() < 1e-5);
 	/// ```
 	//==============================================================================
 	pub mod elastic {
@@ -1364,7 +1364,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 에서 0, 1 에서 1, 사이에서는 0 ~ 1 밖으로 넘치며 떤다)
 		//==============================================================================
-		pub fn r#in(progress: f64) -> f64 {
+		pub fn ease_in(progress: f64) -> f64 {
 			if progress == 0.0 {
 				return 0.0;
 			}
@@ -1385,7 +1385,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 에서 0, 1 에서 1, 사이에서는 0 ~ 1 밖으로 넘치며 떤다)
 		//==============================================================================
-		pub fn out(progress: f64) -> f64 {
+		pub fn ease_out(progress: f64) -> f64 {
 			if progress == 0.0 {
 				return 0.0;
 			}
@@ -1405,7 +1405,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 에서 0, 1 에서 1, 사이에서는 0 ~ 1 밖으로 넘치며 떤다)
 		//==============================================================================
-		pub fn in_out(progress: f64) -> f64 {
+		pub fn ease_in_out(progress: f64) -> f64 {
 			if progress == 0.0 {
 				return 0.0;
 			}
@@ -1430,10 +1430,10 @@ pub mod easing_function {
 	/// ```rust
 	/// use vanilla::easing_function::back;
 	///
-	/// assert!(back::r#in(0.5) < 0.0);
-	/// assert!(back::out(0.5) > 1.0);
-	/// assert!((back::r#in(1.0) - 1.0).abs() < 1e-6);
-	/// assert!(back::out(0.0).abs() < 1e-6);
+	/// assert!(back::ease_in(0.5) < 0.0);
+	/// assert!(back::ease_out(0.5) > 1.0);
+	/// assert!((back::ease_in(1.0) - 1.0).abs() < 1e-6);
+	/// assert!(back::ease_out(0.0).abs() < 1e-6);
 	/// ```
 	//==============================================================================
 	pub mod back {
@@ -1449,7 +1449,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 에서 0, 1 에서 1, 시작 쪽에서 0 아래로 내려간다)
 		//==============================================================================
-		pub fn r#in(progress: f64) -> f64 {
+		pub fn ease_in(progress: f64) -> f64 {
 			progress * progress * ((BACK_OVERSHOOT + 1.0) * progress - BACK_OVERSHOOT)
 		}
 
@@ -1462,7 +1462,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 에서 0, 1 에서 1, 끝 쪽에서 1 을 넘는다)
 		//==============================================================================
-		pub fn out(progress: f64) -> f64 {
+		pub fn ease_out(progress: f64) -> f64 {
 			let shifted_progress = progress - 1.0;
 			shifted_progress * shifted_progress * ((BACK_OVERSHOOT + 1.0) * shifted_progress + BACK_OVERSHOOT) + 1.0
 		}
@@ -1476,7 +1476,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 에서 0, 1 에서 1, 시작 쪽에서 0 아래로, 끝 쪽에서 1 위로 넘친다)
 		//==============================================================================
-		pub fn in_out(progress: f64) -> f64 {
+		pub fn ease_in_out(progress: f64) -> f64 {
 			let doubled_progress = progress * 2.0;
 			if doubled_progress < 1.0 {
 				return 0.5 * (doubled_progress * doubled_progress * ((BACK_IN_OUT_OVERSHOOT + 1.0) * doubled_progress - BACK_IN_OUT_OVERSHOOT));
@@ -1494,10 +1494,10 @@ pub mod easing_function {
 	/// ```rust
 	/// use vanilla::easing_function::bounce;
 	///
-	/// assert_eq!(bounce::out(0.0), 0.0);
-	/// assert!((bounce::out(0.5) - 0.765625).abs() < 1e-6);
-	/// assert!((bounce::out(1.0) - 1.0).abs() < 1e-6);
-	/// assert_eq!(bounce::in_out(0.5), 0.5);
+	/// assert_eq!(bounce::ease_out(0.0), 0.0);
+	/// assert!((bounce::ease_out(0.5) - 0.765625).abs() < 1e-6);
+	/// assert!((bounce::ease_out(1.0) - 1.0).abs() < 1e-6);
+	/// assert_eq!(bounce::ease_in_out(0.5), 0.5);
 	/// ```
 	//==============================================================================
 	pub mod bounce {
@@ -1510,8 +1510,8 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn r#in(progress: f64) -> f64 {
-			1.0 - out(1.0 - progress)
+		pub fn ease_in(progress: f64) -> f64 {
+			1.0 - ease_out(1.0 - progress)
 		}
 
 		//==============================================================================
@@ -1523,7 +1523,7 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn out(progress: f64) -> f64 {
+		pub fn ease_out(progress: f64) -> f64 {
 			if progress < 1.0 / 2.75 {
 				7.5625 * progress * progress
 			}
@@ -1550,11 +1550,11 @@ pub mod easing_function {
 		/// # 돌려줌
 		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
-		pub fn in_out(progress: f64) -> f64 {
+		pub fn ease_in_out(progress: f64) -> f64 {
 			if progress < 0.5 {
-				return r#in(progress * 2.0) * 0.5;
+				return ease_in(progress * 2.0) * 0.5;
 			}
-			out(progress * 2.0 - 1.0) * 0.5 + 0.5
+			ease_out(progress * 2.0 - 1.0) * 0.5 + 0.5
 		}
 	}
 }
@@ -1586,36 +1586,36 @@ mod tests {
 	fn get_easing_reference_table() -> Vec<EasingReferenceRow> {
 		vec![
 			("linear", easing_function::linear as fn(f64) -> f64, [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0]),
-			("quadratic.in", easing_function::quadratic::r#in as fn(f64) -> f64, [0.000000000, 0.010000000, 0.062500000, 0.250000000, 0.562500000, 0.810000000, 1.000000000]),
-			("quadratic.out", easing_function::quadratic::out as fn(f64) -> f64, [0.000000000, 0.190000000, 0.437500000, 0.750000000, 0.937500000, 0.990000000, 1.000000000]),
-			("quadratic.inOut", easing_function::quadratic::in_out as fn(f64) -> f64, [0.000000000, 0.020000000, 0.125000000, 0.500000000, 0.875000000, 0.980000000, 1.000000000]),
-			("cubic.in", easing_function::cubic::r#in as fn(f64) -> f64, [0.000000000, 0.001000000, 0.015625000, 0.125000000, 0.421875000, 0.729000000, 1.000000000]),
-			("cubic.out", easing_function::cubic::out as fn(f64) -> f64, [0.000000000, 0.271000000, 0.578125000, 0.875000000, 0.984375000, 0.999000000, 1.000000000]),
-			("cubic.inOut", easing_function::cubic::in_out as fn(f64) -> f64, [0.000000000, 0.004000000, 0.062500000, 0.500000000, 0.937500000, 0.996000000, 1.000000000]),
-			("quartic.in", easing_function::quartic::r#in as fn(f64) -> f64, [0.000000000, 0.000100000, 0.003906250, 0.062500000, 0.316406250, 0.656100000, 1.000000000]),
-			("quartic.out", easing_function::quartic::out as fn(f64) -> f64, [0.000000000, 0.343900000, 0.683593750, 0.937500000, 0.996093750, 0.999900000, 1.000000000]),
-			("quartic.inOut", easing_function::quartic::in_out as fn(f64) -> f64, [0.000000000, 0.000800000, 0.031250000, 0.500000000, 0.968750000, 0.999200000, 1.000000000]),
-			("quintic.in", easing_function::quintic::r#in as fn(f64) -> f64, [0.000000000, 0.000010000, 0.000976563, 0.031250000, 0.237304688, 0.590490000, 1.000000000]),
-			("quintic.out", easing_function::quintic::out as fn(f64) -> f64, [0.000000000, 0.409510000, 0.762695313, 0.968750000, 0.999023438, 0.999990000, 1.000000000]),
-			("quintic.inOut", easing_function::quintic::in_out as fn(f64) -> f64, [0.000000000, 0.000160000, 0.015625000, 0.500000000, 0.984375000, 0.999840000, 1.000000000]),
-			("sinusoidal.in", easing_function::sinusoidal::r#in as fn(f64) -> f64, [0.000000000, 0.012311659, 0.076120467, 0.292893219, 0.617316568, 0.843565535, 1.000000000]),
-			("sinusoidal.out", easing_function::sinusoidal::out as fn(f64) -> f64, [0.000000000, 0.156434465, 0.382683432, 0.707106781, 0.923879533, 0.987688341, 1.000000000]),
-			("sinusoidal.inOut", easing_function::sinusoidal::in_out as fn(f64) -> f64, [0.000000000, 0.024471742, 0.146446609, 0.500000000, 0.853553391, 0.975528258, 1.000000000]),
-			("exponential.in", easing_function::exponential::r#in as fn(f64) -> f64, [0.000000000, 0.001953125, 0.005524272, 0.031250000, 0.176776695, 0.500000000, 1.000000000]),
-			("exponential.out", easing_function::exponential::out as fn(f64) -> f64, [0.000000000, 0.500000000, 0.823223305, 0.968750000, 0.994475728, 0.998046875, 1.000000000]),
-			("exponential.inOut", easing_function::exponential::in_out as fn(f64) -> f64, [0.000000000, 0.001953125, 0.015625000, 0.500000000, 0.984375000, 0.998046875, 1.000000000]),
-			("circular.in", easing_function::circular::r#in as fn(f64) -> f64, [0.000000000, 0.005012563, 0.031754163, 0.133974596, 0.338562172, 0.564110106, 1.000000000]),
-			("circular.out", easing_function::circular::out as fn(f64) -> f64, [0.000000000, 0.435889894, 0.661437828, 0.866025404, 0.968245837, 0.994987437, 1.000000000]),
-			("circular.inOut", easing_function::circular::in_out as fn(f64) -> f64, [0.000000000, 0.010102051, 0.066987298, 0.500000000, 0.933012702, 0.989897949, 1.000000000]),
-			("elastic.in", easing_function::elastic::r#in as fn(f64) -> f64, [0.000000000, 0.000000000, 0.003906250, 0.000000000, -0.125000000, 0.000000000, 1.000000000]),
-			("elastic.out", easing_function::elastic::out as fn(f64) -> f64, [0.000000000, 1.000000000, 1.125000000, 1.000000000, 0.996093750, 1.000000000, 1.000000000]),
-			("elastic.inOut", easing_function::elastic::in_out as fn(f64) -> f64, [0.000000000, 0.001953125, 0.000000000, 0.500000000, 1.000000000, 0.998046875, 1.000000000]),
-			("back.in", easing_function::back::r#in as fn(f64) -> f64, [0.000000000, -0.014314220, -0.064136563, -0.087697500, 0.182590312, 0.591172020, 1.000000000]),
-			("back.out", easing_function::back::out as fn(f64) -> f64, [0.000000000, 0.408827980, 0.817409688, 1.087697500, 1.064136563, 1.014314220, 1.000000000]),
-			("back.inOut", easing_function::back::in_out as fn(f64) -> f64, [0.000000000, -0.037518552, -0.099681844, 0.500000000, 1.099681844, 1.037518552, 1.000000000]),
-			("bounce.in", easing_function::bounce::r#in as fn(f64) -> f64, [0.000000000, 0.011875000, 0.027343750, 0.234375000, 0.527343750, 0.924375000, 1.000000000]),
-			("bounce.out", easing_function::bounce::out as fn(f64) -> f64, [0.000000000, 0.075625000, 0.472656250, 0.765625000, 0.972656250, 0.988125000, 1.000000000]),
-			("bounce.inOut", easing_function::bounce::in_out as fn(f64) -> f64, [0.000000000, 0.030000000, 0.117187500, 0.500000000, 0.882812500, 0.970000000, 1.000000000]),
+			("quadratic.in", easing_function::quadratic::ease_in as fn(f64) -> f64, [0.000000000, 0.010000000, 0.062500000, 0.250000000, 0.562500000, 0.810000000, 1.000000000]),
+			("quadratic.out", easing_function::quadratic::ease_out as fn(f64) -> f64, [0.000000000, 0.190000000, 0.437500000, 0.750000000, 0.937500000, 0.990000000, 1.000000000]),
+			("quadratic.inOut", easing_function::quadratic::ease_in_out as fn(f64) -> f64, [0.000000000, 0.020000000, 0.125000000, 0.500000000, 0.875000000, 0.980000000, 1.000000000]),
+			("cubic.in", easing_function::cubic::ease_in as fn(f64) -> f64, [0.000000000, 0.001000000, 0.015625000, 0.125000000, 0.421875000, 0.729000000, 1.000000000]),
+			("cubic.out", easing_function::cubic::ease_out as fn(f64) -> f64, [0.000000000, 0.271000000, 0.578125000, 0.875000000, 0.984375000, 0.999000000, 1.000000000]),
+			("cubic.inOut", easing_function::cubic::ease_in_out as fn(f64) -> f64, [0.000000000, 0.004000000, 0.062500000, 0.500000000, 0.937500000, 0.996000000, 1.000000000]),
+			("quartic.in", easing_function::quartic::ease_in as fn(f64) -> f64, [0.000000000, 0.000100000, 0.003906250, 0.062500000, 0.316406250, 0.656100000, 1.000000000]),
+			("quartic.out", easing_function::quartic::ease_out as fn(f64) -> f64, [0.000000000, 0.343900000, 0.683593750, 0.937500000, 0.996093750, 0.999900000, 1.000000000]),
+			("quartic.inOut", easing_function::quartic::ease_in_out as fn(f64) -> f64, [0.000000000, 0.000800000, 0.031250000, 0.500000000, 0.968750000, 0.999200000, 1.000000000]),
+			("quintic.in", easing_function::quintic::ease_in as fn(f64) -> f64, [0.000000000, 0.000010000, 0.000976563, 0.031250000, 0.237304688, 0.590490000, 1.000000000]),
+			("quintic.out", easing_function::quintic::ease_out as fn(f64) -> f64, [0.000000000, 0.409510000, 0.762695313, 0.968750000, 0.999023438, 0.999990000, 1.000000000]),
+			("quintic.inOut", easing_function::quintic::ease_in_out as fn(f64) -> f64, [0.000000000, 0.000160000, 0.015625000, 0.500000000, 0.984375000, 0.999840000, 1.000000000]),
+			("sinusoidal.in", easing_function::sinusoidal::ease_in as fn(f64) -> f64, [0.000000000, 0.012311659, 0.076120467, 0.292893219, 0.617316568, 0.843565535, 1.000000000]),
+			("sinusoidal.out", easing_function::sinusoidal::ease_out as fn(f64) -> f64, [0.000000000, 0.156434465, 0.382683432, 0.707106781, 0.923879533, 0.987688341, 1.000000000]),
+			("sinusoidal.inOut", easing_function::sinusoidal::ease_in_out as fn(f64) -> f64, [0.000000000, 0.024471742, 0.146446609, 0.500000000, 0.853553391, 0.975528258, 1.000000000]),
+			("exponential.in", easing_function::exponential::ease_in as fn(f64) -> f64, [0.000000000, 0.001953125, 0.005524272, 0.031250000, 0.176776695, 0.500000000, 1.000000000]),
+			("exponential.out", easing_function::exponential::ease_out as fn(f64) -> f64, [0.000000000, 0.500000000, 0.823223305, 0.968750000, 0.994475728, 0.998046875, 1.000000000]),
+			("exponential.inOut", easing_function::exponential::ease_in_out as fn(f64) -> f64, [0.000000000, 0.001953125, 0.015625000, 0.500000000, 0.984375000, 0.998046875, 1.000000000]),
+			("circular.in", easing_function::circular::ease_in as fn(f64) -> f64, [0.000000000, 0.005012563, 0.031754163, 0.133974596, 0.338562172, 0.564110106, 1.000000000]),
+			("circular.out", easing_function::circular::ease_out as fn(f64) -> f64, [0.000000000, 0.435889894, 0.661437828, 0.866025404, 0.968245837, 0.994987437, 1.000000000]),
+			("circular.inOut", easing_function::circular::ease_in_out as fn(f64) -> f64, [0.000000000, 0.010102051, 0.066987298, 0.500000000, 0.933012702, 0.989897949, 1.000000000]),
+			("elastic.in", easing_function::elastic::ease_in as fn(f64) -> f64, [0.000000000, 0.000000000, 0.003906250, 0.000000000, -0.125000000, 0.000000000, 1.000000000]),
+			("elastic.out", easing_function::elastic::ease_out as fn(f64) -> f64, [0.000000000, 1.000000000, 1.125000000, 1.000000000, 0.996093750, 1.000000000, 1.000000000]),
+			("elastic.inOut", easing_function::elastic::ease_in_out as fn(f64) -> f64, [0.000000000, 0.001953125, 0.000000000, 0.500000000, 1.000000000, 0.998046875, 1.000000000]),
+			("back.in", easing_function::back::ease_in as fn(f64) -> f64, [0.000000000, -0.014314220, -0.064136563, -0.087697500, 0.182590312, 0.591172020, 1.000000000]),
+			("back.out", easing_function::back::ease_out as fn(f64) -> f64, [0.000000000, 0.408827980, 0.817409688, 1.087697500, 1.064136563, 1.014314220, 1.000000000]),
+			("back.inOut", easing_function::back::ease_in_out as fn(f64) -> f64, [0.000000000, -0.037518552, -0.099681844, 0.500000000, 1.099681844, 1.037518552, 1.000000000]),
+			("bounce.in", easing_function::bounce::ease_in as fn(f64) -> f64, [0.000000000, 0.011875000, 0.027343750, 0.234375000, 0.527343750, 0.924375000, 1.000000000]),
+			("bounce.out", easing_function::bounce::ease_out as fn(f64) -> f64, [0.000000000, 0.075625000, 0.472656250, 0.765625000, 0.972656250, 0.988125000, 1.000000000]),
+			("bounce.inOut", easing_function::bounce::ease_in_out as fn(f64) -> f64, [0.000000000, 0.030000000, 0.117187500, 0.500000000, 0.882812500, 0.970000000, 1.000000000]),
 		]
 	}
 
@@ -1732,7 +1732,7 @@ mod tests {
 		let last_value_in_callback = last_value.clone();
 		let mut tween = Tween::new(TweenValues::new().with("value", 0.0))
 			.to(TweenValues::new().with("value", 100.0), 2.0)
-			.easing(easing_function::quadratic::r#in)
+			.easing(easing_function::quadratic::ease_in)
 			.set_update(move |values, _node_tree| {
 				let value = values.get_number("value").expect("value");
 				last_value_in_callback.set(value);

@@ -23,7 +23,7 @@ let complete_count = Rc::new(Cell::new(0));
 let complete_count_in_callback = complete_count.clone();
 let mut tween = Tween::new(TweenValues::new().with("x", 0.0).with("alpha", 1.0))
 	.to(TweenValues::new().with("x", 100.0).with("alpha", 0.0), 0.5)
-	.easing(easing_function::quadratic::out)
+	.easing(easing_function::quadratic::ease_out)
 	.set_update(move |values, _node_tree| {
 		last_x_in_update.set(values.get_number("x").unwrap());
 	})
@@ -41,15 +41,15 @@ assert_eq!(complete_count.get(), 1);
 
 ### Easing
 
-The `easing_function` module has `linear` and the modules `quadratic`, `cubic`, `quartic`, `quintic`, `sinusoidal`, `exponential`, `circular`, `elastic`, `back` and `bounce`. Every one except `linear` has the functions `r#in`, `out` and `in_out` (as in `easing_function::back::out`). `in` is a Rust keyword, so it is called as `r#in`. Any function or closure that takes progress (0 to 1) and returns modified progress can be passed to `easing`. `back` and `elastic` overshoot outside 0 to 1.
+The `easing_function` module has `linear` and the modules `quadratic`, `cubic`, `quartic`, `quintic`, `sinusoidal`, `exponential`, `circular`, `elastic`, `back` and `bounce`. Every one except `linear` has the functions `ease_in`, `ease_out` and `ease_in_out` (as in `easing_function::back::ease_out`, original `easeIn`, `easeOut`, `easeInOut`). Any function or closure that takes progress (0 to 1) and returns modified progress can be passed to `easing`. `back` and `elastic` overshoot outside 0 to 1.
 
 ```rust
 use vanilla::easing_function;
 
 assert_eq!(easing_function::linear(0.25), 0.25);
-assert_eq!(easing_function::quadratic::r#in(0.5), 0.25);
-assert_eq!(easing_function::quadratic::out(0.5), 0.75);
-assert_eq!(easing_function::cubic::in_out(0.5), 0.5);
+assert_eq!(easing_function::quadratic::ease_in(0.5), 0.25);
+assert_eq!(easing_function::quadratic::ease_out(0.5), 0.75);
+assert_eq!(easing_function::cubic::ease_in_out(0.5), 0.5);
 let four_steps = |progress: f64| (progress * 4.0).floor() / 4.0;
 assert_eq!(four_steps(0.6), 0.5);
 ```
@@ -141,7 +141,7 @@ impl TweenScene {
 			else {
 				(1.4, 1.0)
 			};
-			let pulse_tween = Tween::create_node_tween(box_id, TweenProperty::LocalScale, start_scale, end_scale, 0.4).easing(easing_function::sinusoidal::in_out);
+			let pulse_tween = Tween::create_node_tween(box_id, TweenProperty::LocalScale, start_scale, end_scale, 0.4).easing(easing_function::sinusoidal::ease_in_out);
 			self.pulse_tween_id = Some(self.scene_base.start_tween(pulse_tween));
 			self.is_pulse_growing = !self.is_pulse_growing;
 		}
@@ -174,7 +174,7 @@ impl Scene for TweenScene {
 			let move_tween = Tween::new(TweenValues::new().with("localPosition", Vector2::create(160.0, 360.0)).with("localOpacity", 0.0))
 				.to(TweenValues::new().with("localPosition", Vector2::create(1120.0, 360.0)).with("localOpacity", 1.0), 1.5)
 				.delay(0.2)
-				.easing(easing_function::cubic::in_out)
+				.easing(easing_function::cubic::ease_in_out)
 				.set_target(box_id);
 			self.move_tween_id = Some(self.scene_base.start_tween(move_tween));
 		}
@@ -817,7 +817,7 @@ fn main() {
 - `wait(duration, ActionCallbacks::new().started(..).updated(|progress, target| ..).completed(..))`: waits for the given time (seconds), passing progress (0 to 1). At 0 or less it ends on the first `step` with progress 1.
 - `condition(|target| bool, ActionConditionCallbacks::new())`: waits until the condition becomes true.
 - `call(|target| ..)`: called as soon as it is reached, then moves to the next step in the same frame.
-- `repeat(times, inner_action)`, `forever(inner_action)`, `r#loop(|target| bool, inner_action)` (`loop` is a Rust keyword): repeat the inner action. Steps after `forever` are never reached, so call `stop()` to end it.
+- `repeat(times, inner_action)`, `forever(inner_action)`, `repeat_while(|target| bool, inner_action)` (original `repeatWhile`): repeat the inner action. Steps after `forever` are never reached, so call `stop()` to end it.
 - `is_running()`, `is_done()`. `step` advances only one step at a time, and `call` steps after a finished step run in the same frame.
 
 ```rust
