@@ -949,6 +949,39 @@ impl LoadedFont {
 	}
 
 	//==============================================================================
+	/// measureText 의 닿는 상자에 쓰는 경로 없는 글리프(맥 색 이모지 같은 CoreText 래스터 글꼴)의 정수 상자. (스키아 getBounds 와 같은 셈, 맥이 아니거나 CoreText 래스터 글꼴이 아니면 None)
+	/// - 스키아 SkScalerContext_Mac::generateMetrics: 스키아가 지은 CTFont 의 상자를 바깥 정수로 넓히고 사방 1 픽셀 더 넓힌다(outset(1, 1)). 가짜 기울임이면 상자를 기울인 뒤 넓힌다.
+	///
+	/// # 인자
+	/// - `glyph_index`: 글리프 번호.
+	/// - `pixel_size`: 글자 크기. (픽셀)
+	/// - `skew`: 가로 기울임. (x 에 y x skew 를 더한다, 가짜 기울임이 아니면 0)
+	///
+	/// # 돌려줌
+	/// (왼쪽, 아래, 오른쪽, 위). (펜 원점에서 픽셀, 위가 양수)
+	//==============================================================================
+	pub fn read_glyph_skia_bounds(&self, glyph_index: u16, pixel_size: f32, skew: f32) -> Option<(f32, f32, f32, f32)> {
+		#[cfg(target_os = "macos")]
+		{
+			if !self.is_core_text_raster {
+				return None;
+			}
+			let source_path = self.source_path.as_ref()?;
+			let glyph_rect = crate::platform::desktop::coretextglyph::read_glyph_skia_bounds(source_path, self.face_index, glyph_index, pixel_size, &self.read_core_text_variation_list(pixel_size))?;
+			let bottom_y = glyph_rect.origin.y as f32;
+			let top_y = (glyph_rect.origin.y + glyph_rect.size.height) as f32;
+			let left_x = glyph_rect.origin.x as f32 + (bottom_y * skew).min(top_y * skew);
+			let right_x = (glyph_rect.origin.x + glyph_rect.size.width) as f32 + (bottom_y * skew).max(top_y * skew);
+			Some((left_x.floor() - 1.0, bottom_y.floor() - 1.0, right_x.ceil() + 1.0, top_y.ceil() + 1.0))
+		}
+		#[cfg(not(target_os = "macos"))]
+		{
+			let _ = (glyph_index, pixel_size, skew);
+			None
+		}
+	}
+
+	//==============================================================================
 	/// 글리프 윤곽 그리기. (글꼴 단위, 그 글자 크기의 축 값(opsz 포함)을 건 윤곽. 가변 글꼴은 skrifa 로, 아니면 ttf-parser 로. 윤곽이 없으면 false)
 	/// - ttf-parser 는 글리프마다 변형이 32 개를 넘는 가변 글꼴(맥 SFNS 같은)의 윤곽을 읽지 못한다.
 	///

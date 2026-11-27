@@ -498,6 +498,44 @@ pub fn read_glyph_bounds(path: &Path, face_index: u32, glyph_index: u16, pixel_s
 }
 
 //==============================================================================
+/// 스키아가 짓는 CTFont 의 글리프 상자. (크롬 맥 measureText 의 경로 없는 글리프 상자 셈, 반올림하지 않는다)
+/// - 스키아 SkScalerContext_Mac 은 글꼴을 SkCTFontCreateExactCopy 로 다시 짓는다. 광학 크기 속성(NSCTFontOpticalSizeAttribute)은 바탕 글꼴의 값이나
+///   글자 크기이고, 자간 속성(NSCTFontUnscaledTrackingAttribute)을 0 으로 두어 trak 과 그 밖의 자간을 끈다. 그 글꼴의 CTFontGetBoundingRectsForGlyphs 다.
+/// - 색 이모지는 이 글꼴에서 키우기에 따른 자리 밀림이 빠진다. (16px 에서 바탕 글꼴 0.46 ~ 20.46, 스키아 글꼴 0 ~ 20)
+///
+/// # 인자
+/// - `path`: 글꼴 파일 경로.
+/// - `face_index`: 모음(TTC) 안의 얼굴 번호.
+/// - `glyph_index`: 글리프 번호.
+/// - `pixel_size`: 글자 크기. (픽셀)
+/// - `variation_list`: 축 값 목록. ((4 글자 태그의 수, 값))
+///
+/// # 돌려줌
+/// 글리프 상자. (펜 원점에서 픽셀, 위가 양수) CoreText 가 글꼴을 짓지 못했거나 상자의 가로나 세로가 0 이하면 None.
+//==============================================================================
+pub fn read_glyph_skia_bounds(path: &Path, face_index: u32, glyph_index: u16, pixel_size: f32, variation_list: &[(u32, f32)]) -> Option<CGRect> {
+	let base_font = read_font(path, face_index, pixel_size, variation_list)?;
+	let optical_size_key = CFString::from_static_str("NSCTFontOpticalSizeAttribute");
+	let tracking_key = CFString::from_static_str("NSCTFontUnscaledTrackingAttribute");
+	let base_optical_size = unsafe { base_font.attribute(&optical_size_key) }.and_then(|value| value.downcast::<CFNumber>().ok()).and_then(|number| number.as_f64()).filter(|value| *value > 0.0);
+	let optical_size = base_optical_size.unwrap_or_else(|| unsafe { base_font.size() });
+	let optical_size_value = CFNumber::new_f64(optical_size);
+	let tracking_value = CFNumber::new_i32(0);
+	let attribute_key_list: [&CFString; 2] = [&optical_size_key, &tracking_key];
+	let attribute_value_list: [&CFType; 2] = [&optical_size_value, &tracking_value];
+	let attribute_dictionary = CFDictionary::<CFString, CFType>::from_slices(&attribute_key_list, &attribute_value_list);
+	let font_descriptor = unsafe { CTFontDescriptor::with_attributes(attribute_dictionary.as_ref()) };
+	let font = unsafe { base_font.copy_with_attributes(pixel_size as f64, std::ptr::null(), Some(&font_descriptor)) };
+	let mut glyph = glyph_index;
+	let mut glyph_rect = CGRect::default();
+	unsafe { font.bounding_rects_for_glyphs(CTFontOrientation::Horizontal, std::ptr::NonNull::from(&mut glyph), &mut glyph_rect, 1) };
+	if glyph_rect.size.width <= 0.0 || glyph_rect.size.height <= 0.0 {
+		return None;
+	}
+	Some(glyph_rect)
+}
+
+//==============================================================================
 /// 색 이모지 글꼴을 CoreText 가 키워 그리는 비. (웃는 얼굴 이모지 상자의 높이 / 글자 크기, 재지 못하면 1)
 ///
 /// # 인자
