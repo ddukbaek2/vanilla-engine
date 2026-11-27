@@ -1235,6 +1235,7 @@ impl NodeTree {
 	/// - `time_delta`: 지난 tick 뒤로 흐른 시간. (초)
 	//==============================================================================
 	pub fn tick(&mut self, engine: &Engine, time_delta: f64) {
+		let _engine_scope = crate::core::globalengine::SharedEngineScope::enter(engine);
 		let root_id = self.root_id;
 		self.traversal_depth += 1;
 		self.tick_node(root_id, engine, time_delta);
@@ -1592,6 +1593,7 @@ impl NodeTree {
 	/// - `view_input_position`: 터치 자리. (뷰 좌표)
 	//==============================================================================
 	pub fn dispatch_touch(&mut self, node_id: NodeId, engine: &Engine, touch_kind: TouchKind, view_input_position: Vector2) {
+		let _engine_scope = crate::core::globalengine::SharedEngineScope::enter(engine);
 		self.traversal_depth += 1;
 		self.visit_components(node_id, engine, &mut |component, context| {
 			match touch_kind {
@@ -1740,6 +1742,7 @@ impl NodeTree {
 	/// ```
 	//==============================================================================
 	pub fn dispatch_wheel(&mut self, node_id: NodeId, engine: &Engine, wheel_delta: Vector2) -> bool {
+		let _engine_scope = crate::core::globalengine::SharedEngineScope::enter(engine);
 		let mut current_id = Some(node_id);
 		while let Some(candidate_id) = current_id {
 			let mut is_handled = false;

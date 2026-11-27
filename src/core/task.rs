@@ -413,6 +413,8 @@ thread_local! {
 //==============================================================================
 struct TaskAccessScope {
 	previous_access: Option<TaskAccess>,
+	/// 폴링하는 동안 엔진을 &mut 로 쥔 자리. (with 바깥에서 Engine::get_engine 을 부르면 MutablyBorrowed)
+	_engine_scope: crate::core::globalengine::MutableEngineScope,
 }
 
 impl TaskAccessScope {
@@ -420,9 +422,11 @@ impl TaskAccessScope {
 	/// 칸에 두기.
 	//==============================================================================
 	fn install(task_access: TaskAccess) -> TaskAccessScope {
+		let engine_scope = crate::core::globalengine::MutableEngineScope::enter(task_access.engine, "poll_woken_tasks");
 		let previous_access = TASK_ACCESS.with(|access_cell| access_cell.replace(Some(task_access)));
 		TaskAccessScope {
 			previous_access,
+			_engine_scope: engine_scope,
 		}
 	}
 }
@@ -441,6 +445,8 @@ impl Drop for TaskAccessScope {
 //==============================================================================
 struct TaskAccessLease {
 	task_access: TaskAccess,
+	/// 엔진을 &mut 로 빌려 준 자리. (그동안 Engine::get_engine 은 MutablyBorrowed, 꺼낸 엔진이 살아 있으면 빌리지 않고 패닉한다)
+	_engine_scope: crate::core::globalengine::MutableEngineScope,
 }
 
 impl TaskAccessLease {
@@ -449,8 +455,10 @@ impl TaskAccessLease {
 	//==============================================================================
 	fn try_take() -> Option<TaskAccessLease> {
 		let task_access = TASK_ACCESS.with(|access_cell| access_cell.take())?;
+		let engine_scope = crate::core::globalengine::MutableEngineScope::enter(task_access.engine, "EngineContext::with");
 		Some(TaskAccessLease {
 			task_access,
+			_engine_scope: engine_scope,
 		})
 	}
 

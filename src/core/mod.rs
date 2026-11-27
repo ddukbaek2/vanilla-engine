@@ -9,6 +9,7 @@ pub mod audioplayer;
 pub mod colorglyph;
 pub mod component;
 pub mod engine;
+pub mod globalengine;
 // 브라우저 화면 글. (엔진이 그리는 질문 창과 문맥 메뉴의 글)
 pub mod browseruitext;
 pub mod modaldialog;

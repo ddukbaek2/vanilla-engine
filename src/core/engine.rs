@@ -362,6 +362,7 @@ impl Engine {
 		let reference_resolution_size = engine_configuration.reference_resolution_size;
 		let view_scale_mode = engine_configuration.view_scale_mode;
 		crate::platform::document::apply_engine_configuration(&engine_configuration.document_language, &engine_configuration.document_meta_list);
+		crate::core::globalengine::mark_engine_created();
 		let engine = Engine {
 			engine_configuration,
 			time_manager: TimeManager::new(),
@@ -403,6 +404,72 @@ impl Engine {
 			engine
 		};
 		engine
+	}
+
+	//==============================================================================
+	/// 전역 엔진. (원본 static Engine.getEngine(), 마지막으로 만든 엔진. 러스트 판은 이 스레드에서 지금 도는 엔진)
+	/// - 엔진은 주 스레드에 하나다. 처음 한 번 만들고 지우지 않는다. 언리얼 GEngine, 고도 Engine 싱글톤과 같은 꼴이다.
+	/// - 꺼낸 것은 &Engine 이다. (EngineRef, Deref) &self 함수를 부른다. &mut self 함수는 엔진이 &mut 로 빌려 준 자리의 인자로 부른다.
+	/// - 엔진이 &Engine 으로 빌려 준 동안 꺼낸다: 컴포넌트 tick, 터치, 휠과 그 안에서 부른 모든 코드(위젯 콜백, attach_to_tree, attach, detach),
+	///   페이지 이벤트 리스너.
+	/// - 엔진이 &mut 로 빌려 준 동안(씬 함수와 그 안의 컴포넌트 draw, with_graphic, 작업 문맥의 with, 작업의 with 바깥)은 Err(MutablyBorrowed) 다.
+	///   그 자리는 인자로 받은 엔진을 쓴다. (같은 엔진이다) &mut 로 고치는 엔진을 &Engine 으로 또 주면 러스트 빌림 규칙이 깨지기 때문이다.
+	/// - 다른 스레드에서 부르면 Err(OtherThread), 엔진을 만든 적이 없으면 Err(NotCreated), 돌기 전이면 Err(NotRunning) 이다.
+	/// - 꺼낸 EngineRef 는 그 자리 안에서만 쓴다. 필드나 static 에 넣거나 await 너머로 들고 가면, 빌려 준 자리가 끝날 때 엔진이 까닭을 적고 프로세스를 멈춘다.
+	///
+	/// # 돌려줌
+	/// 꺼낸 엔진, 못 꺼내면 그 까닭.
+	///
+	/// # 예제
+	/// 엔진을 받지 않는 함수에서 전역 엔진 꺼내기
+	/// ```rust
+	/// use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineAccessError, EngineConfiguration, NodeTree};
+	///
+	/// fn read_frame_number() -> u64 {
+	/// 	let engine = Engine::get_engine().expect("엔진");
+	/// 	engine.get_frame_number()
+	/// }
+	///
+	/// struct FrameReader {
+	/// 	component_base: ComponentBase,
+	/// 	frame_number: u64,
+	/// }
+	///
+	/// #[vanilla::reflect]
+	/// impl FrameReader {}
+	///
+	/// #[vanilla::reflect]
+	/// impl Component for FrameReader {
+	/// # 	fn get_component_base(&self) -> &ComponentBase {
+	/// # 		&self.component_base
+	/// # 	}
+	/// # 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+	/// # 		&mut self.component_base
+	/// # 	}
+	/// # 	fn get_component_type(&self) -> &'static str {
+	/// # 		"FrameReader"
+	/// # 	}
+	/// 	fn tick(&mut self, _context: &mut ComponentContext, _time_delta: f64) {
+	/// 		self.frame_number = read_frame_number();
+	/// 	}
+	/// }
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// assert_eq!(Engine::get_engine().unwrap_err(), EngineAccessError::NotRunning);
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let reader_id = node_tree.create_child(root_id, "reader");
+	/// node_tree[reader_id].add_component(FrameReader {
+	/// 	component_base: ComponentBase::new(),
+	/// 	frame_number: 0,
+	/// });
+	/// node_tree.tick(&engine, 0.016);
+	/// let frame_number = node_tree[reader_id].get_component::<FrameReader>().unwrap().frame_number;
+	/// assert_eq!(frame_number, engine.get_frame_number());
+	/// ```
+	//==============================================================================
+	pub fn get_engine() -> Result<crate::core::globalengine::EngineRef, crate::core::globalengine::EngineAccessError> {
+		crate::core::globalengine::get_global_engine()
 	}
 
 	//==============================================================================
@@ -1463,7 +1530,9 @@ impl Engine {
 	//==============================================================================
 	pub fn with_graphic<R>(&mut self, graphic_function: impl FnOnce(&mut Engine, &mut Graphic) -> R) -> Option<R> {
 		let mut graphic = self.graphic.take()?;
+		let engine_scope = crate::core::globalengine::MutableEngineScope::enter(std::ptr::NonNull::from(&mut *self), "Engine::with_graphic");
 		let result = graphic_function(self, &mut graphic);
+		drop(engine_scope);
 		self.graphic = Some(graphic);
 		Some(result)
 	}
@@ -1805,6 +1874,9 @@ impl Engine {
 			page_event_listener_list.retain(|weak_listener| weak_listener.strong_count() > 0);
 			page_event_listener_list.iter().filter_map(|weak_listener| weak_listener.upgrade()).collect()
 		};
+		// 리스너는 엔진을 받지 않는다. 그동안 &Engine 으로 빌려 주어 리스너가 Engine::get_engine 으로 꺼낸다.
+		let engine: &Engine = self;
+		let _engine_scope = crate::core::globalengine::SharedEngineScope::enter(engine);
 		for page_event_listener in listener_list {
 			if let Ok(mut listener) = page_event_listener.try_borrow_mut() {
 				(*listener)(page_event);
@@ -1957,6 +2029,8 @@ impl CaptureRequest {
 pub struct EngineRunner {
 	pub(crate) engine: Engine,
 	scene_list: Vec<Box<dyn Scene>>,
+	/// 러너가 도는 자리. (그동안 빌려 준 자리 밖에서 Engine::get_engine 을 부르면 MutablyBorrowed 다)
+	_running_scope: crate::core::globalengine::EngineRunningScope,
 	/// 내리는 중인 씬. (finalize, unload 를 불렀고 unload 가 맡긴 작업을 기다린다. 원본처럼 목록에 남아 tick 과 draw 를 받는다)
 	unloading_scene_id_list: Vec<SceneId>,
 	/// 목록에서 뺐지만 작업이 남아 살려 둔 씬. (tick, draw 는 받지 않고, 작업의 with 가 이 씬을 받는다)
@@ -1976,6 +2050,7 @@ impl EngineRunner {
 		EngineRunner {
 			engine,
 			scene_list: Vec::new(),
+			_running_scope: crate::core::globalengine::EngineRunningScope::enter(),
 			unloading_scene_id_list: Vec::new(),
 			detached_scene_list: Vec::new(),
 			unload_waiting_list: Vec::new(),

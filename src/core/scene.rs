@@ -485,6 +485,18 @@ impl SceneBase {
 	}
 
 	//==============================================================================
+	/// 엔진 반환. (원본 Scene.getEngine, 이 씬을 불러온 엔진. 러스트 판은 엔진이 하나라 전역 엔진을 준다)
+	/// - Engine::get_engine 과 같다. 씬 함수 안은 엔진이 &mut 로 빌려 준 자리라 Err(MutablyBorrowed) 이고, 씬 함수의 engine 인자를 쓴다.
+	///   씬 tick 이 부른 노드 tick 안(컴포넌트, 위젯 콜백)에서는 꺼낸다.
+	///
+	/// # 돌려줌
+	/// 전역 엔진, 못 꺼내면 그 까닭.
+	//==============================================================================
+	pub fn get_engine(&self) -> Result<crate::core::globalengine::EngineRef, crate::core::globalengine::EngineAccessError> {
+		crate::core::globalengine::get_global_engine()
+	}
+
+	//==============================================================================
 	/// 노드 트리. (변경용)
 	///
 	/// # 돌려줌
