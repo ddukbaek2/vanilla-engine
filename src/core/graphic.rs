@@ -3954,11 +3954,12 @@ impl Graphic {
 	}
 
 	//==============================================================================
-	/// 문자열 텍스처 엔트리를 정렬/베이스라인에 맞춰 쿼드로 출력.
+	/// 글 배치 엔트리를 정렬/베이스라인에 맞춰 글리프 쿼드로 출력.
+	/// - 문자열을 통째로 구웠을 때의 사각형 자리(픽셀 스냅 포함)를 셈하고, 그 안의 글리프 사각형을 아틀라스에서 뽑아 그린다.
 	/// - text_direction 은 정렬 Start / End 를 가를 방향이다. (Ltr 또는 Rtl, 원본 drawTextEntry 의 textDirection)
 	///
 	/// # 인자
-	/// - `entry`: 구운 문자열 텍스처. (TextStringTextureCache 의 항목)
+	/// - `entry`: 글 배치 엔트리. (TextStringTextureCache::get_entry)
 	/// - `x`: 기준 x. (가로 정렬의 기준점, 픽셀)
 	/// - `y`: 기준 y. (세로 기준선의 기준점, 픽셀)
 	/// - `color`: 곱할 색. (None 이면 흰색, 구운 그대로)
@@ -4011,10 +4012,27 @@ impl Graphic {
 			quad_y += (device_point.y.round() - device_point.y) / transform_matrix.d;
 		}
 
-		let vertex_count_offset = self.write_quad(0, quad_x, quad_y, quad_x + entry.quad_width, quad_y + entry.quad_height, 0.0, 0.0, 1.0, 1.0);
+		// 글리프 사각형을 문자열 사각형 자리에 놓아 그린다. (같은 아틀라스 장의 글리프는 한 번에 넘겨 묶음에 들어간다)
 		let white_color = self.get_white_color();
 		let draw_color = color.unwrap_or(white_color);
-		self.draw_vertices(vertex_count_offset / FLOATS_PER_VERTEX, entry.texture, draw_color);
+		let maximum_float_count = VERTEX_CAPACITY * FLOATS_PER_VERTEX - 6 * FLOATS_PER_VERTEX;
+		let mut float_count = 0;
+		let mut run_texture: Option<GlTexture> = None;
+		for (glyph_texture, glyph_rect) in entry.glyph_textures.iter().zip(entry.glyph_rects.iter()) {
+			if let Some(texture) = run_texture {
+				if float_count > 0 && (texture != *glyph_texture || float_count > maximum_float_count) {
+					self.draw_vertices(float_count / FLOATS_PER_VERTEX, texture, draw_color);
+					float_count = 0;
+				}
+			}
+			run_texture = Some(*glyph_texture);
+			float_count = self.write_quad(float_count, quad_x + glyph_rect[0], quad_y + glyph_rect[1], quad_x + glyph_rect[2], quad_y + glyph_rect[3], glyph_rect[4], glyph_rect[5], glyph_rect[6], glyph_rect[7]);
+		}
+		if let Some(texture) = run_texture {
+			if float_count > 0 {
+				self.draw_vertices(float_count / FLOATS_PER_VERTEX, texture, draw_color);
+			}
+		}
 	}
 
 	//==============================================================================
@@ -4076,10 +4094,19 @@ impl Graphic {
 			}
 		}
 
-		// 새로 굽거나 오래된 것을 버리면 텍스처 바인드가 바뀐다. (지울 텍스처가 묶음에 남아 있을 수 있어 먼저 내보낸다)
-		self.flush_batch();
+		// 버릴 아틀라스 장 텍스처는 쌓아 둔 묶음이 쓸 수 있어 묶음을 먼저 내보내고 지운다. (원본 beforeTextureOverwrite)
+		// 새 글리프는 장의 빈 칸에만 올리므로 묶음을 내보내지 않는다. 올리며 텍스처를 묶으므로 묶은 텍스처 기억은 지운다.
+		if self.text_string_texture_cache.has_pending_deleted_textures() {
+			self.flush_batch();
+			self.text_string_texture_cache.delete_pending_textures(&self.gl);
+		}
+		let entry = self.text_string_texture_cache.get_entry(&self.gl, text_draw_kind, text, &self.font_string, line_width, bake_scale, shaping_direction);
 		self.bound_texture.set(None);
-		self.text_string_texture_cache.get_entry(&self.gl, text_draw_kind, text, &self.font_string, line_width, bake_scale, shaping_direction)
+		if self.text_string_texture_cache.has_pending_deleted_textures() {
+			self.flush_batch();
+			self.text_string_texture_cache.delete_pending_textures(&self.gl);
+		}
+		entry
 	}
 
 	//==============================================================================
