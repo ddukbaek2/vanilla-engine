@@ -970,6 +970,8 @@ pub struct UIInputField {
 	measured_font_string: String,
 	caret_local_x: f64,
 	value_revision: u64,
+	/// 그리는 사각형을 셈한 값의 열쇠. (여러 줄인지, 글꼴 크기, 폰트 이름, 안쪽 여백, 보이는 글, 원본 readInputLayerDrawnRectKey)
+	drawn_rect_key: String,
 	context_menu_node_id: Option<NodeId>,
 	/// 이번 tick 에 문맥 메뉴 요청으로 메뉴를 열었는지. (그 요청을 낸 오른쪽 누름이 같은 프레임의 touch_press 로 메뉴를 닫고 선택을 지우지 않게)
 	is_context_menu_opened_this_tick: bool,
@@ -1112,6 +1114,7 @@ impl UIInputField {
 			measured_font_string: String::new(),
 			caret_local_x: 16.0,
 			value_revision: 0,
+			drawn_rect_key: String::new(),
 			context_menu_node_id: None,
 			is_context_menu_opened_this_tick: false,
 			pending_menu_action: None,
@@ -3588,6 +3591,13 @@ impl Component for UIInputField {
 			}
 			context.get_engine().get_input_manager().get_text_input().register_field_state(field_state);
 		}
+
+		// 그리는 사각형을 셈한 값이 바뀌었으면 노드에 알린다. (원본 입력 칸 층의 tick)
+		let drawn_rect_key = format!("{}|{}|{}|{}|{}", self.is_multiline, self.font_size, self.font_family, self.padding, self.get_display_text());
+		if drawn_rect_key != self.drawn_rect_key {
+			self.drawn_rect_key = drawn_rect_key;
+			Component::mark_drawn_rect_dirty(self);
+		}
 	}
 
 	//==============================================================================
@@ -3784,6 +3794,25 @@ impl Component for UIInputField {
 		let previous_scroll_top = self.scroll_top;
 		self.scroll_top = (self.scroll_top + wheel_delta.y).clamp(0.0, self.get_maximum_scroll_top(content_size.y));
 		self.scroll_top != previous_scroll_top
+	}
+
+	//==============================================================================
+	/// 그리는 사각형. (원본 입력 칸 층의 writeInputLayerDrawnRect, 내용 영역에 한 줄이면 글 자리(안쪽 여백부터 글 너비, 가운데에서 위아래로 글꼴 크기)를 합치고 사방 2 를 더한다)
+	//==============================================================================
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {
+		let content_size = transform.get_content_size();
+		let mut minimum_x = content_size.x.min(0.0);
+		let mut maximum_x = content_size.x.max(0.0);
+		let mut minimum_y = content_size.y.min(0.0);
+		let mut maximum_y = content_size.y.max(0.0);
+		if !self.is_multiline {
+			let text_width = graphic.measure_text_with_font_string(&self.build_font_string(), &self.get_display_text()).width;
+			minimum_x = minimum_x.min(self.padding);
+			maximum_x = maximum_x.max(self.padding + text_width);
+			minimum_y = minimum_y.min(content_size.y * 0.5 - self.font_size);
+			maximum_y = maximum_y.max(content_size.y * 0.5 + self.font_size);
+		}
+		Some(Rect::create(minimum_x - 2.0, minimum_y - 2.0, maximum_x - minimum_x + 4.0, maximum_y - minimum_y + 4.0))
 	}
 
 	//==============================================================================
@@ -4095,6 +4124,15 @@ impl Component for UIInputFieldContextMenu {
 			owner_field.request_menu_action(menu_action);
 		}
 		self.close(context);
+	}
+
+	//==============================================================================
+	/// 그리는 사각형. (원본 UIInputFieldContextMenu.calculateDrawnRect, 흰 판은 내용 영역, 그림자가 시그마 8 의 세 배와 기기 한 픽셀만큼 사방으로, 아래로 4 만큼 더 넘친다)
+	//==============================================================================
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, _graphic: &mut Graphic) -> Option<Rect> {
+		let content_size = transform.get_content_size();
+		let shadow_margin = css_blur_radius_to_sigma(16.0) * 3.0 + 2.0;
+		Some(Rect::create(-shadow_margin, -shadow_margin, content_size.x + shadow_margin * 2.0, content_size.y + shadow_margin * 2.0 + 4.0))
 	}
 
 	//==============================================================================

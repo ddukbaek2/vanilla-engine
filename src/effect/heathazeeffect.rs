@@ -11,6 +11,7 @@
 //!   - 줄이 한 번에 그릴 수 있는 정점 수(Graphic 한도)를 넘으면 나눠 그린다. 원본은 배열을 늘려 한 번에 그린다.
 //==============================================================================
 use crate::core::glcontext::GlContext;
+use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{GlTexture, Graphic, PARTICLE_FLOATS_PER_VERTEX};
@@ -107,7 +108,11 @@ impl HeatHazeEffect {
 	/// - `value`: 줄이 좌우로 밀리는 가장 큰 폭. (노드 좌표 픽셀, 기본 3)
 	//==============================================================================
 	pub fn set_amplitude(&mut self, value: f64) {
+		if self.amplitude == value {
+			return;
+		}
 		self.amplitude = value;
+		self.component_base.mark_drawn_rect_dirty();
 	}
 
 	//==============================================================================
@@ -274,6 +279,15 @@ impl Component for HeatHazeEffect {
 	//==============================================================================
 	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f64) {
 		self.timer += time_delta * self.speed;
+	}
+
+	//==============================================================================
+	/// 그리는 사각형. (원본 HeatHazeEffect.calculateDrawnRect, 내용 영역을 좌우로 흔들림 폭 + 1, 위아래로 1 넓힌 것)
+	//==============================================================================
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, _graphic: &mut Graphic) -> Option<Rect> {
+		let content_size = transform.get_content_size();
+		let amplitude = self.amplitude.abs() + 1.0;
+		Some(Rect::create(-amplitude, -1.0, content_size.x + amplitude * 2.0, content_size.y + 2.0))
 	}
 
 	//==============================================================================

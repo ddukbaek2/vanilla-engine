@@ -191,6 +191,8 @@ impl UILabel {
 	/// 품은 RichText 의 바꿀 수 있는 참조.
 	//==============================================================================
 	pub fn get_rich_text_component_mut(&mut self) -> &mut RichText {
+		// 꺼내 바꾸면 그리는 사각형이 바뀔 수 있다. (품은 RichText 는 노드에 직접 붙지 않아 제 세터가 노드에 알리지 못한다)
+		Component::mark_drawn_rect_dirty(self);
 		&mut self.rich_text
 	}
 
@@ -240,7 +242,11 @@ impl UILabel {
 	/// - `use_rich_text`: true 면 품은 RichText 로(조각마다), false 면 품은 Text 로 그린다.
 	//==============================================================================
 	pub fn use_rich_text(&mut self, use_rich_text: bool) {
+		if self.use_rich_text == use_rich_text {
+			return;
+		}
 		self.use_rich_text = use_rich_text;
+		Component::mark_drawn_rect_dirty(self);
 	}
 
 	//==============================================================================
@@ -730,14 +736,15 @@ impl Component for UILabel {
 	}
 
 	//==============================================================================
-	/// 그릴 영역 셈. (품은 Text 로 그리면 content 영역과 글 사각형을 합친 것, 리치텍스트 모드면 None 이라 거르지 않는다)
+	/// 그릴 영역 셈. (배경인 content 영역과 글 사각형을 합친 것, 리치텍스트 모드면 RichText 의 사각형, 아니면 품은 Text 의 사각형)
 	//==============================================================================
 	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {
-		// 리치텍스트는 조각 배치를 따로 재지 않아 거르지 않는다. 품은 Text 로 그릴 때는 배경(content 영역)과 글 사각형을 합친다.
-		if self.use_rich_text {
-			return None;
+		let text_rect = if self.use_rich_text {
+			self.rich_text.calculate_drawn_rect(transform, graphic)?
 		}
-		let text_rect = self.rich_text.get_text_component_mut().calculate_drawn_rect(transform, graphic)?;
+		else {
+			self.rich_text.get_text_component_mut().calculate_drawn_rect(transform, graphic)?
+		};
 		let content_size = transform.get_content_size();
 		let left_x = text_rect.position.x.min(0.0);
 		let top_y = text_rect.position.y.min(0.0);

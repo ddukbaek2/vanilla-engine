@@ -14,6 +14,7 @@
 //!   조각마다 그 방향으로 모양 짓고, 정렬 Start / End 도 그 방향으로 푼다. (원본도 같다)
 //==============================================================================
 use crate::base::color::Color;
+use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::component::text::{Text, TextWrapMode};
 use crate::core::component::{Component, ComponentBase};
@@ -344,6 +345,7 @@ impl RichText {
 			text: text.to_string(),
 			attributes,
 		});
+		self.text.get_component_base().mark_drawn_rect_dirty();
 		self
 	}
 
@@ -352,6 +354,7 @@ impl RichText {
 	//==============================================================================
 	pub fn clear_segments(&mut self) {
 		self.segments.clear();
+		self.text.get_component_base().mark_drawn_rect_dirty();
 	}
 
 	//==============================================================================
@@ -1047,6 +1050,35 @@ impl Component for RichText {
 	#[reflect(after = "getIntrinsicContentSize")]
 	fn is_tick_needed(&self) -> bool {
 		false
+	}
+
+	//==============================================================================
+	/// 그리는 사각형. (원본 RichText.calculateDrawnRect, 조각이 없으면 품은 Text 와 같고, 있으면 조각을 이은 한 줄의 사각형)
+	/// - 조각마다 제 글꼴로 잰 너비를 더한 합산 폭을 정렬대로 놓고, 가장 큰 글꼴 크기의 반과 가장 굵은 외곽선만큼 양옆에 더한다.
+	///   Start 와 End 는 그릴 때의 방향으로 왼쪽이나 오른쪽이 되므로 둘 다 품는다.
+	/// - 세로는 기준선 자리에서 위아래로 가장 큰 글꼴 크기의 1.5 배와 가장 굵은 외곽선만큼. (밑줄, 취소선도 이 안)
+	//==============================================================================
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {
+		if !self.has_segments() {
+			return self.text.calculate_drawn_rect(transform, graphic);
+		}
+		let mut total_width = 0.0;
+		let mut maximum_font_size = 0.0f64;
+		let mut maximum_stroke_width = 0.0f64;
+		for segment in self.segments.iter() {
+			if segment.text.is_empty() {
+				continue;
+			}
+			let (font_string, font_size) = self.resolve_segment_font(&segment.attributes);
+			let stroke_width = segment.attributes.stroke_width.unwrap_or(self.text.get_stroke_width());
+			total_width += graphic.measure_text_with_font_string(&font_string, &segment.text).width;
+			maximum_font_size = maximum_font_size.max(font_size);
+			maximum_stroke_width = maximum_stroke_width.max(stroke_width);
+		}
+		if maximum_font_size == 0.0 {
+			return Some(Rect::create(0.0, 0.0, 0.0, 0.0));
+		}
+		Some(Text::calculate_line_drawn_rect(total_width, maximum_font_size, maximum_stroke_width, self.text.get_text_align(), self.text.get_text_baseline(), transform.get_content_size()))
 	}
 
 	//==============================================================================
