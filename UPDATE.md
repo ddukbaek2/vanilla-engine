@@ -196,7 +196,7 @@
 - UISpinner::calculate_dot_opacity: 점이 없으면(dot_count 0) 0 나누기로 NaN 이 되지 않는다. (원본도 같게 고쳤다)
 - UIListView::set_horizontal: 바뀌면 다음 tick 에 스크롤 영역을 다시 재고 보이는 항목을 새 축에 다시 놓는다. (원본도 같게 고쳤다)
 - 문서 글을 코드에 맞췄다: ShaderProgram(원본 이름 attributeLocationTable), Mask(NodeTree::draw_node 가 자른다), TweenProperty::get_name(첫 글자 소문자), ButtonMotion(tick 과 is_drawn_inside_content 머리, set_lit_handler), GraphicsQualityGovernor(데스크탑은 환경 변수 `VANILLA_<이름>`), FixedStepper::new, PointerCursor::is_coarse_pointer(윈도우 태블릿, 리눅스 터치), ViewManager 렌더 배율 상한(데스크탑도 쓴다), AudioBus::get_gain_node(데스크탑 Rc<MixerGainNode>), UIWindow(as_any, dispose, set_dim_color, set_panel_color), UIContextMenu::show 의 좌표, ui 모듈 머리, README 애셋 로딩 예제 이름(C-CASE)
-- experimental: vanilla::experimental 모듈(src/experimental/mod.rs)을 새로 두었다. 0.4.0 뒤 기능의 초안 자리다. (원본 import.js 의 Experimental 이름 공간 자리) 초안은 API 가 바뀔 수 있다. 지금은 비어 있다
+- experimental: vanilla::experimental 모듈(src/experimental/mod.rs)을 새로 두었다. 0.4.0 뒤 기능의 초안 자리다. (원본 import.js 의 Experimental 이름 공간 자리) 초안은 API 가 바뀔 수 있다. (뒤에 초안 여섯이 들어왔다: 2D 물리, 타일맵, 2D 뼈대, 공간 소리, 세이브, 공간 분할)
 - experimental 초안, 2D 물리와 공간 나누기(vanilla::experimental::physics2d, spatial): 원본 vanilla.js 의 Experimental 초안과 같은 API, 같은 셈이다. PhysicsWorld2D (강체 정적, 운동학, 동적, 모양 원, 캡슐, 선분, 볼록 다각형, 사슬, 관절 거리, 회전, 용접, 바퀴, 분류, 마스크, 무리 거르기, 센서, 닿음과 센서 사건, 광선과 점, 상자, 모양 질의, 하위 걸음과 웜 스타트의 부드러운 걸음 풀이기, 섬째 잠자기, advance 의 고정 걸음과 그리기 보간), RigidBody2D 컴포넌트(Rc<RefCell<PhysicsWorld2D>>), PhysicsDebugDraw2D, DynamicTree<T>, AABB2D, f64 벡터 PhysicsVector2. 셈은 f64 와 직접 짠 삼각 함수라 원본과 결과가 비트까지 같다. (시험 comparison_matches_vanilla_js 가 원본이 쓴 덤프와 견준다, 예제 physics2d)
 - 이름을 러스트 규칙(Rust API Guidelines C-CASE)으로 바꿨다. 함수, 메서드, 변수, 필드, 모듈은 snake_case, 열거 값은 UpperCamelCase, 연관 상수는 SCREAMING_SNAKE_CASE. (setFillColor → set_fill_color, Colors::white → Colors::WHITE, Pivot::topLeft → Pivot::TOP_LEFT, ButtonState::normal → ButtonState::Normal) 이름 경고를 끄던 #![allow(non_snake_case)] 등을 lib.rs 와 예제에서 뺐다. 엔진을 쓰는 코드는 같은 규칙으로 이름을 바꿔야 한다. (공개 API 를 바꾸는 일이다) 바꾼 곳 11,071 군데, 동작은 같다. (cargo test 252 통과, 데스크탑과 웹 빌드 경고 0, 예제 화면이 전과 같음)
 - README: macOS(애플 실리콘) 데스크탑에서 확인함을 적었다
@@ -210,7 +210,7 @@
 - 데스크탑: 가운데와 오른쪽 단추, 손가락(winit Touch)을 입력 매니저에 넣는다. 휠의 Ctrl 을 적는다
 - CameraGestures: 카메라 손짓. 오른쪽 끌기(가로는 돌리기, 캔버스 너비가 한 바퀴, 세로는 기울이기, 끌지 않고 떼면 오른쪽 클릭), 가운데 끌기(밀기), 두 손가락(밀기, 오므려 키우기, 문턱을 넘게 비틀면 돌리기). 매 프레임 update(input_manager, view_manager) 로 읽고 take_pan, take_rotation, take_tilt, take_zoom 으로 꺼낸다
 - PointerCursor, CursorValue: 마우스 커서. 엔진이 하나 들고(get_pointer_cursor_mut) 켜면 프레임 끝마다 커서를 정한다. UIButton 위(누르는 중 포함)면 단추의 커서, 아니면 set_screen_cursor 의 커서. 데스크탑은 winit 커서 아이콘, 웹은 캔버스 cursor 스타일(register_image_cursor 의 그림 커서 포함). 꺼져 있으면(기본) 지금까지와 같다
-- Engine: is_coarse_pointer() (웹은 CSS pointer: coarse, 데스크탑은 false). 플랫폼 층에 set_cursor, is_coarse_pointer 를 더했다
+- Engine: is_coarse_pointer() (웹은 CSS pointer: coarse, 데스크탑은 처음엔 false 였고 뒤에 윈도우와 리눅스는 장치를 읽어 정한다). 플랫폼 층에 set_cursor, is_coarse_pointer 를 더했다
 - UIHitArea: 누르는 자리 넓히기. UIHitArea::attach(node_tree, button_id, minimum_size) 로 단추 바로 뒤 형제로 투명한 누름 자리를 두어 가로세로를 minimum_size 이상으로 넓힌다. 넓힌 몫의 클릭은 단추의 Clicked, Click 알림을 부른다. 단추의 자리, 크기, 피봇을 프레임마다 따라가고, set_clip_node 로 넓힌 몫을 창이나 스크롤 칸 안으로 자른다. (부모가 돌아 있어도 노드 좌표로 바꿔 자른다)
 - UIButton: fire_click_events(context). 누르지 않고 클릭 알림(Clicked, Click)만 부른다
 - ToastMotion, ToastPhase, read_toast_seconds: 알림 노드에 붙이는 나옴과 사라짐 모션. show(text, seconds) 로 바깥쪽(위나 아래)에서 미끄러져 들어오며 살짝 커졌다 돌아오고, 머문 뒤 떠오르며 사라진다. 떠 있는 동안 다른 글이 오면 앞 것이 빨리 비키고, 같은 글이 또 오면 시간만 다시 채우고 통 튄다. show 는 요청만 받고 다음 tick 에서 움직이며, 글은 set_apply_text_handler 로 건 함수가 노드에 넣는다. 숨은 동안 노드는 보이지 않게만 한다
@@ -455,7 +455,7 @@
   - 스팀덱: 데스크탑 리눅스에서 환경 변수 SteamDeck=1, 또는 DMI 의 board_vendor Valve 와 board_name Jupiter, Galileo 면 PlatformType::SteamDeck 이다.
   - 데스크탑 Platform.get_resource_usage: 비어 있던 것을 엔진이 애셋으로 읽은 파일(애셋 바이트 읽기, Engine::load_image, 오디오 파일, 그림 커서)로 채운다. (종류 "file", 전송량과 푼 크기는 파일 바이트 수)
   - 윈도우 잠자기 깸: 시계 차이 판정(윈도우는 단조 시계가 잠든 동안에도 흘러 맞지 않았다) 대신 창을 서브클래싱해 WM_POWERBROADCAST 의 PBT_APMRESUMEAUTOMATIC 을 받아 on_page_process_restored 를 부른다. (platform/desktop/windowsplatform.rs, 윈도우만 windows-sys 0.52 의존) 맥과 리눅스는 시계 차이 판정 그대로다.
-  - 데스크탑 is_coarse_pointer: 윈도우는 크로미엄의 (pointer: coarse) 판정을 옮겼다. (태블릿으로 쓰는 중이거나 마우스 없이 터치만 있으면 참) 맥은 크로미엄도 늘 거짓, 리눅스는 장치 목록을 못 읽어 거짓이다.
+  - 데스크탑 is_coarse_pointer: 윈도우는 크로미엄의 (pointer: coarse) 판정을 옮겼다. (태블릿으로 쓰는 중이거나 마우스 없이 터치만 있으면 참) 맥은 크로미엄도 늘 거짓, 리눅스는 처음엔 장치 목록을 못 읽어 거짓이었다. (뒤에 읽게 고침, 아래 리눅스 항목)
   - FiniteStateMachine: 처리 함수 안에서 get_state_change_requester 로 받은 StateChangeRequester.change_state 로 전이를 부탁하면 그 처리 함수가 끝난 뒤 차례대로 전이한다. (예전에는 처리 함수 안에서 전이할 수 없었다)
   - format: 표에 없는 로캘은 원본이 브라우저 기본 로캘로 쓰듯 시스템 언어(웹 navigator.languages, 데스크탑 LANGUAGE / LC_ALL / LC_MESSAGES / LANG 의 첫째)로, 그것도 표에 없으면 en-US 로 쓴다.
   - Color: create_from_hex 를 원본 createFromHEX 처럼 # 이 있어야 하고 #rgba 를 읽고 두 자리씩 parseInt 꼴로 읽는다. to_hex_string, to_rgba_string 은 원본처럼 0 ~ 1 밖의 성분을 자르지 않는다.
@@ -520,7 +520,7 @@
 - EngineConfiguration.default_font_paths, default_bold_font_paths, fallback_font_paths 의 기본값을 빈 목록으로 바꿨다. 비우면 위처럼 운영체제가 찾고, 주면 전처럼 그 파일을 쓴다. default_font_paths 는 읽히는 파일을 모두 차례로 잇고, default_bold_font_paths 는 같은 자리의 굵은 파일이다. (기본값의 경로 목록을 읽던 코드는 고쳐야 한다)
 - 맥, 리눅스 굵은 글꼴과 TTC: 글꼴 모음(TTC)은 PostScript 이름이나 굵기, 기울기로 얼굴 번호를 고른다. (textshaping::find_collection_face_index, 맥 Apple SD Gothic Neo 의 진짜 Bold 가 나온다) 가변 글꼴(wght 축, 맥 SF)은 굵기를 축 값으로 만든다. (read_weight_variation) 가변 글꼴의 윤곽은 skrifa 로 받아 그린다. (fontdue 는 축 값을 읽지 못하고, ttf-parser 와 fontdue 는 글리프마다 변형이 32 개를 넘는 맥 SFNS 의 윤곽을 그리지 못한다) LoadedFont.create_from_shared_bytes(바이트, 얼굴 번호, 축 값), get_shaping_face, get_font_bytes, get_face_index, is_outline_raster, read_glyph_metrics, draw_glyph_outline. LoadedFont.shaping_face 필드는 get_shaping_face() 로 바꿨다
 - 글꼴 언로드: LoadedFont 가 글꼴 바이트를 rustybuzz 얼굴과 함께 든다. (self_cell, 전에는 Box::leak 으로 붙잡아 등록을 지워도 돌려주지 않았다) 같은 파일의 여러 얼굴은 바이트(Rc)를 나눠 든다
-- 맥 크롬 Canvas2D measureText 와 견준 값: 한글 "가나다라" 16px 55.360, "16px Helvetica" 113.508, "16px Menlo" 154.125 가 같다. (시험으로 넣었다) SF 라틴은 106.672 로 크롬 109.072 보다 2.2% 좁다. (크롬이 시스템 UI 글꼴에 거는 광학 크기와 자간을 다 맞추지 못했다)
+- 맥 크롬 Canvas2D measureText 와 견준 값: 한글 "가나다라" 16px 55.360, "16px Helvetica" 113.508, "16px Menlo" 154.125 가 같다. (시험으로 넣었다) SF 라틴은 106.672 로 크롬 109.072 보다 2.2% 좁다. (크롬이 시스템 UI 글꼴에 거는 광학 크기와 자간을 다 맞추지 못했다) (뒤에 고침: 이 차이는 -apple-system 을 모르는 이름으로 둔 크롬과 달랐던 글꼴 고르기 때문이었다. 아래 SF 라틴 항목)
 - 새 크레이트: self_cell 1, skrifa 0.50, 맥 objc2-core-text 0.3 과 objc2-core-foundation 0.3, 윈도우 dwrote 0.11 과 winapi 0.3, 리눅스 yeslogic-fontconfig-sys 6 (dlopen, 빌드할 때 잇지 않는다)
 - 맥 색 이모지를 CoreText 로 그린다. (platform/desktop/coretextglyph.rs) 크롬 맥처럼 작은 글자 크기에서 이모지를 키워 그리고 아래로 내린다. (16px 에서 20px 그림, 24px 부터 글자 크기 그대로) 전진폭은 CoreText 가 그린 그림 상자의 높이를 정수로 반올림한 값이다. 크롬 measureText 와 8 ~ 128px 의 23 가지 크기에서 같고(8px 10, 13px 16, 16px 20, 21px 23), 12, 16, 20, 32, 64px 의 그림 상자와 알파 합이 크롬 캔버스 getImageData 와 같다. (색 합은 0.01% 안) 시스템에 올린 글꼴만 CoreText 가 이모지를 키우므로 PostScript 이름으로 글꼴을 짓는다
 - 맥: 윤곽이 glyf, CFF, CFF2 에 없는 글꼴도 CoreText 로 그린다. 맥 26 의 중국어 대체 글꼴 PingFangUI.ttc 는 윤곽이 애플 전용 hvgl 표에 있어 열린 해석기로 그릴 수 없다. (전에는 간체 글자가 빈칸이었다) LoadedFont.with_source_path, is_core_text_raster, read_advance_scale, is_integer_advance
@@ -646,7 +646,7 @@
   - 크로미엄 SincResampler 를 옮겨 원본 DECODE_SAMPLE_RATE(44100)로 바꾼다. (Blink 와 같은 32 탭 커널과 길이 셈, 합의 차례는 크롬이 고르는 NEON, SSE, AVX2 와 같게)
   - WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내린다. (쿼드, 5.1 은 명세의 식, 그 밖은 앞 두 채널. 이제 3 채널 이상 파일도 튼다)
   - 시험 소리 21 파일(tests/assets/audio, 모두 수 KB)을 크롬 158 의 결과(chromedecode.cjs 가 찍은 chrome_decode.json)와 견준다. 길이와 채널은 모두 같고, FLAC, MP3, PCM, Vorbis 는 표본까지 같으며 Opus, AAC 는 1e-7 안팎이다
-  - 남은 차이: HE-AAC(SBR, PS)와 3 채널 이상 AAC 는 symphonia 0.6.1 이 받지 않아 데스크탑에서 풀지 못한다. (크롬은 FFmpeg 로 푼다)
+  - 남은 차이: HE-AAC(SBR, PS)와 3 채널 이상 AAC 는 symphonia 0.6.1 이 받지 않아 데스크탑에서 풀지 못했다. (크롬은 FFmpeg 로 푼다) (뒤에 고침: 지금은 oxideav-aac 로 푼다, 아래 HE-AAC 항목)
   - 늘어난 크레이트 7: opus-pure, symphonia-format-mkv, rustfft(크롬처럼 symphonia 의 opt-simd 를 켜 FFT 를 같게)와 그 의존 primal-check, strength_reduce, transpose, num-integer. 줄어든 것은 없다 (kira 가 쓰던 symphonia 를 엔진이 직접 쓴다)
 - "data:" 주소: 데스크탑 Engine::load_audio_asset, request_asset_bytes, request_asset_bytes_into, load_image 가 data: 주소를 풀어 읽는다. (타임라인 편집기가 넣는 data: 소리를 데스크탑에서도 튼다) base64 와 퍼센트 꼴 풀기를 타임라인에서 base/dataurl.rs 로 옮겼다. 웹은 asset_base_url 이 비어 있지 않으면 data: 주소 앞에도 기준 주소를 붙여 못 받던 것을 고쳤다
 - 데스크탑 소리 내기를 kira 에서 cpal 위의 엔진 믹서로 바꿨다. (platform/audio/mixer.rs) 원본 소리 API 와 러스트 API(AudioPlayer, AudioBus, get_gain_node, BeepPlayer)는 그대로다

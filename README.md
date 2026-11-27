@@ -22,7 +22,7 @@
 
 바닐라엔진은 실제 게임을 만들며 다듬어 온 웹게임 엔진 [vanilla.js](https://github.com/ddukbaek2/vanilla.js) 를 러스트로 옮긴 2D/3D 게임 엔진입니다. 검증된 API 와 씬 구조는 그대로 가져오고, 러스트의 속도와 안전함, 네이티브 실행을 더했습니다.
 
-- **코드 하나로 데스크탑과 웹.** 같은 게임 코드로 데스크탑 실행 파일(윈도우, macOS, OpenGL 3.3)과 브라우저용 wasm(WebGL2)을 만듭니다. 창, GL, 입력, 애셋 로딩, 오디오, 클립보드, 한글 입력(IME), 시스템 글꼴의 차이는 엔진의 플랫폼 레이어가 모두 처리합니다.
+- **코드 하나로 데스크탑과 웹.** 같은 게임 코드로 데스크탑 실행 파일(윈도우, macOS, 리눅스(X11, 웨이랜드), OpenGL 3.3)과 브라우저용 wasm(WebGL2)을 만듭니다. 창, GL, 입력, 애셋 로딩, 오디오, 클립보드, 한글 입력(IME), 시스템 글꼴의 차이는 엔진의 플랫폼 레이어가 모두 처리합니다.
 - **빌림 검사기(borrow checker)와 싸우지 않는 씬 그래프.** 노드는 제너레이셔널 핸들(`NodeId`)로 가리킵니다. `Rc<RefCell>` 없이 노드를 마음껏 만들고 지우고, 지운 노드를 가리키는 핸들은 `None` 이 되어 댕글링 참조가 생기지 않습니다.
 - **익숙한 노드와 컴포넌트.** ECS 를 새로 배울 필요 없이, 유니티나 코코스처럼 노드에 컴포넌트를 붙여 게임을 짭니다. vanilla.js 와 이름과 흐름이 같아서 자바스크립트 게임을 옮기기도 쉽습니다.
 - **기본으로 빠른 2D.** 자동 배칭과 화면 밖 컬링이 처음부터 켜져 있습니다. 적 3만 2천 마리가 움직이는 장면에서 드로우 콜이 32,008 번에서 73 번으로 줄어듭니다.
@@ -397,6 +397,8 @@ cargo run --release --example modelviewer
 
 둥근 사각형 적과 사각형 탄환이 노드 하나씩으로 움직이는 벤치 장면의 결과입니다. 적 하나, 탄환 하나가 모두 노드 하나와 Paint 컴포넌트 하나입니다. (데스크탑 네이티브, RTX 2070 SUPER, 수직 동기 끔)
 
+(0.3.2 무렵 값, 0.4.0 에서 다시 잼)
+
 | 적 수 | 배칭 끔 | 배칭 켬 | 드로우 콜 (배칭 전 → 켬) |
 | --- | --- | --- | --- |
 | 4,000 | 125.5 fps | **153.1 fps** | 4,165 → 15 |
@@ -497,10 +499,10 @@ cargo run --release --example modelviewer
 
 - 버전 0.3.2. 버전 번호는 vanilla.js 0.3.2 에서 이어 받았습니다.
 - vanilla.js 의 원본 200 파일 가운데 182 파일을 옮겼습니다. (같은 이름 176, 다른 파일에 합친 것 6) 18 파일은 빈 파일, 죽은 코드, 러스트 표준이 맡는 것(컬렉션, 객체 모델 도우미)이라 일부러 옮기지 않았습니다. 목록과 까닭은 [ARCHITECTURE.md](ARCHITECTURE.md) 9장에 있습니다.
-- `vanilla::experimental` 은 0.4.0 뒤 기능의 초안 자리입니다. (vanilla.js 의 `Experimental` 이름 공간과 같은 자리, API 가 바뀔 수 있습니다) 다 자란 기능은 제자리 모듈로 옮겨 바로 내보냅니다. 지금은 비어 있습니다.
+- `vanilla::experimental` 은 0.4.0 뒤 기능의 초안 자리입니다. (vanilla.js 의 `Experimental` 이름 공간과 같은 자리, API 가 바뀔 수 있습니다) 다 자란 기능은 제자리 모듈로 옮겨 바로 내보냅니다. 지금 초안은 2D 물리, 타일맵, 2D 뼈대, 공간 소리, 세이브, 공간 분할(spatial) 여섯입니다.
 - 두 엔진은 기능 차이를 두지 않습니다. 언어나 플랫폼 때문에 정말 맞출 수 없는 것과 러스트에 맞게 정한 꼴은 [ARCHITECTURE.md](ARCHITECTURE.md) 10장에 모았습니다.
-- 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 돌려 확인했습니다.
-- GitHub Actions 의 플랫폼 확인(`.github/workflows/platforms.yml`)이 윈도우 서버 2025, 우분투 26.04(X11 은 Xvfb, 웨이랜드는 weston headless), 인텔 맥(macOS 26)에서 시험을 돌리고 예제를 찍습니다. GPU 가 없는 기계라 윈도우와 리눅스는 메사 llvmpipe 소프트웨어 GL 로 그리고, 소리는 가상 장치(PulseAudio, VB-CABLE, Background Music)로 냅니다. 견주는 것은 모두 같은 기계의 크롬입니다.
+- macOS(애플 실리콘) 데스크탑과 크롬은 이 저장소의 로컬 기계에서 돌려 확인했습니다. 윈도우와 리눅스(X11, 웨이랜드)는 2026-11-27 GitHub Actions 실행으로 확인했고, 그 뒤 이 확인은 손으로만(workflow_dispatch) 돌립니다.
+- GitHub Actions 의 플랫폼 확인(`.github/workflows/platforms.yml`)이 윈도우 서버 2025, 우분투 26.04(X11 은 Xvfb, 웨이랜드는 weston headless)에서 시험을 돌리고 예제를 찍습니다. 손으로만 돌립니다(workflow_dispatch). 맥은 로컬 기계로 확인하므로 맥 러너는 쓰지 않습니다. GPU 가 없는 기계라 윈도우와 리눅스는 메사 llvmpipe 소프트웨어 GL 로 그리고, 소리는 가상 장치(PulseAudio, VB-CABLE, Background Music)로 냅니다. 견주는 것은 모두 같은 기계의 크롬입니다.
   - 시스템 글꼴과 대체 글꼴(DirectWrite, fontconfig, CoreText): 크롬 Canvas2D measureText 의 전진폭과 위아래 길이 (`tests/desktopplatform.rs`)
   - 소리 해석, 믹서, 비프, PannerNode(HRTF 포함): 크롬 OfflineAudioContext
   - 원본 예제 다섯(toonstyle, toonmaterial, skeleton2d, physics2d, tilemapshowcase): 헤드리스 크롬 그림과의 화소 차이
@@ -519,7 +521,7 @@ cargo run --release --example modelviewer
 ## 개발 환경
 
 - Windows 11 Pro, macOS(애플 실리콘)
-- CI: GitHub Actions 의 윈도우 서버 2025, 우분투 26.04, 인텔 맥 macOS 26 ([tools/TOOLS.md](tools/TOOLS.md) 의 CI 절)
+- CI: GitHub Actions 의 윈도우 서버 2025, 우분투 26.04, 손으로만 돌림 ([tools/TOOLS.md](tools/TOOLS.md) 의 CI 절)
 - Rust 1.100.0
 - 쓰는 크레이트는 [외부 의존성](#외부-의존성) 에 정리했습니다
 
