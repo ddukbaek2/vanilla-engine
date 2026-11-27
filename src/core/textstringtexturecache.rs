@@ -1,8 +1,11 @@
 //==============================================================================
 //! 문자열 텍스처 캐시.
-//! - 원본은 오프스크린 2D 캔버스에 fillText / strokeText 로 문자열을 구워 텍스처로 쓴다. (LRU 상한 512)
-//! - 데스크탑은 글자 모양 짓기(textshaping.rs: 양방향 정렬, rustybuzz 모양 짓기)로 글리프를 놓고 래스터화해(fontdue, 가변 글꼴은 skrifa 윤곽, 맥 색 이모지는 CoreText) 문자열 한 장으로 굽는다.
-//!   상한과 키 구성(방식, 문단 방향, 폰트 문자열, 선 두께, 배율, 글)은 원본과 같다.
+//! - 원본은 글꼴(모드, 글꼴 글, 굽는 배율, 선 굵기)마다 글자 덩어리를 글리프 아틀라스(1024 x 1024 장, 8 장까지)에 한 번만 굽고, 글은 글리프 사각형 목록(엔트리, LRU 상한 1024)으로 그린다.
+//! - 데스크탑은 글자 모양 짓기(textshaping.rs: 양방향 정렬, rustybuzz 모양 짓기)로 글리프를 놓고, 처음 보는 글리프만 래스터화해(맥 CoreText, 윈도우 DirectWrite, 리눅스 skrifa) 아틀라스 칸에 굽는다.
+//!   글리프 열쇠는 (얼굴, 글리프 번호, 크기, 서브픽셀 칸, 방식과 선 굵기, 안티앨리어싱)이다. 셰이퍼가 합자와 이어진 꼴을 글리프로 풀어 주므로 원본의 글자 덩어리 나누기 대신,
+//!   잉크가 가로로 빈 열 하나 없이 닿는 글리프(외곽선은 띠까지)만 한 칸에 묶는다. 빈 열이 있으면 칸마다 그려도 문자열을 통째로 구운 것과 화소가 같다.
+//!   256px 넘는 글꼴과 웹(브라우저 Canvas2D 로 굽는다)은 원본처럼 문자열째 칸 하나에 굽는다.
+//!   장 정책(가장 나중에 연 장에만 이어 놓기, 차면 새 장, 8 장을 넘으면 가장 오래 안 쓴 장을 비우기), 엔트리 상한, 엔트리 키 구성(방식, 문단 방향, 폰트 문자열, 선 두께, 배율, 글)은 원본과 같다.
 //!   원본은 키를 문자열로 이어 붙인다. 여기서는 찾을 때마다 문자열을 만들지 않게 키의 해시로 찾고, 같은 해시 안에서 키를 하나씩 맞춰 본다.
 //! - 글자는 흰색으로 굽고, 그릴 때 색을 곱한다. (색이 바뀌어도 다시 굽지 않는다)
 //!   색 글리프(이모지)는 제 색으로 흰 글자 위에 얹어 굽는다. 원본도 흰색으로 fillText 한 캔버스를 올리므로 이모지는 제 색으로 구워지고 그릴 때 같은 색이 곱해진다.
@@ -220,8 +223,18 @@ const SUBPIXEL_ROUND: f32 = 0.125;
 /// 서브픽셀 자리의 단계 수. (스키아 kSubPixelPosLen 2 비트)
 #[cfg(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android"), not(target_arch = "wasm32"))))]
 const SUBPIXEL_STEP_COUNT: f32 = 4.0;
-/// 캐시 상한. (원본과 같음)
-const MAXIMUM_ENTRY_COUNT: usize = 512;
+/// 글 배치 엔트리 상한. (원본 MAXIMUM_ENTRY_COUNT, 엔트리는 글리프 사각형 목록뿐이라 텍스처가 없다)
+const MAXIMUM_ENTRY_COUNT: usize = 1024;
+/// 글리프 아틀라스 한 장의 너비와 높이. (텍셀, 원본 ATLAS_PAGE_SIZE)
+const ATLAS_PAGE_SIZE: i32 = 1024;
+/// 아틀라스 장 수 상한. (원본 MAXIMUM_ATLAS_PAGE_COUNT, 넘으면 가장 오래 안 쓴 장을 비워 다시 쓴다)
+const MAXIMUM_ATLAS_PAGE_COUNT: usize = 8;
+/// 이보다 큰 글꼴은 문자열째 굽는다. (원본 MAXIMUM_ATLAS_FONT_SIZE, 스키아는 이보다 큰 글리프를 패스로 칠해 자리를 칸으로 묶지 않는다. SkStrikeSpec::ShouldDrawAsPath)
+const MAXIMUM_ATLAS_FONT_SIZE: f32 = 256.0;
+/// 글리프 칸 가장자리의 빈 텍셀. (선형 거르기가 이웃 칸의 잉크를 뽑지 않게)
+const GLYPH_CELL_GUTTER: i32 = 1;
+/// 잉크 경계를 기억하는 글리프 래스터 수 상한. (넘으면 비운다)
+const MAXIMUM_GLYPH_INK_COUNT: usize = 16384;
 /// 글 재기 캐시 상한. (원본과 같음)
 const MAXIMUM_MEASURE_COUNT: usize = 2048;
 
@@ -240,39 +253,75 @@ pub enum TextDrawKind {
 }
 
 //==============================================================================
-/// 구운 문자열 하나. (길이 단위는 모두 논리 픽셀, 베이크 배율로 나눈 값)
-/// - 텍스처 왼쪽 위는 (펜 x - pen_offset_x, 기준선 y - baseline_offset_y) 에 놓고 quad_width, quad_height 크기로 그린다.
+/// 글 배치 엔트리 하나. (원본 getEntry 의 엔트리, 길이 단위는 모두 논리 픽셀, 베이크 배율로 나눈 값)
+/// - 문자열을 통째로 구웠을 때의 사각형(quad_width, quad_height, pen_offset_x, baseline_offset_y)과,
+///   그 사각형 왼쪽 위 기준의 글리프 사각형(glyph_textures, glyph_rects)을 준다. 글리프는 글리프 아틀라스에 한 번만 구워 여러 문자열이 나눠 쓴다.
+/// - 사각형 왼쪽 위는 (펜 x - pen_offset_x, 기준선 y - baseline_offset_y) 에 놓고, 글리프마다 그 자리에 glyph_rects 를 더해 그린다. (Graphic::draw_text_entry)
 ///
 /// # 예제
-/// 구운 문자열을 펜 자리와 기준선에 놓을 사각형
+/// 엔트리의 글리프 사각형을 펜 자리와 기준선에 놓기
 /// ```rust,no_run
 /// use vanilla::core::textstringtexturecache::{TextDrawKind, TextStringTextureCache};
 /// use vanilla::{Rect, ShapingDirection};
 ///
-/// fn calculate_quad(text_string_texture_cache: &mut TextStringTextureCache, gl: &glow::Context, pen_x: f64, baseline_y: f64) -> Option<Rect> {
-/// 	let entry = text_string_texture_cache.get_entry(gl, TextDrawKind::Fill, "Score", "24px default", 0.0, 2.0, ShapingDirection::LeftToRight)?;
-/// 	Some(Rect::create(pen_x - entry.pen_offset_x, baseline_y - entry.baseline_offset_y, entry.quad_width, entry.quad_height))
+/// fn calculate_glyph_quads(text_string_texture_cache: &mut TextStringTextureCache, gl: &glow::Context, pen_x: f64, baseline_y: f64) -> Vec<Rect> {
+/// 	let Some(entry) = text_string_texture_cache.get_entry(gl, TextDrawKind::Fill, "Score", "24px default", 0.0, 2.0, ShapingDirection::LeftToRight) else {
+/// 		return Vec::new();
+/// 	};
+/// 	let quad_x = pen_x - entry.pen_offset_x;
+/// 	let quad_y = baseline_y - entry.baseline_offset_y;
+/// 	entry.glyph_rects.iter().map(|glyph_rect| Rect::create(quad_x + glyph_rect[0], quad_y + glyph_rect[1], glyph_rect[2] - glyph_rect[0], glyph_rect[3] - glyph_rect[1])).collect()
 /// }
 /// ```
 //==============================================================================
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct TextEntry {
-	/// 구운 텍스처. (흰 글자의 프리멀티플라이드 RGBA, 색 글리프는 제 색)
-	pub texture: crate::core::graphic::GlTexture,
+	/// 글리프마다 든 아틀라스 장 텍스처. (glyph_rects 와 같은 차례, 흰 글자의 프리멀티플라이드 RGBA, 색 글리프는 제 색)
+	pub glyph_textures: Rc<[crate::core::graphic::GlTexture]>,
+	/// 글리프 사각형. (문자열 사각형 왼쪽 위 기준 논리 좌표의 왼, 위, 오른, 아래와 아틀라스 텍스처 좌표 u0, v0, u1, v1)
+	pub glyph_rects: Rc<[[f64; 8]]>,
 	/// 전진폭.
 	pub advance_width: f64,
 	/// 글꼴의 기준선 위 길이. (양수)
 	pub font_ascent: f64,
 	/// 글꼴의 기준선 아래 길이. (양수)
 	pub font_descent: f64,
-	/// 텍스처 왼쪽에서 펜 원점까지의 거리.
+	/// 문자열 사각형 왼쪽에서 펜 원점까지의 거리.
 	pub pen_offset_x: f64,
-	/// 텍스처 위에서 기준선까지의 거리.
+	/// 문자열 사각형 위에서 기준선까지의 거리.
 	pub baseline_offset_y: f64,
-	/// 그릴 사각형 너비. (텍스처 너비를 굽는 배율로 나눈 값)
+	/// 문자열 사각형 너비. (통째로 구웠을 때의 텍스처 너비를 굽는 배율로 나눈 값)
 	pub quad_width: f64,
-	/// 그릴 사각형 높이. (텍스처 높이를 굽는 배율로 나눈 값)
+	/// 문자열 사각형 높이. (통째로 구웠을 때의 텍스처 높이를 굽는 배율로 나눈 값)
 	pub quad_height: f64,
+}
+
+//==============================================================================
+/// 글리프 아틀라스 통계. (원본 readAtlasStatistics 의 돌려준 값, 시험과 통계용)
+///
+/// # 예제
+/// 아무것도 굽지 않은 캐시의 통계
+/// ```rust
+/// use vanilla::core::textstringtexturecache::TextStringTextureCache;
+///
+/// let text_string_texture_cache = TextStringTextureCache::new();
+/// let text_atlas_statistics = text_string_texture_cache.read_atlas_statistics();
+/// assert_eq!(text_atlas_statistics.atlas_page_count, 0);
+/// assert_eq!(text_atlas_statistics.entry_count, 0);
+/// ```
+//==============================================================================
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TextAtlasStatistics {
+	/// 아틀라스 장 수.
+	pub atlas_page_count: usize,
+	/// 든 글리프 수.
+	pub glyph_count: usize,
+	/// 지금까지 구운 글리프 수.
+	pub baked_glyph_count: u64,
+	/// 지금까지 아틀라스에 올린 수. (이어 놓은 새 글리프 여럿이 한 번)
+	pub upload_count: u64,
+	/// 글 배치 엔트리 수.
+	pub entry_count: usize,
 }
 
 //==============================================================================
@@ -478,7 +527,115 @@ struct CachedTextEntry {
 	line_width: f64,
 	bake_scale: f64,
 	entry: TextEntry,
-	last_used_frame_number: u64,
+	/// 엔트리가 쓰는 아틀라스 장 번호들. (그 장을 비우면 엔트리도 버린다)
+	atlas_page_id_list: Vec<u64>,
+	/// 마지막으로 준 때의 사용 번호. (LRU)
+	last_use_serial: u64,
+}
+
+//==============================================================================
+/// 글리프 래스터 하나의 열쇠. (얼굴의 글꼴 주소, 가짜 굵게, 가짜 기울임, 글리프 번호, 크기, 서브픽셀 칸)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct GlyphRasterKey {
+	font_address: usize,
+	is_synthetic_bold: bool,
+	is_synthetic_italic: bool,
+	glyph_index: u16,
+	pixel_size_bits: u32,
+	subpixel_x_bits: u32,
+}
+
+//==============================================================================
+/// 글리프 래스터의 잉크 경계. (정수 글리프 원점 기준, 위가 양수, 잉크가 없으면 너비와 높이 0)
+//==============================================================================
+#[derive(Clone, Copy, Debug, Default)]
+struct GlyphInk {
+	left_x: i32,
+	top_y: i32,
+	width: i32,
+	height: i32,
+}
+
+//==============================================================================
+/// 글리프 아틀라스의 칸 열쇠. (원본 #glyphs 의 열쇠)
+/// - 글리프 묶음: 잉크가 닿는 글리프들(대개 하나)의 래스터 열쇠와 정수 자리 차이, 방식과 선 굵기, 안티앨리어싱.
+///   셰이퍼가 합자와 이어진 꼴을 글리프로 풀어 주므로 원본의 글자 덩어리 나누기 대신 잉크가 닿는지로 묶는다.
+/// - 문자열째: 아주 큰 글꼴, 브라우저로 굽는 웹. (원본 isWholeText)
+//==============================================================================
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum GlyphKey {
+	/// 잉크가 닿는 글리프 묶음. (글리프마다 래스터 열쇠와 첫 글리프에서의 정수 자리 차이, 대개 글리프 하나)
+	Glyphs {
+		glyph_list: Vec<(GlyphRasterKey, i32, i32)>,
+		text_draw_kind: TextDrawKind,
+		scaled_line_width_bits: u32,
+		is_antialias: bool,
+	},
+	WholeText {
+		text: String,
+		font_string: String,
+		direction: ShapingDirection,
+		bake_scale_bits: u64,
+		text_draw_kind: TextDrawKind,
+		line_width_bits: u64,
+		is_antialias: bool,
+	},
+}
+
+//==============================================================================
+/// 아틀라스에 구운 글리프 하나. (길이 단위는 배율을 곱한 픽셀)
+/// - 칸 안에서 첫 글리프의 원점(정수 자리)은 (origin_x, baseline_y) 다. (문자열째는 칸 왼쪽 위)
+//==============================================================================
+struct AtlasGlyph {
+	/// 든 글리프의 얼굴 글꼴들. (읽지 않고 잡아만 둔다. 약한 참조가 남으면 글꼴 자리가 풀리지 않아 열쇠의 글꼴 주소가 다른 글꼴에 다시 쓰이지 않는다, 문자열째는 비었다)
+	#[allow(dead_code)]
+	font_list: Vec<std::rc::Weak<LoadedFont>>,
+	/// 든 장 번호. (자리를 잡지 못했으면 None)
+	atlas_page_id: Option<u64>,
+	atlas_x: i32,
+	atlas_y: i32,
+	cell_width: i32,
+	cell_height: i32,
+	origin_x: i32,
+	baseline_y: i32,
+}
+
+//==============================================================================
+/// 아틀라스 장 한 장의 줄. (같은 높이의 칸을 왼쪽부터 잇는다)
+//==============================================================================
+struct AtlasShelf {
+	y: i32,
+	height: i32,
+	cursor_x: i32,
+}
+
+//==============================================================================
+/// 아틀라스 장 한 장. (원본 createAtlasPage 의 장)
+//==============================================================================
+struct AtlasPage {
+	id: u64,
+	texture: crate::core::graphic::GlTexture,
+	width: i32,
+	height: i32,
+	/// 가까운 텍셀로 뽑는지. (안티앨리어싱을 끈 글자)
+	is_nearest: bool,
+	/// 칸 하나만 담는 장인지. (한 장보다 큰 칸)
+	is_dedicated: bool,
+	shelf_list: Vec<AtlasShelf>,
+	next_shelf_y: i32,
+	glyph_key_list: Vec<GlyphKey>,
+	/// 마지막으로 쓴 때의 사용 번호. (장의 LRU)
+	last_use_serial: u64,
+}
+
+//==============================================================================
+/// 아틀라스에 새로 놓을 글리프 하나. (칸 크기의 프리멀티플라이드 RGBA 와 놓을 글리프)
+//==============================================================================
+struct PendingGlyph {
+	glyph_key: GlyphKey,
+	pixels: Vec<u8>,
+	glyph: AtlasGlyph,
 }
 
 impl CachedTextEntry {
@@ -545,10 +702,24 @@ pub struct TextStringTextureCache {
 	fallback_face_list: RefCell<Vec<RegisteredFontFace>>,
 	/// 얼굴을 올린 차례 번호.
 	face_order_number: u64,
-	/// 키의 해시 → 그 해시를 가진 구운 문자열들.
+	/// 키의 해시 → 그 해시를 가진 글 배치 엔트리들.
 	entry_table: HashMap<u64, Vec<CachedTextEntry>>,
 	entry_count: usize,
 	frame_number: u64,
+	/// 구운 글리프 칸. (원본 #glyphs)
+	glyph_table: HashMap<GlyphKey, AtlasGlyph>,
+	/// 글리프 래스터 열쇠마다 잉크 경계. (칸을 묶을 때 다시 래스터하지 않게, 글꼴 주소가 다시 쓰이지 않게 약한 참조를 함께 둔다)
+	glyph_ink_table: HashMap<GlyphRasterKey, (GlyphInk, std::rc::Weak<LoadedFont>)>,
+	/// 아틀라스 장 목록. (연 차례)
+	atlas_page_list: Vec<AtlasPage>,
+	/// 다음에 여는 장의 번호.
+	next_atlas_page_id: u64,
+	/// 엔트리를 줄 때마다 늘리는 번호. (원본 #useSerial, 엔트리와 장의 LRU)
+	use_serial: u64,
+	/// 지금까지 구운 글리프 수. (통계)
+	baked_glyph_count: u64,
+	/// 지금까지 아틀라스에 올린 수. (통계)
+	upload_count: u64,
 	/// 글꼴을 등록한 횟수. (늘면 재 둔 글 폭이 바뀌었을 수 있다)
 	font_registration_count: Cell<u64>,
 	/// 글자가 없을 때 차례로 읽어 볼 대체 글꼴 파일. (원본 브라우저의 시스템 글꼴 대체 자리, 데스크탑, 쓸 때 읽는다)
@@ -561,7 +732,7 @@ pub struct TextStringTextureCache {
 	/// 마지막으로 본 브라우저 글꼴 바뀐 횟수. (웹, 늘었으면 구운 글을 버린다)
 	#[cfg(target_arch = "wasm32")]
 	browser_font_change_count: u64,
-	/// 버릴 구운 문자열의 텍스처. (등록할 때는 GL 이 없어서 다음 굽기 때 지운다)
+	/// 버릴 아틀라스 장의 텍스처. (비울 때는 GL 이 없거나 쌓아 둔 묶음이 그 장을 쓸 수 있어서, 주인 Graphic 이 묶음을 내보낸 뒤 지운다)
 	pending_deleted_texture_list: Vec<crate::core::graphic::GlTexture>,
 	/// 글자 안티앨리어싱. (기본 켬)
 	is_text_antialias_enabled: bool,
@@ -591,6 +762,13 @@ impl TextStringTextureCache {
 			entry_table: HashMap::new(),
 			entry_count: 0,
 			frame_number: 0,
+			glyph_table: HashMap::new(),
+			glyph_ink_table: HashMap::new(),
+			atlas_page_list: Vec::new(),
+			next_atlas_page_id: 1,
+			use_serial: 0,
+			baked_glyph_count: 0,
+			upload_count: 0,
 			font_registration_count: Cell::new(0),
 			fallback_font_candidate_list: RefCell::new(Vec::new()),
 			system_font_state: Rc::new(RefCell::new(SystemFontState::default())),
@@ -793,17 +971,16 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	/// 얼굴이 바뀐 이름으로 구운 문자열 버리기. (그 얼굴의 글자 범위에 든 글자가 있는 것만, 텍스처는 다음 굽기 때 지운다)
+	/// 얼굴이 바뀐 이름으로 배치한 엔트리 버리기. (그 얼굴의 글자 범위에 든 글자가 있는 것만, 원본 invalidateFontFaces)
+	/// - 글리프는 글꼴 주소로 찾으므로 새 얼굴의 글리프는 따로 굽는다. 버린 엔트리의 글리프 칸은 그 장이 비워질 때 다시 쓴다.
 	//==============================================================================
 	fn invalidate_entries_for_face(&mut self, family_key: &str, font_face_descriptors: &FontFaceDescriptors) {
-		let pending_deleted_texture_list = &mut self.pending_deleted_texture_list;
 		let mut removed_count = 0;
 		self.entry_table.retain(|_, cached_text_entry_list| {
 			cached_text_entry_list.retain(|cached_text_entry| {
 				let font_description = parse_font_string(&cached_text_entry.font_string);
 				let is_affected = font_description.family_name_list.iter().any(|family_name| read_registered_family_key(family_name).as_deref() == Some(family_key)) && font_face_descriptors.contains_any_character(&cached_text_entry.text);
 				if is_affected {
-					pending_deleted_texture_list.push(cached_text_entry.entry.texture);
 					removed_count += 1;
 				}
 				!is_affected
@@ -814,15 +991,16 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	/// 구운 문자열 모두 버리기. (원본 clear, 텍스처는 다음 굽기 때 지운다)
+	/// 모든 엔트리와 글리프 버리기. (원본 clear, 아틀라스 장 텍스처는 다음 굽기 때 지운다)
 	//==============================================================================
 	pub fn clear(&mut self) {
-		for (_, cached_text_entry_list) in self.entry_table.drain() {
-			for cached_text_entry in cached_text_entry_list {
-				self.pending_deleted_texture_list.push(cached_text_entry.entry.texture);
-			}
-		}
+		self.entry_table.clear();
 		self.entry_count = 0;
+		self.glyph_table.clear();
+		self.glyph_ink_table.clear();
+		for atlas_page in self.atlas_page_list.drain(..) {
+			self.pending_deleted_texture_list.push(atlas_page.texture);
+		}
 	}
 
 	//==============================================================================
@@ -1601,7 +1779,10 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	/// 구운 문자열 반환. (없으면 굽는다, direction 은 문단 방향. 원본 getEntry 의 textDirection)
+	/// 글 배치 엔트리 반환. (없으면 배치하고 처음 보는 글리프만 아틀라스에 굽는다, direction 은 문단 방향. 원본 getEntry 의 textDirection)
+	/// - 글리프 아틀라스: 1024 x 1024 장에 글리프를 한 번만 굽는다. 가장 나중에 연 장에만 이어 놓고, 차면 새 장, 8 장을 넘으면 가장 오래 안 쓴 장을 비운다.
+	///   비운 장의 텍스처는 버릴 목록에 두고 다음 get_entry 때 지운다. (Graphic 은 쌓아 둔 묶음을 먼저 내보내고 바로 지운다)
+	/// - 글리프 자리는 셰이퍼가 준 자리를 크롬 스키아처럼 정수 자리와 서브픽셀 4 칸으로 나눈다. 잉크가 닿는 글리프는 한 칸에 묶는다. 256px 넘는 글꼴은 문자열째 굽는다.
 	///
 	/// # 인자
 	/// - `gl`: 텍스처를 만들 GL 컨텍스트.
@@ -1613,20 +1794,19 @@ impl TextStringTextureCache {
 	/// - `direction`: 문단 방향.
 	///
 	/// # 돌려줌
-	/// 구운 문자열. (같은 키면 캐시의 것) 글이 비었거나, 데스크탑에서 그릴 얼굴이 하나도 없거나, 텍스처를 만들지 못하면 None.
+	/// 글 배치 엔트리. (같은 키면 캐시의 것) 글이 비었거나, 데스크탑에서 그릴 얼굴이 하나도 없거나, 텍스처를 만들지 못하면 None.
 	///
 	/// # 예제
-	/// 같은 키로 다시 부르면 굽지 않는다
+	/// 같은 키로 다시 부르면 굽지도 올리지도 않는다
 	/// ```rust,no_run
 	/// use vanilla::core::textstringtexturecache::{TextDrawKind, TextStringTextureCache};
 	/// use vanilla::ShapingDirection;
 	///
 	/// fn bake_outline(text_string_texture_cache: &mut TextStringTextureCache, gl: &glow::Context) {
-	/// 	let first_entry = text_string_texture_cache.get_entry(gl, TextDrawKind::Stroke, "Hello", "bold 20px default", 3.0, 1.5, ShapingDirection::LeftToRight);
-	/// 	let entry_count = text_string_texture_cache.get_entry_count();
-	/// 	let second_entry = text_string_texture_cache.get_entry(gl, TextDrawKind::Stroke, "Hello", "bold 20px default", 3.0, 1.5, ShapingDirection::LeftToRight);
-	/// 	assert_eq!(text_string_texture_cache.get_entry_count(), entry_count);
-	/// 	assert_eq!(first_entry.map(|entry| entry.texture), second_entry.map(|entry| entry.texture));
+	/// 	text_string_texture_cache.get_entry(gl, TextDrawKind::Stroke, "Hello", "bold 20px default", 3.0, 1.5, ShapingDirection::LeftToRight);
+	/// 	let first_statistics = text_string_texture_cache.read_atlas_statistics();
+	/// 	text_string_texture_cache.get_entry(gl, TextDrawKind::Stroke, "Hello", "bold 20px default", 3.0, 1.5, ShapingDirection::LeftToRight);
+	/// 	assert_eq!(text_string_texture_cache.read_atlas_statistics(), first_statistics);
 	/// }
 	/// ```
 	//==============================================================================
@@ -1639,9 +1819,9 @@ impl TextStringTextureCache {
 			return Some(entry);
 		}
 
-		let entry = self.bake_entry(gl, text_draw_kind, text, font_string, line_width, bake_scale, direction)?;
+		let (entry, atlas_page_id_list) = self.build_entry(gl, text_draw_kind, text, font_string, line_width, bake_scale, direction)?;
 		if self.entry_count >= MAXIMUM_ENTRY_COUNT {
-			self.evict_oldest_entry(gl);
+			self.evict_oldest_entry();
 		}
 		let is_antialias = self.is_text_antialias_enabled;
 		let entry_hash = create_entry_hash(text_draw_kind, is_antialias, direction, text, font_string, line_width, bake_scale);
@@ -1653,17 +1833,18 @@ impl TextStringTextureCache {
 			font_string: font_string.to_string(),
 			line_width,
 			bake_scale,
-			entry,
-			last_used_frame_number: self.frame_number,
+			entry: entry.clone(),
+			atlas_page_id_list,
+			last_use_serial: self.use_serial,
 		});
 		self.entry_count += 1;
 		Some(entry)
 	}
 
 	//==============================================================================
-	/// 버리기로 한 텍스처 지우기.
+	/// 버리기로 한 아틀라스 장 텍스처 지우기. (주인 Graphic 은 그 장을 쓰는 묶음을 먼저 내보내고 부른다)
 	//==============================================================================
-	fn delete_pending_textures(&mut self, gl: &glow::Context) {
+	pub(crate) fn delete_pending_textures(&mut self, gl: &glow::Context) {
 		for texture in self.pending_deleted_texture_list.drain(..) {
 			unsafe {
 				gl.delete_texture(texture);
@@ -1679,35 +1860,41 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	/// 이미 구운 문자열 찾기. (GL 을 건드리지 않는다, 없으면 None)
+	/// 이미 배치한 엔트리 찾기. (GL 을 건드리지 않는다, 없으면 None. 찾으면 엔트리와 그 엔트리가 쓰는 장의 사용 번호를 올린다)
 	//==============================================================================
 	pub(crate) fn find_entry(&mut self, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<TextEntry> {
 		let is_antialias = self.is_text_antialias_enabled;
 		let entry_hash = create_entry_hash(text_draw_kind, is_antialias, direction, text, font_string, line_width, bake_scale);
-		let frame_number = self.frame_number;
+		self.use_serial += 1;
+		let use_serial = self.use_serial;
 		let cached_text_entry_list = self.entry_table.get_mut(&entry_hash)?;
 		let cached_text_entry = cached_text_entry_list.iter_mut().find(|cached_text_entry| cached_text_entry.is_same_key(text_draw_kind, is_antialias, direction, text, font_string, line_width, bake_scale))?;
-		cached_text_entry.last_used_frame_number = frame_number;
-		Some(cached_text_entry.entry)
+		cached_text_entry.last_use_serial = use_serial;
+		for atlas_page_id in &cached_text_entry.atlas_page_id_list {
+			if let Some(atlas_page) = self.atlas_page_list.iter_mut().find(|atlas_page| atlas_page.id == *atlas_page_id) {
+				atlas_page.last_use_serial = use_serial;
+			}
+		}
+		Some(cached_text_entry.entry.clone())
 	}
 
 	//==============================================================================
-	/// 가장 오래 안 쓴 문자열 하나 버리기.
+	/// 가장 오래 안 쓴 엔트리 하나 버리기. (글리프는 아틀라스에 남아 다른 글이 나눠 쓴다)
 	//==============================================================================
-	fn evict_oldest_entry(&mut self, gl: &glow::Context) {
+	fn evict_oldest_entry(&mut self) {
 		let mut oldest_position: Option<(u64, usize, u64)> = None;
 		for (entry_hash, cached_text_entry_list) in &self.entry_table {
 			for (entry_index, cached_text_entry) in cached_text_entry_list.iter().enumerate() {
 				let is_older = match oldest_position {
-					Some((_, _, oldest_frame_number)) => {
-						cached_text_entry.last_used_frame_number < oldest_frame_number
+					Some((_, _, oldest_use_serial)) => {
+						cached_text_entry.last_use_serial < oldest_use_serial
 					}
 					None => {
 						true
 					}
 				};
 				if is_older {
-					oldest_position = Some((*entry_hash, entry_index, cached_text_entry.last_used_frame_number));
+					oldest_position = Some((*entry_hash, entry_index, cached_text_entry.last_use_serial));
 				}
 			}
 		}
@@ -1720,10 +1907,7 @@ impl TextStringTextureCache {
 			}
 		};
 		if let Some(cached_text_entry_list) = self.entry_table.get_mut(&entry_hash) {
-			let cached_text_entry = cached_text_entry_list.swap_remove(entry_index);
-			unsafe {
-				gl.delete_texture(cached_text_entry.entry.texture);
-			}
+			cached_text_entry_list.swap_remove(entry_index);
 			if cached_text_entry_list.is_empty() {
 				self.entry_table.remove(&entry_hash);
 			}
@@ -1927,10 +2111,10 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	/// 구운 문자열 수.
+	/// 글 배치 엔트리 수.
 	///
 	/// # 돌려줌
-	/// 캐시에 든 구운 문자열 수. (상한 512)
+	/// 캐시에 든 글 배치 엔트리 수. (상한 1024)
 	//==============================================================================
 	pub fn get_entry_count(&self) -> usize {
 		self.entry_count
@@ -2117,16 +2301,20 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	/// 문자열 굽기.
+	/// 글을 배치하고 처음 보는 글리프를 아틀라스에 굽기. (원본 buildEntry, (엔트리, 쓰는 장 번호들))
+	/// - 문자열 사각형은 예전에 문자열을 통째로 구운 비트맵과 같게 셈하고, 글리프 칸은 그 사각형 안으로 잘라 예전과 같은 화소만 남긴다.
 	//==============================================================================
-	fn bake_entry(&self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<TextEntry> {
+	#[allow(clippy::too_many_arguments)]
+	fn build_entry(&mut self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<(TextEntry, Vec<u64>)> {
 		let font_description = parse_font_string(font_string);
 		let face_list = self.resolve_covering_face_list(text, &font_description);
+		let is_antialias = self.is_text_antialias_enabled;
 		if face_list.is_empty() || self.is_browser_raster {
-			// 웹: 원본처럼 브라우저 Canvas2D 로 굽는다.
+			// 웹: 원본처럼 브라우저 Canvas2D 로 문자열째 굽는다.
 			#[cfg(target_arch = "wasm32")]
 			{
-				return bake_system_font_entry(gl, text_draw_kind, text, &font_description, line_width, bake_scale, self.is_text_antialias_enabled, direction);
+				let whole_text_bitmap = bake_system_font_bitmap(text_draw_kind, text, &font_description, line_width, bake_scale, is_antialias, direction)?;
+				return self.build_whole_text_entry(gl, whole_text_bitmap, text_draw_kind, text, font_string, line_width, bake_scale, direction);
 			}
 			#[cfg(not(target_arch = "wasm32"))]
 			{
@@ -2147,40 +2335,551 @@ impl TextStringTextureCache {
 		let padding = stroke_radius.ceil() as i32 + 1;
 		// 원본은 글 크기에 배율을 double 로 곱해 글꼴 글을 짓고, 블링크가 float 로 든다. 글꼴은 크롬 EffectiveFontSize 처럼 0.01px 아래를 버린 크기로 짓는다.
 		let pixel_size = calculate_effective_font_size((f64::from(font_description.font_size) * bake_scale) as f32);
-		let laid_out_text = lay_out_text(&face_list, &font_description, text, pixel_size, direction, padding, WHITE_LUMINANCE_COLOR)?;
-		let mut coverage = laid_out_text.coverage;
-		let mut color_pixels = laid_out_text.color_pixels;
-		let bitmap_width = laid_out_text.width;
-		let bitmap_height = laid_out_text.height;
-
-		// 외곽선: 윤곽 바깥으로 반두께 넓힌 것에서 안으로 반두께 좁힌 것을 뺀 띠. (Canvas2D strokeText 는 윤곽선 가운데에 선을 긋는다, 색 글리프는 테 없이 그대로)
-		if text_draw_kind == TextDrawKind::Stroke {
-			coverage = build_stroke_coverage(&coverage, bitmap_width, bitmap_height, stroke_radius);
+		let system_font_measure = create_system_font_measure(&font_description, pixel_size);
+		let shaped_text: ShapedText = textshaping::shape_text(&face_list, text, pixel_size, direction, system_font_measure.as_deref());
+		let has_system_piece = shaped_text.glyph_list.iter().any(|shaped_glyph| shaped_glyph.face_index == textshaping::SYSTEM_FACE_INDEX);
+		if pixel_size > MAXIMUM_ATLAS_FONT_SIZE || has_system_piece {
+			// 아주 큰 글꼴과 브라우저 시스템 글꼴 조각이 든 글은 문자열째 굽는다. (원본 isWholeText)
+			let laid_out_text = lay_out_text(&face_list, &font_description, text, pixel_size, direction, padding, WHITE_LUMINANCE_COLOR)?;
+			let mut coverage = laid_out_text.coverage;
+			let mut color_pixels = laid_out_text.color_pixels;
+			if text_draw_kind == TextDrawKind::Stroke {
+				coverage = build_stroke_coverage(&coverage, laid_out_text.width, laid_out_text.height, stroke_radius);
+			}
+			if !is_antialias {
+				apply_alpha_threshold(&mut coverage);
+				if let Some(color_pixels) = color_pixels.as_mut() {
+					apply_premultiplied_alpha_threshold(color_pixels);
+				}
+			}
+			let whole_text_bitmap = WholeTextBitmap {
+				pixels: compose_text_pixels(&coverage, color_pixels.as_deref()),
+				width: laid_out_text.width,
+				height: laid_out_text.height,
+				origin_x: f64::from(laid_out_text.origin_x),
+				baseline_y: laid_out_text.baseline_y as f64,
+				advance_width: f64::from(laid_out_text.advance_width),
+				font_ascent: f64::from(laid_out_text.font_ascent),
+				font_descent: f64::from(laid_out_text.font_descent),
+			};
+			return self.build_whole_text_entry(gl, whole_text_bitmap, text_draw_kind, text, font_string, line_width, bake_scale, direction);
 		}
+		let advance_width = shaped_text.advance_width;
+		let (font_ascent, font_descent) = read_line_metrics(&face_list[0].font, pixel_size);
+		let scaled_line_width_bits = match text_draw_kind {
+			TextDrawKind::Stroke => {
+				((line_width * bake_scale) as f32).to_bits()
+			}
+			TextDrawKind::Fill => {
+				0
+			}
+		};
+		let cell_padding = padding + GLYPH_CELL_GUTTER;
+		let use_serial = self.use_serial;
 
-		// 안티앨리어싱을 끈 경우: 문턱값으로 갈라 가장자리의 반투명 픽셀을 없앤다.
-		let is_antialias = self.is_text_antialias_enabled;
-		if !is_antialias {
-			apply_alpha_threshold(&mut coverage);
-			if let Some(color_pixels) = color_pixels.as_mut() {
-				apply_premultiplied_alpha_threshold(color_pixels);
+		// 글리프마다 자리와 잉크 경계. (경계는 글리프 래스터 열쇠마다 한 번 래스터해 기억한다, 이번에 래스터한 것은 칸을 지을 때 다시 쓴다)
+		if self.glyph_ink_table.len() > MAXIMUM_GLYPH_INK_COUNT {
+			self.glyph_ink_table.clear();
+		}
+		let mut raster_table: HashMap<GlyphRasterKey, textshaping::GlyphRaster> = HashMap::new();
+		let mut inked_glyph_list: Vec<(usize, GlyphRasterKey, i32, i32, GlyphInk)> = Vec::with_capacity(shaped_text.glyph_list.len());
+		for (glyph_order, shaped_glyph) in shaped_text.glyph_list.iter().enumerate() {
+			let face = &face_list[shaped_glyph.face_index];
+			let (integer_x, subpixel_x, integer_y) = split_glyph_position(shaped_glyph.position_x, shaped_glyph.position_y, read_glyph_subpixel_positioning(&face_list, shaped_glyph, pixel_size));
+			let glyph_raster_key = GlyphRasterKey {
+				font_address: Rc::as_ptr(&face.font) as usize,
+				is_synthetic_bold: face.is_synthetic_bold,
+				is_synthetic_italic: face.is_synthetic_italic,
+				glyph_index: shaped_glyph.glyph_index,
+				pixel_size_bits: pixel_size.to_bits(),
+				subpixel_x_bits: subpixel_x.to_bits(),
+			};
+			let glyph_ink = match self.glyph_ink_table.get(&glyph_raster_key) {
+				Some((glyph_ink, _)) => {
+					*glyph_ink
+				}
+				None => {
+					let glyph_raster = rasterize_shaped_glyph(&face_list, &font_description, text, shaped_glyph, pixel_size, subpixel_x, WHITE_LUMINANCE_COLOR);
+					let glyph_ink = match glyph_raster.as_ref() {
+						Some(glyph_raster) => {
+							GlyphInk {
+								left_x: glyph_raster.left_x,
+								top_y: glyph_raster.top_y,
+								width: glyph_raster.width,
+								height: glyph_raster.height,
+							}
+						}
+						None => {
+							GlyphInk::default()
+						}
+					};
+					self.glyph_ink_table.insert(glyph_raster_key, (glyph_ink, Rc::downgrade(&face.font)));
+					if let Some(glyph_raster) = glyph_raster {
+						raster_table.insert(glyph_raster_key, glyph_raster);
+					}
+					glyph_ink
+				}
+			};
+			if glyph_ink.width > 0 && glyph_ink.height > 0 {
+				inked_glyph_list.push((glyph_order, glyph_raster_key, integer_x, integer_y, glyph_ink));
 			}
 		}
 
-		// 흰색 프리멀티플라이드 RGBA 위에 색 글리프를 얹어 올리기.
-		let pixels = compose_text_pixels(&coverage, color_pixels.as_deref());
-		let texture = upload_text_texture(gl, bitmap_width, bitmap_height, &pixels, is_antialias)?;
+		// 잉크가 닿는 글리프끼리 한 칸으로 묶는다. (가로로 빈 열이 하나도 없이 닿으면, 외곽선은 띠까지 넓혀 본다)
+		// 빈 열이 있으면 선형 거르기의 이웃 텍셀에 두 글리프가 함께 들지 않아, 칸마다 그려도 문자열을 통째로 구워 그린 것과 화소가 같다.
+		// 닿는 글리프를 따로 그리면 거르기와 겹친 잉크 섞기가 달라진다. (원본은 라틴 낱말을 한 칸에 굽는다)
+		let stroke_extent = match text_draw_kind {
+			TextDrawKind::Stroke => {
+				stroke_radius.ceil() as i32
+			}
+			TextDrawKind::Fill => {
+				0
+			}
+		};
+		let mut chunk_list: Vec<(i32, i32, Vec<usize>)> = Vec::new();
+		for (inked_index, (_, _, integer_x, _, glyph_ink)) in inked_glyph_list.iter().enumerate() {
+			let left_x = integer_x + glyph_ink.left_x - stroke_extent;
+			let right_x = integer_x + glyph_ink.left_x + glyph_ink.width + stroke_extent;
+			let touching_index_list: Vec<usize> = chunk_list.iter().enumerate().filter(|(_, chunk)| left_x <= chunk.1 && chunk.0 <= right_x).map(|(chunk_index, _)| chunk_index).collect();
+			if touching_index_list.is_empty() {
+				chunk_list.push((left_x, right_x, vec![inked_index]));
+				continue;
+			}
+			let mut merged_chunk = (left_x, right_x, vec![inked_index]);
+			for chunk_index in touching_index_list.into_iter().rev() {
+				let chunk = chunk_list.remove(chunk_index);
+				merged_chunk.0 = merged_chunk.0.min(chunk.0);
+				merged_chunk.1 = merged_chunk.1.max(chunk.1);
+				merged_chunk.2.extend(chunk.2);
+			}
+			merged_chunk.2.sort_unstable();
+			chunk_list.push(merged_chunk);
+		}
 
-		Some(TextEntry {
+		// 칸 찾기. (없으면 지어 굽기 목록에 모은다, 있으면 그 장의 사용 번호를 올려 이번에 비우지 않게 한다)
+		let mut glyph_position_list: Vec<(GlyphKey, i32, i32)> = Vec::with_capacity(chunk_list.len());
+		let mut pending_glyph_list: Vec<PendingGlyph> = Vec::new();
+		for (_, _, inked_index_list) in &chunk_list {
+			let (_, _, first_integer_x, first_integer_y, _) = inked_glyph_list[inked_index_list[0]];
+			let glyph_key = GlyphKey::Glyphs {
+				glyph_list: inked_index_list.iter().map(|inked_index| {
+					let (_, glyph_raster_key, integer_x, integer_y, _) = inked_glyph_list[*inked_index];
+					(glyph_raster_key, integer_x - first_integer_x, integer_y - first_integer_y)
+				}).collect(),
+				text_draw_kind,
+				scaled_line_width_bits,
+				is_antialias,
+			};
+			if let Some(glyph) = self.glyph_table.get(&glyph_key) {
+				if let Some(atlas_page_id) = glyph.atlas_page_id {
+					if let Some(atlas_page) = self.atlas_page_list.iter_mut().find(|atlas_page| atlas_page.id == atlas_page_id) {
+						atlas_page.last_use_serial = use_serial;
+					}
+				}
+			}
+			else if !pending_glyph_list.iter().any(|pending_glyph| pending_glyph.glyph_key == glyph_key) {
+				// 칸에 든 글리프 래스터. (이번에 래스터하지 않은 것은 다시 래스터한다)
+				for inked_index in inked_index_list {
+					let (glyph_order, glyph_raster_key, _, _, _) = inked_glyph_list[*inked_index];
+					if raster_table.contains_key(&glyph_raster_key) {
+						continue;
+					}
+					if let Some(glyph_raster) = rasterize_shaped_glyph(&face_list, &font_description, text, &shaped_text.glyph_list[glyph_order], pixel_size, f32::from_bits(glyph_raster_key.subpixel_x_bits), WHITE_LUMINANCE_COLOR) {
+						raster_table.insert(glyph_raster_key, glyph_raster);
+					}
+				}
+				let mut member_list: Vec<(&textshaping::GlyphRaster, i32, i32)> = Vec::with_capacity(inked_index_list.len());
+				let mut font_list: Vec<std::rc::Weak<LoadedFont>> = Vec::new();
+				for inked_index in inked_index_list {
+					let (glyph_order, glyph_raster_key, integer_x, integer_y, _) = inked_glyph_list[*inked_index];
+					if let Some(glyph_raster) = raster_table.get(&glyph_raster_key) {
+						member_list.push((glyph_raster, integer_x - first_integer_x, integer_y - first_integer_y));
+						let font = &face_list[shaped_text.glyph_list[glyph_order].face_index].font;
+						if !font_list.iter().any(|weak_font| std::ptr::eq(weak_font.as_ptr(), Rc::as_ptr(font))) {
+							font_list.push(Rc::downgrade(font));
+						}
+					}
+				}
+				if member_list.is_empty() {
+					continue;
+				}
+				let first_font = &face_list[shaped_text.glyph_list[inked_glyph_list[inked_index_list[0]].0].face_index].font;
+				let (line_ascent, line_descent) = read_line_metrics(first_font, pixel_size);
+				pending_glyph_list.push(compose_atlas_chunk(&member_list, font_list, text_draw_kind, stroke_radius, is_antialias, cell_padding, line_ascent, line_descent, glyph_key.clone()));
+			}
+			glyph_position_list.push((glyph_key, first_integer_x, first_integer_y));
+		}
+		if !pending_glyph_list.is_empty() {
+			self.bake_glyphs(gl, pending_glyph_list, is_antialias);
+		}
+
+		// 문자열 사각형. (예전에 문자열을 통째로 구운 비트맵과 같은 셈, 펜 원점 기준 위가 양수)
+		let mut minimum_x: f32 = 0.0;
+		let mut maximum_x: f32 = advance_width;
+		let mut top_extent: f32 = font_ascent;
+		let mut bottom_extent: f32 = font_descent;
+		for (_, _, integer_x, integer_y, glyph_ink) in &inked_glyph_list {
+			let left_x = integer_x + glyph_ink.left_x;
+			let top_y = integer_y + glyph_ink.top_y;
+			minimum_x = minimum_x.min(left_x as f32);
+			maximum_x = maximum_x.max((left_x + glyph_ink.width) as f32);
+			top_extent = top_extent.max(top_y as f32);
+			bottom_extent = bottom_extent.max((glyph_ink.height - top_y) as f32);
+		}
+		let origin_x = padding as f32 - minimum_x.floor();
+		let baseline_y = padding + top_extent.ceil() as i32;
+		let width = (origin_x + maximum_x).ceil() as i32 + padding;
+		let height = baseline_y + bottom_extent.ceil() as i32 + padding;
+		if width <= 0 || height <= 0 {
+			return None;
+		}
+
+		// 글리프 사각형. (문자열 사각형 왼쪽 위 기준, 사각형 밖은 잘라 낸다)
+		let origin_x_integer = origin_x as i32;
+		let mut glyph_texture_list: Vec<crate::core::graphic::GlTexture> = Vec::with_capacity(glyph_position_list.len());
+		let mut glyph_rect_list: Vec<[f64; 8]> = Vec::with_capacity(glyph_position_list.len());
+		let mut atlas_page_id_list: Vec<u64> = Vec::new();
+		for (glyph_key, integer_x, integer_y) in &glyph_position_list {
+			let glyph = match self.glyph_table.get(glyph_key) {
+				Some(glyph) => {
+					glyph
+				}
+				None => {
+					continue;
+				}
+			};
+			let cell_left = origin_x_integer + integer_x - glyph.origin_x;
+			let cell_top = baseline_y - integer_y - glyph.baseline_y;
+			if let Some(glyph_rect) = self.append_glyph_rect(glyph, cell_left, cell_top, width, height, bake_scale, &mut glyph_texture_list, &mut atlas_page_id_list) {
+				glyph_rect_list.push(glyph_rect);
+			}
+		}
+
+		Some((
+			TextEntry {
+				glyph_textures: Rc::from(glyph_texture_list),
+				glyph_rects: Rc::from(glyph_rect_list),
+				advance_width: f64::from(advance_width) / bake_scale,
+				font_ascent: f64::from(font_ascent) / bake_scale,
+				font_descent: f64::from(font_descent) / bake_scale,
+				pen_offset_x: f64::from(origin_x) / bake_scale,
+				baseline_offset_y: baseline_y as f64 / bake_scale,
+				quad_width: width as f64 / bake_scale,
+				quad_height: height as f64 / bake_scale,
+			},
+			atlas_page_id_list,
+		))
+	}
+
+	//==============================================================================
+	/// 문자열째 구운 비트맵을 칸 하나로 굽고 엔트리 짓기. (아주 큰 글꼴, 브라우저로 굽는 웹, 원본 isWholeText)
+	//==============================================================================
+	#[allow(clippy::too_many_arguments)]
+	fn build_whole_text_entry(&mut self, gl: &glow::Context, whole_text_bitmap: WholeTextBitmap, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<(TextEntry, Vec<u64>)> {
+		let width = whole_text_bitmap.width;
+		let height = whole_text_bitmap.height;
+		if width <= 0 || height <= 0 {
+			return None;
+		}
+		let is_antialias = self.is_text_antialias_enabled;
+		let glyph_key = GlyphKey::WholeText {
+			text: text.to_string(),
+			font_string: font_string.to_string(),
+			direction,
+			bake_scale_bits: bake_scale.to_bits(),
+			text_draw_kind,
+			line_width_bits: line_width.to_bits(),
+			is_antialias,
+		};
+		if !self.glyph_table.contains_key(&glyph_key) {
+			let pending_glyph = PendingGlyph {
+				glyph_key: glyph_key.clone(),
+				pixels: whole_text_bitmap.pixels,
+				glyph: AtlasGlyph {
+					font_list: Vec::new(),
+					atlas_page_id: None,
+					atlas_x: 0,
+					atlas_y: 0,
+					cell_width: width,
+					cell_height: height,
+					origin_x: 0,
+					baseline_y: 0,
+				},
+			};
+			self.bake_glyphs(gl, vec![pending_glyph], is_antialias);
+		}
+		let mut glyph_texture_list: Vec<crate::core::graphic::GlTexture> = Vec::with_capacity(1);
+		let mut glyph_rect_list: Vec<[f64; 8]> = Vec::with_capacity(1);
+		let mut atlas_page_id_list: Vec<u64> = Vec::new();
+		if let Some(glyph) = self.glyph_table.get(&glyph_key) {
+			if let Some(atlas_page_id) = glyph.atlas_page_id {
+				let use_serial = self.use_serial;
+				if let Some(atlas_page) = self.atlas_page_list.iter_mut().find(|atlas_page| atlas_page.id == atlas_page_id) {
+					atlas_page.last_use_serial = use_serial;
+				}
+			}
+			if let Some(glyph_rect) = self.append_glyph_rect(glyph, 0, 0, width, height, bake_scale, &mut glyph_texture_list, &mut atlas_page_id_list) {
+				glyph_rect_list.push(glyph_rect);
+			}
+		}
+		Some((
+			TextEntry {
+				glyph_textures: Rc::from(glyph_texture_list),
+				glyph_rects: Rc::from(glyph_rect_list),
+				advance_width: whole_text_bitmap.advance_width / bake_scale,
+				font_ascent: whole_text_bitmap.font_ascent / bake_scale,
+				font_descent: whole_text_bitmap.font_descent / bake_scale,
+				pen_offset_x: whole_text_bitmap.origin_x / bake_scale,
+				baseline_offset_y: whole_text_bitmap.baseline_y / bake_scale,
+				quad_width: width as f64 / bake_scale,
+				quad_height: height as f64 / bake_scale,
+			},
+			atlas_page_id_list,
+		))
+	}
+
+	//==============================================================================
+	/// 글리프 칸 하나를 문자열 사각형 안으로 잘라 글리프 사각형으로. (그릴 잉크가 없거나 사각형 밖이면 None, 쓰는 장 텍스처와 번호를 목록에 더한다)
+	//==============================================================================
+	#[allow(clippy::too_many_arguments)]
+	fn append_glyph_rect(&self, glyph: &AtlasGlyph, cell_left: i32, cell_top: i32, width: i32, height: i32, bake_scale: f64, glyph_texture_list: &mut Vec<crate::core::graphic::GlTexture>, atlas_page_id_list: &mut Vec<u64>) -> Option<[f64; 8]> {
+		let atlas_page_id = glyph.atlas_page_id?;
+		let atlas_page = self.atlas_page_list.iter().find(|atlas_page| atlas_page.id == atlas_page_id)?;
+		let clipped_left = cell_left.max(0);
+		let clipped_right = (cell_left + glyph.cell_width).min(width);
+		let clipped_top = cell_top.max(0);
+		let clipped_bottom = (cell_top + glyph.cell_height).min(height);
+		if clipped_right <= clipped_left || clipped_bottom <= clipped_top {
+			return None;
+		}
+		glyph_texture_list.push(atlas_page.texture);
+		if !atlas_page_id_list.contains(&atlas_page_id) {
+			atlas_page_id_list.push(atlas_page_id);
+		}
+		let page_width = f64::from(atlas_page.width);
+		let page_height = f64::from(atlas_page.height);
+		Some([
+			f64::from(clipped_left) / bake_scale,
+			f64::from(clipped_top) / bake_scale,
+			f64::from(clipped_right) / bake_scale,
+			f64::from(clipped_bottom) / bake_scale,
+			f64::from(glyph.atlas_x + clipped_left - cell_left) / page_width,
+			f64::from(glyph.atlas_y + clipped_top - cell_top) / page_height,
+			f64::from(glyph.atlas_x + clipped_right - cell_left) / page_width,
+			f64::from(glyph.atlas_y + clipped_bottom - cell_top) / page_height,
+		])
+	}
+
+	//==============================================================================
+	/// 새 글리프들을 아틀라스에 놓고 올리기. (원본 bakeGlyphs, 같은 줄에 이어 놓인 글리프들은 한 번에 올린다)
+	//==============================================================================
+	fn bake_glyphs(&mut self, gl: &glow::Context, pending_glyph_list: Vec<PendingGlyph>, is_antialias: bool) {
+		let is_nearest = !is_antialias;
+		// 칸 자리 잡기와 이어진 칸 묶기. (장 번호, 줄 y, 왼쪽 x, 너비, 높이, 글리프 차례들)
+		let mut span_list: Vec<(u64, i32, i32, i32, i32, Vec<usize>)> = Vec::new();
+		let mut placed_glyph_list: Vec<PendingGlyph> = Vec::with_capacity(pending_glyph_list.len());
+		for mut pending_glyph in pending_glyph_list {
+			let glyph = &mut pending_glyph.glyph;
+			if glyph.cell_width > 0 && glyph.cell_height > 0 {
+				if let Some((atlas_page_id, atlas_x, atlas_y)) = self.allocate_glyph_cell(gl, glyph.cell_width, glyph.cell_height, is_nearest) {
+					glyph.atlas_page_id = Some(atlas_page_id);
+					glyph.atlas_x = atlas_x;
+					glyph.atlas_y = atlas_y;
+					let glyph_order = placed_glyph_list.len();
+					let is_joined = match span_list.last_mut() {
+						Some(span) if span.0 == atlas_page_id && span.1 == atlas_y && span.2 + span.3 == atlas_x && span.4 == glyph.cell_height => {
+							span.3 += glyph.cell_width;
+							span.5.push(glyph_order);
+							true
+						}
+						_ => {
+							false
+						}
+					};
+					if !is_joined {
+						span_list.push((atlas_page_id, atlas_y, atlas_x, glyph.cell_width, glyph.cell_height, vec![glyph_order]));
+					}
+				}
+			}
+			placed_glyph_list.push(pending_glyph);
+		}
+
+		// 이어진 칸마다 한 번 올리기. (프리멀티플라이드 RGBA)
+		for (atlas_page_id, atlas_y, atlas_x, span_width, span_height, glyph_order_list) in &span_list {
+			let texture = match self.atlas_page_list.iter().find(|atlas_page| atlas_page.id == *atlas_page_id) {
+				Some(atlas_page) => {
+					atlas_page.texture
+				}
+				None => {
+					continue;
+				}
+			};
+			let mut span_pixels = vec![0u8; (*span_width * *span_height * 4) as usize];
+			for glyph_order in glyph_order_list {
+				let placed_glyph = &placed_glyph_list[*glyph_order];
+				let glyph = &placed_glyph.glyph;
+				let offset_x = glyph.atlas_x - atlas_x;
+				let row_bytes = (glyph.cell_width * 4) as usize;
+				for cell_y in 0..glyph.cell_height {
+					let source_start = (cell_y * glyph.cell_width * 4) as usize;
+					let destination_start = ((cell_y * *span_width + offset_x) * 4) as usize;
+					span_pixels[destination_start..destination_start + row_bytes].copy_from_slice(&placed_glyph.pixels[source_start..source_start + row_bytes]);
+				}
+			}
+			unsafe {
+				gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+				gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+				gl.tex_sub_image_2d(glow::TEXTURE_2D, 0, *atlas_x, *atlas_y, *span_width, *span_height, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&span_pixels)));
+			}
+			self.baked_glyph_count += glyph_order_list.len() as u64;
+			self.upload_count += 1;
+		}
+
+		// 글리프 맵과 장의 글리프 목록에 넣기.
+		for placed_glyph in placed_glyph_list {
+			if let Some(atlas_page_id) = placed_glyph.glyph.atlas_page_id {
+				if let Some(atlas_page) = self.atlas_page_list.iter_mut().find(|atlas_page| atlas_page.id == atlas_page_id) {
+					atlas_page.glyph_key_list.push(placed_glyph.glyph_key.clone());
+				}
+			}
+			self.glyph_table.insert(placed_glyph.glyph_key, placed_glyph.glyph);
+		}
+	}
+
+	//==============================================================================
+	/// 글리프 칸 자리 잡기. (원본 allocateGlyphCell, (장 번호, x, y))
+	/// - 가장 나중에 연 장의 같은 높이 줄에 이어 놓고, 없으면 새 줄, 차면 새 장, 장 수가 상한이면 가장 오래 안 쓴 장을 비운다.
+	///   (TextMeshPro 여러 장 아틀라스처럼, 앞 장의 남은 틈을 채우면 한 문자열의 글리프가 여러 장에 흩어져 드로 콜이 나뉜다)
+	/// - 이번 엔트리가 쓰는 장(사용 번호가 지금 번호)은 비우지 않는다. 그것뿐이면 상한을 넘겨 새 장을 연다. 한 장보다 큰 칸은 제 크기의 장을 따로 연다.
+	//==============================================================================
+	fn allocate_glyph_cell(&mut self, gl: &glow::Context, width: i32, height: i32, is_nearest: bool) -> Option<(u64, i32, i32)> {
+		if width > ATLAS_PAGE_SIZE || height > ATLAS_PAGE_SIZE {
+			self.make_room_for_atlas_page();
+			let atlas_page_index = self.create_atlas_page(gl, width, height, is_nearest, true)?;
+			let atlas_page = &mut self.atlas_page_list[atlas_page_index];
+			atlas_page.next_shelf_y = height;
+			return Some((atlas_page.id, 0, 0));
+		}
+		if let Some(atlas_page_index) = self.atlas_page_list.iter().rposition(|atlas_page| atlas_page.is_nearest == is_nearest && !atlas_page.is_dedicated) {
+			if let Some(placed) = try_place_glyph_cell(&mut self.atlas_page_list[atlas_page_index], width, height, self.use_serial) {
+				return Some(placed);
+			}
+		}
+		self.make_room_for_atlas_page();
+		let atlas_page_index = self.create_atlas_page(gl, ATLAS_PAGE_SIZE, ATLAS_PAGE_SIZE, is_nearest, false)?;
+		try_place_glyph_cell(&mut self.atlas_page_list[atlas_page_index], width, height, self.use_serial)
+	}
+
+	//==============================================================================
+	/// 장 수가 상한이면 가장 오래 안 쓴 장 하나를 비워 자리를 낸다. (원본 makeRoomForAtlasPage, 이번 엔트리가 쓰는 장은 비우지 않는다)
+	//==============================================================================
+	fn make_room_for_atlas_page(&mut self) {
+		if self.atlas_page_list.len() < MAXIMUM_ATLAS_PAGE_COUNT {
+			return;
+		}
+		let use_serial = self.use_serial;
+		let oldest_atlas_page_index = self.atlas_page_list.iter().enumerate().filter(|(_, atlas_page)| atlas_page.last_use_serial < use_serial).min_by_key(|(_, atlas_page)| atlas_page.last_use_serial).map(|(atlas_page_index, _)| atlas_page_index);
+		if let Some(atlas_page_index) = oldest_atlas_page_index {
+			self.remove_atlas_page(atlas_page_index);
+		}
+	}
+
+	//==============================================================================
+	/// 아틀라스 장 만들기. (원본 createAtlasPage, 빈 텍셀로 채운 텍스처, 만든 장의 차례)
+	//==============================================================================
+	fn create_atlas_page(&mut self, gl: &glow::Context, width: i32, height: i32, is_nearest: bool, is_dedicated: bool) -> Option<usize> {
+		let texture_filter = if is_nearest {
+			glow::NEAREST
+		}
+		else {
+			glow::LINEAR
+		};
+		let empty_pixels = vec![0u8; (width * height * 4) as usize];
+		let texture = unsafe {
+			let texture = gl.create_texture().ok()?;
+			gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+			gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, width, height, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&empty_pixels)));
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, texture_filter as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, texture_filter as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+			texture
+		};
+		let id = self.next_atlas_page_id;
+		self.next_atlas_page_id += 1;
+		self.atlas_page_list.push(AtlasPage {
+			id,
 			texture,
-			advance_width: f64::from(laid_out_text.advance_width) / bake_scale,
-			font_ascent: f64::from(laid_out_text.font_ascent) / bake_scale,
-			font_descent: f64::from(laid_out_text.font_descent) / bake_scale,
-			pen_offset_x: f64::from(laid_out_text.origin_x) / bake_scale,
-			baseline_offset_y: laid_out_text.baseline_y as f64 / bake_scale,
-			quad_width: bitmap_width as f64 / bake_scale,
-			quad_height: bitmap_height as f64 / bake_scale,
-		})
+			width,
+			height,
+			is_nearest,
+			is_dedicated,
+			shelf_list: Vec::new(),
+			next_shelf_y: 0,
+			glyph_key_list: Vec::new(),
+			last_use_serial: self.use_serial,
+		});
+		Some(self.atlas_page_list.len() - 1)
+	}
+
+	//==============================================================================
+	/// 아틀라스 장 지우기. (원본 removeAtlasPage, 그 장의 글리프와 그 장을 쓰는 엔트리도 버린다, 텍스처는 버릴 목록에 둔다)
+	//==============================================================================
+	fn remove_atlas_page(&mut self, atlas_page_index: usize) {
+		let atlas_page = self.atlas_page_list.remove(atlas_page_index);
+		for glyph_key in &atlas_page.glyph_key_list {
+			let is_in_page = self.glyph_table.get(glyph_key).is_some_and(|glyph| glyph.atlas_page_id == Some(atlas_page.id));
+			if is_in_page {
+				self.glyph_table.remove(glyph_key);
+			}
+		}
+		let atlas_page_id = atlas_page.id;
+		let mut removed_count = 0;
+		self.entry_table.retain(|_, cached_text_entry_list| {
+			cached_text_entry_list.retain(|cached_text_entry| {
+				let is_affected = cached_text_entry.atlas_page_id_list.contains(&atlas_page_id);
+				if is_affected {
+					removed_count += 1;
+				}
+				!is_affected
+			});
+			!cached_text_entry_list.is_empty()
+		});
+		self.entry_count -= removed_count;
+		self.pending_deleted_texture_list.push(atlas_page.texture);
+	}
+
+	//==============================================================================
+	/// 글리프 아틀라스 통계. (원본 readAtlasStatistics, 시험과 통계용: 장 수, 글리프 수, 지금까지 구운 글리프 수, 지금까지 올린 수, 엔트리 수)
+	///
+	/// # 돌려줌
+	/// 지금의 통계.
+	///
+	/// # 예제
+	/// 처음 굽는 글은 아틀라스 장을 열고 엔트리 하나를 더한다
+	/// ```rust,no_run
+	/// use vanilla::core::textstringtexturecache::{TextDrawKind, TextStringTextureCache};
+	/// use vanilla::ShapingDirection;
+	///
+	/// fn bake_once(text_string_texture_cache: &mut TextStringTextureCache, gl: &glow::Context) {
+	/// 	let entry_count = text_string_texture_cache.read_atlas_statistics().entry_count;
+	/// 	text_string_texture_cache.get_entry(gl, TextDrawKind::Fill, "Score 100", "20px default", 0.0, 1.0, ShapingDirection::LeftToRight);
+	/// 	let text_atlas_statistics = text_string_texture_cache.read_atlas_statistics();
+	/// 	assert!(text_atlas_statistics.atlas_page_count >= 1);
+	/// 	assert!(text_atlas_statistics.baked_glyph_count >= 1);
+	/// 	assert_eq!(text_atlas_statistics.entry_count, entry_count + 1);
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn read_atlas_statistics(&self) -> TextAtlasStatistics {
+		TextAtlasStatistics {
+			atlas_page_count: self.atlas_page_list.len(),
+			glyph_count: self.glyph_table.len(),
+			baked_glyph_count: self.baked_glyph_count,
+			upload_count: self.upload_count,
+			entry_count: self.entry_count,
+		}
 	}
 }
 
@@ -2403,26 +3102,137 @@ fn create_system_font_measure(font_description: &FontDescription, pixel_size: f3
 }
 
 //==============================================================================
-/// 브라우저 시스템 글꼴로 굽기. (웹. 글꼴 바이트가 하나도 없을 때)
+/// 문자열째 구운 비트맵. (프리멀티플라이드 RGBA, 길이 단위는 배율을 곱한 픽셀)
+//==============================================================================
+struct WholeTextBitmap {
+	pixels: Vec<u8>,
+	width: i32,
+	height: i32,
+	origin_x: f64,
+	baseline_y: f64,
+	advance_width: f64,
+	font_ascent: f64,
+	font_descent: f64,
+}
+
+//==============================================================================
+/// 브라우저 시스템 글꼴로 문자열째 굽기. (웹. 글꼴 바이트가 하나도 없거나 브라우저로 굽을 때)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
-fn bake_system_font_entry(gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f64, bake_scale: f64, is_antialias: bool, direction: ShapingDirection) -> Option<TextEntry> {
+fn bake_system_font_bitmap(text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f64, bake_scale: f64, is_antialias: bool, direction: ShapingDirection) -> Option<WholeTextBitmap> {
 	let mut system_font_bitmap = crate::platform::web::systemfont::bake_text(text_draw_kind, text, font_description, line_width, bake_scale, direction)?;
 	if !is_antialias {
 		// 프리멀티플라이드라 알파로 가르고 색은 곧은 색으로 채운다. (흰 글자는 네 칸 모두 덮인 정도, 색 이모지는 제 색)
 		apply_premultiplied_alpha_threshold(&mut system_font_bitmap.pixels);
 	}
-	let texture = upload_text_texture(gl, system_font_bitmap.bitmap_width, system_font_bitmap.bitmap_height, &system_font_bitmap.pixels, is_antialias)?;
-	Some(TextEntry {
-		texture,
-		advance_width: system_font_bitmap.advance_width / bake_scale,
-		font_ascent: system_font_bitmap.font_ascent / bake_scale,
-		font_descent: system_font_bitmap.font_descent / bake_scale,
-		pen_offset_x: system_font_bitmap.pen_x / bake_scale,
-		baseline_offset_y: system_font_bitmap.baseline_y / bake_scale,
-		quad_width: system_font_bitmap.bitmap_width as f64 / bake_scale,
-		quad_height: system_font_bitmap.bitmap_height as f64 / bake_scale,
+	Some(WholeTextBitmap {
+		pixels: system_font_bitmap.pixels,
+		width: system_font_bitmap.bitmap_width,
+		height: system_font_bitmap.bitmap_height,
+		origin_x: system_font_bitmap.pen_x,
+		baseline_y: system_font_bitmap.baseline_y,
+		advance_width: system_font_bitmap.advance_width,
+		font_ascent: system_font_bitmap.font_ascent,
+		font_descent: system_font_bitmap.font_descent,
 	})
+}
+
+//==============================================================================
+/// 잉크가 닿는 글리프 묶음을 아틀라스 칸으로 짓기. (글리프 차례대로 겹쳐 얹고, 외곽선, 안티앨리어싱 문턱, 흰색 프리멀티플라이드 RGBA 까지)
+/// - member_list: (래스터, 첫 글리프에서의 정수 자리 차이 x, y(위가 양수)). 문자열을 통째로 구울 때(lay_out_text)와 같은 차례와 섞기다.
+/// - 칸 가로는 잉크에 여백(cell_padding)을 둘러 잡고, 세로는 첫 얼굴의 줄 높이(넘는 잉크는 잉크까지)에 여백을 둘러 잡는다. (같은 글꼴의 칸이 같은 높이 줄에 이어 놓인다)
+//==============================================================================
+#[allow(clippy::too_many_arguments)]
+fn compose_atlas_chunk(member_list: &[(&textshaping::GlyphRaster, i32, i32)], font_list: Vec<std::rc::Weak<LoadedFont>>, text_draw_kind: TextDrawKind, stroke_radius: f32, is_antialias: bool, cell_padding: i32, line_ascent: f32, line_descent: f32, glyph_key: GlyphKey) -> PendingGlyph {
+	let mut ink_left_x = i32::MAX;
+	let mut ink_right_x = i32::MIN;
+	let mut ink_top_extent = line_ascent.ceil() as i32;
+	let mut ink_bottom_extent = line_descent.ceil() as i32;
+	for (glyph_raster, offset_x, offset_y) in member_list {
+		ink_left_x = ink_left_x.min(offset_x + glyph_raster.left_x);
+		ink_right_x = ink_right_x.max(offset_x + glyph_raster.left_x + glyph_raster.width);
+		ink_top_extent = ink_top_extent.max(offset_y + glyph_raster.top_y);
+		ink_bottom_extent = ink_bottom_extent.max(glyph_raster.height - (offset_y + glyph_raster.top_y));
+	}
+	let cell_width = ink_right_x - ink_left_x + cell_padding * 2;
+	let cell_height = ink_top_extent + ink_bottom_extent + cell_padding * 2;
+	let origin_x = cell_padding - ink_left_x;
+	let baseline_y = cell_padding + ink_top_extent;
+
+	// 칸 크기의 덮인 정도와 색 층. (겹치는 곳은 원본 캔버스처럼 뒤 글리프를 위에 얹는다, 색 글리프는 색 층에)
+	let mut coverage = vec![0u8; (cell_width * cell_height) as usize];
+	let mut color_pixels: Option<Vec<u8>> = None;
+	for (glyph_raster, offset_x, offset_y) in member_list {
+		let glyph_left_x = origin_x + offset_x + glyph_raster.left_x;
+		let glyph_top_y = baseline_y - (offset_y + glyph_raster.top_y);
+		if let Some(glyph_color_pixels) = glyph_raster.color_pixels.as_ref() {
+			let layer_pixels = color_pixels.get_or_insert_with(|| vec![0u8; (cell_width * cell_height * 4) as usize]);
+			draw_color_pixels(layer_pixels, cell_width, cell_height, glyph_color_pixels, glyph_raster.width, glyph_raster.height, glyph_left_x, glyph_top_y);
+		}
+		for glyph_y in 0..glyph_raster.height {
+			for glyph_x in 0..glyph_raster.width {
+				let cell_index = ((glyph_top_y + glyph_y) * cell_width + glyph_left_x + glyph_x) as usize;
+				coverage[cell_index] = blend_coverage(coverage[cell_index], glyph_raster.coverage[(glyph_y * glyph_raster.width + glyph_x) as usize]);
+			}
+		}
+	}
+
+	// 외곽선: 윤곽 바깥으로 반두께 넓힌 것에서 안으로 반두께 좁힌 것을 뺀 띠. (띠가 닿는 글리프는 한 칸에 묶였으므로 문자열째 그은 것과 같다, 색 글리프는 테 없이 그대로)
+	if text_draw_kind == TextDrawKind::Stroke {
+		coverage = build_stroke_coverage(&coverage, cell_width, cell_height, stroke_radius);
+	}
+
+	// 안티앨리어싱을 끈 경우: 문턱값으로 갈라 가장자리의 반투명 픽셀을 없앤다.
+	if !is_antialias {
+		apply_alpha_threshold(&mut coverage);
+		if let Some(color_pixels) = color_pixels.as_mut() {
+			apply_premultiplied_alpha_threshold(color_pixels);
+		}
+	}
+
+	PendingGlyph {
+		glyph_key,
+		pixels: compose_text_pixels(&coverage, color_pixels.as_deref()),
+		glyph: AtlasGlyph {
+			font_list,
+			atlas_page_id: None,
+			atlas_x: 0,
+			atlas_y: 0,
+			cell_width,
+			cell_height,
+			origin_x,
+			baseline_y,
+		},
+	}
+}
+
+//==============================================================================
+/// 장 하나에 글리프 칸 놓아 보기. (원본 tryPlaceGlyph, 같은 높이 줄의 남은 자리, 없으면 새 줄. (장 번호, x, y), 자리가 없으면 None)
+//==============================================================================
+fn try_place_glyph_cell(atlas_page: &mut AtlasPage, width: i32, height: i32, use_serial: u64) -> Option<(u64, i32, i32)> {
+	if width > atlas_page.width {
+		return None;
+	}
+	for shelf in &mut atlas_page.shelf_list {
+		if shelf.height == height && shelf.cursor_x + width <= atlas_page.width {
+			let atlas_x = shelf.cursor_x;
+			shelf.cursor_x += width;
+			atlas_page.last_use_serial = use_serial;
+			return Some((atlas_page.id, atlas_x, shelf.y));
+		}
+	}
+	if atlas_page.next_shelf_y + height <= atlas_page.height {
+		let atlas_y = atlas_page.next_shelf_y;
+		atlas_page.shelf_list.push(AtlasShelf {
+			y: atlas_y,
+			height,
+			cursor_x: width,
+		});
+		atlas_page.next_shelf_y += height;
+		atlas_page.last_use_serial = use_serial;
+		return Some((atlas_page.id, 0, atlas_y));
+	}
+	None
 }
 
 //==============================================================================
@@ -2531,39 +3341,6 @@ fn peek_color_font_tables(font_path: &std::path::Path) -> bool {
 		Err(_) => {
 			false
 		}
-	}
-}
-
-//==============================================================================
-/// 구운 픽셀을 텍스처로 올리기. (흰색 프리멀티플라이드 RGBA, 안티앨리어싱을 끄면 NEAREST)
-//==============================================================================
-fn upload_text_texture(gl: &glow::Context, bitmap_width: i32, bitmap_height: i32, pixels: &[u8], is_antialias: bool) -> Option<crate::core::graphic::GlTexture> {
-	let texture_filter = if is_antialias {
-		glow::LINEAR
-	}
-	else {
-		glow::NEAREST
-	};
-	unsafe {
-		let texture = gl.create_texture().ok()?;
-		gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-		gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
-		gl.tex_image_2d(
-			glow::TEXTURE_2D,
-			0,
-			glow::RGBA8 as i32,
-			bitmap_width,
-			bitmap_height,
-			0,
-			glow::RGBA,
-			glow::UNSIGNED_BYTE,
-			glow::PixelUnpackData::Slice(Some(pixels)),
-		);
-		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, texture_filter as i32);
-		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, texture_filter as i32);
-		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
-		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
-		Some(texture)
 	}
 }
 
@@ -4149,7 +4926,8 @@ mod tests {
 		assert_ne!(first_hash, create_entry_hash(TextDrawKind::Fill, true, ShapingDirection::LeftToRight, "가나다", "16px default", 0.0, 2.0));
 		assert_ne!(first_hash, create_entry_hash(TextDrawKind::Fill, false, ShapingDirection::LeftToRight, "가나다", "16px default", 0.0, 1.5));
 		let texture_entry = TextEntry {
-			texture: glow::NativeTexture(std::num::NonZeroU32::new(1).expect("one")),
+			glyph_textures: Rc::from(vec![glow::NativeTexture(std::num::NonZeroU32::new(1).expect("one"))]),
+			glyph_rects: Rc::from(vec![[0.0; 8]]),
 			advance_width: 0.0,
 			font_ascent: 0.0,
 			font_descent: 0.0,
@@ -4167,7 +4945,8 @@ mod tests {
 			line_width: 0.0,
 			bake_scale: 1.5,
 			entry: texture_entry,
-			last_used_frame_number: 0,
+			atlas_page_id_list: Vec::new(),
+			last_use_serial: 0,
 		};
 		assert!(cached_text_entry.is_same_key(TextDrawKind::Fill, true, ShapingDirection::LeftToRight, "가나다", "16px default", 0.0, 1.5));
 		assert!(!cached_text_entry.is_same_key(TextDrawKind::Fill, false, ShapingDirection::LeftToRight, "가나다", "16px default", 0.0, 1.5));
