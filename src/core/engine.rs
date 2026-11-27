@@ -2045,7 +2045,7 @@ impl Engine {
 	/// 	engine.spawn_task(|mut engine_context| async move {
 	/// 		let result: Result<GpuThroughput, String> = engine_context.with(|engine| engine.measure_gpu_throughput(60)).await;
 	/// 		if let Ok(throughput) = result {
-	/// 			println!("{} 프레임, 프레임당 {} 밀리초", throughput.frame_count, throughput.milliseconds_per_frame);
+	/// 			println!("{} frames, {} ms per frame", throughput.frame_count, throughput.milliseconds_per_frame);
 	/// 		}
 	/// 	});
 	/// }
