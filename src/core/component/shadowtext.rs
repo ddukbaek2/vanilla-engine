@@ -546,6 +546,7 @@ impl ShadowText {
 	/// - `text`: 그릴 한 줄 글. (빈 글이면 그리지 않는다)
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.text = String::from(text);
 		self.is_bake_dirty = true;
 	}
@@ -568,6 +569,7 @@ impl ShadowText {
 	//==============================================================================
 	#[reflect(name = "FontFace")]
 	pub fn set_font_family(&mut self, font_family: &str) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.font_family = String::from(font_family);
 		self.is_bake_dirty = true;
 	}
@@ -600,6 +602,7 @@ impl ShadowText {
 	/// - `text_align`: 노드 안 가로 정렬. (Left, Center, Right, Start / End 는 글 방향으로 푼다, 처음 Center)
 	//==============================================================================
 	pub fn set_text_align(&mut self, text_align: TextAlign) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.text_align = text_align;
 	}
 
@@ -620,6 +623,7 @@ impl ShadowText {
 	/// - `text_direction`: 글 방향. (Auto 는 글의 첫 강한 글자로 정한다, 처음 Ltr)
 	//==============================================================================
 	pub fn set_text_direction(&mut self, text_direction: TextDirection) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.text_direction = text_direction;
 		self.is_bake_dirty = true;
 	}
@@ -670,6 +674,7 @@ impl ShadowText {
 	/// - `text_color`: 글자 색. (Color 또는 "#rrggbb" 같은 문자열, 알파가 글자 불투명도)
 	//==============================================================================
 	pub fn set_text_style(&mut self, font_size: f64, is_bold: bool, text_color: impl Into<Color>) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.font_size = font_size;
 		self.is_bold = is_bold;
 		self.text_color = text_color.into();
@@ -683,6 +688,7 @@ impl ShadowText {
 	/// - `is_italic`: 기울여 그릴지. (처음 false)
 	//==============================================================================
 	pub fn set_italic(&mut self, is_italic: bool) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.is_italic = is_italic;
 		self.is_bake_dirty = true;
 	}
@@ -704,6 +710,7 @@ impl ShadowText {
 	/// - `is_underline`: 밑줄을 그을지. (처음 false)
 	//==============================================================================
 	pub fn set_underline(&mut self, is_underline: bool) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.is_underline = is_underline;
 		self.is_bake_dirty = true;
 	}
@@ -725,6 +732,7 @@ impl ShadowText {
 	/// - `is_strikethrough`: 취소선을 그을지. (처음 false)
 	//==============================================================================
 	pub fn set_strikethrough(&mut self, is_strikethrough: bool) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.is_strikethrough = is_strikethrough;
 		self.is_bake_dirty = true;
 	}
@@ -749,6 +757,7 @@ impl ShadowText {
 	/// - `shadow_blur`: 그림자가 번지는 만큼. (노드 좌표, 0 보다 작으면 0, 처음 0)
 	//==============================================================================
 	pub fn set_shadow(&mut self, shadow_color: impl Into<Color>, shadow_opacity: f64, shadow_offset: f64, shadow_blur: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		let mut shadow_color: Color = shadow_color.into();
 		shadow_color.alpha = shadow_opacity.clamp(0.0, 1.0);
 		self.shadow_color = shadow_color;
@@ -777,6 +786,7 @@ impl ShadowText {
 	/// ```
 	//==============================================================================
 	pub fn set_fit_minimum_ratio(&mut self, fit_minimum_ratio: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.fit_minimum_ratio = fit_minimum_ratio.clamp(0.01, 1.0);
 		self.is_bake_dirty = true;
 	}

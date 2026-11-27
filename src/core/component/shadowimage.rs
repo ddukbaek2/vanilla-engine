@@ -316,6 +316,7 @@ impl ShadowImage {
 	/// ```
 	//==============================================================================
 	pub fn set_image(&mut self, image: Option<Rc<Image>>, image_rect: Option<Rect>) {
+		self.component_base.mark_drawn_rect_dirty();
 		if let Some(image) = &image {
 			image.set_pixels_retained(true);
 		}
@@ -351,6 +352,7 @@ impl ShadowImage {
 	/// - `image_color`: 그림 모양을 칠할 색. (알파는 그림 알파에 곱한다, None 이면 그림 색 그대로, 처음 None)
 	//==============================================================================
 	pub fn set_image_color(&mut self, image_color: Option<Color>) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.image_color = image_color;
 	}
 
@@ -371,6 +373,7 @@ impl ShadowImage {
 	/// - `image_path`: 그림 경로. (적어 두기만 하고 그림을 읽지 않는다)
 	//==============================================================================
 	pub fn set_image_path(&mut self, image_path: &str) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.image_path = String::from(image_path);
 	}
 
@@ -395,6 +398,7 @@ impl ShadowImage {
 	/// - `shadow_blur`: 그림자가 번지는 만큼. (노드 좌표, 0 보다 작으면 0, 처음 0)
 	//==============================================================================
 	pub fn set_shadow(&mut self, shadow_color: impl Into<Color>, shadow_opacity: f64, shadow_offset: f64, shadow_blur: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		let mut shadow_color: Color = shadow_color.into();
 		shadow_color.alpha = shadow_opacity.clamp(0.0, 1.0);
 		self.shadow_color = shadow_color;

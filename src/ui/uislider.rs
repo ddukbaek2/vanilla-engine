@@ -419,6 +419,7 @@ impl UISlider {
 	/// - `thumb_radius`: 손잡이 원의 반지름. (호스트 content_size 와 같은 단위, 기본 16)
 	//==============================================================================
 	pub fn set_thumb_radius(&mut self, thumb_radius: f64) {
+		Component::mark_drawn_rect_dirty(self);
 		self.thumb_radius = thumb_radius;
 	}
 
@@ -483,6 +484,7 @@ impl UISlider {
 	/// ```
 	//==============================================================================
 	pub fn set_thumb_node(&mut self, thumb_node_id: Option<NodeId>) {
+		Component::mark_drawn_rect_dirty(self);
 		self.thumb_node_id = thumb_node_id;
 	}
 
@@ -523,6 +525,7 @@ impl UISlider {
 	/// - `direction`: 방향. (Horizontal 은 왼쪽이 최소값, Vertical 은 아래가 최소값, 기본 Horizontal)
 	//==============================================================================
 	pub fn set_direction(&mut self, direction: ProgressDirection) {
+		Component::mark_drawn_rect_dirty(self);
 		self.direction = direction;
 	}
 
@@ -656,6 +659,35 @@ impl Component for UISlider {
 	#[reflect(after = "isDragging")]
 	fn is_drawn_inside_content(&self) -> bool {
 		false
+	}
+
+	//==============================================================================
+	/// 그리는 사각형. (원본 UISlider.calculateDrawnRect)
+	/// - 트랙과 채움은 내용 영역, 손잡이 원은 값이 움직이는 줄 전체에 반지름만큼. (값과 상관없는 사각형이라 값을 바꿔도 다시 셀 일이 없다)
+	/// - 손잡이 노드를 정했으면 내용 영역만. (손잡이 노드는 저마다 그린다) 한 단위씩 넓힌다.
+	//==============================================================================
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, _graphic: &mut Graphic) -> Option<Rect> {
+		let content_size = transform.get_content_size();
+		let mut minimum_x = 0.0_f64;
+		let mut minimum_y = 0.0_f64;
+		let mut maximum_x = content_size.x;
+		let mut maximum_y = content_size.y;
+		if self.thumb_node_id.is_none() && self.thumb_radius > 0.0 {
+			let thumb_radius = self.thumb_radius;
+			if self.direction == ProgressDirection::Vertical {
+				minimum_x = minimum_x.min(content_size.x * 0.5 - thumb_radius);
+				maximum_x = maximum_x.max(content_size.x * 0.5 + thumb_radius);
+				minimum_y = minimum_y.min(-thumb_radius);
+				maximum_y = maximum_y.max(content_size.y + thumb_radius);
+			}
+			else {
+				minimum_x = minimum_x.min(-thumb_radius);
+				maximum_x = maximum_x.max(content_size.x + thumb_radius);
+				minimum_y = minimum_y.min(content_size.y * 0.5 - thumb_radius);
+				maximum_y = maximum_y.max(content_size.y * 0.5 + thumb_radius);
+			}
+		}
+		Some(Rect::create(minimum_x - 1.0, minimum_y - 1.0, maximum_x - minimum_x + 2.0, maximum_y - minimum_y + 2.0))
 	}
 
 	//==============================================================================

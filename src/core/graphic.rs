@@ -1202,6 +1202,18 @@ pub struct Graphic {
 	last_frame_draw_vertex_count: u32,
 	culled_node_count: u32,
 	last_frame_culled_node_count: u32,
+	/// 이번 프레임에 화면 밖이라 그리기를 통째로 건너뛴 하위 트리 수.
+	culled_subtree_count: u32,
+	last_frame_culled_subtree_count: u32,
+	/// 하위 트리째 그리기 건너뛰기. (기본 켬)
+	is_subtree_culling_enabled: bool,
+	/// 그리기 프레임 번호. (begin_frame_statistics 마다 하나씩 오른다, 노드가 지난 프레임에 그려졌는지 본다)
+	draw_frame_number: u64,
+	/// 보이는 사각형을 지역 좌표로 옮긴 경계 상자의 열쇠. (변환 a~f, 보이는 디바이스 사각형 넷)
+	local_visible_key_list: [f64; 10],
+	/// 지역 좌표의 보이는 경계 상자. (최소 x, 최소 y, 최대 x, 최대 y)
+	local_visible_bounds: [f64; 4],
+	is_local_visible_bounds_known: bool,
 	frame_number: u64,
 	round_rect_unit_table: [(f64, f64); ROUND_RECT_POSITION_COUNT],
 	is_batching_enabled: bool,
@@ -1401,6 +1413,13 @@ impl Graphic {
 			last_frame_draw_vertex_count: 0,
 			culled_node_count: 0,
 			last_frame_culled_node_count: 0,
+			culled_subtree_count: 0,
+			last_frame_culled_subtree_count: 0,
+			is_subtree_culling_enabled: true,
+			draw_frame_number: 0,
+			local_visible_key_list: [f64::NAN; 10],
+			local_visible_bounds: [0.0; 4],
+			is_local_visible_bounds_known: false,
 			frame_number: 0,
 			round_rect_unit_table: build_round_rect_unit_table(),
 			is_batching_enabled: true,
@@ -2957,6 +2976,150 @@ impl Graphic {
 	}
 
 	//==============================================================================
+	/// 하위 트리째 그리기 건너뛰기 켜고 끄기. (기본 켬, 원본 setSubtreeCullingEnabled)
+	/// - 켜면 노드와 자손이 그리는 곳을 모두 품는 하위 트리 그리기 경계(NodeTree::read_subtree_draw_bounds)가 화면과 걸린 자르기 밖일 때 그 노드와 자손의 그리기를 통째로 건너뛴다. tick 은 그대로 돈다.
+	/// - 화면 밖 거르기(set_culling_enabled)가 꺼져 있으면 이것도 하지 않는다. 기즈모를 모두 그리게 했으면 건너뛰지 않는다.
+	///
+	/// # 인자
+	/// - `is_subtree_culling_enabled`: true 면 화면 밖 하위 트리를 통째로 건너뛴다.
+	///
+	/// # 예제
+	/// 끄고 켜기
+	/// ```rust,no_run
+	/// use vanilla::Graphic;
+	///
+	/// fn compare_culling(graphic: &mut Graphic) {
+	/// 	assert!(graphic.is_subtree_culling_enabled());
+	/// 	graphic.set_subtree_culling_enabled(false);
+	/// 	assert!(!graphic.is_subtree_culling_enabled());
+	/// 	println!("건너뛴 하위 트리 {}", graphic.get_last_frame_culled_subtree_count());
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn set_subtree_culling_enabled(&mut self, is_subtree_culling_enabled: bool) {
+		self.is_subtree_culling_enabled = is_subtree_culling_enabled;
+	}
+
+	//==============================================================================
+	/// 하위 트리째 그리기 건너뛰기 여부. (원본 isSubtreeCullingEnabled)
+	///
+	/// # 돌려줌
+	/// 켜져 있으면 true. (처음 true)
+	//==============================================================================
+	pub fn is_subtree_culling_enabled(&self) -> bool {
+		self.is_subtree_culling_enabled
+	}
+
+	//==============================================================================
+	/// 지난 프레임에 화면 밖이라 그리기를 통째로 건너뛴 하위 트리 수. (원본 getLastFrameCulledSubtreeCount)
+	///
+	/// # 돌려줌
+	/// 지난 프레임에 건너뛴 하위 트리 수. (begin_frame_statistics 가 넘겨 둔 값, 건너뛴 노드의 자손은 세지 않는다)
+	//==============================================================================
+	pub fn get_last_frame_culled_subtree_count(&self) -> u32 {
+		self.last_frame_culled_subtree_count
+	}
+
+	//==============================================================================
+	/// 이번 프레임에 화면 밖이라 그리기를 통째로 건너뛴 하위 트리 수 더하기. (원본 addCulledSubtreeCount, NodeTree::draw_children 이 보이는 범위 밖 자식을 한꺼번에 건너뛰고 부른다)
+	///
+	/// # 인자
+	/// - `culled_subtree_count`: 더할 하위 트리 수.
+	//==============================================================================
+	pub fn add_culled_subtree_count(&mut self, culled_subtree_count: u32) {
+		self.culled_subtree_count += culled_subtree_count;
+	}
+
+	//==============================================================================
+	/// 보이는 사각형(화면과 걸린 자르기, is_local_rect_visible 과 같은 것)을 지금 변환의 지역 좌표로 거꾸로 옮긴 경계 상자 읽기. (원본 readLocalVisibleBounds)
+	/// - 돌림이나 기울임이 있으면 넉넉하다(네 꼭짓점의 경계 상자, 디바이스 사각형을 한 픽셀씩 넓혀 옮김). 이 사각형 밖에 그리는 것은 보이지 않는다.
+	/// - 노드가 많은 자식 가운데 보이는 범위를 찾을 때 쓴다(NodeTree::draw_children). 변환과 자르기가 같으면 다시 셈하지 않는다.
+	///
+	/// # 돌려줌
+	/// 지역 좌표의 보이는 경계 상자. 화면 밖 거르기나 하위 트리 거르기가 꺼졌거나, 기즈모를 모두 그리거나, 뷰포트를 아직 정하지 않았거나, 변환을 거꾸로 걸 수 없으면(배율 0) None.
+	///
+	/// # 예제
+	/// 두 배로 키운 변환에서는 보이는 사각형이 반이 된다
+	/// ```rust,no_run
+	/// use vanilla::Graphic;
+	///
+	/// fn read_scaled(graphic: &mut Graphic) {
+	/// 	if let Some(visible_rect) = graphic.read_local_visible_bounds() {
+	/// 		graphic.push_state();
+	/// 		graphic.scale(2.0, 2.0);
+	/// 		let scaled_rect = graphic.read_local_visible_bounds().expect("visible");
+	/// 		assert!((scaled_rect.size.x * 2.0 - visible_rect.size.x).abs() < 1e-9);
+	/// 		graphic.pop_state();
+	/// 	}
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn read_local_visible_bounds(&mut self) -> Option<Rect> {
+		if !self.is_culling_enabled || !self.is_subtree_culling_enabled || self.is_force_gizmos_visible() || !self.update_local_visible_bounds() {
+			return None;
+		}
+		let bounds = self.local_visible_bounds;
+		Some(Rect::create(bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1]))
+	}
+
+	//==============================================================================
+	/// 보이는 사각형을 지금 변환의 지역 좌표로 거꾸로 옮긴 경계 상자 셈하기. (셈할 수 있으면 true)
+	/// - 변환과 보이는 디바이스 사각형이 지난번과 같으면 다시 셈하지 않는다. (한 부모의 자식들을 그리는 동안은 같다)
+	//==============================================================================
+	fn update_local_visible_bounds(&mut self) -> bool {
+		let viewport_width = self.applied_viewport_width as f64;
+		let viewport_height = self.applied_viewport_height as f64;
+		if viewport_width <= 0.0 || viewport_height <= 0.0 {
+			return false;
+		}
+		let mut visible_minimum_x = 0.0;
+		let mut visible_minimum_y = 0.0;
+		let mut visible_maximum_x = viewport_width;
+		let mut visible_maximum_y = viewport_height;
+		if let Some(clip_entry) = self.clip_stack.last() {
+			visible_minimum_x = clip_entry.cull_minimum_x.max(visible_minimum_x);
+			visible_minimum_y = clip_entry.cull_minimum_y.max(visible_minimum_y);
+			visible_maximum_x = clip_entry.cull_maximum_x.min(visible_maximum_x);
+			visible_maximum_y = clip_entry.cull_maximum_y.min(visible_maximum_y);
+		}
+		let matrix = self.transform_matrix;
+		let key_list = [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f, visible_minimum_x, visible_minimum_y, visible_maximum_x, visible_maximum_y];
+		if key_list == self.local_visible_key_list {
+			return self.is_local_visible_bounds_known;
+		}
+		self.local_visible_key_list = key_list;
+
+		// 거꾸로 건다. (지역 = 역행렬 x (디바이스 - 옮김))
+		let determinant = matrix.a * matrix.d - matrix.b * matrix.c;
+		if determinant == 0.0 || !determinant.is_finite() {
+			self.is_local_visible_bounds_known = false;
+			return false;
+		}
+		let inverse_determinant = 1.0 / determinant;
+		let left_x = visible_minimum_x - 1.0 - matrix.e;
+		let top_y = visible_minimum_y - 1.0 - matrix.f;
+		let right_x = visible_maximum_x + 1.0 - matrix.e;
+		let bottom_y = visible_maximum_y + 1.0 - matrix.f;
+		let corner_list: [(f64, f64); 4] = [(left_x, top_y), (right_x, top_y), (left_x, bottom_y), (right_x, bottom_y)];
+		let mut minimum_x = f64::INFINITY;
+		let mut minimum_y = f64::INFINITY;
+		let mut maximum_x = f64::NEG_INFINITY;
+		let mut maximum_y = f64::NEG_INFINITY;
+		for (corner_x, corner_y) in corner_list {
+			let local_x = (matrix.d * corner_x - matrix.c * corner_y) * inverse_determinant;
+			let local_y = (matrix.a * corner_y - matrix.b * corner_x) * inverse_determinant;
+			minimum_x = minimum_x.min(local_x);
+			minimum_y = minimum_y.min(local_y);
+			maximum_x = maximum_x.max(local_x);
+			maximum_y = maximum_y.max(local_y);
+		}
+		let is_finite = minimum_x.is_finite() && minimum_y.is_finite() && maximum_x.is_finite() && maximum_y.is_finite();
+		self.local_visible_bounds = [minimum_x, minimum_y, maximum_x, maximum_y];
+		self.is_local_visible_bounds_known = is_finite;
+		is_finite
+	}
+
+	//==============================================================================
 	/// 이번 프레임에 거른 노드 수 더하기. (NodeTree 가 부른다)
 	///
 	/// # 인자
@@ -2985,9 +3148,19 @@ impl Graphic {
 		self.last_frame_draw_call_count = self.draw_call_count;
 		self.last_frame_draw_vertex_count = self.draw_vertex_count;
 		self.last_frame_culled_node_count = self.culled_node_count;
+		self.last_frame_culled_subtree_count = self.culled_subtree_count;
 		self.draw_call_count = 0;
 		self.draw_vertex_count = 0;
 		self.culled_node_count = 0;
+		self.culled_subtree_count = 0;
+		self.draw_frame_number += 1;
+	}
+
+	//==============================================================================
+	/// 그리기 프레임 번호. (begin_frame_statistics 마다 하나씩 오른다)
+	//==============================================================================
+	pub(crate) fn get_draw_frame_number(&self) -> u64 {
+		self.draw_frame_number
 	}
 
 	//==============================================================================

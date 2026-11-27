@@ -6,6 +6,7 @@
 //! - `#[reflect]` 를 컴포넌트의 impl 블록에 붙이면 블록 안의 `pub fn get_*(&self) -> T`, `pub fn is_*(&self) -> T` 와
 //!   그 짝 `pub fn set_*(&mut self, value)` 를 모아 vanilla::core::reflection::Reflect 구현을 짓는다.
 //! - `#[reflect]` 를 impl Component 블록에 붙이면 그 블록에서 다시 정의한 게터(원본 하위 클래스가 덮어쓴 isTickNeeded 같은 것)를 인스펙터용으로 모은다.
+//!   그 블록에 fn draw 가 없으면 Component::is_draw_overridden 을 false 로 짓는다. (그리지 않는 컴포넌트, 원본 draw === Component.prototype.draw)
 //!   두 블록 모두 붙여야 한다. Reflect 가 Component 의 상위 트레이트라 어느 쪽을 빠뜨려도 컴파일 에러다. (원본처럼 모든 컴포넌트가 반사된다)
 //!   게터가 없는 타입은 빈 블록 `#[reflect] impl 타입 {}` 에 붙인다.
 //! - 원본 규칙을 그대로 따른다:
@@ -1112,6 +1113,16 @@ fn expand_component_impl(block_options: &BlockOptions, mut item_impl: ItemImpl) 
 				});
 			}
 		}
+	}
+
+	// draw 를 덮어쓰지 않은 컴포넌트는 아무것도 그리지 않는다고 알린다. (원본은 component.draw 가 Component.prototype.draw 와 같은지로 본다, 화면 밖 거르기와 하위 트리 그리기 경계가 뺀다)
+	let is_method_defined = |method_name: &str| item_impl.items.iter().any(|impl_item| matches!(impl_item, ImplItem::Fn(method) if method.sig.ident == method_name));
+	if !is_method_defined("draw") && !is_method_defined("is_draw_overridden") {
+		item_impl.items.push(syn::parse_quote! {
+			fn is_draw_overridden(&self) -> bool {
+				false
+			}
+		});
 	}
 
 	let self_type = &item_impl.self_ty;

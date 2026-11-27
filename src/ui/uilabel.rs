@@ -137,6 +137,7 @@ impl UILabel {
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
+		Component::mark_drawn_rect_dirty(self);
 		self.ui_view.set_background_color(background_color);
 	}
 
@@ -219,6 +220,7 @@ impl UILabel {
 	/// ```
 	//==============================================================================
 	pub fn append_segment(&mut self, text: &str, attributes: RichTextAttributes) -> &mut UILabel {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.append_segment(text, attributes);
 		self
 	}
@@ -227,6 +229,7 @@ impl UILabel {
 	/// 리치텍스트 조각 모두 지우기.
 	//==============================================================================
 	pub fn clear_segments(&mut self) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.clear_segments();
 	}
 
@@ -257,6 +260,7 @@ impl UILabel {
 	/// - `text`: 새 글. (리치텍스트 모드가 아니고 지금 글과 같으면 건너뛴다, 마크업은 늘 풀어 조각으로 둔다)
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
+		Component::mark_drawn_rect_dirty(self);
 		// 같은 글이면 건너뛴다. (리치텍스트는 조각을 따로 쌓았을 수 있어 늘 넣는다)
 		if !self.use_rich_text && self.rich_text.get_text() == text {
 			return;
@@ -295,6 +299,7 @@ impl UILabel {
 	/// ```
 	//==============================================================================
 	pub fn set_fit_width(&mut self, width: f64, minimum_ratio: f64) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.get_text_component_mut().set_fit_width(width, minimum_ratio);
 	}
 
@@ -353,6 +358,7 @@ impl UILabel {
 	/// - `font_size`: 글자 크기. (픽셀)
 	//==============================================================================
 	pub fn set_font_size(&mut self, font_size: f64) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_font_size(font_size);
 	}
 
@@ -373,6 +379,7 @@ impl UILabel {
 	/// - `font_family`: 폰트 이름. (Graphic 에 등록한 이름)
 	//==============================================================================
 	pub fn set_font_family(&mut self, font_family: &str) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_font_family(font_family);
 	}
 
@@ -394,6 +401,7 @@ impl UILabel {
 	/// - `word_wrap_width`: 자동 줄바꿈 폭. (픽셀, 0 이면 줄바꿈 문자로만 나눈다)
 	//==============================================================================
 	pub fn set_word_wrap_width(&mut self, word_wrap_width: f64) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_word_wrap_width(word_wrap_width);
 	}
 
@@ -404,6 +412,7 @@ impl UILabel {
 	/// - `wrap_mode`: 줄바꿈 방식. (Word 는 낱말 단위, Character 는 글자 단위)
 	//==============================================================================
 	pub fn set_wrap_mode(&mut self, wrap_mode: TextWrapMode) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_wrap_mode(wrap_mode);
 	}
 
@@ -424,6 +433,7 @@ impl UILabel {
 	/// - `line_spacing`: 줄 간격. (글자 크기의 배수)
 	//==============================================================================
 	pub fn set_line_spacing(&mut self, line_spacing: f64) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_line_spacing(line_spacing);
 	}
 
@@ -434,6 +444,7 @@ impl UILabel {
 	/// - `visible_character_count`: 보일 글자 수. (-1 이면 전체, -1 아래는 -1 로 맞춘다. 마크업이 든 글은 자르지 않는다)
 	//==============================================================================
 	pub fn set_visible_character_count(&mut self, visible_character_count: i32) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_visible_character_count(visible_character_count);
 	}
 
@@ -454,6 +465,7 @@ impl UILabel {
 	/// - `color`: 외곽선 색.
 	//==============================================================================
 	pub fn set_stroke_color(&mut self, color: impl Into<Color>) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_stroke_color(color);
 	}
 
@@ -464,6 +476,7 @@ impl UILabel {
 	/// - `stroke_width`: 외곽선 두께. (픽셀, 0 이면 외곽선 없음)
 	//==============================================================================
 	pub fn set_stroke_width(&mut self, stroke_width: f64) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_stroke_width(stroke_width);
 	}
 
@@ -474,6 +487,7 @@ impl UILabel {
 	/// - `color`: 글자 색. (Color 나 "#rrggbb" 같은 글)
 	//==============================================================================
 	pub fn set_text_color(&mut self, color: impl Into<Color>) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_text_color(color);
 	}
 
@@ -494,6 +508,7 @@ impl UILabel {
 	/// - `is_bold`: true 면 굵게.
 	//==============================================================================
 	pub fn set_bold(&mut self, is_bold: bool) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_bold(is_bold);
 	}
 
@@ -514,6 +529,7 @@ impl UILabel {
 	/// - `is_italic`: true 면 기울임.
 	//==============================================================================
 	pub fn set_italic(&mut self, is_italic: bool) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_italic(is_italic);
 	}
 
@@ -534,6 +550,7 @@ impl UILabel {
 	/// - `is_underline`: true 면 밑줄.
 	//==============================================================================
 	pub fn set_underline(&mut self, is_underline: bool) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_underline(is_underline);
 	}
 
@@ -554,6 +571,7 @@ impl UILabel {
 	/// - `is_strikethrough`: true 면 취소선.
 	//==============================================================================
 	pub fn set_strikethrough(&mut self, is_strikethrough: bool) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_strikethrough(is_strikethrough);
 	}
 
@@ -574,6 +592,7 @@ impl UILabel {
 	/// - `text_direction`: 글자 방향.
 	//==============================================================================
 	pub fn set_text_direction(&mut self, text_direction: TextDirection) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_text_direction(text_direction);
 	}
 
@@ -594,6 +613,7 @@ impl UILabel {
 	/// - `text_align`: content 영역 안의 가로 정렬.
 	//==============================================================================
 	pub fn set_text_align(&mut self, text_align: TextAlign) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_text_align(text_align);
 	}
 
@@ -614,6 +634,7 @@ impl UILabel {
 	/// - `text_baseline`: content 영역 안의 세로 기준선.
 	//==============================================================================
 	pub fn set_text_baseline(&mut self, text_baseline: TextBaseline) {
+		Component::mark_drawn_rect_dirty(self);
 		self.rich_text.set_text_baseline(text_baseline);
 	}
 

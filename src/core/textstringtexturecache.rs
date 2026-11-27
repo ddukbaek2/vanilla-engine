@@ -869,6 +869,8 @@ impl TextStringTextureCache {
 	//==============================================================================
 	pub fn register_font_face(&mut self, family_name: &str, font_face_descriptors: FontFaceDescriptors, font_bytes: Vec<u8>) -> Result<(), String> {
 		let font = Rc::new(load_font(font_bytes)?);
+		// 새 글꼴로 글 너비가 바뀔 수 있어 모든 노드가 하위 트리 그리기 경계를 다시 셈하게 한다. (원본 글꼴 적재의 Component.markAllDrawnRectsDirty)
+		crate::core::component::ComponentBase::mark_all_drawn_rects_dirty();
 		let family_key = create_family_key(family_name);
 		self.face_order_number += 1;
 		let order_number = self.face_order_number;
