@@ -1262,8 +1262,7 @@ impl Drop for ExternalPassGuard<'_> {
 	/// 2D 상태 되돌리기.
 	//==============================================================================
 	fn drop(&mut self) {
-		// pass 가 받은 GlContext 는 상태 캐시를 거치지만, 안의 glow::Context 를 꺼내 바꿨을 수 있어 잊고 되돌린다. (되돌리기가 다시 건 값은 다시 기억한다)
-		crate::core::glstatecache::reset(&self.graphic.gl);
+		// pass 가 받은 GlContext 는 상태 캐시를 거치므로 잊지 않고 되돌린다. (원본 runExternalPass 와 같음)
 		self.graphic.restore_render_state();
 		if self.shader_clip_count > 0 {
 			self.graphic.write_shader_clips_to_stencil(false);
@@ -2192,7 +2191,7 @@ impl Graphic {
 		self.bind_main_texture(texture);
 		self.apply_color_mask();
 		unsafe {
-			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
+			crate::core::glstatecache::draw_arrays(&self.gl, glow::TRIANGLES, 0, vertex_count as i32);
 		}
 		self.draw_call_count += 1;
 		self.draw_vertex_count += vertex_count as u32;
@@ -2341,7 +2340,7 @@ impl Graphic {
 		self.upload_draw_uniforms(color, false);
 		self.bind_main_texture(texture);
 		unsafe {
-			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
+			crate::core::glstatecache::draw_arrays(&self.gl, glow::TRIANGLES, 0, vertex_count as i32);
 			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, framebuffer);
 		}
 		self.is_color_mask_known.set(false);
@@ -2400,7 +2399,7 @@ impl Graphic {
 		self.bind_main_texture(texture);
 		self.apply_color_mask();
 		unsafe {
-			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
+			crate::core::glstatecache::draw_arrays(&self.gl, glow::TRIANGLES, 0, vertex_count as i32);
 		}
 		self.draw_call_count += 1;
 		self.draw_vertex_count += vertex_count as u32;
@@ -2851,7 +2850,7 @@ impl Graphic {
 		}
 		self.apply_color_mask();
 		unsafe {
-			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
+			crate::core::glstatecache::draw_arrays(&self.gl, glow::TRIANGLES, 0, vertex_count as i32);
 
 			// 기본 버텍스 어레이로 복귀. (프로그램은 다음에 낱장으로 그릴 때 건다)
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(self.vertex_array));
@@ -3218,7 +3217,7 @@ impl Graphic {
 			self.bind_main_texture(texture);
 			self.apply_color_mask();
 			unsafe {
-				self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
+				crate::core::glstatecache::draw_arrays(&self.gl, glow::TRIANGLES, 0, vertex_count as i32);
 			}
 			self.draw_call_count += 1;
 			self.draw_vertex_count += vertex_count as u32;
@@ -3300,7 +3299,7 @@ impl Graphic {
 		let group_vertex_count = (end_quad_index - start_quad_index) * 6;
 		self.apply_color_mask();
 		unsafe {
-			self.gl.draw_arrays(glow::TRIANGLES, (start_quad_index * 6) as i32, group_vertex_count as i32);
+			crate::core::glstatecache::draw_arrays(&self.gl, glow::TRIANGLES, (start_quad_index * 6) as i32, group_vertex_count as i32);
 		}
 		self.draw_call_count += 1;
 		self.draw_vertex_count += group_vertex_count as u32;
@@ -5173,14 +5172,13 @@ impl Graphic {
 	/// GL 컨텍스트 반환. (원본 getWebGL2RenderingContext)
 	/// - 받은 컨텍스트(GlContext)의 상태 함수는 GL 상태 캐시를 거치므로, 받은 뒤 바꾼 상태를 엔진이 안다.
 	/// - 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, Graphic 이 2D 그리기에 묶어 둔 프로그램과 텍스처의 기억은 잊는다. (다음 그리기에서 상태 캐시에 물어 다시 건다)
-	/// - GL 상태 캐시도 잊는다. 안의 glow::Context 를 꺼내(`&glow::Context` 꼴의 함수에 넘기면 저절로 바뀐다) 바꾼 상태를 다음 받을 때 바로잡는 안전망이다.
+	/// - GL 상태 캐시는 잊지 않는다. (원본과 같음, 안의 glow::Context 를 꺼내 상태를 바꿨으면 reset_gl_state_cache 를 부른다)
 	///
 	/// # 돌려줌
 	/// Graphic 이 든 GL 컨텍스트. 엔진 함수의 `&glow::Context` 인자로도 그대로 넘긴다.
 	//==============================================================================
 	pub fn get_gl(&self) -> &GlContext {
 		self.forget_bound_render_state();
-		crate::core::glstatecache::reset(&self.gl);
 		GlContext::from_context(&self.gl)
 	}
 
@@ -5234,7 +5232,8 @@ impl Graphic {
 	/// - get_gl, run_external_pass, 툰 렌더러의 콜백이 주는 GlContext 는 상태 함수가 상태 캐시를 거치므로, 같은 콜백 안에서 엔진 그리기를 이어 불러도 부를 것 없다.
 	/// - GlContext 에서 안의 glow::Context 를 꺼내(`let raw: &glow::Context = gl;`, `&glow::Context` 꼴의 함수에 넘기기) 상태 함수를 바로 불렀거나,
 	///   다른 라이브러리가 같은 GL 컨텍스트의 상태를 바꾼 뒤 같은 콜백 안에서 엔진 그리기를 이어 부를 때 부른다.
-	/// - get_gl 과 run_external_pass 의 끝, 툰 렌더러의 on_before_draw 와 그리기 줄의 단계 콜백 뒤에는 엔진이 스스로 잊는다. (안전망)
+	/// - 엔진은 GL 을 넘기는 자리(get_gl, run_external_pass, 툰 렌더러의 콜백)에서 스스로 잊지 않는다. (원본과 같음)
+	/// - 상태 캐시를 거치지 않은 호출을 찾으려면 환경 변수 VANILLA_GL_STATE_CHECK=1 로 돌린다. (엔진 그리기 앞마다 기억한 값과 진짜 GL 을 견주어 어긋난 곳과 앞의 상태 호출을 표준 오류에 남긴다)
 	//==============================================================================
 	pub fn reset_gl_state_cache(&self) {
 		crate::core::glstatecache::reset(&self.gl);

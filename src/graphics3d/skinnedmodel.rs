@@ -3055,9 +3055,8 @@ impl SkinnedModel {
 		unsafe {
 			let vertex_buffer = gl.create_buffer()?;
 			gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
-			// 셈은 f64 로 들고 GPU 에는 f32 로 올린다. (원본 Float32Array)
-			let float32_array: Vec<f32> = data_array.iter().map(|value| *value as f32).collect();
-			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_to_bytes(&float32_array), glow::STATIC_DRAW);
+			// u16 그대로 올린다. (원본 Uint16Array, 포인터가 UNSIGNED_SHORT 라 f32 로 바꿔 올리면 조인트 번호가 깨져 jointMatrices 밖을 읽는다)
+			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_to_bytes(data_array), glow::STATIC_DRAW);
 			gl.enable_vertex_attrib_array(attribute_location);
 			gl.vertex_attrib_pointer_i32(attribute_location, component_count, glow::UNSIGNED_SHORT, 0, 0);
 			Ok(Some(vertex_buffer))

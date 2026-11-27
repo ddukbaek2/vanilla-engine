@@ -7,6 +7,7 @@
 //! - 엔진 함수가 받는 `&glow::Context` 자리에 그대로 넘긴다. (Deref 로 바뀐다, 엔진 안은 상태 캐시를 거쳐 부른다)
 //! - `let raw: &glow::Context = gl;` 처럼 안의 glow::Context 를 꺼내 상태 함수를 바로 부르면 상태 캐시가 모른다. 그때는 Graphic::reset_gl_state_cache 를 부른다.
 //!   (원본에서 WebGL2RenderingContext.prototype.viewport.call 처럼 가로채지 못한 길로 부른 것과 같다)
+//! - 엔진은 GL 을 넘기는 자리에서 상태 캐시를 스스로 잊지 않는다. (원본과 같음) 상태 캐시를 거치지 않은 호출은 VANILLA_GL_STATE_CHECK=1 로 돌려 찾는다.
 //==============================================================================
 use crate::core::glstatecache::{self, GlStatePart};
 use crate::core::graphic::{GlFramebuffer, GlProgram, GlTexture, GlVertexArray};

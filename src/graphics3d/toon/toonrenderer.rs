@@ -3346,10 +3346,10 @@ impl ToonRenderer {
 			}
 			unsafe {
 				if is_instanced {
-					gl.draw_elements_instanced(glow::TRIANGLES, count as i32, glow::UNSIGNED_INT, (start * 4) as i32, instance_count);
+					crate::core::glstatecache::draw_elements_instanced(gl, glow::TRIANGLES, count as i32, glow::UNSIGNED_INT, (start * 4) as i32, instance_count);
 				}
 				else {
-					gl.draw_elements(glow::TRIANGLES, count as i32, glow::UNSIGNED_INT, (start * 4) as i32);
+					crate::core::glstatecache::draw_elements(gl, glow::TRIANGLES, count as i32, glow::UNSIGNED_INT, (start * 4) as i32);
 				}
 			}
 			draw_call_count += 1;
@@ -3365,8 +3365,6 @@ impl ToonRenderer {
 			if let Some(on_before_draw) = options.on_before_draw {
 				on_before_draw(&depth_entry.program, GlContext::from_context(gl), ToonProgramKind::Depth);
 				self.forget_uniform_values(&depth_entry.program);
-				// 콜백이 안의 glow::Context 를 꺼내 상태를 바꿨을 수 있다. (GlContext 의 상태 함수는 상태 캐시를 거친다, 안전망)
-				crate::core::glstatecache::reset(gl);
 			}
 			ToonRenderer::apply_vertex_array(gl, body_vertex_array);
 			draw_elements(gl, index_start, index_count);
@@ -3416,8 +3414,6 @@ impl ToonRenderer {
 			if let Some(on_before_draw) = options.on_before_draw {
 				on_before_draw(outline_program, GlContext::from_context(gl), ToonProgramKind::Outline);
 				self.forget_uniform_values(outline_program);
-				// 콜백이 안의 glow::Context 를 꺼내 상태를 바꿨을 수 있다. (GlContext 의 상태 함수는 상태 캐시를 거친다, 안전망)
-				crate::core::glstatecache::reset(gl);
 			}
 			ToonRenderer::apply_cull_face(gl, glow::FRONT);
 			ToonRenderer::apply_vertex_array(gl, outline_vertex_array);
@@ -3486,8 +3482,6 @@ impl ToonRenderer {
 		if let Some(on_before_draw) = options.on_before_draw {
 			on_before_draw(solid_program, GlContext::from_context(gl), ToonProgramKind::Solid);
 			self.forget_uniform_values(solid_program);
-			// 콜백이 안의 glow::Context 를 꺼내 상태를 바꿨을 수 있다. (GlContext 의 상태 함수는 상태 캐시를 거친다, 안전망)
-			crate::core::glstatecache::reset(gl);
 		}
 		ToonRenderer::apply_cull_face(gl, glow::BACK);
 		ToonRenderer::apply_vertex_array(gl, body_vertex_array);

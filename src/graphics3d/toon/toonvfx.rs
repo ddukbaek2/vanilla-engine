@@ -2562,7 +2562,7 @@ impl ToonVfx {
 	//==============================================================================
 	fn draw_indexed_mesh(gl: &glow::Context, indexed_mesh: &IndexedMesh) {
 		unsafe {
-			gl.draw_elements(glow::TRIANGLES, indexed_mesh.index_count, glow::UNSIGNED_SHORT, 0);
+			crate::core::glstatecache::draw_elements(gl, glow::TRIANGLES, indexed_mesh.index_count, glow::UNSIGNED_SHORT, 0);
 		}
 	}
 
@@ -2617,7 +2617,7 @@ impl ToonVfx {
 		set_uniform_vector4(gl, decal_program, "decalRing", options.ring);
 		set_uniform_float(gl, decal_program, "decalSeed", decal.seed);
 		unsafe {
-			gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+			crate::core::glstatecache::draw_arrays(gl, glow::TRIANGLE_STRIP, 0, 4);
 		}
 	}
 
@@ -2827,7 +2827,7 @@ impl ToonVfx {
 			};
 			set_uniform_vector4(gl, ribbon_program, "ribbonGlow", glow_value);
 			unsafe {
-				gl.draw_arrays(glow::TRIANGLE_STRIP, first_vertex, vertex_count);
+				crate::core::glstatecache::draw_arrays(gl, glow::TRIANGLE_STRIP, first_vertex, vertex_count);
 			}
 			first_vertex += vertex_count;
 		}
@@ -2859,13 +2859,13 @@ impl ToonVfx {
 					gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&self.particle_data[..used_count * PARTICLE_FLOAT_COUNT]), glow::DYNAMIC_DRAW);
 					self.is_particle_dirty = false;
 				}
-				gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, 4, used_count as i32);
+				crate::core::glstatecache::draw_arrays_instanced(gl, glow::TRIANGLE_STRIP, 0, 4, used_count as i32);
 			}
 			if glint_count > 0 {
 				crate::core::glstatecache::bind_vertex_array(gl, Some(self.glint_vertex_array));
 				gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.glint_buffer));
 				gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&self.glint_data[..glint_count * PARTICLE_FLOAT_COUNT]), glow::DYNAMIC_DRAW);
-				gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, 4, glint_count as i32);
+				crate::core::glstatecache::draw_arrays_instanced(gl, glow::TRIANGLE_STRIP, 0, 4, glint_count as i32);
 			}
 		}
 	}
@@ -2890,7 +2890,7 @@ impl ToonVfx {
 			let fade = 1.0 - flash.age / flash.life;
 			set_uniform_vector4(gl, flash_program, "flashColor", [flash.color[0], flash.color[1], flash.color[2], flash.strength * fade * fade]);
 			unsafe {
-				gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+				crate::core::glstatecache::draw_arrays(gl, glow::TRIANGLE_STRIP, 0, 4);
 			}
 		}
 		unsafe {

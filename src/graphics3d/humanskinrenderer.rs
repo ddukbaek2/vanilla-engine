@@ -1629,10 +1629,10 @@ fn draw_drawable_triangles(gl: &glow::Context, drawable: &Drawable) {
 	unsafe {
 		crate::core::glstatecache::bind_vertex_array(gl, Some(drawable.vertex_array));
 		if drawable.is_indexed {
-			gl.draw_elements(glow::TRIANGLES, drawable.index_count as i32, drawable.index_component_type, drawable.index_byte_offset);
+			crate::core::glstatecache::draw_elements(gl, glow::TRIANGLES, drawable.index_count as i32, drawable.index_component_type, drawable.index_byte_offset);
 		}
 		else {
-			gl.draw_arrays(glow::TRIANGLES, 0, drawable.vertex_count as i32);
+			crate::core::glstatecache::draw_arrays(gl, glow::TRIANGLES, 0, drawable.vertex_count as i32);
 		}
 	}
 }

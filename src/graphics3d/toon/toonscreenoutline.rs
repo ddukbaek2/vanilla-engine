@@ -660,10 +660,10 @@ impl ToonScreenOutline {
 			crate::core::glstatecache::bind_vertex_array(gl, Some(body_vertex_array));
 			let byte_offset = (index_start * 4) as i32;
 			if instance_count > 0 {
-				gl.draw_elements_instanced(glow::TRIANGLES, index_count as i32, glow::UNSIGNED_INT, byte_offset, instance_count);
+				crate::core::glstatecache::draw_elements_instanced(gl, glow::TRIANGLES, index_count as i32, glow::UNSIGNED_INT, byte_offset, instance_count);
 			}
 			else {
-				gl.draw_elements(glow::TRIANGLES, index_count as i32, glow::UNSIGNED_INT, byte_offset);
+				crate::core::glstatecache::draw_elements(gl, glow::TRIANGLES, index_count as i32, glow::UNSIGNED_INT, byte_offset);
 			}
 			if is_mirrored {
 				crate::core::glstatecache::front_face(gl, glow::CCW);
@@ -722,7 +722,7 @@ impl ToonScreenOutline {
 			gl.uniform_1_f64(location("isPerspective").as_ref(), if frame.is_perspective { 1.0 } else { 0.0 });
 			gl.uniform_1_f64(location("depthThreshold").as_ref(), self.depth_threshold);
 			gl.uniform_1_f64(location("creaseCosine").as_ref(), if line_widths[1] > 0.0 { self.crease_cosine } else { -2.0 });
-			gl.draw_arrays(glow::TRIANGLES, 0, 3);
+			crate::core::glstatecache::draw_arrays(gl, glow::TRIANGLES, 0, 3);
 			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + DEPTH_TEXTURE_UNIT);
 			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
 
@@ -737,7 +737,7 @@ impl ToonScreenOutline {
 			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(line_target.seed_texture));
 			gl.uniform_1_i32(seed_gather_program.get_uniform_location(gl, "seedTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
 			gl.uniform_2_f64(seed_gather_program.get_uniform_location(gl, "pointScale").as_ref(), point_scale_x, point_scale_y);
-			gl.draw_arrays(glow::TRIANGLES, 0, 3);
+			crate::core::glstatecache::draw_arrays(gl, glow::TRIANGLES, 0, 3);
 
 			// 3. 점프 플러딩. (그리는 영역 굵기의 반과 덮는 몫의 반 픽셀을 넓히기 판 칸으로, 섞을 때 보는 2x2 칸만큼 더)
 			jump_flood_program.use_program(gl);
@@ -749,7 +749,7 @@ impl ToonScreenOutline {
 				crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + LINE_TEXTURE_UNIT);
 				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(line_target.jump_flood_textures[seed_index]));
 				gl.uniform_1_i32(jump_flood_program.get_uniform_location(gl, "stepSize").as_ref(), step_size);
-				gl.draw_arrays(glow::TRIANGLES, 0, 3);
+				crate::core::glstatecache::draw_arrays(gl, glow::TRIANGLES, 0, 3);
 				seed_index = 1 - seed_index;
 			}
 			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + LINE_TEXTURE_UNIT);
@@ -801,7 +801,7 @@ impl ToonScreenOutline {
 			gl.uniform_4_f64(location("outlineColor").as_ref(), color[0], color[1], color[2], color[3]);
 			gl.uniform_1_f64(location("hdrOutput").as_ref(), if self.is_hdr_output { 1.0 } else { 0.0 });
 			crate::core::glstatecache::bind_vertex_array(gl, Some(self.empty_vertex_array));
-			gl.draw_arrays(glow::TRIANGLES, 0, 3);
+			crate::core::glstatecache::draw_arrays(gl, glow::TRIANGLES, 0, 3);
 			crate::core::glstatecache::bind_vertex_array(gl, None);
 			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + LINE_TEXTURE_UNIT);
 			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
