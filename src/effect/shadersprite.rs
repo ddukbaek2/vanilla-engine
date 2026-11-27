@@ -1207,7 +1207,7 @@ impl Component for ShaderSprite {
 		let image_height = image.get_height().max(1) as f64;
 		let effect_color = self.get_effect_color();
 		let effect_parameters = self.get_effect_parameters();
-		let gl = graphic.get_gl();
+		let gl = graphic.get_tracked_gl();
 		unsafe {
 			gl.uniform_1_f64(shader_program.get_uniform_location(gl, "effectTime").as_ref(), self.get_effect_time());
 			gl.uniform_1_f64(shader_program.get_uniform_location(gl, "effectProgress").as_ref(), self.get_effect_progress());

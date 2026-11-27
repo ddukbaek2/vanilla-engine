@@ -340,7 +340,7 @@ impl SkinnedModelAsset {
 	fn destroy_resources(&self, gl: &glow::Context) {
 		for drawable in self.drawable_list.borrow_mut().drain(..) {
 			unsafe {
-				gl.delete_vertex_array(drawable.vertex_array);
+				crate::core::glstatecache::delete_vertex_array(gl, drawable.vertex_array);
 				for vertex_buffer in drawable.vertex_buffer_list.iter() {
 					gl.delete_buffer(*vertex_buffer);
 				}
@@ -348,7 +348,7 @@ impl SkinnedModelAsset {
 					gl.delete_buffer(index_buffer);
 				}
 				if let Some(morph_texture) = drawable.morph_texture {
-					gl.delete_texture(morph_texture);
+					crate::core::glstatecache::delete_texture(gl, morph_texture);
 				}
 			}
 		}

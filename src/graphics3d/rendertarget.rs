@@ -161,7 +161,7 @@ impl RenderTarget {
 		if requested_sample_count < 2 {
 			return 0;
 		}
-		let maximum_sample_count = unsafe { gl.get_parameter_i32(glow::MAX_SAMPLES) };
+		let maximum_sample_count = unsafe { crate::core::glstatecache::get_parameter_i32(gl, glow::MAX_SAMPLES) };
 		let sample_count = clamp_sample_count_to_formats(gl, requested_sample_count.min(maximum_sample_count), internal_format_list);
 		if sample_count >= 2 {
 			sample_count
@@ -302,8 +302,8 @@ impl RenderTarget {
 		let mut sample_count = RenderTarget::read_supported_sample_count(gl, self.requested_sample_count, &format_list);
 		if sample_count > 0 {
 			unsafe {
-				let multisample_framebuffer = gl.create_framebuffer()?;
-				gl.bind_framebuffer(glow::FRAMEBUFFER, Some(multisample_framebuffer));
+				let multisample_framebuffer = crate::core::glstatecache::create_framebuffer(gl)?;
+				crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(multisample_framebuffer));
 				self.multisample_framebuffer = Some(multisample_framebuffer);
 				let mut multisample_draw_buffer_list = Vec::new();
 				for attachment_index in 0..self.color_attachment_count {
@@ -335,8 +335,8 @@ impl RenderTarget {
 		self.sample_count = sample_count;
 
 		unsafe {
-			let framebuffer = gl.create_framebuffer()?;
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+			let framebuffer = crate::core::glstatecache::create_framebuffer(gl)?;
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(framebuffer));
 			self.framebuffer = Some(framebuffer);
 
 			// 컬러 어태치먼트. (개수만큼 텍스처 생성, 실수 컬러는 RGBA16F)
@@ -348,9 +348,9 @@ impl RenderTarget {
 			};
 			let mut draw_buffer_list = Vec::new();
 			for attachment_index in 0..self.color_attachment_count {
-				let color_texture = gl.create_texture()?;
+				let color_texture = crate::core::glstatecache::create_texture(gl)?;
 				self.color_texture_list.push(color_texture);
-				gl.bind_texture(glow::TEXTURE_2D, Some(color_texture));
+				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(color_texture));
 				gl.tex_image_2d(glow::TEXTURE_2D, 0, internal_format as i32, width, height, 0, glow::RGBA, component_type, glow::PixelUnpackData::Slice(None));
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
@@ -367,9 +367,9 @@ impl RenderTarget {
 			// 깊이 어태치먼트. (텍스처, 이후 패스에서 샘플링 가능 / 렌더버퍼, 깊이 테스트 전용, 멀티샘플이면 깊이 시험은 멀티샘플 쪽이 맡아 렌더버퍼는 짓지 않는다)
 			if self.use_depth && (self.use_depth_texture || sample_count == 0) {
 				if self.use_depth_texture {
-					let created_depth_texture = gl.create_texture()?;
+					let created_depth_texture = crate::core::glstatecache::create_texture(gl)?;
 					self.depth_texture = Some(created_depth_texture);
-					gl.bind_texture(glow::TEXTURE_2D, Some(created_depth_texture));
+					crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(created_depth_texture));
 					gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::DEPTH_COMPONENT24 as i32, width, height, 0, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT, glow::PixelUnpackData::Slice(None));
 					gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
 					gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
@@ -386,7 +386,7 @@ impl RenderTarget {
 				}
 			}
 
-			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, None);
 		}
 		self.width = width;
 		self.height = height;
@@ -407,8 +407,8 @@ impl RenderTarget {
 		let width = self.width;
 		let height = self.height;
 		unsafe {
-			gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(multisample_framebuffer));
-			gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, self.framebuffer);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::READ_FRAMEBUFFER, Some(multisample_framebuffer));
+			crate::core::glstatecache::bind_framebuffer(gl, glow::DRAW_FRAMEBUFFER, self.framebuffer);
 			if self.color_attachment_count > 1 {
 				let mut draw_buffer_list = vec![glow::NONE; self.color_attachment_count];
 				for attachment_index in 0..self.color_attachment_count {
@@ -436,7 +436,7 @@ impl RenderTarget {
 			if self.depth_texture.is_some() {
 				gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, glow::DEPTH_BUFFER_BIT, glow::NEAREST);
 			}
-			gl.bind_framebuffer(glow::FRAMEBUFFER, previous_framebuffer);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, previous_framebuffer);
 		}
 	}
 
@@ -448,8 +448,8 @@ impl RenderTarget {
 	//==============================================================================
 	pub fn bind(&self, gl: &glow::Context) {
 		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, self.get_framebuffer());
-			gl.viewport(0, 0, self.width, self.height);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, self.get_framebuffer());
+			crate::core::glstatecache::viewport(gl, 0, 0, self.width, self.height);
 		}
 	}
 
@@ -463,16 +463,16 @@ impl RenderTarget {
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		unsafe {
 			if let Some(framebuffer) = self.framebuffer.take() {
-				gl.delete_framebuffer(framebuffer);
+				crate::core::glstatecache::delete_framebuffer(gl, framebuffer);
 			}
 			for color_texture in self.color_texture_list.drain(..) {
-				gl.delete_texture(color_texture);
+				crate::core::glstatecache::delete_texture(gl, color_texture);
 			}
 			if let Some(depth_renderbuffer) = self.depth_renderbuffer.take() {
 				gl.delete_renderbuffer(depth_renderbuffer);
 			}
 			if let Some(depth_texture) = self.depth_texture.take() {
-				gl.delete_texture(depth_texture);
+				crate::core::glstatecache::delete_texture(gl, depth_texture);
 			}
 		}
 		self.destroy_multisample(gl);
@@ -486,7 +486,7 @@ impl RenderTarget {
 	fn destroy_multisample(&mut self, gl: &glow::Context) {
 		unsafe {
 			if let Some(multisample_framebuffer) = self.multisample_framebuffer.take() {
-				gl.delete_framebuffer(multisample_framebuffer);
+				crate::core::glstatecache::delete_framebuffer(gl, multisample_framebuffer);
 			}
 			for color_renderbuffer in self.multisample_color_renderbuffer_list.drain(..) {
 				gl.delete_renderbuffer(color_renderbuffer);

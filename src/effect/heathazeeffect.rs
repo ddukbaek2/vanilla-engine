@@ -171,7 +171,7 @@ impl HeatHazeEffect {
 		if let Some(capture_texture) = self.capture_texture.take() {
 			if let Some(gl) = self.gl_context.upgrade() {
 				unsafe {
-					gl.delete_texture(capture_texture);
+					crate::core::glstatecache::delete_texture(&gl, capture_texture);
 				}
 			}
 		}
@@ -188,12 +188,12 @@ impl HeatHazeEffect {
 				return Some(capture_texture);
 			}
 			unsafe {
-				gl.delete_texture(capture_texture);
+				crate::core::glstatecache::delete_texture(gl, capture_texture);
 			}
 			self.capture_texture = None;
 		}
 		let capture_texture = unsafe {
-			let capture_texture = match gl.create_texture() {
+			let capture_texture = match crate::core::glstatecache::create_texture(gl) {
 				Ok(capture_texture) => {
 					capture_texture
 				}
@@ -202,7 +202,7 @@ impl HeatHazeEffect {
 					return None;
 				}
 			};
-			gl.bind_texture(glow::TEXTURE_2D, Some(capture_texture));
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(capture_texture));
 			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGB8 as i32, width, height, 0, glow::RGB, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None));
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
@@ -319,7 +319,7 @@ impl Component for HeatHazeEffect {
 		}
 
 		// 떠 오기. (GL 은 아래가 0 이라 텍스처 0 줄이 영역 아래쪽이다)
-		let capture_texture = match self.ensure_capture_texture(graphic.get_gl(), region_width, region_height) {
+		let capture_texture = match self.ensure_capture_texture(graphic.get_tracked_gl(), region_width, region_height) {
 			Some(capture_texture) => {
 				capture_texture
 			}
@@ -328,9 +328,9 @@ impl Component for HeatHazeEffect {
 			}
 		};
 		unsafe {
-			let gl = graphic.get_gl();
-			gl.active_texture(glow::TEXTURE0);
-			gl.bind_texture(glow::TEXTURE_2D, Some(capture_texture));
+			let gl = graphic.get_tracked_gl();
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(capture_texture));
 			gl.copy_tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, region_x, buffer_height - region_bottom, region_width, region_height);
 		}
 

@@ -512,8 +512,8 @@ impl Material {
 			}
 			_ => {
 				return unsafe {
-					let texture = gl.create_texture()?;
-					gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+					let texture = crate::core::glstatecache::create_texture(gl)?;
+					crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
 					gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, 1, 1, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&fallback_color)));
 					Ok((texture, 4))
 				};
@@ -542,9 +542,9 @@ impl Material {
 			glow::RGBA8
 		};
 		unsafe {
-			let texture = gl.create_texture()?;
-			gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-			gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 4);
+			let texture = crate::core::glstatecache::create_texture(gl)?;
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
+			crate::core::glstatecache::pixel_store_i32(gl, glow::UNPACK_ALIGNMENT, 4);
 			gl.tex_image_2d(glow::TEXTURE_2D, 0, internal_format as i32, width as i32, height as i32, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&pixels)));
 			gl.generate_mipmap(glow::TEXTURE_2D);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR_MIPMAP_LINEAR as i32);
@@ -722,12 +722,12 @@ impl Material {
 			let uniform_location = shader_program.get_uniform_location(gl, uniform_name);
 			unsafe {
 				gl.uniform_1_i32(uniform_location.as_ref(), *texture_unit as i32);
-				gl.active_texture(glow::TEXTURE0 + *texture_unit);
-				gl.bind_texture(glow::TEXTURE_2D, *texture);
+				crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + *texture_unit);
+				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, *texture);
 			}
 		}
 		unsafe {
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 		}
 	}
 
@@ -940,7 +940,7 @@ impl Material {
 		let owned_texture_list = [self.base_color_texture, self.normal_texture, self.metallic_roughness_texture, self.glossiness_texture, self.occlusion_texture, self.emissive_texture, self.specular_texture, self.opacity_texture];
 		for texture in owned_texture_list.into_iter().flatten() {
 			unsafe {
-				gl.delete_texture(texture);
+				crate::core::glstatecache::delete_texture(gl, texture);
 			}
 		}
 	}

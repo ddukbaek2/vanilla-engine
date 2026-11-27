@@ -286,22 +286,22 @@ impl ToonPostProcess {
 		let previous_framebuffer = read_framebuffer_binding(gl);
 		let previous_texture = read_texture_binding(gl);
 		unsafe {
-			let Ok(test_texture) = gl.create_texture() else {
+			let Ok(test_texture) = crate::core::glstatecache::create_texture(gl) else {
 				return false;
 			};
-			let Ok(test_framebuffer) = gl.create_framebuffer() else {
-				gl.delete_texture(test_texture);
+			let Ok(test_framebuffer) = crate::core::glstatecache::create_framebuffer(gl) else {
+				crate::core::glstatecache::delete_texture(gl, test_texture);
 				return false;
 			};
-			gl.bind_texture(glow::TEXTURE_2D, Some(test_texture));
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(test_texture));
 			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA16F as i32, 1, 1, 0, glow::RGBA, glow::HALF_FLOAT, glow::PixelUnpackData::Slice(None));
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(test_framebuffer));
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(test_framebuffer));
 			gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(test_texture), 0);
 			let is_complete = gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE;
-			gl.bind_framebuffer(glow::FRAMEBUFFER, previous_framebuffer);
-			gl.bind_texture(glow::TEXTURE_2D, previous_texture);
-			gl.delete_framebuffer(test_framebuffer);
-			gl.delete_texture(test_texture);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, previous_framebuffer);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, previous_texture);
+			crate::core::glstatecache::delete_framebuffer(gl, test_framebuffer);
+			crate::core::glstatecache::delete_texture(gl, test_texture);
 			is_complete
 		}
 	}
@@ -432,9 +432,9 @@ impl ToonPostProcess {
 	pub fn begin(&self, gl: &glow::Context, clear_color: [f64; 3]) {
 		self.scene_render_target.bind(gl);
 		unsafe {
-			gl.viewport(0, 0, self.scene_render_target.get_width(), self.scene_render_target.get_height());
-			gl.depth_mask(true);
-			gl.clear_color((clear_color[0]) as f32, (clear_color[1]) as f32, (clear_color[2]) as f32, 1.0);
+			crate::core::glstatecache::viewport(gl, 0, 0, self.scene_render_target.get_width(), self.scene_render_target.get_height());
+			crate::core::glstatecache::depth_mask(gl, true);
+			crate::core::glstatecache::clear_color(gl, (clear_color[0]) as f32, (clear_color[1]) as f32, (clear_color[2]) as f32, 1.0);
 			gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
 		}
 	}
@@ -462,10 +462,10 @@ impl ToonPostProcess {
 			}
 		}
 		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, output_framebuffer);
-			gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-			gl.disable(glow::DEPTH_TEST);
-			gl.disable(glow::BLEND);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, output_framebuffer);
+			crate::core::glstatecache::viewport(gl, viewport[0], viewport[1], viewport[2], viewport[3]);
+			crate::core::glstatecache::disable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::disable(gl, glow::BLEND);
 		}
 		let composite_pass = &self.composite_pass;
 		composite_pass.use_program(gl);
@@ -477,15 +477,15 @@ impl ToonPostProcess {
 			None
 		};
 		unsafe {
-			gl.active_texture(glow::TEXTURE0);
-			gl.bind_texture(glow::TEXTURE_2D, scene_texture);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, scene_texture);
 			gl.uniform_1_i32(composite_pass.get_uniform_location(gl, "sceneTexture").as_ref(), 0);
-			gl.active_texture(glow::TEXTURE1);
-			gl.bind_texture(glow::TEXTURE_2D, bloom_texture);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE1);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, bloom_texture);
 			gl.uniform_1_i32(composite_pass.get_uniform_location(gl, "bloomTexture").as_ref(), 1);
 			// 깊이 칸. (밝힌 자리를 쓰지 않으면 읽지 않지만 빈 칸이면 드라이버가 알리므로 씬 텍스처를 묶어 둔다)
-			gl.active_texture(glow::TEXTURE2);
-			gl.bind_texture(glow::TEXTURE_2D, if applied_lit_area.is_some() { depth_texture } else { scene_texture });
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE2);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, if applied_lit_area.is_some() { depth_texture } else { scene_texture });
 			gl.uniform_1_i32(composite_pass.get_uniform_location(gl, "depthTexture").as_ref(), 2);
 			gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "bloomStrength").as_ref(), if self.is_bloom_enabled { self.bloom_strength } else { 0.0 });
 			gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "exposure").as_ref(), self.exposure);
@@ -509,13 +509,13 @@ impl ToonPostProcess {
 			gl.uniform_3_f64(composite_pass.get_uniform_location(gl, "hazeColor").as_ref(), haze_color[0], haze_color[1], haze_color[2]);
 			gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "hazeAmount").as_ref(), self.haze_amount);
 			gl.uniform_1_f64(composite_pass.get_uniform_location(gl, "vignetteStrength").as_ref(), self.vignette_strength);
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 		}
 		composite_pass.draw(gl);
 		unsafe {
-			gl.active_texture(glow::TEXTURE2);
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE2);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 		}
 	}
 

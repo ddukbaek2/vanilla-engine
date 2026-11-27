@@ -685,7 +685,7 @@ fn upload_drawable_morph_targets(gl: &glow::Context, drawable: &mut Drawable) ->
 	if target_count == 0 || vertex_count == 0 {
 		if let Some(morph_texture) = drawable.morph_texture.take() {
 			unsafe {
-				gl.delete_texture(morph_texture);
+				crate::core::glstatecache::delete_texture(gl, morph_texture);
 			}
 		}
 		drawable.is_morph_dirty = false;
@@ -699,17 +699,17 @@ fn upload_drawable_morph_targets(gl: &glow::Context, drawable: &mut Drawable) ->
 				morph_texture
 			}
 			None => {
-				gl.create_texture()?
+				crate::core::glstatecache::create_texture(gl)?
 			}
 		};
 		drawable.morph_texture = Some(morph_texture);
-		gl.bind_texture(glow::TEXTURE_2D, Some(morph_texture));
+		crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(morph_texture));
 		gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA32F as i32, texture_width as i32, texture_height as i32, 0, glow::RGBA, glow::FLOAT, glow::PixelUnpackData::Slice(Some(slice_to_bytes(&texel_data))));
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
-		gl.bind_texture(glow::TEXTURE_2D, None);
+		crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
 	}
 	drawable.morph_rows_per_target = rows_per_target as i32;
 	drawable.morph_texture_width = texture_width as i32;
@@ -1279,7 +1279,7 @@ impl SkinnedModelLoadHandle {
 			};
 			let file_format = self.file_format;
 			let model_result = task::with_polling_graphic(|graphic| -> Result<SkinnedModel, String> {
-				let gl = graphic.get_gl();
+				let gl = graphic.get_tracked_gl();
 				match file_format {
 					SkinnedModelFileFormat::Glb => {
 						SkinnedModel::load_from_bytes_with_shader_program(gl, &bytes, shader_program)
@@ -2331,11 +2331,11 @@ impl SkinnedModel {
 				}
 			};
 			let vertex_array = unsafe {
-				gl.create_vertex_array()?
+				crate::core::glstatecache::create_vertex_array(gl)?
 			};
 			let mut vertex_buffer_list = Vec::new();
 			unsafe {
-				gl.bind_vertex_array(Some(vertex_array));
+				crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
 			}
 			if let Some(vertex_buffer) = SkinnedModel::bind_float_attribute(gl, &shader_program, "vertexPosition", &mesh_description.positions, 3)? {
 				vertex_buffer_list.push(vertex_buffer);
@@ -2377,7 +2377,7 @@ impl SkinnedModel {
 				buffer_byte_count += indices.as_bytes().len();
 			}
 			unsafe {
-				gl.bind_vertex_array(None);
+				crate::core::glstatecache::bind_vertex_array(gl, None);
 			}
 
 			let material = match mesh_description.material_index.and_then(|material_index| material_list.get(material_index)) {
@@ -2561,7 +2561,7 @@ impl SkinnedModel {
 		};
 		unsafe {
 			let wireframe_index_buffer = gl.create_buffer()?;
-			gl.bind_vertex_array(None);
+			crate::core::glstatecache::bind_vertex_array(gl, None);
 			gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(wireframe_index_buffer));
 			gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, wireframe_indices.as_bytes(), glow::STATIC_DRAW);
 			gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
@@ -3380,7 +3380,7 @@ impl SkinnedModel {
 				}
 				if !drawable.is_morph_texture_shared {
 					if let Some(morph_texture) = drawable.morph_texture {
-						gl.delete_texture(morph_texture);
+						crate::core::glstatecache::delete_texture(gl, morph_texture);
 					}
 				}
 			}

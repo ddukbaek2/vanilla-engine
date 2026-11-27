@@ -57,16 +57,16 @@ pub(crate) fn read_texture_pixels(gl: &glow::Context, texture: GlTexture, width:
 	let mut pixels = vec![0u8; width as usize * height as usize * 4];
 	unsafe {
 		let previous_framebuffer = crate::core::graphic::read_framebuffer_binding(gl);
-		let framebuffer = gl.create_framebuffer().ok()?;
-		gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+		let framebuffer = crate::core::glstatecache::create_framebuffer(gl).ok()?;
+		crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(framebuffer));
 		gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
 		let is_complete = gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE;
 		if is_complete {
-			gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
+			crate::core::glstatecache::pixel_store_i32(gl, glow::PACK_ALIGNMENT, 1);
 			gl.read_pixels(0, 0, width as i32, height as i32, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelPackData::Slice(Some(&mut pixels)));
 		}
-		gl.bind_framebuffer(glow::FRAMEBUFFER, previous_framebuffer);
-		gl.delete_framebuffer(framebuffer);
+		crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, previous_framebuffer);
+		crate::core::glstatecache::delete_framebuffer(gl, framebuffer);
 		if !is_complete {
 			return None;
 		}
@@ -201,7 +201,7 @@ impl ImageTextureCache {
 		if let Some(entry) = self.entry_table.get_mut(&instance_id) {
 			if entry.is_smoothing != is_smoothing || entry.is_mipmap != is_mipmap {
 				unsafe {
-					gl.bind_texture(glow::TEXTURE_2D, Some(entry.texture));
+					crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(entry.texture));
 					apply_filter(gl, is_smoothing, is_mipmap);
 				}
 				entry.is_smoothing = is_smoothing;
@@ -218,10 +218,10 @@ impl ImageTextureCache {
 			return None;
 		}
 		let texture = unsafe {
-			let texture = gl.create_texture().ok()?;
-			gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+			let texture = crate::core::glstatecache::create_texture(gl).ok()?;
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
 			let pixels = image.get_pixels();
-			gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+			crate::core::glstatecache::pixel_store_i32(gl, glow::UNPACK_ALIGNMENT, 1);
 			gl.tex_image_2d(
 				glow::TEXTURE_2D,
 				0,
@@ -261,7 +261,7 @@ impl ImageTextureCache {
 			let is_alive = entry.image.strong_count() > 0;
 			if !is_alive {
 				unsafe {
-					gl.delete_texture(entry.texture);
+					crate::core::glstatecache::delete_texture(gl, entry.texture);
 				}
 			}
 			is_alive

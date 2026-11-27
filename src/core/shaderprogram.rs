@@ -96,7 +96,7 @@ impl ShaderProgram {
 					return Err(error);
 				}
 			};
-			let program = match gl.create_program() {
+			let program = match crate::core::glstatecache::create_program(gl) {
 				Ok(program) => {
 					program
 				}
@@ -111,15 +111,15 @@ impl ShaderProgram {
 			for (attribute_name, attribute_location) in attribute_location_list {
 				gl.bind_attrib_location(program, *attribute_location, attribute_name);
 			}
-			gl.link_program(program);
-			let is_linked = gl.get_program_link_status(program);
+			crate::core::glstatecache::link_program(gl, program);
+			let is_linked = crate::core::glstatecache::get_program_link_status(gl, program);
 			gl.detach_shader(program, vertex_shader);
 			gl.detach_shader(program, fragment_shader);
 			gl.delete_shader(vertex_shader);
 			gl.delete_shader(fragment_shader);
 			if !is_linked {
 				let program_info_log = gl.get_program_info_log(program);
-				gl.delete_program(program);
+				crate::core::glstatecache::delete_program(gl, program);
 				return Err(format!("셰이더 프로그램 링크 실패: {}", program_info_log));
 			}
 			Ok(ShaderProgram {
@@ -131,14 +131,17 @@ impl ShaderProgram {
 	}
 
 	//==============================================================================
-	/// 사용. (원본 useProgram)
+	/// 사용. (원본 useProgram, 상태 캐시가 이미 이 프로그램을 쓴다고 기억하면 GL 에 다시 걸지 않는다)
 	///
 	/// # 인자
 	/// - `gl`: 프로그램을 만든 GL 컨텍스트.
 	//==============================================================================
 	pub fn use_program(&self, gl: &glow::Context) {
+		if crate::core::glstatecache::is_program_in_use(gl, Some(self.program)) {
+			return;
+		}
 		unsafe {
-			gl.use_program(Some(self.program));
+			crate::core::glstatecache::use_program(gl, Some(self.program));
 		}
 	}
 
@@ -254,7 +257,7 @@ mod tests {
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Shader), 0);
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Program), 1);
 		unsafe {
-			gl.delete_program(shader_program.get_program());
+			crate::core::glstatecache::delete_program(&gl, shader_program.get_program());
 		}
 		assert_eq!(fake_gl::get_live_count(FakeGlObject::Program), 0);
 	}

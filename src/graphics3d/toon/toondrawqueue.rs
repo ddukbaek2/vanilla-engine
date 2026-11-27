@@ -25,9 +25,9 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use glow::HasContext;
 
 use crate::base::matrix4::Matrix4;
+use crate::core::graphic::GlTexture;
 use crate::graphics3d::camera3d::Camera3D;
 use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowMap};
 use crate::graphics3d::toon::toonmaterial::ToonBlendMode;
@@ -113,6 +113,33 @@ pub struct ToonDrawQueue<'a> {
 	item_list: Vec<ToonDrawItem<'a>>,
 	pass_list: RefCell<Vec<(ToonDrawStage, ToonPassCallback<'a>)>>,
 	screen_outline: RefCell<Option<&'a mut ToonScreenOutline>>,
+	/// 정렬한 불투명한 것의 차례. (원본 opaqueItemList, 담거나 비우면 None, 처음 그릴 때 만든다)
+	opaque_index_list: RefCell<Option<Vec<usize>>>,
+}
+
+thread_local! {
+	/// 정렬 번호. (원본 sortIdTable, 처음 본 차례로 1 부터, 재질은 번호, 모형은 주소, 텍스처는 GL 이름이 키)
+	static SORT_ID_TABLE: RefCell<(u64, HashMap<u32, u64>, HashMap<usize, u64>, HashMap<GlTexture, u64>)> = RefCell::new((1, HashMap::new(), HashMap::new(), HashMap::new()));
+}
+
+//==============================================================================
+/// 정렬 번호 셋 읽기. (원본 readSortId, 재질, 모형, 바탕색 텍스처, 없으면 0)
+//==============================================================================
+fn read_sort_ids(item: &ToonDrawItem) -> (u64, u64, u64) {
+	SORT_ID_TABLE.with(|sort_id_table| {
+		let mut sort_id_table = sort_id_table.borrow_mut();
+		let (next_sort_id, material_table, mesh_table, texture_table) = &mut *sort_id_table;
+		let material_id = match item.options.material {
+			Some(material) => *material_table.entry(material.get_id()).or_insert_with(|| { *next_sort_id += 1; *next_sort_id - 1 }),
+			None => 0,
+		};
+		let mesh_id = *mesh_table.entry(item.mesh as *const ToonMesh as usize).or_insert_with(|| { *next_sort_id += 1; *next_sort_id - 1 });
+		let texture_id = match item.options.base_color_texture {
+			Some(texture) => *texture_table.entry(texture).or_insert_with(|| { *next_sort_id += 1; *next_sort_id - 1 }),
+			None => 0,
+		};
+		(material_id, mesh_id, texture_id)
+	})
 }
 
 //==============================================================================
@@ -130,7 +157,7 @@ impl<'a> ToonDrawQueue<'a> {
 	/// 빈 그리기 줄. (화면 공간 바깥선을 맡기지 않은 것)
 	//==============================================================================
 	pub fn new() -> ToonDrawQueue<'a> {
-		ToonDrawQueue { item_list: Vec::new(), pass_list: RefCell::new(Vec::new()), screen_outline: RefCell::new(None) }
+		ToonDrawQueue { item_list: Vec::new(), pass_list: RefCell::new(Vec::new()), screen_outline: RefCell::new(None), opaque_index_list: RefCell::new(None) }
 	}
 
 	//==============================================================================
@@ -138,6 +165,7 @@ impl<'a> ToonDrawQueue<'a> {
 	//==============================================================================
 	pub fn clear(&mut self) {
 		self.item_list.clear();
+		*self.opaque_index_list.get_mut() = None;
 		self.pass_list.borrow_mut().clear();
 	}
 
@@ -193,6 +221,7 @@ impl<'a> ToonDrawQueue<'a> {
 	pub fn add_mesh(&mut self, mesh: &'a ToonMesh, model_matrix: &Matrix4, options: ToonDrawOptions<'a>) {
 		let (center, _) = mesh.get_bounding_sphere();
 		let depth_point = model_matrix.transform_point(center[0], center[1], center[2]);
+		*self.opaque_index_list.get_mut() = None;
 		self.item_list.push(ToonDrawItem { mesh, model_matrix: *model_matrix, instance_list: None, options, is_transparent: is_transparent_options(&options), depth_position: [depth_point.x, depth_point.y, depth_point.z] });
 	}
 
@@ -217,6 +246,7 @@ impl<'a> ToonDrawQueue<'a> {
 		for value in depth_position.iter_mut() {
 			*value /= instance_list.len() as f64;
 		}
+		*self.opaque_index_list.get_mut() = None;
 		self.item_list.push(ToonDrawItem { mesh, model_matrix: Matrix4::create_identity(), instance_list: Some(instance_list), options, is_transparent: is_transparent_options(&options), depth_position });
 	}
 
@@ -230,8 +260,9 @@ impl<'a> ToonDrawQueue<'a> {
 	//==============================================================================
 	pub fn draw_shadows(&self, gl: &glow::Context, renderer: &mut ToonRenderer, shadow_map: &ShadowMap) {
 		renderer.begin_shadow_pass(gl, shadow_map);
-		for item in self.item_list.iter() {
-			if item.is_transparent || !item.options.casts_shadow {
+		for &item_index in self.read_opaque_index_list().iter() {
+			let item = &self.item_list[item_index];
+			if !item.options.casts_shadow {
 				continue;
 			}
 			ToonDrawQueue::draw_item(gl, renderer, item, item.options);
@@ -251,8 +282,9 @@ impl<'a> ToonDrawQueue<'a> {
 		renderer.begin_shadow_atlas_pass(gl, shadow_atlas);
 		for tile_index in 0..shadow_atlas.get_tile_count() {
 			renderer.set_shadow_atlas_tile(gl, shadow_atlas, tile_index);
-			for item in self.item_list.iter() {
-				if item.is_transparent || !item.options.casts_shadow {
+			for &item_index in self.read_opaque_index_list().iter() {
+				let item = &self.item_list[item_index];
+				if !item.options.casts_shadow {
 					continue;
 				}
 				ToonDrawQueue::draw_item(gl, renderer, item, item.options);
@@ -308,11 +340,11 @@ impl<'a> ToonDrawQueue<'a> {
 		};
 		let mut viewport = [0i32; 4];
 		unsafe {
-			gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+			crate::core::glstatecache::get_parameter_i32_slice(gl, glow::VIEWPORT, &mut viewport);
 			if let Some(screen_rect) = renderer.get_screen_rect() {
 				let left = screen_rect.position.x.floor() as i32;
 				let bottom = (viewport[3] as f64 - screen_rect.position.y - screen_rect.size.y).floor() as i32;
-				gl.viewport(viewport[0] + left, viewport[1] + bottom, (screen_rect.size.x.round() as i32).max(1), (screen_rect.size.y.round() as i32).max(1));
+				crate::core::glstatecache::viewport(gl, viewport[0] + left, viewport[1] + bottom, (screen_rect.size.x.round() as i32).max(1), (screen_rect.size.y.round() as i32).max(1));
 			}
 		}
 		if screen_outline.begin_line_ids(gl, view_matrix, projection_matrix) {
@@ -342,7 +374,7 @@ impl<'a> ToonDrawQueue<'a> {
 			screen_outline.end_line_ids(gl);
 		}
 		unsafe {
-			gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+			crate::core::glstatecache::viewport(gl, viewport[0], viewport[1], viewport[2], viewport[3]);
 		}
 	}
 
@@ -364,6 +396,19 @@ impl<'a> ToonDrawQueue<'a> {
 	}
 
 	//==============================================================================
+	/// 정렬한 불투명한 것의 차례 읽기. (원본 readOpaqueItemList, 재질, 모형, 바탕색 텍스처의 차례, 같으면 담은 차례, 담은 것이 그대로면 앞서 만든 것을 쓴다)
+	/// - 그림자 깊이 판은 차례와 결과가 무관하다. 색 판은 깊이가 꼭 같은 면만 차례가 드러난다.
+	//==============================================================================
+	fn read_opaque_index_list(&self) -> std::cell::Ref<'_, Vec<usize>> {
+		if self.opaque_index_list.borrow().is_none() {
+			let mut key_list: Vec<((u64, u64, u64), usize)> = self.item_list.iter().enumerate().filter(|(_, item)| !item.is_transparent).map(|(item_index, item)| (read_sort_ids(item), item_index)).collect();
+			key_list.sort_unstable();
+			*self.opaque_index_list.borrow_mut() = Some(key_list.into_iter().map(|(_, item_index)| item_index).collect());
+		}
+		std::cell::Ref::map(self.opaque_index_list.borrow(), |opaque_index_list| opaque_index_list.as_ref().unwrap())
+	}
+
+	//==============================================================================
 	/// 단계마다 그리기. (begin_frame 과 end_frame 사이, read_depth(자리) 는 카메라에서의 보기 깊이)
 	//==============================================================================
 	fn draw_stages(&self, gl: &glow::Context, renderer: &mut ToonRenderer, read_depth: &dyn Fn([f64; 3]) -> f64) {
@@ -371,10 +416,8 @@ impl<'a> ToonDrawQueue<'a> {
 
 		// 1. 불투명한 몸. (인스턴스 묶음은 바깥선까지 한 번에, 화면 밖이면 draw_mesh 가 걸러 센다)
 		let mut outline_index_list: Vec<usize> = Vec::new();
-		for (item_index, item) in self.item_list.iter().enumerate() {
-			if item.is_transparent {
-				continue;
-			}
+		for &item_index in self.read_opaque_index_list().iter() {
+			let item = &self.item_list[item_index];
 			if item.instance_list.is_some() || (item.options.is_culled && !renderer.is_visible(item.mesh, &item.model_matrix)) {
 				ToonDrawQueue::draw_item(gl, renderer, item, item.options);
 				continue;
@@ -425,21 +468,21 @@ impl<'a> ToonDrawQueue<'a> {
 			let read_entry_depth = |entry: &ToonTransparentEntry| entry.depth_sum / entry.item_index_list.len() as f64;
 			entry_list.sort_by(|first, second| read_entry_depth(second).total_cmp(&read_entry_depth(first)));
 			unsafe {
-				gl.depth_mask(false);
+				crate::core::glstatecache::depth_mask(gl, false);
 			}
 			for entry in entry_list.iter() {
 				if entry.is_depth_prepassed {
 					unsafe {
-						gl.color_mask(false, false, false, false);
-						gl.depth_mask(true);
+						crate::core::glstatecache::color_mask(gl, false, false, false, false);
+						crate::core::glstatecache::depth_mask(gl, true);
 					}
 					for item_index in entry.item_index_list.iter() {
 						let item = &self.item_list[*item_index];
 						ToonDrawQueue::draw_item(gl, renderer, item, item.options);
 					}
 					unsafe {
-						gl.color_mask(true, true, true, true);
-						gl.depth_mask(false);
+						crate::core::glstatecache::color_mask(gl, true, true, true, true);
+						crate::core::glstatecache::depth_mask(gl, false);
 					}
 				}
 				for item_index in entry.item_index_list.iter() {
@@ -448,7 +491,7 @@ impl<'a> ToonDrawQueue<'a> {
 				}
 			}
 			unsafe {
-				gl.depth_mask(true);
+				crate::core::glstatecache::depth_mask(gl, true);
 			}
 		}
 		self.run_passes(gl, renderer, ToonDrawStage::AfterTransparent);

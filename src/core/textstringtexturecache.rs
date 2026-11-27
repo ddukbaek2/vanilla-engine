@@ -1847,7 +1847,7 @@ impl TextStringTextureCache {
 	pub(crate) fn delete_pending_textures(&mut self, gl: &glow::Context) {
 		for texture in self.pending_deleted_texture_list.drain(..) {
 			unsafe {
-				gl.delete_texture(texture);
+				crate::core::glstatecache::delete_texture(gl, texture);
 			}
 		}
 	}
@@ -2727,8 +2727,8 @@ impl TextStringTextureCache {
 				}
 			}
 			unsafe {
-				gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-				gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
+				crate::core::glstatecache::pixel_store_i32(gl, glow::UNPACK_ALIGNMENT, 1);
 				gl.tex_sub_image_2d(glow::TEXTURE_2D, 0, *atlas_x, *atlas_y, *span_width, *span_height, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&span_pixels)));
 			}
 			self.baked_glyph_count += glyph_order_list.len() as u64;
@@ -2796,9 +2796,9 @@ impl TextStringTextureCache {
 		};
 		let empty_pixels = vec![0u8; (width * height * 4) as usize];
 		let texture = unsafe {
-			let texture = gl.create_texture().ok()?;
-			gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-			gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+			let texture = crate::core::glstatecache::create_texture(gl).ok()?;
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
+			crate::core::glstatecache::pixel_store_i32(gl, glow::UNPACK_ALIGNMENT, 1);
 			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, width, height, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&empty_pixels)));
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, texture_filter as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, texture_filter as i32);

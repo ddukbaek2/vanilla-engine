@@ -353,7 +353,7 @@ impl ToonScreenOutline {
 		let seed_gather_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, SEED_GATHER_FRAGMENT_SHADER)?;
 		let jump_flood_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, JUMP_FLOOD_FRAGMENT_SHADER)?;
 		let composite_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, COMPOSITE_FRAGMENT_SHADER)?;
-		let empty_vertex_array = unsafe { gl.create_vertex_array()? };
+		let empty_vertex_array = unsafe { crate::core::glstatecache::create_vertex_array(gl)? };
 		Ok(ToonScreenOutline {
 			line_program,
 			seed_program,
@@ -522,7 +522,7 @@ impl ToonScreenOutline {
 	pub fn begin_line_ids(&mut self, gl: &glow::Context, view_matrix: &Matrix4, projection_matrix: &Matrix4) -> bool {
 		let mut viewport = [0i32; 4];
 		unsafe {
-			gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+			crate::core::glstatecache::get_parameter_i32_slice(gl, glow::VIEWPORT, &mut viewport);
 		}
 		let mut view_projection_matrix = *projection_matrix;
 		view_projection_matrix.multiply(view_matrix);
@@ -550,18 +550,18 @@ impl ToonScreenOutline {
 		self.save_state(gl);
 		self.is_drawing_line_ids = true;
 		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-			gl.viewport(0, 0, width, height);
-			gl.disable(glow::SCISSOR_TEST);
-			gl.disable(glow::BLEND);
-			gl.clear_color(0.0, 0.0, 0.0, 0.0);
-			gl.depth_mask(true);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(framebuffer));
+			crate::core::glstatecache::viewport(gl, 0, 0, width, height);
+			crate::core::glstatecache::disable(gl, glow::SCISSOR_TEST);
+			crate::core::glstatecache::disable(gl, glow::BLEND);
+			crate::core::glstatecache::clear_color(gl, 0.0, 0.0, 0.0, 0.0);
+			crate::core::glstatecache::depth_mask(gl, true);
 			gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
-			gl.enable(glow::DEPTH_TEST);
-			gl.depth_func(glow::LEQUAL);
-			gl.enable(glow::CULL_FACE);
-			gl.cull_face(glow::BACK);
-			gl.front_face(glow::CCW);
+			crate::core::glstatecache::enable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::depth_func(gl, glow::LEQUAL);
+			crate::core::glstatecache::enable(gl, glow::CULL_FACE);
+			crate::core::glstatecache::cull_face(gl, glow::BACK);
+			crate::core::glstatecache::front_face(gl, glow::CCW);
 			self.line_program.use_program(gl);
 			gl.uniform_matrix_4_f32_slice(self.line_program.get_uniform_location(gl, "viewProjectionMatrix").as_ref(), false, &view_projection_matrix.elements);
 		}
@@ -655,9 +655,9 @@ impl ToonScreenOutline {
 				return;
 			}
 			if is_mirrored {
-				gl.front_face(glow::CW);
+				crate::core::glstatecache::front_face(gl, glow::CW);
 			}
-			gl.bind_vertex_array(Some(body_vertex_array));
+			crate::core::glstatecache::bind_vertex_array(gl, Some(body_vertex_array));
 			let byte_offset = (index_start * 4) as i32;
 			if instance_count > 0 {
 				gl.draw_elements_instanced(glow::TRIANGLES, index_count as i32, glow::UNSIGNED_INT, byte_offset, instance_count);
@@ -666,7 +666,7 @@ impl ToonScreenOutline {
 				gl.draw_elements(glow::TRIANGLES, index_count as i32, glow::UNSIGNED_INT, byte_offset);
 			}
 			if is_mirrored {
-				gl.front_face(glow::CCW);
+				crate::core::glstatecache::front_face(gl, glow::CCW);
 			}
 		}
 	}
@@ -699,20 +699,20 @@ impl ToonScreenOutline {
 		let view = frame.view_matrix.read_elements();
 		let mut seed_index = 0usize;
 		unsafe {
-			gl.bind_vertex_array(Some(self.empty_vertex_array));
-			gl.viewport(0, 0, line_target.width, line_target.height);
-			gl.disable(glow::DEPTH_TEST);
-			gl.depth_mask(false);
-			gl.disable(glow::CULL_FACE);
-			gl.disable(glow::BLEND);
+			crate::core::glstatecache::bind_vertex_array(gl, Some(self.empty_vertex_array));
+			crate::core::glstatecache::viewport(gl, 0, 0, line_target.width, line_target.height);
+			crate::core::glstatecache::disable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::depth_mask(gl, false);
+			crate::core::glstatecache::disable(gl, glow::CULL_FACE);
+			crate::core::glstatecache::disable(gl, glow::BLEND);
 
 			// 1. 씨앗 고르기.
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(line_target.seed_framebuffer));
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(line_target.seed_framebuffer));
 			seed_program.use_program(gl);
-			gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, Some(line_target.line_texture));
-			gl.active_texture(glow::TEXTURE0 + DEPTH_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, Some(line_target.depth_texture));
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + LINE_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(line_target.line_texture));
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + DEPTH_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(line_target.depth_texture));
 			let location = |name: &str| seed_program.get_uniform_location(gl, name);
 			gl.uniform_1_i32(location("lineTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
 			gl.uniform_1_i32(location("depthTexture").as_ref(), DEPTH_TEXTURE_UNIT as i32);
@@ -723,18 +723,18 @@ impl ToonScreenOutline {
 			gl.uniform_1_f64(location("depthThreshold").as_ref(), self.depth_threshold);
 			gl.uniform_1_f64(location("creaseCosine").as_ref(), if line_widths[1] > 0.0 { self.crease_cosine } else { -2.0 });
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
-			gl.active_texture(glow::TEXTURE0 + DEPTH_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + DEPTH_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
 
 			// 2. 넓히기 판으로 모으기. (줄인 판이면 칸마다 가장 가까운 씨앗)
 			let point_scale_x = line_target.width as f64 / line_target.jump_flood_width as f64;
 			let point_scale_y = line_target.height as f64 / line_target.jump_flood_height as f64;
 			let seed_gather_program = &self.seed_gather_program;
-			gl.viewport(0, 0, line_target.jump_flood_width, line_target.jump_flood_height);
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(line_target.jump_flood_framebuffers[0]));
+			crate::core::glstatecache::viewport(gl, 0, 0, line_target.jump_flood_width, line_target.jump_flood_height);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(line_target.jump_flood_framebuffers[0]));
 			seed_gather_program.use_program(gl);
-			gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, Some(line_target.seed_texture));
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + LINE_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(line_target.seed_texture));
 			gl.uniform_1_i32(seed_gather_program.get_uniform_location(gl, "seedTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
 			gl.uniform_2_f64(seed_gather_program.get_uniform_location(gl, "pointScale").as_ref(), point_scale_x, point_scale_y);
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
@@ -745,17 +745,17 @@ impl ToonScreenOutline {
 			gl.uniform_2_f64(jump_flood_program.get_uniform_location(gl, "pointScale").as_ref(), point_scale_x, point_scale_y);
 			let reach = (line_widths[0].max(line_widths[1]) * 0.5 + 0.5) / point_scale_x.min(point_scale_y) + 1.5;
 			for step_size in read_jump_flood_steps(reach) {
-				gl.bind_framebuffer(glow::FRAMEBUFFER, Some(line_target.jump_flood_framebuffers[1 - seed_index]));
-				gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
-				gl.bind_texture(glow::TEXTURE_2D, Some(line_target.jump_flood_textures[seed_index]));
+				crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(line_target.jump_flood_framebuffers[1 - seed_index]));
+				crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + LINE_TEXTURE_UNIT);
+				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(line_target.jump_flood_textures[seed_index]));
 				gl.uniform_1_i32(jump_flood_program.get_uniform_location(gl, "stepSize").as_ref(), step_size);
 				gl.draw_arrays(glow::TRIANGLES, 0, 3);
 				seed_index = 1 - seed_index;
 			}
-			gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			gl.active_texture(glow::TEXTURE0);
-			gl.bind_vertex_array(None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + LINE_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
+			crate::core::glstatecache::bind_vertex_array(gl, None);
 		}
 		line_target.jump_flood_index = seed_index;
 		self.restore_state(gl);
@@ -782,16 +782,16 @@ impl ToonScreenOutline {
 		let color = self.color;
 		let line_widths = self.line_widths;
 		unsafe {
-			gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-			gl.disable(glow::DEPTH_TEST);
-			gl.depth_mask(false);
-			gl.disable(glow::CULL_FACE);
-			gl.enable(glow::BLEND);
-			gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+			crate::core::glstatecache::viewport(gl, viewport[0], viewport[1], viewport[2], viewport[3]);
+			crate::core::glstatecache::disable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::depth_mask(gl, false);
+			crate::core::glstatecache::disable(gl, glow::CULL_FACE);
+			crate::core::glstatecache::enable(gl, glow::BLEND);
+			crate::core::glstatecache::blend_func(gl, glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
 			composite_program.use_program(gl);
-			gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, Some(seed_texture));
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + LINE_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(seed_texture));
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 			let location = |name: &str| composite_program.get_uniform_location(gl, name);
 			gl.uniform_1_i32(location("seedTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
 			gl.uniform_4_f64(location("viewportRect").as_ref(), viewport[0] as f64, viewport[1] as f64, viewport[2].max(1) as f64, viewport[3].max(1) as f64);
@@ -800,12 +800,12 @@ impl ToonScreenOutline {
 			gl.uniform_1_f64(location("creaseOpacity").as_ref(), self.crease_opacity);
 			gl.uniform_4_f64(location("outlineColor").as_ref(), color[0], color[1], color[2], color[3]);
 			gl.uniform_1_f64(location("hdrOutput").as_ref(), if self.is_hdr_output { 1.0 } else { 0.0 });
-			gl.bind_vertex_array(Some(self.empty_vertex_array));
+			crate::core::glstatecache::bind_vertex_array(gl, Some(self.empty_vertex_array));
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
-			gl.bind_vertex_array(None);
-			gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::bind_vertex_array(gl, None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + LINE_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 		}
 		self.restore_state(gl);
 	}
@@ -873,8 +873,8 @@ impl ToonScreenOutline {
 			let previous_framebuffer = crate::graphics3d::read_framebuffer_binding(gl);
 			let previous_texture = crate::graphics3d::read_texture_binding(gl);
 			let create_texture = |internal_format: u32, format: u32, data_type: u32, texture_width: i32, texture_height: i32| -> Option<GlTexture> {
-				let texture = gl.create_texture().ok()?;
-				gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+				let texture = crate::core::glstatecache::create_texture(gl).ok()?;
+				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(texture));
 				gl.tex_image_2d(glow::TEXTURE_2D, 0, internal_format as i32, texture_width, texture_height, 0, format, data_type, glow::PixelUnpackData::Slice(None));
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
@@ -886,10 +886,10 @@ impl ToonScreenOutline {
 			let depth_texture = create_texture(glow::DEPTH_COMPONENT24, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT, width, height)?;
 			let seed_texture = create_texture(glow::RGBA16UI, glow::RGBA_INTEGER, glow::UNSIGNED_SHORT, width, height)?;
 			let jump_flood_textures = [create_texture(glow::RGBA16UI, glow::RGBA_INTEGER, glow::UNSIGNED_SHORT, jump_flood_width, jump_flood_height)?, create_texture(glow::RGBA16UI, glow::RGBA_INTEGER, glow::UNSIGNED_SHORT, jump_flood_width, jump_flood_height)?];
-			gl.bind_texture(glow::TEXTURE_2D, previous_texture);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, previous_texture);
 			let create_framebuffer = |color_texture: GlTexture, depth_texture: Option<GlTexture>| -> Option<(GlFramebuffer, bool)> {
-				let framebuffer = gl.create_framebuffer().ok()?;
-				gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+				let framebuffer = crate::core::glstatecache::create_framebuffer(gl).ok()?;
+				crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(framebuffer));
 				gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(color_texture), 0);
 				if depth_texture.is_some() {
 					gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::TEXTURE_2D, depth_texture, 0);
@@ -900,7 +900,7 @@ impl ToonScreenOutline {
 			let (seed_framebuffer, is_seed_complete) = create_framebuffer(seed_texture, None)?;
 			let (first_jump_flood_framebuffer, is_first_complete) = create_framebuffer(jump_flood_textures[0], None)?;
 			let (second_jump_flood_framebuffer, is_second_complete) = create_framebuffer(jump_flood_textures[1], None)?;
-			gl.bind_framebuffer(glow::FRAMEBUFFER, previous_framebuffer);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, previous_framebuffer);
 			let line_target = ToonLineTarget {
 				framebuffer,
 				line_texture,
@@ -937,16 +937,16 @@ impl ToonScreenOutline {
 	//==============================================================================
 	fn delete_target_objects(gl: &glow::Context, line_target: &ToonLineTarget) {
 		unsafe {
-			gl.delete_framebuffer(line_target.framebuffer);
-			gl.delete_framebuffer(line_target.seed_framebuffer);
+			crate::core::glstatecache::delete_framebuffer(gl, line_target.framebuffer);
+			crate::core::glstatecache::delete_framebuffer(gl, line_target.seed_framebuffer);
 			for jump_flood_framebuffer in line_target.jump_flood_framebuffers {
-				gl.delete_framebuffer(jump_flood_framebuffer);
+				crate::core::glstatecache::delete_framebuffer(gl, jump_flood_framebuffer);
 			}
-			gl.delete_texture(line_target.line_texture);
-			gl.delete_texture(line_target.depth_texture);
-			gl.delete_texture(line_target.seed_texture);
+			crate::core::glstatecache::delete_texture(gl, line_target.line_texture);
+			crate::core::glstatecache::delete_texture(gl, line_target.depth_texture);
+			crate::core::glstatecache::delete_texture(gl, line_target.seed_texture);
 			for jump_flood_texture in line_target.jump_flood_textures {
-				gl.delete_texture(jump_flood_texture);
+				crate::core::glstatecache::delete_texture(gl, jump_flood_texture);
 			}
 		}
 	}
@@ -957,21 +957,21 @@ impl ToonScreenOutline {
 	fn save_state(&mut self, gl: &glow::Context) {
 		unsafe {
 			let mut viewport = [0i32; 4];
-			gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+			crate::core::glstatecache::get_parameter_i32_slice(gl, glow::VIEWPORT, &mut viewport);
 			let mut clear_color = [0.0f32; 4];
-			gl.get_parameter_f32_slice(glow::COLOR_CLEAR_VALUE, &mut clear_color);
+			crate::core::glstatecache::get_parameter_f32_slice(gl, glow::COLOR_CLEAR_VALUE, &mut clear_color);
 			self.saved_state = Some(SavedState {
-				is_blend_enabled: gl.is_enabled(glow::BLEND),
-				is_depth_test_enabled: gl.is_enabled(glow::DEPTH_TEST),
-				is_cull_face_enabled: gl.is_enabled(glow::CULL_FACE),
-				is_scissor_test_enabled: gl.is_enabled(glow::SCISSOR_TEST),
-				depth_mask: gl.get_parameter_bool(glow::DEPTH_WRITEMASK),
-				depth_function: gl.get_parameter_i32(glow::DEPTH_FUNC),
-				front_face: gl.get_parameter_i32(glow::FRONT_FACE),
-				blend_source_rgb: gl.get_parameter_i32(glow::BLEND_SRC_RGB),
-				blend_destination_rgb: gl.get_parameter_i32(glow::BLEND_DST_RGB),
-				blend_source_alpha: gl.get_parameter_i32(glow::BLEND_SRC_ALPHA),
-				blend_destination_alpha: gl.get_parameter_i32(glow::BLEND_DST_ALPHA),
+				is_blend_enabled: crate::core::glstatecache::is_enabled(gl, glow::BLEND),
+				is_depth_test_enabled: crate::core::glstatecache::is_enabled(gl, glow::DEPTH_TEST),
+				is_cull_face_enabled: crate::core::glstatecache::is_enabled(gl, glow::CULL_FACE),
+				is_scissor_test_enabled: crate::core::glstatecache::is_enabled(gl, glow::SCISSOR_TEST),
+				depth_mask: crate::core::glstatecache::get_parameter_bool(gl, glow::DEPTH_WRITEMASK),
+				depth_function: crate::core::glstatecache::get_parameter_i32(gl, glow::DEPTH_FUNC),
+				front_face: crate::core::glstatecache::get_parameter_i32(gl, glow::FRONT_FACE),
+				blend_source_rgb: crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_SRC_RGB),
+				blend_destination_rgb: crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_DST_RGB),
+				blend_source_alpha: crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_SRC_ALPHA),
+				blend_destination_alpha: crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_DST_ALPHA),
 				clear_color,
 				program: crate::graphics3d::read_program_binding(gl),
 				vertex_array: crate::graphics3d::read_vertex_array_binding(gl),
@@ -994,22 +994,22 @@ impl ToonScreenOutline {
 			}
 		};
 		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, saved_state.framebuffer);
-			gl.viewport(saved_state.viewport[0], saved_state.viewport[1], saved_state.viewport[2], saved_state.viewport[3]);
-			gl.clear_color(saved_state.clear_color[0], saved_state.clear_color[1], saved_state.clear_color[2], saved_state.clear_color[3]);
-			gl.bind_vertex_array(saved_state.vertex_array);
-			gl.use_program(saved_state.program);
-			gl.depth_mask(saved_state.depth_mask);
-			gl.depth_func(saved_state.depth_function as u32);
-			gl.front_face(saved_state.front_face as u32);
-			gl.cull_face(glow::BACK);
-			gl.blend_func_separate(saved_state.blend_source_rgb as u32, saved_state.blend_destination_rgb as u32, saved_state.blend_source_alpha as u32, saved_state.blend_destination_alpha as u32);
+			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, saved_state.framebuffer);
+			crate::core::glstatecache::viewport(gl, saved_state.viewport[0], saved_state.viewport[1], saved_state.viewport[2], saved_state.viewport[3]);
+			crate::core::glstatecache::clear_color(gl, saved_state.clear_color[0], saved_state.clear_color[1], saved_state.clear_color[2], saved_state.clear_color[3]);
+			crate::core::glstatecache::bind_vertex_array(gl, saved_state.vertex_array);
+			crate::core::glstatecache::use_program(gl, saved_state.program);
+			crate::core::glstatecache::depth_mask(gl, saved_state.depth_mask);
+			crate::core::glstatecache::depth_func(gl, saved_state.depth_function as u32);
+			crate::core::glstatecache::front_face(gl, saved_state.front_face as u32);
+			crate::core::glstatecache::cull_face(gl, glow::BACK);
+			crate::core::glstatecache::blend_func_separate(gl, saved_state.blend_source_rgb as u32, saved_state.blend_destination_rgb as u32, saved_state.blend_source_alpha as u32, saved_state.blend_destination_alpha as u32);
 			for (capability, is_enabled) in [(glow::BLEND, saved_state.is_blend_enabled), (glow::DEPTH_TEST, saved_state.is_depth_test_enabled), (glow::CULL_FACE, saved_state.is_cull_face_enabled), (glow::SCISSOR_TEST, saved_state.is_scissor_test_enabled)] {
 				if is_enabled {
-					gl.enable(capability);
+					crate::core::glstatecache::enable(gl, capability);
 				}
 				else {
-					gl.disable(capability);
+					crate::core::glstatecache::disable(gl, capability);
 				}
 			}
 		}
@@ -1024,12 +1024,12 @@ impl ToonScreenOutline {
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		self.delete_line_target(gl);
 		unsafe {
-			gl.delete_vertex_array(self.empty_vertex_array);
-			gl.delete_program(self.line_program.get_program());
-			gl.delete_program(self.seed_program.get_program());
-			gl.delete_program(self.seed_gather_program.get_program());
-			gl.delete_program(self.jump_flood_program.get_program());
-			gl.delete_program(self.composite_program.get_program());
+			crate::core::glstatecache::delete_vertex_array(gl, self.empty_vertex_array);
+			crate::core::glstatecache::delete_program(gl, self.line_program.get_program());
+			crate::core::glstatecache::delete_program(gl, self.seed_program.get_program());
+			crate::core::glstatecache::delete_program(gl, self.seed_gather_program.get_program());
+			crate::core::glstatecache::delete_program(gl, self.jump_flood_program.get_program());
+			crate::core::glstatecache::delete_program(gl, self.composite_program.get_program());
 		}
 	}
 }

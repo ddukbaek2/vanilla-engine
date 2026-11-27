@@ -1638,8 +1638,8 @@ impl ToonVfx {
 			buffer_list.push(glint_buffer);
 			let glint_vertex_array = ToonVfx::create_particle_vertex_array(gl, &mut buffer_list, &corner_data, glint_buffer)?;
 			// 리본: 자리와 (길이 쪽, 가로).
-			let ribbon_vertex_array = gl.create_vertex_array()?;
-			gl.bind_vertex_array(Some(ribbon_vertex_array));
+			let ribbon_vertex_array = crate::core::glstatecache::create_vertex_array(gl)?;
+			crate::core::glstatecache::bind_vertex_array(gl, Some(ribbon_vertex_array));
 			let ribbon_buffer = gl.create_buffer()?;
 			buffer_list.push(ribbon_buffer);
 			gl.bind_buffer(glow::ARRAY_BUFFER, Some(ribbon_buffer));
@@ -1647,12 +1647,12 @@ impl ToonVfx {
 			gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, (RIBBON_FLOAT_COUNT * 4) as i32, 0);
 			gl.enable_vertex_attrib_array(1);
 			gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, (RIBBON_FLOAT_COUNT * 4) as i32, 12);
-			gl.bind_vertex_array(None);
+			crate::core::glstatecache::bind_vertex_array(gl, None);
 			// 바닥 자국: 네 귀퉁이만.
-			let decal_vertex_array = gl.create_vertex_array()?;
-			gl.bind_vertex_array(Some(decal_vertex_array));
+			let decal_vertex_array = crate::core::glstatecache::create_vertex_array(gl)?;
+			crate::core::glstatecache::bind_vertex_array(gl, Some(decal_vertex_array));
 			ToonVfx::bind_corner_buffer(gl, &mut buffer_list, &corner_data, 0)?;
-			gl.bind_vertex_array(None);
+			crate::core::glstatecache::bind_vertex_array(gl, None);
 			let (sphere_positions, sphere_indices) = create_sphere_arrays();
 			let sphere_mesh = ToonVfx::create_indexed_mesh(gl, &mut buffer_list, &sphere_positions, &sphere_indices, 3)?;
 			let (band_positions, band_indices) = create_grid_arrays(BAND_SEGMENTS);
@@ -1725,8 +1725,8 @@ impl ToonVfx {
 	/// 파티클 꼴의 버텍스 어레이. (네 귀퉁이와 인스턴스 값 일곱)
 	//==============================================================================
 	unsafe fn create_particle_vertex_array(gl: &glow::Context, buffer_list: &mut Vec<GlBuffer>, corner_data: &[f32], instance_buffer: GlBuffer) -> Result<GlVertexArray, String> {
-		let vertex_array = gl.create_vertex_array()?;
-		gl.bind_vertex_array(Some(vertex_array));
+		let vertex_array = crate::core::glstatecache::create_vertex_array(gl)?;
+		crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
 		ToonVfx::bind_corner_buffer(gl, buffer_list, corner_data, 0)?;
 		gl.bind_buffer(glow::ARRAY_BUFFER, Some(instance_buffer));
 		for attribute_index in 0..7u32 {
@@ -1735,7 +1735,7 @@ impl ToonVfx {
 			gl.vertex_attrib_pointer_f32(location, 4, glow::FLOAT, false, (PARTICLE_FLOAT_COUNT * 4) as i32, (attribute_index * 16) as i32);
 			gl.vertex_attrib_divisor(location, 1);
 		}
-		gl.bind_vertex_array(None);
+		crate::core::glstatecache::bind_vertex_array(gl, None);
 		Ok(vertex_array)
 	}
 
@@ -1756,8 +1756,8 @@ impl ToonVfx {
 	/// 번호로 그리는 메쉬 짓기. (자리는 어트리뷰트 0)
 	//==============================================================================
 	unsafe fn create_indexed_mesh(gl: &glow::Context, buffer_list: &mut Vec<GlBuffer>, positions: &[f32], indices: &[u16], component_count: i32) -> Result<IndexedMesh, String> {
-		let vertex_array = gl.create_vertex_array()?;
-		gl.bind_vertex_array(Some(vertex_array));
+		let vertex_array = crate::core::glstatecache::create_vertex_array(gl)?;
+		crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
 		let vertex_buffer = gl.create_buffer()?;
 		buffer_list.push(vertex_buffer);
 		gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
@@ -1768,7 +1768,7 @@ impl ToonVfx {
 		buffer_list.push(index_buffer);
 		gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(index_buffer));
 		gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, index_slice_to_bytes(indices), glow::STATIC_DRAW);
-		gl.bind_vertex_array(None);
+		crate::core::glstatecache::bind_vertex_array(gl, None);
 		Ok(IndexedMesh { vertex_array, index_count: indices.len() as i32 })
 	}
 
@@ -1801,12 +1801,12 @@ impl ToonVfx {
 					atlas_texture
 				}
 				None => {
-					gl.create_texture().ok()?
+					crate::core::glstatecache::create_texture(gl).ok()?
 				}
 			};
-			gl.active_texture(glow::TEXTURE0 + VFX_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, Some(atlas_texture));
-			gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + VFX_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(atlas_texture));
+			crate::core::glstatecache::pixel_store_i32(gl, glow::UNPACK_ALIGNMENT, 1);
 			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, ATLAS_WIDTH as i32, ATLAS_HEIGHT as i32, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&pixels)));
 			if is_new {
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
@@ -1814,8 +1814,8 @@ impl ToonVfx {
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 			}
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 			self.atlas_texture = Some(atlas_texture);
 		}
 		self.atlas_pixels = Some(pixels);
@@ -2477,23 +2477,23 @@ impl ToonVfx {
 			}
 		};
 		unsafe {
-			let is_blend_enabled = gl.is_enabled(glow::BLEND);
-			let is_depth_test_enabled = gl.is_enabled(glow::DEPTH_TEST);
-			let is_cull_face_enabled = gl.is_enabled(glow::CULL_FACE);
-			let depth_mask = gl.get_parameter_bool(glow::DEPTH_WRITEMASK);
-			let depth_function = gl.get_parameter_i32(glow::DEPTH_FUNC);
-			let blend_functions = [gl.get_parameter_i32(glow::BLEND_SRC_RGB), gl.get_parameter_i32(glow::BLEND_DST_RGB), gl.get_parameter_i32(glow::BLEND_SRC_ALPHA), gl.get_parameter_i32(glow::BLEND_DST_ALPHA)];
+			let is_blend_enabled = crate::core::glstatecache::is_enabled(gl, glow::BLEND);
+			let is_depth_test_enabled = crate::core::glstatecache::is_enabled(gl, glow::DEPTH_TEST);
+			let is_cull_face_enabled = crate::core::glstatecache::is_enabled(gl, glow::CULL_FACE);
+			let depth_mask = crate::core::glstatecache::get_parameter_bool(gl, glow::DEPTH_WRITEMASK);
+			let depth_function = crate::core::glstatecache::get_parameter_i32(gl, glow::DEPTH_FUNC);
+			let blend_functions = [crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_SRC_RGB), crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_DST_RGB), crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_SRC_ALPHA), crate::core::glstatecache::get_parameter_i32(gl, glow::BLEND_DST_ALPHA)];
 			let previous_program = crate::graphics3d::read_program_binding(gl);
 			let previous_vertex_array = crate::graphics3d::read_vertex_array_binding(gl);
-			gl.enable(glow::DEPTH_TEST);
-			gl.depth_func(glow::LEQUAL);
-			gl.depth_mask(false);
-			gl.disable(glow::CULL_FACE);
-			gl.enable(glow::BLEND);
-			gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
-			gl.active_texture(glow::TEXTURE0 + VFX_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, Some(atlas_texture));
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::enable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::depth_func(gl, glow::LEQUAL);
+			crate::core::glstatecache::depth_mask(gl, false);
+			crate::core::glstatecache::disable(gl, glow::CULL_FACE);
+			crate::core::glstatecache::enable(gl, glow::BLEND);
+			crate::core::glstatecache::blend_func(gl, glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + VFX_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(atlas_texture));
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 			self.draw_decals(gl, &frame);
 			self.draw_shockwaves(gl, &frame);
 			self.draw_plumes(gl, &frame);
@@ -2502,20 +2502,20 @@ impl ToonVfx {
 			self.draw_ribbons(gl, &frame);
 			self.draw_particles(gl, &frame, is_particle_live);
 			self.draw_flashes(gl);
-			gl.active_texture(glow::TEXTURE0 + VFX_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			gl.active_texture(glow::TEXTURE0);
-			gl.bind_vertex_array(previous_vertex_array);
-			gl.use_program(previous_program);
-			gl.depth_mask(depth_mask);
-			gl.depth_func(depth_function as u32);
-			gl.blend_func_separate(blend_functions[0] as u32, blend_functions[1] as u32, blend_functions[2] as u32, blend_functions[3] as u32);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + VFX_TEXTURE_UNIT);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
+			crate::core::glstatecache::bind_vertex_array(gl, previous_vertex_array);
+			crate::core::glstatecache::use_program(gl, previous_program);
+			crate::core::glstatecache::depth_mask(gl, depth_mask);
+			crate::core::glstatecache::depth_func(gl, depth_function as u32);
+			crate::core::glstatecache::blend_func_separate(gl, blend_functions[0] as u32, blend_functions[1] as u32, blend_functions[2] as u32, blend_functions[3] as u32);
 			for (capability, is_enabled) in [(glow::BLEND, is_blend_enabled), (glow::DEPTH_TEST, is_depth_test_enabled), (glow::CULL_FACE, is_cull_face_enabled)] {
 				if is_enabled {
-					gl.enable(capability);
+					crate::core::glstatecache::enable(gl, capability);
 				}
 				else {
-					gl.disable(capability);
+					crate::core::glstatecache::disable(gl, capability);
 				}
 			}
 		}
@@ -2578,7 +2578,7 @@ impl ToonVfx {
 		set_uniform_float(gl, decal_program, "decalTime", self.time);
 		set_uniform_vector3(gl, decal_program, "rimColor", self.rim_color);
 		unsafe {
-			gl.bind_vertex_array(Some(self.decal_vertex_array));
+			crate::core::glstatecache::bind_vertex_array(gl, Some(self.decal_vertex_array));
 		}
 		for decal in self.decal_list.iter() {
 			if decal.age < 0.0 {
@@ -2632,7 +2632,7 @@ impl ToonVfx {
 		ToonVfx::use_program(gl, band_program, frame);
 		set_uniform_vector3(gl, band_program, "rimColor", self.rim_color);
 		unsafe {
-			gl.bind_vertex_array(Some(self.band_mesh.vertex_array));
+			crate::core::glstatecache::bind_vertex_array(gl, Some(self.band_mesh.vertex_array));
 		}
 		for shockwave in self.shockwave_list.iter() {
 			let options = &shockwave.options;
@@ -2677,7 +2677,7 @@ impl ToonVfx {
 		let view_direction = frame.view_direction;
 		set_uniform_vector4(gl, plume_program, "cameraPoint", [view_direction[0], view_direction[1], view_direction[2], 0.0]);
 		unsafe {
-			gl.bind_vertex_array(Some(self.lathe_mesh.vertex_array));
+			crate::core::glstatecache::bind_vertex_array(gl, Some(self.lathe_mesh.vertex_array));
 		}
 		for plume in self.plume_list.iter() {
 			if plume.age < 0.0 {
@@ -2708,7 +2708,7 @@ impl ToonVfx {
 		set_uniform_vector3(gl, fireball_program, "viewDirection", frame.view_direction);
 		set_uniform_vector3(gl, fireball_program, "rimColor", self.rim_color);
 		unsafe {
-			gl.bind_vertex_array(Some(self.sphere_mesh.vertex_array));
+			crate::core::glstatecache::bind_vertex_array(gl, Some(self.sphere_mesh.vertex_array));
 		}
 		for fireball in self.fireball_list.iter() {
 			if fireball.age < 0.0 {
@@ -2744,7 +2744,7 @@ impl ToonVfx {
 		ToonVfx::use_program(gl, beam_program, frame);
 		set_uniform_vector4(gl, beam_program, "cameraPoint", frame.camera_point);
 		unsafe {
-			gl.bind_vertex_array(Some(self.lathe_mesh.vertex_array));
+			crate::core::glstatecache::bind_vertex_array(gl, Some(self.lathe_mesh.vertex_array));
 		}
 		for beam in self.queued_beam_list.iter() {
 			let start = beam.start;
@@ -2807,7 +2807,7 @@ impl ToonVfx {
 		ToonVfx::use_program(gl, ribbon_program, frame);
 		set_uniform_vector3(gl, ribbon_program, "rimColor", self.rim_color);
 		unsafe {
-			gl.bind_vertex_array(Some(self.ribbon_vertex_array));
+			crate::core::glstatecache::bind_vertex_array(gl, Some(self.ribbon_vertex_array));
 			gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.ribbon_buffer));
 			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&ribbon_data), glow::DYNAMIC_DRAW);
 		}
@@ -2852,7 +2852,7 @@ impl ToonVfx {
 		unsafe {
 			gl.uniform_1_f32_slice(particle_program.get_uniform_location(gl, "lookGains").as_ref(), &self.look_gain_list);
 			if is_particle_live {
-				gl.bind_vertex_array(Some(self.particle_vertex_array));
+				crate::core::glstatecache::bind_vertex_array(gl, Some(self.particle_vertex_array));
 				let used_count = self.particle_used_count;
 				if self.is_particle_dirty {
 					gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.particle_buffer));
@@ -2862,7 +2862,7 @@ impl ToonVfx {
 				gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, 4, used_count as i32);
 			}
 			if glint_count > 0 {
-				gl.bind_vertex_array(Some(self.glint_vertex_array));
+				crate::core::glstatecache::bind_vertex_array(gl, Some(self.glint_vertex_array));
 				gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.glint_buffer));
 				gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&self.glint_data[..glint_count * PARTICLE_FLOAT_COUNT]), glow::DYNAMIC_DRAW);
 				gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, 4, glint_count as i32);
@@ -2880,8 +2880,8 @@ impl ToonVfx {
 		let flash_program = &self.flash_program;
 		flash_program.use_program(gl);
 		unsafe {
-			gl.disable(glow::DEPTH_TEST);
-			gl.bind_vertex_array(Some(self.decal_vertex_array));
+			crate::core::glstatecache::disable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::bind_vertex_array(gl, Some(self.decal_vertex_array));
 		}
 		for flash in self.flash_list.iter() {
 			if flash.age < 0.0 {
@@ -2894,7 +2894,7 @@ impl ToonVfx {
 			}
 		}
 		unsafe {
-			gl.enable(glow::DEPTH_TEST);
+			crate::core::glstatecache::enable(gl, glow::DEPTH_TEST);
 		}
 	}
 
@@ -2910,13 +2910,13 @@ impl ToonVfx {
 				gl.delete_buffer(buffer);
 			}
 			for vertex_array in [self.particle_vertex_array, self.glint_vertex_array, self.ribbon_vertex_array, self.decal_vertex_array, self.sphere_mesh.vertex_array, self.band_mesh.vertex_array, self.lathe_mesh.vertex_array] {
-				gl.delete_vertex_array(vertex_array);
+				crate::core::glstatecache::delete_vertex_array(gl, vertex_array);
 			}
 			for shader_program in [&self.particle_program, &self.fireball_program, &self.band_program, &self.decal_program, &self.beam_program, &self.plume_program, &self.ribbon_program, &self.flash_program] {
-				gl.delete_program(shader_program.get_program());
+				crate::core::glstatecache::delete_program(gl, shader_program.get_program());
 			}
 			if let Some(atlas_texture) = self.atlas_texture.take() {
-				gl.delete_texture(atlas_texture);
+				crate::core::glstatecache::delete_texture(gl, atlas_texture);
 			}
 		}
 	}

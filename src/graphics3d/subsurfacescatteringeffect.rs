@@ -292,8 +292,8 @@ impl SubsurfaceScatteringEffect {
 	//==============================================================================
 	pub fn render(&self, gl: &glow::Context, irradiance_texture: Option<GlTexture>, depth_texture: Option<GlTexture>, field_of_view_radian: f64, aspect_ratio: f64, near_distance: f64, far_distance: f64) {
 		unsafe {
-			gl.disable(glow::DEPTH_TEST);
-			gl.disable(glow::BLEND);
+			crate::core::glstatecache::disable(gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::disable(gl, glow::BLEND);
 		}
 
 		let scatter_pass = &self.scatter_pass;
@@ -307,9 +307,9 @@ impl SubsurfaceScatteringEffect {
 			gl.uniform_1_f64(scatter_pass.get_uniform_location(gl, "distanceToProjectionWindow").as_ref(), 1.0 / (field_of_view_radian * 0.5).tan());
 			gl.uniform_1_f64(scatter_pass.get_uniform_location(gl, "aspectRatio").as_ref(), aspect_ratio);
 			gl.uniform_2_f64(scatter_pass.get_uniform_location(gl, "depthRange").as_ref(), near_distance, far_distance);
-			gl.active_texture(glow::TEXTURE1);
-			gl.bind_texture(glow::TEXTURE_2D, depth_texture);
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE1);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, depth_texture);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 		}
 
 		// 1. 가로. (조도 → 핑)
@@ -317,7 +317,7 @@ impl SubsurfaceScatteringEffect {
 		ping_render_target.bind(gl);
 		unsafe {
 			gl.uniform_2_f64(blur_direction_location.as_ref(), 1.0, 0.0);
-			gl.bind_texture(glow::TEXTURE_2D, irradiance_texture);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, irradiance_texture);
 		}
 		scatter_pass.draw(gl);
 
@@ -326,15 +326,15 @@ impl SubsurfaceScatteringEffect {
 		pong_render_target.bind(gl);
 		unsafe {
 			gl.uniform_2_f64(blur_direction_location.as_ref(), 0.0, 1.0);
-			gl.bind_texture(glow::TEXTURE_2D, ping_render_target.get_color_texture(0));
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, ping_render_target.get_color_texture(0));
 		}
 		scatter_pass.draw(gl);
 
 		// 깊이 텍스처 해제. (유닛 1 은 섀도우 샘플러 전용, 비교 모드 없는 텍스처가 남으면 이후 드로우가 무효화된다)
 		unsafe {
-			gl.active_texture(glow::TEXTURE1);
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			gl.active_texture(glow::TEXTURE0);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE1);
+			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, None);
+			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 		}
 	}
 
