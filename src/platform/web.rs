@@ -1150,9 +1150,10 @@ impl WebApplication {
 		let document = window.document().ok_or_else(|| String::from("document 없음"))?;
 
 		// 이름 설정. (원본처럼 비어 있지 않으면 문서 제목에 쓴다, 데스크탑 창 제목의 기본값이면 페이지의 제목을 그대로 둔다)
-		let title = &self.engine_runner.engine.get_engine_configuration().title;
+		// 설정은 이 줄에서만 빌린다. (&...title 로 두면 빌림이 함수 끝까지 늘어나 아래 attach_graphic 이 설정을 고칠 때 이미 빌렸다고 패닉한다)
+		let title = self.engine_runner.engine.get_engine_configuration().title.clone();
 		if !title.is_empty() && title != crate::core::engine::DEFAULT_ENGINE_TITLE {
-			document.set_title(title);
+			document.set_title(&title);
 		}
 		let canvas_id = self.engine_runner.engine.get_engine_configuration().canvas_id.clone();
 		let canvas: web_sys::HtmlCanvasElement = match document.get_element_by_id(&canvas_id) {
