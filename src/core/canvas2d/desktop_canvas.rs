@@ -283,8 +283,24 @@ impl Canvas2D {
 	/// - `angle`: 돌릴 각. (라디안, 화면에서 시계 방향이 +)
 	//==============================================================================
 	pub fn rotate(&mut self, angle: f64) {
-		let angle = clamp_to_float(angle);
-		self.transform(f64::from(angle.cos()), f64::from(angle.sin()), f64::from(-angle.sin()), f64::from(angle.cos()), 0.0, 0.0);
+		// 블링크: 유한하지 않으면 무시하고, double 각을 도로 바꿔(base::RadToDeg) float 로 줄여 스키아 rotate 에 넘긴다.
+		if !angle.is_finite() {
+			return;
+		}
+		let degrees = clamp_to_float(angle * (180.0 / std::f64::consts::PI));
+		// 스키아 SkMatrix::setRotate: 라디안은 float 셈(SkDegreesToRadians), sin 과 cos 은 float 이고 1/65536 안이면 0 이다. (SkScalarSinSnapToZero)
+		let radians = degrees * (std::f32::consts::PI / 180.0);
+		let snap_to_zero = |value: f32| {
+			if value.abs() <= 1.0 / 65536.0 {
+				0.0
+			}
+			else {
+				value
+			}
+		};
+		let sine = snap_to_zero(radians.sin());
+		let cosine = snap_to_zero(radians.cos());
+		self.transform(f64::from(cosine), f64::from(sine), f64::from(-sine), f64::from(cosine), 0.0, 0.0);
 	}
 
 	//==============================================================================
@@ -2572,6 +2588,24 @@ fn box_blur_vertical(source: &[f32], target: &mut [f32], width: usize, height: u
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	//==============================================================================
+	/// rotate 는 크롬처럼 각을 float 도로 줄여 스키아 setRotate 로 돌린다. (1/65536 안의 sin, cos 은 0)
+	//==============================================================================
+	#[test]
+	fn rotate_matches_skia_set_rotate() {
+		let mut canvas = Canvas2D::new(4, 4);
+		canvas.rotate(std::f64::consts::FRAC_PI_2);
+		let matrix = canvas.get_transform();
+		assert_eq!((matrix.a, matrix.b, matrix.c, matrix.d), (0.0, 1.0, -1.0, 0.0));
+		canvas.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+		canvas.rotate(0.5);
+		let matrix = canvas.get_transform();
+		let radians = ((0.5f64 * (180.0 / std::f64::consts::PI)) as f32) * (std::f32::consts::PI / 180.0);
+		assert_eq!((matrix.a, matrix.b), (radians.cos(), radians.sin()));
+		canvas.rotate(f64::NAN);
+		assert_eq!(canvas.get_transform(), matrix);
+	}
 
 	//==============================================================================
 	/// 한 픽셀의 곧은 RGBA.
