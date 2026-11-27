@@ -2090,7 +2090,8 @@ pub fn is_subpixel_positioned(face: &ResolvedFontFace, pixel_size: f32) -> bool 
 ///   가짜 기울임은 CoreText 의 글자 행렬 기울기로 그린다. 색 글리프는 rasterize_glyph 와 같다.
 /// - 윈도우: 색이 아닌 글리프는 크롬 윈도우 Canvas2D 와 같은 길로 DirectWrite 가 그린다. (스키아 SkScalerContext_DW 의 A8: 격자 맞춤, gasp 로 고른 렌더링 모드, ClearType 이 켜졌으면 크롬처럼 3x1 텍스처의 세 채널 평균, 꺼졌으면 그레이스케일)
 ///   감마 전보정은 글자 색 밝기 단계의 표로, 대비와 감마는 크롬처럼 Avalon.Graphics 키가 있으면 시스템 값, 없으면 대비 1, sRGB 다. 가짜 기울임은 DirectWrite 글자 행렬의 기울기다.
-/// - 리눅스: 색이 아닌 글리프는 크롬 리눅스처럼 skrifa 윤곽에 fontconfig 의 힌팅 단계로 힌팅을 걸어 칠하고 감마 1.2, 대비 0.2 로 전보정한다. (스키아 SkTypeface_Fontations)
+/// - 리눅스: 색이 아닌 글리프는 크롬 리눅스처럼 skrifa 윤곽에 fontconfig 의 힌팅 단계로 힌팅을 걸어 스키아와 같은 해석적 AA 로 칠하고 감마 1.2, 대비 0.2 로 전보정한다. (스키아 SkTypeface_Fontations, SkScan_AAAPath)
+///   fontconfig 힌팅이 꽉(hintfull)인 글꼴은 서브픽셀 자리를 끈다. (is_subpixel_positioned, 부르는 쪽이 subpixel_x 를 0 으로 준다)
 /// - 그 밖은 서브픽셀 자리와 밝기를 쓰지 않는다.
 ///
 /// # 인자
