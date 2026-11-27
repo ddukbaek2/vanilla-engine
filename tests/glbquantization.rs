@@ -6,7 +6,7 @@
 //!   - skinned_float, skinned_quantized: 본 하나, 위치 UNSIGNED_SHORT 를 inverseBindMatrices 로 되풀이, 무게 UNSIGNED_BYTE 정규화, 돌림 움직임 SHORT 정규화.
 //!   - required_*: extensionsRequired 에 읽지 못하는 확장을 더한 것. fallback_buffer: bufferView 가 바이너리 덩어리 밖 buffers[1](meshopt 의 fallback 버퍼)을 가리키는 것.
 //! - 두 가지를 본다. 원본과 같은 값을 내는지(32비트 실수 한두 칸까지 받는다, 맥에서는 차이 0), 원본 시험처럼 양자화 칸 크기 안에서 실수 모형과 같은 꼭짓점을 내는지.
-//! - 노멀이 없는 프리미티브의 평평한 노멀(glTF 2.0 명세)도 본다. (원본에는 아직 없어 러스트만의 시험이다)
+//! - 노멀이 없는 프리미티브의 평평한 노멀(glTF 2.0 명세)도 본다. (툰과 PBR 둘 다 꼭짓점을 삼각형마다 푼다, 원본 meshquantization.test.mjs 와 같은 검사)
 //==============================================================================
 use serde_json::Value;
 use vanilla::graphics3d::skinnedmodel::SkinnedModel;
@@ -263,6 +263,60 @@ fn toon_reader_builds_flat_normals_when_normals_are_missing() {
 	check_near(&widen(&arrays.uv_data), &indices.iter().flat_map(|corner| UVS[*corner]).collect::<Vec<f64>>(), 1e-6, "텍스처 좌표도 삼각형마다 푼다");
 	let outline_options = ToonOutlineOptions { width: 0.02, added_parts: vec![String::from("hull")], ..ToonOutlineOptions::default() };
 	assert!(!read_glb_arrays(&bytes, Some(&outline_options)).unwrap().outline_vertex_data.is_empty(), "노멀이 없어도 몸으로 바깥선 껍데기를 짓는다");
+}
+
+//==============================================================================
+/// 삼각형마다의 평평한 노멀 기대값. ((p1 - p0) x (p2 - p0) 을 길이 1 로, 위치는 GLB 에 담긴 32 비트 실수, 원본 시험의 createExpectedFlatNormals)
+//==============================================================================
+fn create_expected_flat_normals(indices: &[usize]) -> Vec<f64> {
+	let mut normals = Vec::new();
+	for triangle in indices.chunks(3) {
+		let [first, second, third] = [0, 1, 2].map(|corner| POSITIONS[triangle[corner]].map(|value| value as f32 as f64));
+		let first_edge = [second[0] - first[0], second[1] - first[1], second[2] - first[2]];
+		let second_edge = [third[0] - first[0], third[1] - first[1], third[2] - first[2]];
+		let cross = [first_edge[1] * second_edge[2] - first_edge[2] * second_edge[1], first_edge[2] * second_edge[0] - first_edge[0] * second_edge[2], first_edge[0] * second_edge[1] - first_edge[1] * second_edge[0]];
+		let length = (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+		for _ in 0..3 {
+			normals.extend_from_slice(&[cross[0] / length, cross[1] / length, cross[2] / length]);
+		}
+	}
+	normals
+}
+
+//==============================================================================
+/// json 에서 노멀을 뺀 GLB. (glTF 2.0 명세: 노멀이 없으면 평평한 노멀, 원본 시험의 removeNormals)
+//==============================================================================
+fn remove_normals(bytes: &[u8]) -> Vec<u8> {
+	let (mut json, binary_buffer) = SkinnedModel::read_glb_chunks(bytes).unwrap();
+	for mesh in json["meshes"].as_array_mut().unwrap().iter_mut() {
+		for primitive in mesh["primitives"].as_array_mut().unwrap().iter_mut() {
+			primitive["attributes"].as_object_mut().unwrap().remove("NORMAL");
+		}
+	}
+	create_glb(&json, &binary_buffer)
+}
+
+//==============================================================================
+/// PBR 읽기(SkinnedModel): 노멀이 없는 프리미티브는 꼭짓점을 삼각형마다 풀어 평평한 노멀을 짓고 번호 없이 그린다. (고치기 전에는 노멀이 없어 업로드 때 부드러운 노멀, 원본 시험의 "노멀 없는 PBR")
+//==============================================================================
+#[test]
+fn pbr_reader_builds_flat_normals_when_normals_are_missing() {
+	let indices = [0usize, 1, 2, 0, 2, 3];
+	let (_, mesh_description_list) = interpret_pbr(&remove_normals(&read_asset("float.glb"))).unwrap();
+	let mesh_description = &mesh_description_list[0];
+	assert!(mesh_description.normals.is_some(), "노멀 없는 PBR 노멀");
+	assert!(mesh_description.indices.is_none(), "노멀 없는 PBR 은 번호 없이");
+	check_near(&mesh_description.positions, &indices.iter().flat_map(|corner| POSITIONS[*corner]).collect::<Vec<f64>>(), 1e-6, "노멀 없는 PBR 위치");
+	check_near(mesh_description.normals.as_deref().unwrap_or(&[]), &create_expected_flat_normals(&indices), 1e-6, "노멀 없는 PBR 평평한 노멀");
+	check_near(mesh_description.texture_coordinates.as_deref().unwrap_or(&[]), &indices.iter().flat_map(|corner| UVS[*corner]).collect::<Vec<f64>>(), 1e-6, "노멀 없는 PBR 텍스처 좌표");
+	assert_eq!(mesh_description.weights.len(), indices.len() * 4, "노멀 없는 PBR 가중치 수");
+
+	// 노멀 없는 뼈대 모형: 조인트와 가중치도 삼각형마다 푼다. (원본 시험의 "노멀 없는 뼈대 PBR")
+	let (_, skinned_description_list) = interpret_pbr(&remove_normals(&read_asset("skinned_float.glb"))).unwrap();
+	let skinned_description = &skinned_description_list[0];
+	check_near(skinned_description.normals.as_deref().unwrap_or(&[]), &create_expected_flat_normals(&indices), 1e-6, "노멀 없는 뼈대 PBR 평평한 노멀");
+	assert_eq!(skinned_description.joints, indices.iter().flat_map(|_| [0u16, 0, 0, 0]).collect::<Vec<u16>>(), "노멀 없는 뼈대 PBR 조인트");
+	check_near(&skinned_description.weights, &indices.iter().flat_map(|_| [1.0, 0.0, 0.0, 0.0]).collect::<Vec<f64>>(), 1e-6, "노멀 없는 뼈대 PBR 가중치");
 }
 
 //==============================================================================
