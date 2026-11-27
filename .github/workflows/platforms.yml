@@ -1,4 +1,6 @@
-# 플랫폼 확인. (윈도우, 리눅스 X11 과 웨이랜드, 인텔 맥에서 시험을 돌리고 예제를 찍어 같은 기계의 크롬과 견준다)
+# 플랫폼 확인. (윈도우, 리눅스 X11 과 웨이랜드에서 시험을 돌리고 예제를 찍어 같은 기계의 크롬과 견준다)
+# - 손으로만 돌린다(workflow_dispatch). 고친 것은 먼저 로컬(맥 본디, 로제타 x86_64, 도커 리눅스)에서 확인해 문제가 없을 때 윈도우, 리눅스 마지막 확인으로 한 번 돌린다.
+#   CI 로 문제를 찾거나 고치며 되풀이해 돌리지 않는다. 맥은 로컬 기계로 확인하므로 맥 러너는 쓰지 않는다. (2026-11-27 뚝백이님)
 # - 시험: cargo test --workspace (doctest 포함), 데스크탑 플랫폼 시험(tests/desktopplatform.rs 의 #[ignore] 시험: 시스템 글꼴, 대체 글꼴, 색 이모지, 클립보드, 크롬 measureText 견주기)
 # - 그림: GPU 가 없는 기계라 메사 llvmpipe 소프트웨어 GL 로 그린다. (리눅스는 Xvfb 의 GLX 와 weston headless 의 EGL, 윈도우는 메사 opengl32.dll 을 예제 옆에 둔 WGL)
 #   예제는 찍기 모드(VANILLA_CAPTURE_PATH)로 돌려 그림을 아티팩트로 올린다. (.github/scripts/captureexamples.cjs)
@@ -13,9 +15,6 @@
 name: 플랫폼 확인
 
 on:
-  push:
-    branches: [dev, release, "ci-*"]
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -43,8 +42,6 @@ jobs:
             os: ubuntu-latest
           - tag: windows
             os: windows-latest
-          - tag: macos-intel
-            os: macos-26-intel
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     defaults:
