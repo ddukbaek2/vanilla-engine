@@ -475,7 +475,8 @@ impl ShadowText {
 		}
 		let scaled_blur = self.shadow_blur * bake_scale;
 		let scaled_offset = (self.shadow_offset * bake_scale).round() as i32;
-		let mut padding = BAKE_PADDING + scaled_blur.ceil() as i32 * 2 + scaled_offset.max(0);
+		// 사방 여백은 번지는 만큼만, 그림자 내림은 아래 높이에만 더한다. (원본 bakePadding 과 bakeHeight)
+		let mut padding = BAKE_PADDING + scaled_blur.ceil() as i32 * 2;
 		if self.is_underline {
 			// 밑줄은 기준선 아래로 내려가므로 여유를 더 둔다.
 			padding += ((font_size * 0.25 + 2.0) * bake_scale).ceil() as i32;
@@ -483,6 +484,7 @@ impl ShadowText {
 		// 원본은 글 색 그대로 Canvas2D 에 굽는다. (맥 데스크탑은 그 색 밝기로 감마 전보정)
 		let mut text_raster = graphic.get_text_string_texture_cache().rasterize_text_with_color(&self.text, &font_string, bake_scale, padding, self.resolve_shaping_text_direction().to_shaping_direction(), self.text_color)?;
 		self.draw_decoration_lines(&mut text_raster, font_size, bake_scale);
+		extend_raster_bottom(&mut text_raster, scaled_offset.max(0));
 		let image = match text_raster.color_pixels.as_ref() {
 			Some(color_pixels) => {
 				// 색 글리프(이모지)는 제 색에 글자 색의 알파만 곱하고, 그림자는 이모지 모양까지 드리운다. (원본 fillStyle 과 캔버스 그림자)
@@ -895,6 +897,21 @@ impl Component for ShadowText {
 	}
 }
 
+//==============================================================================
+/// 래스터 아래에 빈 줄 더하기. (그림자를 아래로 내린 만큼 높이를 늘린다, 원본 bakeHeight 의 + scaledShadowOffset)
+//==============================================================================
+fn extend_raster_bottom(text_raster: &mut TextRaster, row_count: i32) {
+	if row_count <= 0 {
+		return;
+	}
+	let added_pixel_count = (text_raster.width * row_count) as usize;
+	text_raster.height += row_count;
+	text_raster.coverage.resize(text_raster.coverage.len() + added_pixel_count, 0);
+	if let Some(color_pixels) = text_raster.color_pixels.as_mut() {
+		color_pixels.resize(color_pixels.len() + added_pixel_count * 4, 0);
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -910,6 +927,32 @@ mod tests {
 		// 그림자를 올리면 위로 넓어진다.
 		let raised_rect = ShadowText::calculate_shadow_drawn_rect(46.17596435546875, 16.0, 0.0, -5.0, TextAlign::Left, Vector2::create(120.0, 30.0));
 		assert_eq!((raised_rect.position.x, raised_rect.position.y, raised_rect.size.y), (-10.0, -16.0, 57.0));
+	}
+
+	//==============================================================================
+	/// 그림자 내림은 래스터 아래 높이에만 더해지고 너비와 위쪽, 색 층은 그대로 늘어난다. (원본 bakeHeight)
+	//==============================================================================
+	#[test]
+	fn shadow_offset_extends_only_bottom() {
+		let mut text_raster = TextRaster {
+			coverage: vec![7u8; 12],
+			color_pixels: Some(vec![9u8; 48]),
+			width: 4,
+			height: 3,
+			origin_x: 1.0,
+			baseline_y: 2.0,
+			advance_width: 2.0,
+			font_ascent: 1.0,
+			font_descent: 1.0,
+		};
+		extend_raster_bottom(&mut text_raster, 0);
+		assert_eq!((text_raster.width, text_raster.height, text_raster.coverage.len()), (4, 3, 12));
+		extend_raster_bottom(&mut text_raster, 2);
+		assert_eq!((text_raster.width, text_raster.height, text_raster.coverage.len()), (4, 5, 20));
+		assert_eq!(text_raster.color_pixels.as_ref().unwrap().len(), 80);
+		assert!(text_raster.coverage[..12].iter().all(|value| *value == 7));
+		assert!(text_raster.coverage[12..].iter().all(|value| *value == 0));
+		assert_eq!((text_raster.origin_x, text_raster.baseline_y), (1.0, 2.0));
 	}
 
 	//==============================================================================
