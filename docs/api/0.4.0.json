@@ -43145,8 +43145,8 @@
 							"signature": "pub fn flush_batch(&mut self)",
 							"params": [],
 							"description": {
-								"ko": "모아 둔 묶음 내보내기. (GL 상태를 바꾸기 전, 프레임 끝, GL 을 직접 쓰기 전에 부른다)",
-								"en": "Flushes the gathered batch. (called before changing GL state, at the end of a frame, and before using GL directly)"
+								"ko": "모아 둔 묶음 내보내기. (GL 상태를 바꾸기 전, 프레임 끝, GL 을 직접 쓰기 전에 부른다)\n- 묶음의 텍스처를 0 번부터의 유닛에 묶는다. 쓰지 않는 칸의 유닛에는 흰 텍스처를 묶어, 지난 그리기의 텍스처가 지금 그리는 칸(렌더 타겟)이어도 되먹임이 생기지 않게 한다. (원본과 같음)",
+								"en": "Flushes the gathered batch. (called before changing GL state, at the end of a frame, and before using GL directly)\n- Binds the batch textures to units from 0 up. Units of unused slots get the white texture, so a texture from an earlier draw never forms a feedback loop even if it is the current target (render target). (same as the original)"
 							},
 							"since": "0.3.2",
 							"source": "src/core/graphic.rs"
@@ -43160,14 +43160,14 @@
 									"name": "is_batching_enabled",
 									"type": "bool",
 									"description": {
-										"ko": "true 면 같은 텍스처의 그리기를 모아 한 번에 그린다. (끌 때 모아 둔 것을 먼저 내보낸다)",
-										"en": "true gathers draws with the same texture and draws them at once. (flushes what was gathered first when turning off)"
+										"ko": "true 면 연이은 그리기를 모아 한 번에 그린다. (끌 때 모아 둔 것을 먼저 내보낸다)",
+										"en": "If true, consecutive draws are gathered and drawn at once. (turning it off flushes what has been gathered first)"
 									}
 								}
 							],
 							"description": {
-								"ko": "묶어 그리기 켜고 끄기. (기본 켬. 끄면 원본처럼 그리기 하나에 드로우 콜 하나)",
-								"en": "Turns batching on and off. (on by default. When off, one draw call per draw like the original)"
+								"ko": "묶어 그리기 켜고 끄기. (기본 켬. 끄면 원본처럼 그리기 하나에 드로우 콜 하나)\n- 켜면 연이은 드로우(이미지, 도형, 글자, 정점 색 쿼드)를 정점에 변환과 색을 실어 쌓아 두었다가 한 번의 드로우 콜로 그린다.\n- 텍스처는 한 묶음에 여러 장(기기 텍스처 유닛 수와 16 가운데 작은 것)까지 묶어 텍스처가 바뀌어도 이어진다. (PixiJS 와 같은 꼴)\n- 축에 맞고 화소 경계에 놓인 자르기(begin_clip_rect)는 정점의 자르기 사각형으로 셰이더가 잘라 묶음을 끊지 않는다. (돌아갔거나 둥근 자르기는 스텐실)\n- 텍스처 칸이 차거나, 블렌드, 스텐실 자르기, 바꿔 끼운 셰이더가 바뀌거나 버퍼가 차면 그때까지 쌓인 것을 그리고, 프레임 끝에 엔진이 남은 것을 그린다.",
+								"en": "Turns batching on or off. (on by default. When off, one draw call per draw, like the original)\n- When on, consecutive draws (images, shapes, text, vertex-color quads) are accumulated with transform and color carried in the vertices and drawn in one draw call.\n- One batch binds several textures (the smaller of the device texture unit count and 16), so the batch continues when the texture changes. (the same scheme as PixiJS)\n- Axis-aligned clips (begin_clip_rect) whose edges lie on pixel boundaries are clipped by the shader with a clip rectangle carried in the vertices, so they do not break the batch. (rotated or rounded clips use the stencil)\n- When the texture slots fill up, when the blend, a stencil clip or a swapped-in shader changes, or when the buffer is full, what has accumulated is drawn, and the engine draws the rest at the end of the frame."
 							},
 							"since": "0.3.2",
 							"source": "src/core/graphic.rs"
@@ -43260,13 +43260,13 @@
 							"returns": {
 								"type": "bool",
 								"description": {
-									"ko": "변환한 네 꼭짓점의 경계 상자가 드로잉 버퍼(0, 0 에서 너비, 높이까지)와 걸치면 true. (경계에 닿기만 해도 true)",
-									"en": "true if the bounding box of the four transformed corners overlaps the drawing buffer (from 0, 0 to width, height). (true even if it only touches the edge)"
+									"ko": "변환한 네 꼭짓점의 경계 상자가 드로잉 버퍼(0, 0 에서 너비, 높이까지)와 걸린 자르기의 경계 상자 안에 걸치면 true. (경계에 닿기만 해도 true)",
+									"en": "true if the bounding box of the four transformed corners overlaps the drawing buffer (from 0, 0 to width, height) and the bounding box of the active clip. (touching the edge counts as true)"
 								}
 							},
 							"description": {
-								"ko": "현재 변환 기준의 사각형이 화면(드로잉 버퍼)에 걸치는지. (네 꼭짓점을 변환한 경계 상자로 본다)",
-								"en": "Whether a rectangle in the current transform overlaps the screen (drawing buffer). (checked with the bounding box of the four transformed corners)"
+								"ko": "현재 변환 기준의 사각형이 화면(드로잉 버퍼)과 걸린 자르기 안에 걸치는지. (네 꼭짓점을 변환한 경계 상자로 본다)\n- begin_clip_rect 로 건 자르기(겹친 것 모두)의 경계 상자 밖이면 보이지 않는 것으로 본다. (유니티 RectMask2D 처럼 스크롤 칸 밖 줄을 그리지 않는다)",
+								"en": "Whether a rectangle in the current transform overlaps the screen (drawing buffer) and the active clip. (judged by the bounding box of the four transformed corners)\n- Outside the bounding box of the clips set with begin_clip_rect (all nested ones), it counts as not visible. (like Unity RectMask2D, rows outside a scroll view are not drawn)"
 							},
 							"since": "0.3.2",
 							"source": "src/core/graphic.rs",
@@ -149876,7 +149876,13 @@
 								"en": "Sets multiline. (like Chrome textarea. Web DOM input uses a hidden `<textarea>`. Not a property of the original field, so excluded from reflection)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "setMultiline"
+							}
 						},
 						{
 							"kind": "method",
@@ -149895,7 +149901,13 @@
 								"en": "Whether it is multiline."
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "isMultiline"
+							}
 						},
 						{
 							"kind": "method",
@@ -149916,7 +149928,13 @@
 								"en": "Sets the line height. (multiline fields, CSS normal if None. Like Chrome SimpleFontData, adds the rounded ascent, descent and line gap of the first font)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "setLineHeight"
+							}
 						},
 						{
 							"kind": "method",
@@ -149935,7 +149953,13 @@
 								"en": "Line height. (multiline fields)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "getLineHeight"
+							}
 						},
 						{
 							"kind": "method",
@@ -149956,7 +149980,13 @@
 								"en": "Sets the tab size. (multiline fields, width in spaces. CSS tab-size, default 8)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "setTabSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -149975,7 +150005,13 @@
 								"en": "Tab size."
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "getTabSize"
+							}
 						},
 						{
 							"kind": "method",
@@ -149994,7 +150030,13 @@
 								"en": "Vertical scroll offset. (multiline fields, the original textarea scrollTop)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "getScrollTop"
+							}
 						},
 						{
 							"kind": "method",
@@ -150015,7 +150057,13 @@
 								"en": "Sets the vertical scroll offset. (multiline fields, clamped to within the end of the text on the next draw)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "setScrollTop"
+							}
 						},
 						{
 							"kind": "method",
@@ -150034,7 +150082,13 @@
 								"en": "Whether there is something to undo."
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "canUndo"
+							}
 						},
 						{
 							"kind": "method",
@@ -150053,7 +150107,13 @@
 								"en": "Whether there is something to redo."
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiinputfield.rs"
+							"source": "src/ui/uiinputfield.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiinputfield",
+								"class": "UIInputField",
+								"name": "canRedo"
+							}
 						},
 						{
 							"kind": "method",
