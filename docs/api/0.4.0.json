@@ -105955,8 +105955,8 @@
 		{
 			"name": "graphics3d/shadowmap",
 			"summary": {
-				"ko": "섀도우 맵. (원본 graphics3d/shadowmap.js)\n- 방향광 실시간 그림자, 깊이 텍스처(하드웨어 비교 샘플링, sampler2DShadow) + 직교 광원 행렬.\n- begin_render() 로 깊이 패스를 시작하고, 결과 텍스처를 본 패스에서 샘플링한다.\n- 광원 행렬은 텍셀 단위로 스냅해 이동 시 그림자 가장자리 떨림을 줄인다. 빛이 거의 바로 위나 아래로 나아가면 위쪽을 z 축으로 잡아 행렬이 깨지지 않게 한다.\n- 지을 때 앞의 텍스처와 프레임버퍼 묶음을 돌린다. (모형을 지은 뒤에 지어도 깊이 텍스처가 텍스처 유닛에 남아 그리기가 INVALID_OPERATION 이 되지 않게)\n- ShadowAtlas: 점광과 스포트라이트의 그림자를 깊이 텍스처 한 장에 칸으로 나눠 담는다. (원본 ShadowAtlas, 유니티 URP 의 추가 빛 그림자 아틀라스 꼴)\n  칸 크기는 URP 기본과 같이 정한다. 칸마다 tile_resolution 을 바라고, 아틀라스에 다 들어가지 않으면 다 들어갈 때까지 칸 한 변을 반씩 줄인다. (점광 하나면 512, 스포트라이트 하나면 1024)\n  툰 셰이더는 받는 자리를 노멀 쪽으로 그 거리의 칸 텍셀 (1 + 3 x (1 - dot(N, L))) 개만큼 밀어 견준다. (빛에 비스듬한 면일수록 크게, 그림자 여드름을 막는다)\n- 텍셀 스냅의 반올림은 원본 Math.round 와 같이 0.5 를 위로 올린다. (러스트 round 는 0 에서 먼 쪽이라 음수에서 다르다)\n- 원본 해상도 기본값 인자 2048 은 DEFAULT_SHADOWMAP_RESOLUTION 으로 둔다. (러스트에 기본값 인자가 없다)\n- 해 그림자 치우침은 set_bias(깊이, 노멀) 의 그림자 텍셀 단위 값이다. (기본 1, 1, 유니티 URP 의 Depth Bias, Normal Bias 와 같은 단위, 받는 쪽 ToonRenderer 가 텍셀 크기와 기울기를 곱해 건다)",
-				"en": "Shadow map. (original graphics3d/shadowmap.js)\n- Real-time directional light shadows, a depth texture (hardware compare sampling, sampler2DShadow) and an orthographic light matrix.\n- begin_render() starts the depth pass, and the main pass samples the resulting texture.\n- The light matrix snaps to texel units to reduce shadow edge shimmer while moving. When the light points almost straight up or down, the up axis is taken as z so the matrix does not break.\n- Construction restores the previous texture and framebuffer bindings. (so building it after models does not leave the depth texture on a texture unit and make drawing INVALID_OPERATION)\n- ShadowAtlas: stores point light and spot light shadows as tiles in one depth texture. (original ShadowAtlas, the form of Unity URP's additional light shadow atlas)\n  Tile size follows the URP default. Each tile asks for tile_resolution, and if they do not all fit in the atlas, the tile side is halved until they fit. (512 for one point light, 1024 for one spot light)\n  The toon shader pushes the receiving position toward the normal by (1 + 3 x (1 - dot(N, L))) tile texels at that distance before comparing. (larger for surfaces at a grazing angle to the light, prevents shadow acne)\n- Texel snapping rounds 0.5 up, like the original Math.round. (Rust round goes away from zero, so it differs for negative numbers)\n- The original default resolution argument 2048 is DEFAULT_SHADOWMAP_RESOLUTION. (Rust has no default arguments)\n- The sun shadow bias is the shadow-texel value of set_bias(depth, normal). (default 1, 1, the same unit as Depth Bias and Normal Bias of Unity URP, the receiving ToonRenderer applies it multiplied by the texel size and slope)"
+				"ko": "섀도우 맵. (원본 graphics3d/shadowmap.js)\n- 방향광 실시간 그림자, 깊이 텍스처(하드웨어 비교 샘플링, sampler2DShadow) + 직교 광원 행렬.\n- begin_render() 로 깊이 패스를 시작하고, 결과 텍스처를 본 패스에서 샘플링한다.\n- 광원 행렬은 텍셀 단위로 스냅해 이동 시 그림자 가장자리 떨림을 줄인다. 빛이 거의 바로 위나 아래로 나아가면 위쪽을 z 축으로 잡아 행렬이 깨지지 않게 한다.\n- 지을 때 앞의 텍스처와 프레임버퍼 묶음을 돌린다. (모형을 지은 뒤에 지어도 깊이 텍스처가 텍스처 유닛에 남아 그리기가 INVALID_OPERATION 이 되지 않게)\n- ShadowAtlas: 점광과 스포트라이트의 그림자를 깊이 텍스처 한 장에 칸으로 나눠 담는다. (원본 ShadowAtlas, 유니티 URP 의 추가 빛 그림자 아틀라스 꼴)\n  칸 크기는 URP 기본과 같이 정한다. 칸마다 tile_resolution 을 바라고, 아틀라스에 다 들어가지 않으면 다 들어갈 때까지 칸 한 변을 반씩 줄인다. (점광 하나면 512, 스포트라이트 하나면 1024)\n  툰 셰이더는 받는 자리를 노멀 쪽으로 그 거리의 칸 텍셀 (1 + 3 x (1 - dot(N, L))) 개만큼 밀어 견준다. (빛에 비스듬한 면일수록 크게, 그림자 여드름을 막는다)\n- 텍셀 스냅의 반올림은 원본 Math.round 와 같이 0.5 를 위로 올린다. (러스트 round 는 0 에서 먼 쪽이라 음수에서 다르다)\n- 원본 해상도 기본값 인자 2048 은 DEFAULT_SHADOWMAP_RESOLUTION 으로 둔다. (러스트에 기본값 인자가 없다)\n- 해 그림자 치우침은 set_bias(깊이, 노멀) 의 그림자 텍셀 단위 값이다. (기본 1, 1, 유니티 URP 의 Depth Bias, Normal Bias 와 같은 단위, 받는 쪽 ToonRenderer 가 텍셀 크기와 기울기를 곱해 건다)\n- 그림자 갱신 방식(원본 ShadowUpdateMode)은 ShadowMap 과 ShadowAtlas 가 하나씩 가진 그림자 깊이 캐시(원본 createShadowCache)에 둔다. ToonDrawQueue 가 견주고 begin_render 가 그 결정대로 묶는다.\n  begin_render 가 &self 로 캐시를 고치므로 캐시는 RefCell 에 둔다. (원본은 객체 안 값을 바로 고친다)",
+				"en": "Shadow map. (original graphics3d/shadowmap.js)\n- Real-time directional light shadows, a depth texture (hardware compare sampling, sampler2DShadow) and an orthographic light matrix.\n- begin_render() starts the depth pass, and the main pass samples the resulting texture.\n- The light matrix snaps to texel units to reduce shadow edge shimmer while moving. When the light points almost straight up or down, the up axis is taken as z so the matrix does not break.\n- Construction restores the previous texture and framebuffer bindings. (so building it after models does not leave the depth texture on a texture unit and make drawing INVALID_OPERATION)\n- ShadowAtlas: stores point light and spot light shadows as tiles in one depth texture. (original ShadowAtlas, the form of Unity URP's additional light shadow atlas)\n  Tile size follows the URP default. Each tile asks for tile_resolution, and if they do not all fit in the atlas, the tile side is halved until they fit. (512 for one point light, 1024 for one spot light)\n  The toon shader pushes the receiving position toward the normal by (1 + 3 x (1 - dot(N, L))) tile texels at that distance before comparing. (larger for surfaces at a grazing angle to the light, prevents shadow acne)\n- Texel snapping rounds 0.5 up, like the original Math.round. (Rust round goes away from zero, so it differs for negative numbers)\n- The original default resolution argument 2048 is DEFAULT_SHADOWMAP_RESOLUTION. (Rust has no default arguments)\n- The sun shadow bias is the shadow-texel value of set_bias(depth, normal). (default 1, 1, the same unit as Depth Bias and Normal Bias of Unity URP, the receiving ToonRenderer applies it multiplied by the texel size and slope)\n- The shadow update mode (the original ShadowUpdateMode) lives in the shadow depth cache that ShadowMap and ShadowAtlas each hold (the original createShadowCache). ToonDrawQueue compares, and begin_render binds by that decision.\n  begin_render changes the cache through &self, so the cache sits in a RefCell. (The original changes the values in the object directly)"
 			},
 			"classes": [
 				{
@@ -106099,8 +106099,8 @@
 								}
 							],
 							"description": {
-								"ko": "깊이 패스 시작. (프레임버퍼 바인드 + 뷰포트 + 깊이 클리어)\n- 가위 시험을 끄고 깊이 시험과 깊이 쓰기를 켠다. 끝나면 부르는 쪽이 다음 패스의 프레임버퍼와 뷰포트를 다시 잡는다.",
-								"en": "Starts the depth pass. (framebuffer bind + viewport + depth clear)\n- Turns off the scissor test and turns on the depth test and depth writing. When done, the caller sets the next pass's framebuffer and viewport again."
+								"ko": "깊이 패스 시작. (프레임버퍼 바인드 + 뷰포트 + 깊이 클리어, ToonDrawQueue 가 캐시를 쓸 때는 구운 판에 그리거나 구운 판을 옮겨 그 위에 덧그린다)\n- 가위 시험을 끄고 깊이 시험과 깊이 쓰기를 켠다. 끝나면 부르는 쪽이 다음 패스의 프레임버퍼와 뷰포트를 다시 잡는다.",
+								"en": "Starts the depth pass. (framebuffer bind + viewport + depth clear; when ToonDrawQueue uses the cache, it draws into the baked target or copies the baked target and draws over it)\n- Turns off the scissor test and turns on the depth test and depth writing. When done, the caller sets the next pass's framebuffer and viewport again."
 							},
 							"since": "0.3.2",
 							"source": "src/graphics3d/shadowmap.rs",
@@ -106109,6 +106109,119 @@
 								"module": "graphics3d/shadowmap",
 								"class": "ShadowMap",
 								"name": "beginRender"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "set_update_mode",
+							"signature": "pub fn set_update_mode(&mut self, update_mode: ShadowUpdateMode, update_interval: u32)",
+							"params": [
+								{
+									"name": "update_mode",
+									"type": "ShadowUpdateMode",
+									"description": {
+										"ko": "ShadowUpdateMode.",
+										"en": "ShadowUpdateMode."
+									}
+								},
+								{
+									"name": "update_interval",
+									"type": "u32",
+									"description": {
+										"ko": "Interval 일 때 몇 프레임마다 그릴지. (1 보다 작으면 1)",
+										"en": "How many frames apart to draw for Interval. (1 if smaller than 1)"
+									}
+								}
+							],
+							"description": {
+								"ko": "그림자를 다시 그리는 방식 정하기. (원본 setUpdateMode, ToonDrawQueue 가 따른다, 기본 ShadowUpdateMode::OnChange, 정하면 다음 그리기에서 전부 다시 그린다)\n- 원본의 updateInterval 기본값 인자 1 은 러스트에 기본값 인자가 없어 늘 준다. (Interval 이 아니면 쓰지 않는다)",
+								"en": "Sets how the shadow is redrawn. (the original setUpdateMode, ToonDrawQueue follows it, default ShadowUpdateMode::OnChange, setting it redraws everything on the next draw)\n- Rust has no default arguments, so the original's default updateInterval argument 1 is always passed. (Unused unless Interval)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/shadowmap",
+								"class": "ShadowMap",
+								"name": "setUpdateMode"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "그림자를 세 프레임마다 그리기",
+										"en": "Drawing the shadow every third frame"
+									},
+									"code": "use vanilla::{GlContext, ShadowMap, ShadowUpdateMode};\n\nfn draw_shadow_every_third_frame(gl: &GlContext) {\n\tlet mut shadow_target = ShadowMap::new(gl, 1024).unwrap();\n\tshadow_target.set_update_mode(ShadowUpdateMode::Interval, 3);\n\tprintln!(\"{:?} {}\", shadow_target.get_update_mode(), shadow_target.get_update_interval());\n\tshadow_target.set_update_mode(ShadowUpdateMode::EveryFrame, 1);\n\tshadow_target.destroy(gl);\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "get_update_mode",
+							"signature": "pub fn get_update_mode(&self) -> ShadowUpdateMode",
+							"params": [],
+							"returns": {
+								"type": "ShadowUpdateMode",
+								"description": {
+									"ko": "ShadowUpdateMode. (기본 OnChange)",
+									"en": "ShadowUpdateMode. (default OnChange)"
+								}
+							},
+							"description": {
+								"ko": "그림자를 다시 그리는 방식 반환. (원본 getUpdateMode)",
+								"en": "Returns how the shadow is redrawn. (the original getUpdateMode)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/shadowmap",
+								"class": "ShadowMap",
+								"name": "getUpdateMode"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_update_interval",
+							"signature": "pub fn get_update_interval(&self) -> u32",
+							"params": [],
+							"returns": {
+								"type": "u32",
+								"description": {
+									"ko": "몇 프레임마다 그리는지. (1 이상, 기본 1)",
+									"en": "How many frames apart it draws. (1 or more, default 1)"
+								}
+							},
+							"description": {
+								"ko": "Interval 의 프레임 수 반환. (원본 getUpdateInterval)",
+								"en": "Returns the frame count for Interval. (the original getUpdateInterval)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/shadowmap",
+								"class": "ShadowMap",
+								"name": "getUpdateInterval"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "request_update",
+							"signature": "pub fn request_update(&mut self)",
+							"params": [],
+							"description": {
+								"ko": "다음 그리기에서 전부 다시 그리게 하기. (원본 requestUpdate, 드리우개 기록이 못 보는 바뀜, 예를 들어 모형의 꼭짓점을 고쳤을 때)",
+								"en": "Makes the next draw redraw everything. (the original requestUpdate, for changes the caster records cannot see, for example when a mesh's vertices were edited)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/shadowmap",
+								"class": "ShadowMap",
+								"name": "requestUpdate"
 							}
 						},
 						{
@@ -106321,8 +106434,8 @@
 								}
 							],
 							"description": {
-								"ko": "파괴. (GL 리소스 해제)",
-								"en": "Destroy. (Releases GL resources)"
+								"ko": "파괴. (GL 리소스 해제, 프레임버퍼와 깊이 텍스처, 구운 판을 지운다)",
+								"en": "Destroy. (Releases GL resources, deletes the framebuffer, the depth texture and the baked target)"
 							},
 							"since": "0.3.2",
 							"source": "src/graphics3d/shadowmap.rs",
@@ -106873,8 +106986,8 @@
 								}
 							],
 							"description": {
-								"ko": "깊이 패스 시작. (프레임버퍼를 묶고 판 전체를 비운다, 칸마다 begin_tile)\n- 뷰포트를 판 전체로, 가위 시험을 끄고, 깊이 시험과 깊이 쓰기를 켠다.",
-								"en": "Begins the depth pass. (Binds the framebuffer and clears the whole target, begin_tile per tile)\n- Sets the viewport to the whole target, turns off the scissor test, and turns on the depth test and depth writes."
+								"ko": "깊이 패스 시작. (프레임버퍼를 묶고 판 전체를 비운다, 칸마다 begin_tile, ToonDrawQueue 가 캐시를 쓸 때는 구운 판에 그리거나 구운 판을 옮겨 그 위에 덧그린다)\n- 뷰포트를 판 전체로, 가위 시험을 끄고, 깊이 시험과 깊이 쓰기를 켠다.",
+								"en": "Begins the depth pass. (Binds the framebuffer and clears the whole target, begin_tile per tile; when ToonDrawQueue uses the cache, it draws into the baked target or copies the baked target and draws over it)\n- Sets the viewport to the whole target, turns off the scissor test, and turns on the depth test and depth writes."
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/shadowmap.rs",
@@ -106883,6 +106996,119 @@
 								"module": "graphics3d/shadowmap",
 								"class": "ShadowAtlas",
 								"name": "beginRender"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "set_update_mode",
+							"signature": "pub fn set_update_mode(&mut self, update_mode: ShadowUpdateMode, update_interval: u32)",
+							"params": [
+								{
+									"name": "update_mode",
+									"type": "ShadowUpdateMode",
+									"description": {
+										"ko": "ShadowUpdateMode.",
+										"en": "ShadowUpdateMode."
+									}
+								},
+								{
+									"name": "update_interval",
+									"type": "u32",
+									"description": {
+										"ko": "Interval 일 때 몇 프레임마다 그릴지. (1 보다 작으면 1)",
+										"en": "How many frames apart to draw for Interval. (1 if smaller than 1)"
+									}
+								}
+							],
+							"description": {
+								"ko": "그림자를 다시 그리는 방식 정하기. (원본 setUpdateMode, ToonDrawQueue 가 따른다, 기본 ShadowUpdateMode::OnChange, 정하면 다음 그리기에서 전부 다시 그린다)\n- 원본의 updateInterval 기본값 인자 1 은 러스트에 기본값 인자가 없어 늘 준다. (Interval 이 아니면 쓰지 않는다)",
+								"en": "Sets how the shadow is redrawn. (the original setUpdateMode, ToonDrawQueue follows it, default ShadowUpdateMode::OnChange, setting it redraws everything on the next draw)\n- Rust has no default arguments, so the original's default updateInterval argument 1 is always passed. (Unused unless Interval)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "setUpdateMode"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "그림자를 세 프레임마다 그리기",
+										"en": "Drawing the shadow every third frame"
+									},
+									"code": "use vanilla::{GlContext, ShadowAtlas, ShadowUpdateMode, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION};\n\nfn draw_shadow_every_third_frame(gl: &GlContext) {\n\tlet mut shadow_target = ShadowAtlas::new(gl, 1024, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION).unwrap();\n\tshadow_target.set_update_mode(ShadowUpdateMode::Interval, 3);\n\tprintln!(\"{:?} {}\", shadow_target.get_update_mode(), shadow_target.get_update_interval());\n\tshadow_target.set_update_mode(ShadowUpdateMode::EveryFrame, 1);\n\tshadow_target.destroy(gl);\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "get_update_mode",
+							"signature": "pub fn get_update_mode(&self) -> ShadowUpdateMode",
+							"params": [],
+							"returns": {
+								"type": "ShadowUpdateMode",
+								"description": {
+									"ko": "ShadowUpdateMode. (기본 OnChange)",
+									"en": "ShadowUpdateMode. (default OnChange)"
+								}
+							},
+							"description": {
+								"ko": "그림자를 다시 그리는 방식 반환. (원본 getUpdateMode)",
+								"en": "Returns how the shadow is redrawn. (the original getUpdateMode)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "getUpdateMode"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_update_interval",
+							"signature": "pub fn get_update_interval(&self) -> u32",
+							"params": [],
+							"returns": {
+								"type": "u32",
+								"description": {
+									"ko": "몇 프레임마다 그리는지. (1 이상, 기본 1)",
+									"en": "How many frames apart it draws. (1 or more, default 1)"
+								}
+							},
+							"description": {
+								"ko": "Interval 의 프레임 수 반환. (원본 getUpdateInterval)",
+								"en": "Returns the frame count for Interval. (the original getUpdateInterval)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "getUpdateInterval"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "request_update",
+							"signature": "pub fn request_update(&mut self)",
+							"params": [],
+							"description": {
+								"ko": "다음 그리기에서 전부 다시 그리게 하기. (원본 requestUpdate, 드리우개 기록이 못 보는 바뀜, 예를 들어 모형의 꼭짓점을 고쳤을 때)",
+								"en": "Makes the next draw redraw everything. (the original requestUpdate, for changes the caster records cannot see, for example when a mesh's vertices were edited)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "requestUpdate"
 							}
 						},
 						{
@@ -107204,8 +107430,8 @@
 								}
 							],
 							"description": {
-								"ko": "파괴. (GL 리소스 해제)",
-								"en": "Destroy. (Releases GL resources)"
+								"ko": "파괴. (GL 리소스 해제, 프레임버퍼와 깊이 텍스처, 구운 판을 지운다)",
+								"en": "Destroy. (Releases GL resources, deletes the framebuffer, the depth texture and the baked target)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/shadowmap.rs",
@@ -107312,7 +107538,63 @@
 					}
 				}
 			],
-			"enums": []
+			"enums": [
+				{
+					"name": "ShadowUpdateMode",
+					"summary": {
+						"ko": "그림자 깊이를 다시 그리는 방식. (원본 ShadowUpdateMode, ShadowMap 과 ShadowAtlas 의 set_update_mode, ToonDrawQueue::draw_shadows 와 draw_local_shadows 가 따른다)\n- EveryFrame: 매 프레임 드리우개 전부를 다시 그린다.\n- OnChange: 빛과 드리우개가 그대로면 다시 그리지 않는다. 오래 그대로인 드리우개는 따로 구워 두고, 움직이는 것만 매 프레임 그 위에 덧그린다. (기본, 화면은 매 프레임 그린 것과 같다)\n- Interval: N 프레임마다 한 번 전부 다시 그린다. (사이의 프레임은 앞의 그림자를 그대로 써서, 움직이는 것의 그림자가 늦게 따라온다)",
+						"en": "How shadow depth is redrawn. (the original ShadowUpdateMode, followed by set_update_mode of ShadowMap and ShadowAtlas and by ToonDrawQueue::draw_shadows and draw_local_shadows)\n- EveryFrame: redraws every caster every frame.\n- OnChange: does not redraw when the lights and casters are unchanged. Casters that stay unchanged for a long time are baked separately, and only the moving ones are drawn over them every frame. (default, the screen is the same as drawing every frame)\n- Interval: redraws everything once every N frames. (Frames in between reuse the previous shadow, so the shadow of moving things follows late)"
+					},
+					"traits": [
+						"Clone",
+						"Copy",
+						"Debug",
+						"Default",
+						"PartialEq",
+						"Eq",
+						"Hash"
+					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "graphics3d/shadowmap",
+						"class": "ShadowUpdateMode"
+					},
+					"source": "src/graphics3d/shadowmap.rs",
+					"values": [
+						{
+							"name": "EveryFrame",
+							"description": {
+								"ko": "매 프레임 전부.",
+								"en": "Everything every frame."
+							}
+						},
+						{
+							"name": "OnChange",
+							"description": {
+								"ko": "바뀔 때만. (기본)",
+								"en": "Only on change. (default)"
+							}
+						},
+						{
+							"name": "Interval",
+							"description": {
+								"ko": "N 프레임마다.",
+								"en": "Every N frames."
+							}
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "해 그림자는 바뀔 때만, 점광 그림자는 네 프레임마다",
+								"en": "Sun shadow only on change, point light shadow every four frames"
+							},
+							"code": "use vanilla::{GlContext, ShadowAtlas, ShadowMap, ShadowUpdateMode, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION};\n\nfn choose_shadow_updates(gl: &GlContext) {\n\tlet mut shadow_map = ShadowMap::new(gl, 1024).unwrap();\n\tshadow_map.set_update_mode(ShadowUpdateMode::OnChange, 1);\n\tlet mut shadow_atlas = ShadowAtlas::new(gl, 1024, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION).unwrap();\n\tshadow_atlas.set_update_mode(ShadowUpdateMode::Interval, 4);\n\tprintln!(\"{:?} {:?} {}\", shadow_map.get_update_mode(), shadow_atlas.get_update_mode(), shadow_atlas.get_update_interval());\n\tshadow_map.destroy(gl);\n\tshadow_atlas.destroy(gl);\n}",
+							"language": "rust"
+						}
+					]
+				}
+			]
 		},
 		{
 			"name": "graphics3d/skinnedmodel",
@@ -123356,8 +123638,8 @@
 		{
 			"name": "graphics3d/toon/toondrawqueue",
 			"summary": {
-				"ko": "툰 그리기 줄. (vanilla.js graphics3d/toon/toondrawqueue.js 의 ToonDrawQueue)\n- 한 프레임에 그릴 모형을 담아 두었다가 ToonRenderer 로 차례를 맞춰 그린다.\n- 차례: (화면 공간 바깥선의 선의 판) → 단계 BeforeOpaque → 불투명한 몸 → AfterOpaque → 불투명한 것의 바깥선 껍데기 → 화면 공간 바깥선 → AfterOutline\n  → 비치는 것(카메라에서 먼 것부터, 깊이는 쓰지 않음) → AfterTransparent.\n  몸을 다 그린 뒤 바깥선을 몰아 그려 프로그램을 덜 바꾸고, 비치는 것은 뒤의 것이 비쳐 보이게 맨 끝에 먼 것부터 섞는다.\n- 비치는 것: 꼴의 alpha 나 tint_color 의 알파가 1 보다 작거나 blend_mode 가 Alpha 가 아닌 것. 바깥선도 함께(has_outline) 그린다.\n- 묶음: 꼴의 group 이 같은 비치는 것은 한 덩어리로 가운데 깊이(담긴 것의 평균)로 정렬하고 담은 차례로 그린다.\n  is_depth_prepassed 가 묶음 안에 하나라도 있으면 그 덩어리는 깊이만 먼저 그린 뒤 같은 깊이(LEQUAL)인 화소에만 색을 칠한다.\n  여러 부품이 겹친 홀로그램이 두 겹으로 밝지 않고 한 덩어리로 비친다. 덩어리끼리는 먼 것부터라 서로 비친다.\n- 화면 공간 바깥선: set_screen_outline(ToonScreenOutline) 을 주면 draw 가 몸 앞에 불투명한 것을 선의 판에 그리고, 바깥선 껍데기 뒤에 섞는다.\n  번호는 꼴의 line_id (None 이면 담은 차례 + 1, 인스턴스는 ToonInstance 의 line_id 가 먼저), 모형마다 has_screen_outline, has_crease_line 으로 끄고 켠다.\n  비치는 것은 선의 판에 그리지 않는다. 화면 사각형(ToonRenderer::set_screen_rect)이 있으면 그 사각형을 선의 판의 그리는 영역으로 쓴다.\n  러스트 판은 바깥선을 &'a mut 로 빌려 RefCell 에 담는다. (draw(&self) 에서 고쳐 쓴다)\n- 단계 콜백: add_pass(stage, callback) 의 callback(gl, renderer) 를 그 자리에서 부른다. 부른 뒤 렌더러가 프레임의 그리기 상태를 다시 건다.\n- 인스턴스 묶음(add_mesh_instanced)은 불투명이면 몸과 바깥선을 한 번에 그리고, 비치면 인스턴스 자리의 가운데로 한 덩어리로 정렬한다.\n- 그림자: draw_shadows(gl, renderer, shadow_map) 가 casts_shadow 가 true 인 불투명한 것만 그림자 깊이로 그린다. draw 보다 먼저 부른다.\n  점광과 스포트라이트 그림자는 draw_local_shadows(gl, renderer, shadow_atlas) 가 아틀라스의 칸마다 같은 것을 그린다. (렌더러에 set_local_shadows 로 건다)\n- 사용: 매 프레임 clear() → add_mesh / add_mesh_instanced / add_pass → (draw_shadows) → draw(gl, renderer, camera) 나 draw_with_matrices(gl, renderer, 보기 행렬, 투영 행렬)\n  draw 는 renderer.begin_frame_with_camera 와 end_frame 을 스스로 부른다. draw_with_matrices 는 begin_frame_with_matrices 를 부른다. (직교 원 행렬 카메라)\n  화면 사각형(ToonRenderer::set_screen_rect)은 그 전에 건다. clear 는 담은 모형과 단계 콜백을 모두 비운다. (화면 공간 바깥선은 그대로 둔다)\n- 원본은 담은 것을 객체 참조로 든다. 러스트 판은 모형과 인스턴스 목록, 단계 콜백을 빌려 담으므로 줄이 그 수명 'a 를 갖는다. (프레임마다 새로 짓거나 clear 뒤 다시 담는다)\n  단계 콜백은 FnMut 이라 RefCell 에 담아 draw(&self) 에서 부른다.",
-				"en": "Toon draw queue. (ToonDrawQueue of vanilla.js graphics3d/toon/toondrawqueue.js)\n- Holds the models to draw in a frame, then draws them in order with ToonRenderer.\n- Order: (line target of the screen-space outline) → stage BeforeOpaque → opaque bodies → AfterOpaque → outline shells of opaque things → screen-space outline → AfterOutline\n  → transparent things (farthest from the camera first, depth not written) → AfterTransparent.\n  Outlines are drawn together after all bodies to switch programs less, and transparent things are blended last from the farthest so what is behind shows through.\n- Transparent things: those whose options alpha or tint_color alpha is below 1, or whose blend_mode is not Alpha. Their outlines are drawn with them too (has_outline).\n- Groups: transparent things with the same options group are sorted as one lump by the middle depth (average of the members) and drawn in the order they were added.\n  If even one member of a group has is_depth_prepassed, that lump draws depth first and then paints color only on pixels with the same depth (LEQUAL).\n  A hologram made of several overlapping parts shows through as one lump instead of being doubly bright. Lumps are drawn farthest first so they show through each other.\n- Screen-space outline: if set_screen_outline(ToonScreenOutline) is given, draw draws opaque things into the line target before the bodies and blends it after the outline shells.\n  The ID is the options line_id (the order added + 1 if None, for instances the line_id of ToonInstance comes first), and per model has_screen_outline and has_crease_line turn it off and on.\n  Transparent things are not drawn into the line target. If there is a screen rectangle (ToonRenderer::set_screen_rect), that rectangle is used as the drawing area of the line target.\n  The Rust version borrows the outline as &'a mut and keeps it in a RefCell. (Modified in draw(&self))\n- Stage callbacks: callback(gl, renderer) of add_pass(stage, callback) is called at that point. After the call, the renderer sets the frame's draw state again.\n- Instance batches (add_mesh_instanced) draw body and outline at once if opaque, and if transparent are sorted as one lump by the center of the instance positions.\n- Shadows: draw_shadows(gl, renderer, shadow_map) draws only opaque things whose casts_shadow is true into the shadow depth. Call it before draw.\n  For point light and spotlight shadows, draw_local_shadows(gl, renderer, shadow_atlas) draws the same things per atlas tile. (Set on the renderer with set_local_shadows)\n- Use: every frame clear() → add_mesh / add_mesh_instanced / add_pass → (draw_shadows) → draw(gl, renderer, camera) or draw_with_matrices(gl, renderer, view matrix, projection matrix)\n  draw calls renderer.begin_frame_with_camera and end_frame by itself. draw_with_matrices calls begin_frame_with_matrices. (Orthographic or raw matrix camera)\n  The screen rectangle (ToonRenderer::set_screen_rect) is set before that. clear empties all added models and stage callbacks. (The screen-space outline is kept)\n- The original holds what is added as object references. The Rust version borrows the models, instance lists and stage callbacks, so the queue has their lifetime 'a. (Build a new one every frame, or add again after clear)\n  Stage callbacks are FnMut, so they are kept in a RefCell and called in draw(&self)."
+				"ko": "툰 그리기 줄. (vanilla.js graphics3d/toon/toondrawqueue.js 의 ToonDrawQueue)\n- 한 프레임에 그릴 모형을 담아 두었다가 ToonRenderer 로 차례를 맞춰 그린다.\n- 차례: (화면 공간 바깥선의 선의 판) → 단계 BeforeOpaque → 불투명한 몸 → AfterOpaque → 불투명한 것의 바깥선 껍데기 → 화면 공간 바깥선 → AfterOutline\n  → 비치는 것(카메라에서 먼 것부터, 깊이는 쓰지 않음) → AfterTransparent.\n  몸을 다 그린 뒤 바깥선을 몰아 그려 프로그램을 덜 바꾸고, 비치는 것은 뒤의 것이 비쳐 보이게 맨 끝에 먼 것부터 섞는다.\n- 비치는 것: 꼴의 alpha 나 tint_color 의 알파가 1 보다 작거나 blend_mode 가 Alpha 가 아닌 것. 바깥선도 함께(has_outline) 그린다.\n- 묶음: 꼴의 group 이 같은 비치는 것은 한 덩어리로 가운데 깊이(담긴 것의 평균)로 정렬하고 담은 차례로 그린다.\n  is_depth_prepassed 가 묶음 안에 하나라도 있으면 그 덩어리는 깊이만 먼저 그린 뒤 같은 깊이(LEQUAL)인 화소에만 색을 칠한다.\n  여러 부품이 겹친 홀로그램이 두 겹으로 밝지 않고 한 덩어리로 비친다. 덩어리끼리는 먼 것부터라 서로 비친다.\n- 화면 공간 바깥선: set_screen_outline(ToonScreenOutline) 을 주면 draw 가 몸 앞에 불투명한 것을 선의 판에 그리고, 바깥선 껍데기 뒤에 섞는다.\n  번호는 꼴의 line_id (None 이면 담은 차례 + 1, 인스턴스는 ToonInstance 의 line_id 가 먼저), 모형마다 has_screen_outline, has_crease_line 으로 끄고 켠다.\n  비치는 것은 선의 판에 그리지 않는다. 화면 사각형(ToonRenderer::set_screen_rect)이 있으면 그 사각형을 선의 판의 그리는 영역으로 쓴다.\n  러스트 판은 바깥선을 &'a mut 로 빌려 RefCell 에 담는다. (draw(&self) 에서 고쳐 쓴다)\n- 단계 콜백: add_pass(stage, callback) 의 callback(gl, renderer) 를 그 자리에서 부른다. 부른 뒤 렌더러가 프레임의 그리기 상태를 다시 건다.\n- 인스턴스 묶음(add_mesh_instanced)은 불투명이면 몸과 바깥선을 한 번에 그리고, 비치면 인스턴스 자리의 가운데로 한 덩어리로 정렬한다.\n- 그림자: draw_shadows(gl, renderer, shadow_map) 가 casts_shadow 가 true 인 불투명한 것만 그림자 깊이로 그린다. draw 보다 먼저 부른다.\n  점광과 스포트라이트 그림자는 draw_local_shadows(gl, renderer, shadow_atlas) 가 아틀라스의 칸마다 같은 것을 그린다. (렌더러에 set_local_shadows 로 건다)\n  그림자 판의 set_update_mode(ShadowUpdateMode) 를 따른다. 기본 OnChange 는 빛과 드리우개가 그대로면 다시 그리지 않고, 오래 그대로인 것은 구워 두고 움직이는 것만 덧그린다. (화면은 매 프레임 그린 것과 같다)\n- 사용: 매 프레임 clear() → add_mesh / add_mesh_instanced / add_pass → (draw_shadows) → draw(gl, renderer, camera) 나 draw_with_matrices(gl, renderer, 보기 행렬, 투영 행렬)\n  draw 는 renderer.begin_frame_with_camera 와 end_frame 을 스스로 부른다. draw_with_matrices 는 begin_frame_with_matrices 를 부른다. (직교 원 행렬 카메라)\n  화면 사각형(ToonRenderer::set_screen_rect)은 그 전에 건다. clear 는 담은 모형과 단계 콜백을 모두 비운다. (화면 공간 바깥선은 그대로 둔다)\n- 원본은 담은 것을 객체 참조로 든다. 러스트 판은 모형과 인스턴스 목록, 단계 콜백을 빌려 담으므로 줄이 그 수명 'a 를 갖는다. (프레임마다 새로 짓거나 clear 뒤 다시 담는다)\n  단계 콜백은 FnMut 이라 RefCell 에 담아 draw(&self) 에서 부른다.",
+				"en": "Toon draw queue. (ToonDrawQueue of vanilla.js graphics3d/toon/toondrawqueue.js)\n- Holds the models to draw in a frame, then draws them in order with ToonRenderer.\n- Order: (line target of the screen-space outline) → stage BeforeOpaque → opaque bodies → AfterOpaque → outline shells of opaque things → screen-space outline → AfterOutline\n  → transparent things (farthest from the camera first, depth not written) → AfterTransparent.\n  Outlines are drawn together after all bodies to switch programs less, and transparent things are blended last from the farthest so what is behind shows through.\n- Transparent things: those whose options alpha or tint_color alpha is below 1, or whose blend_mode is not Alpha. Their outlines are drawn with them too (has_outline).\n- Groups: transparent things with the same options group are sorted as one lump by the middle depth (average of the members) and drawn in the order they were added.\n  If even one member of a group has is_depth_prepassed, that lump draws depth first and then paints color only on pixels with the same depth (LEQUAL).\n  A hologram made of several overlapping parts shows through as one lump instead of being doubly bright. Lumps are drawn farthest first so they show through each other.\n- Screen-space outline: if set_screen_outline(ToonScreenOutline) is given, draw draws opaque things into the line target before the bodies and blends it after the outline shells.\n  The ID is the options line_id (the order added + 1 if None, for instances the line_id of ToonInstance comes first), and per model has_screen_outline and has_crease_line turn it off and on.\n  Transparent things are not drawn into the line target. If there is a screen rectangle (ToonRenderer::set_screen_rect), that rectangle is used as the drawing area of the line target.\n  The Rust version borrows the outline as &'a mut and keeps it in a RefCell. (Modified in draw(&self))\n- Stage callbacks: callback(gl, renderer) of add_pass(stage, callback) is called at that point. After the call, the renderer sets the frame's draw state again.\n- Instance batches (add_mesh_instanced) draw body and outline at once if opaque, and if transparent are sorted as one lump by the center of the instance positions.\n- Shadows: draw_shadows(gl, renderer, shadow_map) draws only opaque things whose casts_shadow is true into the shadow depth. Call it before draw.\n  For point light and spotlight shadows, draw_local_shadows(gl, renderer, shadow_atlas) draws the same things per atlas tile. (Set on the renderer with set_local_shadows)\n  Follows the shadow target's set_update_mode(ShadowUpdateMode). The default OnChange does not redraw when the lights and casters are unchanged, bakes casters that stay unchanged for a long time, and draws only the moving ones over them. (The screen is the same as drawing every frame)\n- Use: every frame clear() → add_mesh / add_mesh_instanced / add_pass → (draw_shadows) → draw(gl, renderer, camera) or draw_with_matrices(gl, renderer, view matrix, projection matrix)\n  draw calls renderer.begin_frame_with_camera and end_frame by itself. draw_with_matrices calls begin_frame_with_matrices. (Orthographic or raw matrix camera)\n  The screen rectangle (ToonRenderer::set_screen_rect) is set before that. clear empties all added models and stage callbacks. (The screen-space outline is kept)\n- The original holds what is added as object references. The Rust version borrows the models, instance lists and stage callbacks, so the queue has their lifetime 'a. (Build a new one every frame, or add again after clear)\n  Stage callbacks are FnMut, so they are kept in a RefCell and called in draw(&self)."
 			},
 			"classes": [
 				{
@@ -123654,8 +123936,8 @@
 								}
 							],
 							"description": {
-								"ko": "그림자 깊이 그리기. (불투명하고 casts_shadow 가 true 인 것만, 앞의 프레임버퍼와 뷰포트는 되돌린다)",
-								"en": "Draws shadow depth. (only opaque ones whose casts_shadow is true, restores the previous framebuffer and viewport)"
+								"ko": "그림자 깊이 그리기. (불투명하고 casts_shadow 가 true 인 것만, 앞의 프레임버퍼와 뷰포트는 되돌린다)\n- shadow_map.set_update_mode 의 갱신 방식을 따른다. (기본 OnChange 는 빛과 드리우개가 그대로면 그리지 않는다)",
+								"en": "Draws shadow depth. (only opaque ones whose casts_shadow is true, restores the previous framebuffer and viewport)\n- Follows the update mode of shadow_map.set_update_mode. (The default OnChange does not draw when the lights and casters are unchanged)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toondrawqueue.rs",
@@ -123697,8 +123979,8 @@
 								}
 							],
 							"description": {
-								"ko": "점광과 스포트라이트 그림자 깊이 그리기. (불투명하고 casts_shadow 가 true 인 것을 아틀라스의 칸마다, 앞의 프레임버퍼와 뷰포트는 되돌린다)",
-								"en": "Draws point light and spotlight shadow depth. (Opaque ones with casts_shadow true, per atlas tile, the previous framebuffer and viewport are restored)"
+								"ko": "점광과 스포트라이트 그림자 깊이 그리기. (불투명하고 casts_shadow 가 true 인 것을 아틀라스의 칸마다, 앞의 프레임버퍼와 뷰포트는 되돌린다)\n- shadow_atlas.set_update_mode 의 갱신 방식을 따른다. (기본 OnChange 는 빛과 드리우개가 그대로면 그리지 않는다)",
+								"en": "Draws point light and spotlight shadow depth. (Opaque ones with casts_shadow true, per atlas tile, the previous framebuffer and viewport are restored)\n- Follows the update mode of shadow_atlas.set_update_mode. (The default OnChange does not draw when the lights and casters are unchanged)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toondrawqueue.rs",

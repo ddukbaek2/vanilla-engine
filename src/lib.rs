@@ -140,7 +140,7 @@ pub use crate::graphics3d::ambientocclusioneffect::AmbientOcclusionEffect;
 pub use crate::graphics3d::bloomeffect::BloomEffect;
 pub use crate::graphics3d::material::{ImageDescription, ImageDescriptionLoadFuture, ImageDescriptionOptions, ImageSource, Material, MaterialDescription};
 pub use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
-pub use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowAtlasLight, ShadowAtlasLightSource, ShadowAtlasTile, ShadowMap, DEFAULT_SHADOW_ATLAS_RESOLUTION, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION, SHADOW_ATLAS_MAXIMUM_LIGHTS};
+pub use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowAtlasLight, ShadowAtlasLightSource, ShadowAtlasTile, ShadowMap, ShadowUpdateMode, DEFAULT_SHADOW_ATLAS_RESOLUTION, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION, SHADOW_ATLAS_MAXIMUM_LIGHTS};
 pub use crate::graphics3d::skinnedmodel::{AnimationClip, AnimationPath, Drawable, MeshDescription, MorphTarget, Skin, SkinnedModel, SkinnedModelNode, MORPH_TARGET_MAXIMUM};
 pub use crate::graphics3d::skinnedmodelasset::{SkinnedModelAsset, SkinnedModelAssetContent};
 pub use crate::graphics3d::skinnedmodelrenderer::{SkinnedModelRenderer, MORPH_GLSL};

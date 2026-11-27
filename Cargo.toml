@@ -39,6 +39,11 @@ harness = false
 name = "shadowbias"
 harness = false
 
+# 그림자 갱신 방식 찍기 시험. (원본 tests/graphics3d/shadowcachechrome.test.mjs 와 같은 장면)
+[[test]]
+name = "shadowcache"
+harness = false
+
 [dependencies]
 # 반사 매크로. (#[reflect], 원본 vanilla.js 의 실행 중 반사를 컴파일 때 지은 코드로 한다)
 vanilla-engine-macros = { version = "0.3.2", path = "macros" }
