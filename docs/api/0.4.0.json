@@ -42257,24 +42257,6 @@
 						},
 						{
 							"kind": "method",
-							"name": "invalidate_render_state_cache",
-							"signature": "pub fn invalidate_render_state_cache(&self)",
-							"params": [],
-							"description": {
-								"ko": "묶음 기억 잊기. (원본 invalidateRenderStateCache, Graphic 을 거치지 않고 GL 로 프로그램이나 텍스처를 바꾼 뒤 2D 를 이어 그릴 때)\n- get_gl, restore_render_state, 프레임 시작과 끝은 스스로 잊는다.",
-								"en": "Forgets the batch cache. (the original invalidateRenderStateCache, for continuing 2D drawing after changing the program or texture through GL without going through Graphic)\n- get_gl, restore_render_state, frame start and end forget it by themselves."
-							},
-							"since": "0.4.0",
-							"source": "src/core/graphic.rs",
-							"counterpart": {
-								"engine": "vanilla.js",
-								"module": "core/graphic",
-								"class": "Graphic",
-								"name": "invalidateRenderStateCache"
-							}
-						},
-						{
-							"kind": "method",
 							"name": "clear_depth_buffer",
 							"signature": "pub fn clear_depth_buffer(&mut self)",
 							"params": [],
@@ -42321,8 +42303,8 @@
 								}
 							},
 							"description": {
-								"ko": "2D 그리기 사이에 GL 패스 끼우기. (원본 runExternalPass)\n- 앞의 2D 묶음을 내보내고, 기억한 프로그램과 텍스처를 잊고, is_depth_cleared 면 깊이를 비운 뒤 pass 를 부르고, 끝나면 restore_render_state 를 부른다.\n- pass 는 GL 컨텍스트를 받아 프로그램, 버텍스 어레이, 뷰포트, 섞기, 깊이, 면 가리기를 바꿔도 된다. (클립 중이면 스텐실 테스트는 restore_render_state 가 다시 켠다)\n- 받은 컨텍스트(GlContext)의 상태 함수는 GL 상태 캐시를 거치므로, pass 안에서 상태를 바꾼 뒤 엔진 그리기를 이어 불러도 엔진이 바뀐 상태를 안다.\n- pass 가 돌려준 값을 그대로 돌려준다. pass 가 패닉해도 풀리는 동안 가드가 restore_render_state 를 부른다. (원본은 던져도 되돌린다)",
-								"en": "Insert a GL pass between 2D drawing. (original runExternalPass)\n- Flushes the previous 2D batch, forgets the remembered program and texture, clears depth if is_depth_cleared, calls pass, and calls restore_render_state when it ends.\n- pass receives the GL context and may change the program, vertex array, viewport, blending, depth and face culling. (While clipping, restore_render_state turns the stencil test back on)\n- State functions of the received context (GlContext) go through the GL state cache, so the engine knows the changed state even when engine drawing continues inside pass after changing state.\n- Returns the value pass returned. If pass panics, the guard calls restore_render_state while unwinding. (The original also restores when it throws)"
+								"ko": "2D 그리기 사이에 GL 패스 끼우기. (원본 runExternalPass)\n- 앞의 2D 묶음을 내보내고, is_depth_cleared 면 깊이를 비운 뒤 pass 를 부르고, 끝나면 restore_render_state 를 부른다.\n- pass 는 GL 컨텍스트를 받아 프로그램, 버텍스 어레이, 뷰포트, 섞기, 깊이, 면 가리기를 바꿔도 된다. (스텐실 자르기는 그대로 걸려 있고, 끝나면 스텐실 자르기 상태를 되돌린다)\n- 받은 컨텍스트(GlContext)의 상태 함수는 GL 상태 캐시를 거치므로, pass 안에서 상태를 바꾼 뒤 엔진 그리기를 이어 불러도 엔진이 바뀐 상태를 안다.\n- 이 함수 밖에서 같은 컨텍스트로 GL 을 써도 다음 2D 그리기가 프로그램, 버텍스 어레이, 정점 버퍼, 텍스처 유닛, 섞기, 깊이, 면 가리기, 가위, 뷰포트를 상태 캐시에 견주어 다시 건다.\n  남는 약속은 둘이다. 2D 는 지금 묶인 프레임 버퍼에 그리므로 게임 프레임 버퍼를 묶었으면 들어올 때 것으로 돌려 두고, 스텐실 상태는 바꾸지 않는다.\n- pass 가 돌려준 값을 그대로 돌려준다. pass 가 패닉해도 풀리는 동안 가드가 restore_render_state 를 부른다. (원본은 던져도 되돌린다)",
+								"en": "Inserts a GL pass between 2D draws. (the original runExternalPass)\n- Flushes the preceding 2D batch, clears depth if is_depth_cleared, calls pass, and calls restore_render_state when done.\n- pass receives the GL context and may change the program, vertex array, viewport, blending, depth, and face culling. (The stencil clip stays set, and the stencil clip state is restored at the end)\n- The state functions of the received context (GlContext) go through the GL state cache, so the engine knows the changed state even if engine drawing continues after changing state inside pass.\n- Even if GL is used with the same context outside this function, the next 2D draw compares the program, vertex array, vertex buffer, texture units, blending, depth, face culling, scissor, and viewport against the state cache and sets them again.\n  Two promises remain. 2D draws into the currently bound framebuffer, so if you bound a game framebuffer, put back the one bound on entry, and do not change the stencil state.\n- Returns what pass returned as is. Even if pass panics, a guard calls restore_render_state while unwinding. (the original restores even when it throws)"
 							},
 							"since": "0.4.0",
 							"source": "src/core/graphic.rs",
@@ -45498,8 +45480,8 @@
 							"signature": "pub fn begin_opacity_layer(&mut self)",
 							"params": [],
 							"description": {
-								"ko": "투명도 층 시작. (CSS opacity, 어도비 투명도 묶음처럼 end_opacity_layer 까지 그린 것을 따로 칸에 모았다가 지금 전역 알파로 한 번에 얹는다)\n- 층 안의 그림은 서로 겹친 자리가 비치지 않는다. (노드마다 투명도를 곱해 따로 얹으면 겹친 자리에서 아래 그림이 비친다)\n- 층 안은 전역 알파 1 에서 시작한다. 층 칸은 화면과 같은 크기의 RGBA8 이고 스텐실을 지금 자르기 깊이로 채워 둬 층 안의 자르기도 그대로 된다.\n  바깥 자르기는 얹을 때 걸린다. 층은 겹쳐 열 수 있다. 칸을 지을 수 없으면 층 없이 그대로 그린다.\n- NodeTree 는 set_opacity_layer 를 켠 노드의 투명도가 1 보다 작으면 그 노드와 자손을 층으로 그린다.",
-								"en": "Begins an opacity layer. (Like CSS opacity or an Adobe transparency group, everything drawn until end_opacity_layer is gathered in a separate buffer and laid down at once with the current global alpha)\n- Drawings inside the layer do not show through each other where they overlap. (Multiplying opacity per node and laying each down separately lets the drawing below show through at overlaps)\n- Inside the layer the global alpha starts at 1. The layer buffer is RGBA8 at the screen size, and its stencil is filled with the current clip depth so clips inside the layer still work.\n  Outer clips apply when the layer is laid down. Layers can be nested. If the buffer cannot be made, drawing goes straight through without a layer.\n- NodeTree draws a node with set_opacity_layer turned on and opacity below 1, together with its descendants, as a layer."
+								"ko": "투명도 층 시작. (CSS opacity, 어도비 투명도 묶음처럼 end_opacity_layer 까지 그린 것을 따로 칸에 모았다가 지금 전역 알파로 한 번에 얹는다)\n- 층 안의 그림은 서로 겹친 자리가 비치지 않는다. (노드마다 투명도를 곱해 따로 얹으면 겹친 자리에서 아래 그림이 비친다)\n- 층 안은 전역 알파 1 에서 시작한다. 층 칸은 화면과 같은 크기의 RGBA8 이고 깊이를 비우고 스텐실을 지금 자르기 깊이로 채워 둬 층 안의 자르기와 3D 패스(run_external_pass 의 is_depth_cleared 거짓)도 그대로 된다.\n  바깥 자르기는 얹을 때 걸린다. 층은 겹쳐 열 수 있다. 칸을 지을 수 없으면 층 없이 그대로 그린다.\n- NodeTree 는 set_opacity_layer 를 켠 노드의 투명도가 1 보다 작으면 그 노드와 자손을 층으로 그린다.",
+								"en": "Starts an opacity layer. (Like CSS opacity or an Adobe transparency group, collects what is drawn until end_opacity_layer into a separate target and puts it on at once with the current global alpha)\n- Drawings inside the layer do not show through where they overlap each other. (Multiplying opacity per node and putting each on separately shows the drawing below where they overlap)\n- The layer starts at global alpha 1. The layer target is an RGBA8 the size of the screen, and its depth is cleared and its stencil is filled with the current clip depth, so clips and 3D passes (is_depth_cleared false in run_external_pass) inside the layer work as they are.\n  The outer clip applies when putting it on. Layers can be nested. If the target cannot be built, draws as is without a layer.\n- NodeTree draws a node with set_opacity_layer on and the node's descendants as a layer when its opacity is less than 1."
 							},
 							"since": "0.4.0",
 							"source": "src/core/graphic.rs",
@@ -45674,8 +45656,8 @@
 							"signature": "pub fn restore_render_state(&mut self)",
 							"params": [],
 							"description": {
-								"ko": "렌더 상태 복구. (외부 GL 패스가 프로그램 / 버텍스 어레이 / 뷰포트 / 블렌드를 바꾼 뒤 Graphic 출력을 이어갈 때)\n- 원본과 같고, 클립 중이면 스텐실 테스트도 다시 켠다. (원본은 켜지 않는다)\n- 기억한 프로그램과 텍스처를 잊고 다시 건다.",
-								"en": "Restores the render state. (for continuing Graphic drawing after an external GL pass changed the program / vertex array / viewport / blend)\n- Same as the original, and also turns the stencil test back on if clipping. (the original does not)\n- Forgets the remembered program and texture and binds them again."
+								"ko": "렌더 상태 복구. (외부 GL 패스가 프로그램 / 버텍스 어레이 / 뷰포트 / 블렌드를 바꾼 뒤 Graphic 출력을 이어갈 때, 원본 restoreRenderState)\n- 스텐실 자르기 상태는 되돌리지 않는다. (run_external_pass 가 끝에 되돌린다, 원본과 같음)",
+								"en": "Restores the render state. (for continuing Graphic output after an external GL pass changed the program / vertex array / viewport / blending, the original restoreRenderState)\n- Does not restore the stencil clip state. (run_external_pass restores it at the end, same as the original)"
 							},
 							"since": "0.3.2",
 							"source": "src/core/graphic.rs",
@@ -45774,8 +45756,8 @@
 								}
 							},
 							"description": {
-								"ko": "GL 컨텍스트 반환. (원본 getWebGL2RenderingContext)\n- 받은 컨텍스트(GlContext)의 상태 함수는 GL 상태 캐시를 거치므로, 받은 뒤 바꾼 상태를 엔진이 안다.\n- 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, Graphic 이 2D 그리기에 묶어 둔 프로그램과 텍스처의 기억은 잊는다. (다음 그리기에서 상태 캐시에 물어 다시 건다)\n- GL 상태 캐시는 잊지 않는다. (원본과 같음, 안의 glow::Context 를 꺼내 상태를 바꿨으면 reset_gl_state_cache 를 부른다)",
-								"en": "Returns the GL context. (original getWebGL2RenderingContext)\n- State functions of the received context (GlContext) go through the GL state cache, so the engine knows state changed after receiving it.\n- The receiver may change the program or texture, so Graphic forgets the program and texture it bound for 2D drawing. (The next draw asks the state cache and binds them again)\n- It does not reset the GL state cache. (Same as the original; if state was changed through the inner glow::Context taken out, call reset_gl_state_cache)"
+								"ko": "GL 컨텍스트 반환. (원본 getWebGL2RenderingContext)\n- 받은 컨텍스트(GlContext)의 상태 함수는 GL 상태 캐시를 거치므로, 받은 뒤 바꾼 상태를 엔진이 안다.\n  Graphic 은 묶음과 2D 상태를 따로 기억하지 않고 그리기 앞에 상태 캐시에 견주므로, 받은 쪽이 프로그램, 텍스처, 섞기 같은 것을 바꿔도 다음 2D 그리기가 다시 건다.\n- 색 쓰기 마스크는 모든 채널로 되돌려 준다. (데스크탑 기본 프레임버퍼에 알파를 쓰지 않으려 Graphic 이 끈 것)\n- GL 상태 캐시는 잊지 않는다. (원본과 같음, 안의 glow::Context 를 꺼내 상태를 바꿨으면 reset_gl_state_cache 를 부른다)",
+								"en": "Returns the GL context. (the original getWebGL2RenderingContext)\n- The state functions of the received context (GlContext) go through the GL state cache, so the engine knows state changed after receiving it.\n  Graphic does not remember bindings and 2D state separately and compares against the state cache before drawing, so even if the receiver changes the program, textures, blending, and the like, the next 2D draw sets them again.\n- Returns the color write mask to all channels. (what Graphic turned off so as not to write alpha to the desktop default framebuffer)\n- Does not forget the GL state cache. (same as the original; if you took out the inner glow::Context and changed state, call reset_gl_state_cache)"
 							},
 							"since": "0.3.2",
 							"source": "src/core/graphic.rs"
@@ -46703,8 +46685,8 @@
 					"name": "GlContext",
 					"kind": "struct",
 					"summary": {
-						"ko": "엔진 GL 컨텍스트. (원본 WebGL2RenderingContext, Graphic::get_gl 이 준다, 상태 함수가 상태 캐시를 거친다)\n- 상태 함수(묶기, 켜고 끄기, 뷰포트, 가위, 섞기, 깊이, 면, 프로그램, 버텍스 어레이, 텍스처, 비우기 색, 픽셀 저장)는 상태 캐시를 거쳐 GL 을 부르고,\n  읽기(get_parameter_*, is_enabled)는 기억한 값으로 답한다. 그 밖의 함수는 안의 glow::Context 를 그대로 부른다.\n- 게임 코드가 이것으로 상태를 바꾼 직후 같은 콜백 안에서 엔진 그리기를 이어 불러도 엔진이 바뀐 상태를 안다.",
-						"en": "Engine GL context. (original WebGL2RenderingContext, given by Graphic::get_gl, state functions go through the state cache)\n- State functions (binding, enabling and disabling, viewport, scissor, blending, depth, faces, program, vertex array, texture, clear color, pixel store) call GL through the state cache,\n  and reads (get_parameter_*, is_enabled) are answered from remembered values. Other functions call the inner glow::Context as is.\n- Even when game code changes state with it and engine drawing continues right after inside the same callback, the engine knows the changed state."
+						"ko": "엔진 GL 컨텍스트. (원본 WebGL2RenderingContext, Graphic::get_gl 이 준다, 상태 함수가 상태 캐시를 거친다)\n- 상태 함수(묶기, 켜고 끄기, 뷰포트, 가위, 섞기, 깊이, 면, 프로그램, 버텍스 어레이, 버퍼 묶기, 텍스처, 비우기 색, 픽셀 저장)는 상태 캐시를 거쳐 GL 을 부르고,\n  읽기(get_parameter_*, is_enabled)는 기억한 값으로 답한다. 그 밖의 함수는 안의 glow::Context 를 그대로 부른다.\n- 게임 코드가 이것으로 상태를 바꾼 직후 같은 콜백 안에서 엔진 그리기를 이어 불러도 엔진이 바뀐 상태를 안다.",
+						"en": "Engine GL context. (the original WebGL2RenderingContext, given by Graphic::get_gl, its state functions go through the state cache)\n- State functions (binding, enabling and disabling, viewport, scissor, blending, depth, faces, program, vertex array, buffer binding, textures, clear color, pixel store) call GL through the state cache,\n  and reads (get_parameter_*, is_enabled) answer with the remembered values. Other functions call the inner glow::Context as is.\n- Even if game code continues engine drawing in the same callback right after changing state with this, the engine knows the changed state."
 					},
 					"traits": [
 						"std::ops::Deref"
@@ -47782,6 +47764,75 @@
 							"description": {
 								"ko": "버텍스 어레이 지우기. (원본 deleteVertexArray)",
 								"en": "Delete a vertex array. (original deleteVertexArray)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "create_buffer",
+							"signature": "pub unsafe fn create_buffer(&self) -> Result<GlBuffer, String>",
+							"params": [],
+							"returns": {
+								"type": "Result<GlBuffer, String>",
+								"description": {
+									"ko": "새 버퍼. 못 만들면 까닭.",
+									"en": "The new buffer. The reason if it cannot be created."
+								}
+							},
+							"description": {
+								"ko": "버퍼 만들기. (glow 의 같은 이름, 지운 이름을 GL 이 다시 주면 상태 캐시가 지운 기억과 처음 묶은 대상을 뺀다)",
+								"en": "Creates a buffer. (glow's function of the same name; if GL gives back a deleted name, the state cache removes it from the deleted record and the first bound target)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "bind_buffer",
+							"signature": "pub unsafe fn bind_buffer(&self, target: u32, buffer: Option<GlBuffer>)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "묶을 대상. (ARRAY_BUFFER, ELEMENT_ARRAY_BUFFER 같은 것)",
+										"en": "The target to bind. (ARRAY_BUFFER, ELEMENT_ARRAY_BUFFER, and the like)"
+									}
+								},
+								{
+									"name": "buffer",
+									"type": "Option<GlBuffer>",
+									"description": {
+										"ko": "묶을 버퍼. None 이면 풀기.",
+										"en": "The buffer to bind. None unbinds."
+									}
+								}
+							],
+							"description": {
+								"ko": "버퍼 묶기. (원본 bindBuffer, 상태 캐시는 ARRAY_BUFFER 묶음을 기억해 엔진 2D 그리기가 제 정점 버퍼를 다시 묶을지 견준다)",
+								"en": "Binds a buffer. (the original bindBuffer; the state cache remembers the ARRAY_BUFFER binding so engine 2D drawing can compare whether to bind its own vertex buffer again)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "delete_buffer",
+							"signature": "pub unsafe fn delete_buffer(&self, buffer: GlBuffer)",
+							"params": [
+								{
+									"name": "buffer",
+									"type": "GlBuffer",
+									"description": {
+										"ko": "지울 버퍼.",
+										"en": "The buffer to delete."
+									}
+								}
+							],
+							"description": {
+								"ko": "버퍼 지우기. (원본 deleteBuffer)",
+								"en": "Deletes a buffer. (the original deleteBuffer)"
 							},
 							"since": "0.4.0",
 							"source": "src/core/glcontext.rs"
@@ -56229,8 +56280,8 @@
 							"source": "src/core/node/nodetree.rs",
 							"counterpart": {
 								"engine": "vanilla.js",
-								"module": "base/node",
-								"class": "Node",
+								"module": "core/node/transformnode",
+								"class": "TransformNode",
 								"name": "setParent"
 							}
 						},
@@ -59273,8 +59324,8 @@
 							"source": "src/core/node/worldnode.rs",
 							"counterpart": {
 								"engine": "vanilla.js",
-								"module": "base/node",
-								"class": "Node",
+								"module": "core/node/transformnode",
+								"class": "TransformNode",
 								"name": "setActive"
 							}
 						},
@@ -89476,8 +89527,8 @@
 								}
 							],
 							"description": {
-								"ko": "깊이 패스 시작. (프레임버퍼 바인드 + 뷰포트 + 깊이 클리어)\n- 깊이 시험과 깊이 쓰기를 켠다. 끝나면 부르는 쪽이 다음 패스의 프레임버퍼와 뷰포트를 다시 잡는다.",
-								"en": "Starts the depth pass. (framebuffer bind + viewport + depth clear)\n- Turns on depth test and depth write. Afterward, the caller sets the next pass's framebuffer and viewport again."
+								"ko": "깊이 패스 시작. (프레임버퍼 바인드 + 뷰포트 + 깊이 클리어)\n- 가위 시험을 끄고 깊이 시험과 깊이 쓰기를 켠다. 끝나면 부르는 쪽이 다음 패스의 프레임버퍼와 뷰포트를 다시 잡는다.",
+								"en": "Starts the depth pass. (framebuffer bind + viewport + depth clear)\n- Turns off the scissor test and turns on the depth test and depth writing. When done, the caller sets the next pass's framebuffer and viewport again."
 							},
 							"since": "0.3.2",
 							"source": "src/graphics3d/shadowmap.rs",
