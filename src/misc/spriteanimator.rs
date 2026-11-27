@@ -3,7 +3,7 @@
 //! - 원본 misc/spriteanimator.js 를 옮긴 것이다. 이름을 붙인 클립(프레임 시퀀스)을 등록해 두고 play("run") 으로 바꾼다.
 //! - 같은 클립을 다시 play 해도 처음부터 하지 않는다. (restart_if_same 으로 바꿀 수 있다)
 //! - 클립이 끝나면 on_complete 콜백으로 다음 상태를 이어 간다. (FSM 과 묶어 쓴다)
-//! - 같은 노드의 Sprite 컴포넌트에 지금 프레임(이미지 + 영역)을 넣는다. tick 때 context.get_node_mut().`get_component_mut::<Sprite>()` 로 찾는다.
+//! - 같은 노드의 Sprite 컴포넌트에 지금 프레임(이미지 + 영역)을 넣는다. 원본 findSprite 처럼 한 번 찾으면 기억한다. (find_sprite)
 //! - 사용:
 //!   ```text
 //!     let animator = node_tree[hero_id].add_component(SpriteAnimator::new());
@@ -19,15 +19,16 @@
 //! - 원본과 다른 점:
 //!   on_complete 는 애니메이터를 받는 한 번짜리 콜백(FnOnce(&mut SpriteAnimator))이다. 원본은 클로저가 애니메이터를 붙잡아 썼다.
 //!   fps 는 이름을 줄이지 않아 frame_per_second 다. 기본값(10, 반복)은 DEFAULT_FRAME_PER_SECOND 와 true 를 넘긴다.
-//!   아틀라스 JSON 은 serde_json::Value 로 받는다. 원본 findSprite(찾아서 들고 있기)는 형제 컴포넌트의 참조를 들고 있을 수 없어(빌림이 tick 을 넘어 살 수 없다)
-//!     옮기지 않았다. 대신 tick 마다 context.get_node_mut().`get_component_mut::<Sprite>()` 로 찾고, 밖에서는 apply_current_frame(sprite) 에 Sprite 를 넘긴다.
+//!   아틀라스 JSON 은 serde_json::Value 로 받는다.
+//!   원본 findSprite 는 찾은 Sprite 를 들고 있는다. 러스트 컴포넌트는 형제 컴포넌트의 참조를 들 수 없어(빌림이 tick 을 넘어 살 수 없다) Sprite 가 든 노드의 NodeId 를 기억하고,
+//!     SpriteAnimator::find_sprite(&mut node_tree, 노드) 가 그 노드에서 꺼낸다. 밖에서는 apply_current_frame(sprite) 에 Sprite 를 넘길 수도 있다.
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::core::animation::Animation;
 use crate::core::component::sprite::Sprite;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::image::Image;
-use crate::core::node::nodetree::ComponentContext;
+use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::WorldNode;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -132,6 +133,8 @@ pub struct SpriteAnimator {
 	clip_name: Option<String>,
 	animation: Animation,
 	on_complete: Option<SpriteAnimatorCompleteEvent>,
+	/// Sprite 를 찾은 노드. (원본 #sprite 캐시 자리, 한 번 찾으면 기억한다)
+	sprite_node_id: Option<NodeId>,
 }
 
 #[crate::reflect]
@@ -152,6 +155,7 @@ impl SpriteAnimator {
 			clip_name: None,
 			animation: Animation::new(),
 			on_complete: None,
+			sprite_node_id: None,
 		}
 	}
 
@@ -389,6 +393,56 @@ impl SpriteAnimator {
 	pub fn get_current_frame_index(&self) -> usize {
 		self.animation.get_current_frame_index()
 	}
+
+	//==============================================================================
+	/// 같은 노드의 스프라이트 찾기. (원본 findSprite, 한 번 찾으면 기억한다)
+	/// - 원본은 찾은 Sprite 를 들고 있는다. 러스트는 형제 컴포넌트의 참조를 들 수 없어 Sprite 가 든 노드의 NodeId 를 애니메이터에 기억하고 트리에서 꺼낸다.
+	/// - tick 에서 찾았어도 기억한다. 기억한 노드에서 Sprite 를 뺐으면 None 이다.
+	///
+	/// # 인자
+	/// - `node_tree`: 노드가 든 트리.
+	/// - `node_id`: SpriteAnimator 가 붙은 노드.
+	///
+	/// # 돌려줌
+	/// 같은 노드의 첫 Sprite. 노드가 없거나, 노드에 SpriteAnimator 나 Sprite 가 없으면 None.
+	///
+	/// # 예제
+	/// 애니메이터가 넣는 스프라이트 꺼내기
+	/// ```rust
+	/// use vanilla::{Image, NodeTree, Rect, Sprite, SpriteAnimator, SpriteAnimatorPlayOptions};
+	///
+	/// let image = Image::create_from_pixels(64, 16, vec![0u8; 64 * 16 * 4]);
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let hero_id = node_tree.create_child(root_id, "hero");
+	/// node_tree[hero_id].add_component(Sprite::new());
+	/// let animator = node_tree[hero_id].add_component(SpriteAnimator::new());
+	/// animator.add_clip("run", image, &[Rect::create(16.0, 0.0, 16.0, 16.0)], 10.0, true);
+	/// SpriteAnimator::play(&mut node_tree[hero_id], "run", SpriteAnimatorPlayOptions::default());
+	/// let sprite = SpriteAnimator::find_sprite(&mut node_tree, hero_id).expect("sprite");
+	/// assert_eq!(sprite.get_image_rect(), Rect::create(16.0, 0.0, 16.0, 16.0));
+	/// ```
+	//==============================================================================
+	pub fn find_sprite(node_tree: &mut NodeTree, node_id: NodeId) -> Option<&mut Sprite> {
+		let sprite_node_id = {
+			let node = node_tree.get_node_mut(node_id)?;
+			let has_sprite = node.get_component::<Sprite>().is_some();
+			let sprite_animator = node.get_component_mut::<SpriteAnimator>()?;
+			match sprite_animator.sprite_node_id {
+				Some(sprite_node_id) => {
+					sprite_node_id
+				}
+				None => {
+					if !has_sprite {
+						return None;
+					}
+					sprite_animator.sprite_node_id = Some(node_id);
+					node_id
+				}
+			}
+		};
+		node_tree.get_node_mut(sprite_node_id)?.get_component_mut::<Sprite>()
+	}
 }
 
 impl Default for SpriteAnimator {
@@ -435,7 +489,11 @@ impl Component for SpriteAnimator {
 				on_complete(self);
 			}
 		}
+		let node_id = context.get_node_id();
 		if let Some(sprite) = context.get_node_mut().get_component_mut::<Sprite>() {
+			if self.sprite_node_id.is_none() {
+				self.sprite_node_id = Some(node_id);
+			}
 			self.apply_current_frame(sprite);
 		}
 	}
@@ -456,6 +514,29 @@ mod tests {
 	//==============================================================================
 	fn create_sheet_rects(first_column: usize, frame_count: usize) -> Vec<Rect> {
 		(first_column..first_column + frame_count).map(|column| Rect::create(column as f64 * 16.0, 0.0, 16.0, 16.0)).collect()
+	}
+
+	//==============================================================================
+	/// find_sprite: 같은 노드의 Sprite 를 찾아 기억한다. (Sprite 나 애니메이터가 없으면 None, tick 에서 찾은 것도 기억)
+	//==============================================================================
+	#[test]
+	fn find_sprite_remembers_node() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let image = Image::create_from_pixels(64, 16, vec![0u8; 64 * 16 * 4]);
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let plain_id = node_tree.create_child(root_id, "plain");
+		assert!(SpriteAnimator::find_sprite(&mut node_tree, plain_id).is_none());
+		let hero_id = node_tree.create_child(root_id, "hero");
+		node_tree[hero_id].add_component(SpriteAnimator::new()).add_clip("run", image, &create_sheet_rects(1, 2), 10.0, true);
+		assert!(SpriteAnimator::find_sprite(&mut node_tree, hero_id).is_none());
+		assert!(node_tree[hero_id].get_component::<SpriteAnimator>().expect("animator").sprite_node_id.is_none());
+		node_tree[hero_id].add_component(Sprite::new());
+		SpriteAnimator::play(&mut node_tree[hero_id], "run", SpriteAnimatorPlayOptions::default());
+		node_tree.tick(&engine, 1.0 / 60.0);
+		assert_eq!(node_tree[hero_id].get_component::<SpriteAnimator>().expect("animator").sprite_node_id, Some(hero_id));
+		let sprite = SpriteAnimator::find_sprite(&mut node_tree, hero_id).expect("sprite");
+		assert_eq!(sprite.get_image_rect(), Rect::create(16.0, 0.0, 16.0, 16.0));
 	}
 
 	//==============================================================================
