@@ -1397,7 +1397,8 @@ impl WorldNode {
 	//==============================================================================
 	pub fn draw_components(&mut self, graphic: &mut Graphic) -> (Option<f64>, bool) {
 		let mut is_culled = false;
-		if !self.components.is_empty() && graphic.is_culling_enabled() {
+		// 하위 트리가 보이는 사각형 안에 다 든 노드 아래면 견주지 않는다. (원본 #isComponentDrawCulled)
+		if !self.components.is_empty() && graphic.is_culling_enabled() && !graphic.is_inside_visible_bounds() {
 			let mut drawn_rect: Option<Rect> = None;
 			let mut is_drawn_rect_known = true;
 			for component in self.components.iter_mut() {
