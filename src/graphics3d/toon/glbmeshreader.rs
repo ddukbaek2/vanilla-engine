@@ -9,6 +9,7 @@
 //!   - 재질 extras 의 outline 은 바깥선 껍데기(뒷면만 그림), basic 은 빛을 받지 않는 부품이다.
 //!     바깥선 설정을 주면 그 껍데기는 담지 않고, ".outline" 짝이 있는 노드의 몸으로 점마다 같은 굵기의 껍데기를 새로 짓는다.
 //!   - 뼈대(skin)가 있으면 본 노드와 그 거꾸로 묶는 행렬, 움직임(animations)과 그 extras 를 함께 읽는다. 자세는 write_skin_pose 가 셈한다.
+//!     섞은 자세를 스킨 행렬로 짓기 전에 뼈마다 고치려면 pose_adjust 에 고리(ToonPoseAdjust::Hook)나 고침 표(ToonPoseAdjust::Bones, adjust_bones, BoneModifier)를 준다.
 //!   - 부품을 따로 숨기거나 칠하는 모형은 read_glb_node_arrays 로 노드마다 따로 읽는다. (노드 extras 와 비치는 정도를 함께)
 //!   - 한 덩이로 읽은 뼈대 모형의 노드 extras 와 부품의 자리, 따르는 본은 read_glb_node_infos 로 따로 읽는다.
 //! - 엔진의 SkinnedModel(텍스처 PBR)과는 따로다. 툰 그리기에 쓸 꼭짓점 배열만 뽑는다.
@@ -19,6 +20,7 @@ use serde_json::Value;
 
 use crate::base::matrix4::Matrix4;
 use crate::base::quaternion::Quaternion;
+use crate::base::trigonometry::hypot_list;
 use crate::graphics3d::toon::meshbuilder::{MeshBuilder, ToonMaterialRange, ToonMeshArrays};
 
 /// GLB 의 머리와 덩어리 종류.
@@ -85,7 +87,7 @@ pub struct ToonOutlineOptions {
 /// let arm = ToonSkeletonNode { name: String::from("arm"), parent_index: Some(0), translation: [0.5, 0.0, 0.0], rotation: [0.0, 0.0, 0.0, 1.0], scale: [2.0; 3], matrix: None };
 /// let skeleton = ToonSkeleton { joints: vec![0, 1], inverse_bind_matrices: Vec::new(), nodes: vec![root, arm], animations: HashMap::new() };
 /// let mut joint_matrices = vec![0.0f32; skeleton.joints.len() * 16];
-/// write_skin_pose(&skeleton, "Idle", 0.0, &mut joint_matrices, None, None);
+/// write_skin_pose(&skeleton, "Idle", 0.0, &mut joint_matrices, None, None, None);
 /// assert!((joint_matrices[16] - 2.0).abs() < 0.0001);
 /// assert!((joint_matrices[28] - 0.5).abs() < 0.0001 && (joint_matrices[29] - 1.0).abs() < 0.0001);
 /// ```
@@ -135,9 +137,9 @@ pub enum ToonChannelPath {
 /// let animation = ToonAnimation { duration: 1.0, channels: vec![hop], extras: serde_json::Value::Null };
 /// let skeleton = ToonSkeleton { joints: vec![0], inverse_bind_matrices: Vec::new(), nodes: vec![node], animations: HashMap::from([(String::from("Hop"), animation)]) };
 /// let mut joint_matrices = [0.0; 16];
-/// write_skin_pose(&skeleton, "Hop", 0.25, &mut joint_matrices, None, None);
+/// write_skin_pose(&skeleton, "Hop", 0.25, &mut joint_matrices, None, None, None);
 /// assert_eq!(joint_matrices[13], 0.0);
-/// write_skin_pose(&skeleton, "Hop", 0.75, &mut joint_matrices, None, None);
+/// write_skin_pose(&skeleton, "Hop", 0.75, &mut joint_matrices, None, None, None);
 /// assert_eq!(joint_matrices[13], 1.0);
 /// ```
 //==============================================================================
@@ -169,7 +171,7 @@ pub struct ToonAnimationChannel {
 /// let animation = ToonAnimation { duration: 2.0, channels: vec![rise], extras: serde_json::json!({ "loop": "once" }) };
 /// let skeleton = ToonSkeleton { joints: vec![0], inverse_bind_matrices: Vec::new(), nodes: vec![node], animations: HashMap::from([(String::from("Rise"), animation)]) };
 /// let mut joint_matrices = [0.0; 16];
-/// write_skin_pose(&skeleton, "Rise", 3.0, &mut joint_matrices, None, None);
+/// write_skin_pose(&skeleton, "Rise", 3.0, &mut joint_matrices, None, None, None);
 /// assert_eq!(joint_matrices[13], 4.0);
 /// ```
 //==============================================================================
@@ -198,7 +200,7 @@ pub struct ToonAnimation {
 /// let animation = ToonAnimation { duration: 1.0, channels: vec![lift], extras: serde_json::Value::Null };
 /// let skeleton = ToonSkeleton { joints: vec![0, 1], inverse_bind_matrices: Vec::new(), nodes: vec![root, arm], animations: HashMap::from([(String::from("Lift"), animation)]) };
 /// let mut joint_matrices = vec![0.0f32; skeleton.joints.len() * 16];
-/// write_skin_pose(&skeleton, "Lift", 0.5, &mut joint_matrices, None, None);
+/// write_skin_pose(&skeleton, "Lift", 0.5, &mut joint_matrices, None, None, None);
 /// assert!((joint_matrices[16 + 12] - 1.0).abs() < 0.0001);
 /// assert!((joint_matrices[16 + 13] - 1.0).abs() < 0.0001);
 /// ```
@@ -213,7 +215,7 @@ pub struct ToonAnimation {
 /// 		return Ok(Vec::new());
 /// 	};
 /// 	let mut joint_matrices = vec![0.0f32; skeleton.joints.len() * 16];
-/// 	write_skin_pose(skeleton, "Survey", time, &mut joint_matrices, None, None);
+/// 	write_skin_pose(skeleton, "Survey", time, &mut joint_matrices, None, None, None);
 /// 	Ok(joint_matrices)
 /// }
 /// ```
@@ -282,7 +284,7 @@ pub struct ToonPartArrays {
 /// 		return Ok(Some(visor_info.center));
 /// 	};
 /// 	let mut joint_matrices = vec![0.0f32; skeleton.joints.len() * 16];
-/// 	write_skin_pose(skeleton, "Walk", 0.25, &mut joint_matrices, None, None);
+/// 	write_skin_pose(skeleton, "Walk", 0.25, &mut joint_matrices, None, None, None);
 /// 	let mut joint_matrix = Matrix4::create_identity();
 /// 	joint_matrix.elements.copy_from_slice(&joint_matrices[joint_index * 16..joint_index * 16 + 16]);
 /// 	let visor_position = joint_matrix.transform_point(visor_info.center[0], visor_info.center[1], visor_info.center[2]);
@@ -317,7 +319,7 @@ pub struct ToonNodeInfo {
 /// let time_since_change = 0.05;
 /// let blend = ToonPoseBlend { animation_name: "Survey", time: 1.4, weight: 1.0 - time_since_change / blend_duration };
 /// let mut joint_matrices = vec![0.0f32; skeleton.joints.len() * 16];
-/// write_skin_pose(&skeleton, "Run", time_since_change, &mut joint_matrices, Some(blend), None);
+/// write_skin_pose(&skeleton, "Run", time_since_change, &mut joint_matrices, Some(blend), None, None);
 /// assert!((joint_matrices[13] - 0.5).abs() < 0.0001);
 /// ```
 //==============================================================================
@@ -335,6 +337,115 @@ pub struct ToonPoseBlend<'a> {
 /// 노드마다의 흔들림 배율. (움직임 이름 → (노드 차례, 배율) 목록, 1 이면 그대로, 0 이면 쉬는 자세)
 //==============================================================================
 pub type ToonSwingScales = HashMap<String, Vec<(usize, f64)>>;
+
+//==============================================================================
+/// 뼈 고치기의 꼴. (adjust_bones 와 write_skin_pose 의 ToonPoseAdjust::Bones 표에서 고침 하나가 움직임 값에 어떻게 걸리는지, 원본 BoneModifyMode)
+/// - Add: 움직임 위에 덧붙인다. 자리는 부모 공간에서 더하고, 돌림은 그 뼈의 공간에서 뒤에 곱하고(q x 준 돌림), 크기는 곱한다.
+/// - Replace: 준 값으로 바꾼다. (자리, 돌림, 크기 모두 부모 공간의 지역 값)
+///
+/// # 예제
+/// 엉덩이는 내리고 머리는 움직임 값을 버리고 정면으로 두기
+/// ```rust
+/// use std::collections::HashMap;
+/// use vanilla::{write_skin_pose, BoneModifier, BoneModifyMode, ToonPoseAdjust, ToonSkeleton, ToonSkeletonNode};
+///
+/// let hip = ToonSkeletonNode { name: String::from("hip"), parent_index: None, translation: [0.0, 5.0, 0.0], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: None };
+/// let head = ToonSkeletonNode { name: String::from("head"), parent_index: Some(0), translation: [0.0, 1.0, 0.0], rotation: [0.0, 0.7071, 0.0, 0.7071], scale: [1.0; 3], matrix: None };
+/// let skeleton = ToonSkeleton { joints: vec![0, 1], inverse_bind_matrices: Vec::new(), nodes: vec![hip, head], animations: HashMap::new() };
+/// let modifiers = [
+/// 	BoneModifier { name: Some("hip"), translation: Some([0.0, -2.0, 0.0]), mode: BoneModifyMode::Add, ..Default::default() },
+/// 	BoneModifier { name: Some("head"), rotation: Some([0.0, 0.0, 0.0, 1.0]), mode: BoneModifyMode::Replace, ..Default::default() },
+/// ];
+/// let mut joint_matrices = vec![0.0f32; skeleton.joints.len() * 16];
+/// write_skin_pose(&skeleton, "Idle", 0.0, &mut joint_matrices, None, None, Some(ToonPoseAdjust::Bones(&modifiers)));
+/// assert_eq!(joint_matrices[13], 3.0);
+/// assert_eq!(joint_matrices[16], 1.0);
+/// ```
+//==============================================================================
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum BoneModifyMode {
+	/// 움직임 위에 덧붙임. (자리는 더함, 돌림은 그 뼈의 공간에서 뒤에 곱함, 크기는 곱함)
+	#[default]
+	Add = 0,
+	/// 준 값으로 바꿈. (부모 공간의 지역 값)
+	Replace = 1,
+}
+
+//==============================================================================
+/// 뼈 하나의 고침. (adjust_bones 와 ToonPoseAdjust::Bones 표의 한 줄, 원본 { nodeIndex, name, translation, rotation, scale, mode, weight })
+/// - 준 칸(Some)만 건다. node_index 가 None 이면 name 으로 찾는다. (같은 이름이 여럿이면 앞 노드, 못 찾거나 행렬로 둔 노드면 건너뛴다)
+/// - weight 는 고치기 앞과 뒤 사이의 몫이다. (0 이면 그대로, 1 이면 다 고침, 0 ~ 1 로 자름, 돌림은 가까운 쪽으로 섞어 정규화)
+/// - 기본은 칸 모두 None, mode Add, weight 1 이다.
+///
+/// # 예제
+/// 꼬리 마디를 그 뼈의 x 축으로 0.8 라디안 더 돌리고 그 반만 걸기
+/// ```rust
+/// use vanilla::{BoneModifier, BoneModifyMode};
+///
+/// let half_angle: f64 = 0.4;
+/// let modifier = BoneModifier { name: Some("b_Tail02_013"), rotation: Some([half_angle.sin(), 0.0, 0.0, half_angle.cos()]), weight: 0.5, ..Default::default() };
+/// assert_eq!(modifier.mode, BoneModifyMode::Add);
+/// assert_eq!(modifier.node_index, None);
+/// ```
+//==============================================================================
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct BoneModifier<'a> {
+	/// 고칠 노드의 skeleton.nodes 차례. (None 이면 name 으로 찾음)
+	pub node_index: Option<usize>,
+	/// 고칠 노드의 이름. (node_index 가 None 일 때 쓴다)
+	pub name: Option<&'a str>,
+	/// 자리. ([x, y, z], Add 면 더함, Replace 면 그 값, None 이면 그대로)
+	pub translation: Option<[f64; 3]>,
+	/// 돌림 사원수. ([x, y, z, w], Add 면 그 뼈의 공간에서 뒤에 곱함, Replace 면 그 값을 정규화, None 이면 그대로)
+	pub rotation: Option<[f64; 4]>,
+	/// 크기. ([x, y, z], Add 면 곱함, Replace 면 그 값, None 이면 그대로)
+	pub scale: Option<[f64; 3]>,
+	/// 거는 꼴. (기본 Add)
+	pub mode: BoneModifyMode,
+	/// 고치기 앞과 뒤 사이의 몫. (0 ~ 1, 기본 1)
+	pub weight: f64,
+}
+
+impl Default for BoneModifier<'_> {
+	//==============================================================================
+	/// 아무것도 고치지 않는 고침. (칸 모두 None, mode Add, weight 1)
+	//==============================================================================
+	fn default() -> Self {
+		BoneModifier { node_index: None, name: None, translation: None, rotation: None, scale: None, mode: BoneModifyMode::Add, weight: 1.0 }
+	}
+}
+
+//==============================================================================
+/// 섞은 자세의 뼈마다 지역 변환을 고치는 것. (write_skin_pose 의 pose_adjust, 원본 writeSkinPose 일곱째 인자의 함수나 표)
+/// - Hook: (노드마다의 지역 값, 뼈대) 로 불러 그 함수가 지역 값을 제자리에서 고친다. (이 부름만의 사본이라 뼈대의 쉬는 자세는 바뀌지 않는다)
+/// - Bones: adjust_bones 의 뼈마다 고침 표로 건다.
+///
+/// # 예제
+/// 고리 안에서 표 고침과 직접 고침을 같이 쓰기
+/// ```rust
+/// use std::collections::HashMap;
+/// use vanilla::{adjust_bones, write_skin_pose, BoneModifier, ToonPoseAdjust, ToonSkeleton, ToonSkeletonNode};
+///
+/// let spine = ToonSkeletonNode { name: String::from("spine"), parent_index: None, translation: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: None };
+/// let tail = ToonSkeletonNode { name: String::from("tail"), parent_index: Some(0), translation: [0.0, 0.0, -1.0], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: None };
+/// let skeleton = ToonSkeleton { joints: vec![0, 1], inverse_bind_matrices: Vec::new(), nodes: vec![spine, tail], animations: HashMap::new() };
+/// let half_angle: f64 = 0.3;
+/// let mut crouch = |locals: &mut [ToonSkeletonNode], pose_skeleton: &ToonSkeleton| {
+/// 	adjust_bones(locals, pose_skeleton, &[BoneModifier { name: Some("spine"), rotation: Some([half_angle.sin(), 0.0, 0.0, half_angle.cos()]), ..Default::default() }]);
+/// 	locals[1].scale[1] *= 1.2;
+/// };
+/// let mut joint_matrices = vec![0.0f32; skeleton.joints.len() * 16];
+/// write_skin_pose(&skeleton, "Idle", 0.0, &mut joint_matrices, None, None, Some(ToonPoseAdjust::Hook(&mut crouch)));
+/// assert!((joint_matrices[5] - 0.6f64.cos() as f32).abs() < 0.0001);
+/// assert_eq!(skeleton.nodes[1].scale, [1.0; 3]);
+/// ```
+//==============================================================================
+pub enum ToonPoseAdjust<'a> {
+	/// 노드마다의 지역 값을 직접 고치는 고리. (locals, skeleton)
+	Hook(&'a mut dyn FnMut(&mut [ToonSkeletonNode], &ToonSkeleton)),
+	/// adjust_bones 의 뼈마다 고침 표.
+	Bones(&'a [BoneModifier<'a>]),
+}
 
 //==============================================================================
 /// GLB 의 JSON 과 바이너리.
@@ -1082,7 +1193,7 @@ pub fn read_glb_node_infos(bytes: &[u8]) -> Result<HashMap<String, ToonNodeInfo>
 }
 
 //==============================================================================
-/// 움직임의 한 갈래를 그 시각에서 읽기. (LINEAR 는 사이를 섞고 돌림은 사원수를 가까운 쪽으로 섞어 정규화, STEP 은 앞 키)
+/// 움직임의 한 갈래를 그 시각에서 읽기. (LINEAR 는 사이를 섞고 돌림은 사원수를 가까운 쪽으로 섞어 원본처럼 Math.hypot 길이로 정규화, STEP 은 앞 키)
 //==============================================================================
 fn sample_channel(channel: &ToonAnimationChannel, time: f64) -> Vec<f64> {
 	let times = &channel.times;
@@ -1119,7 +1230,7 @@ fn sample_channel(channel: &ToonAnimationChannel, time: f64) -> Vec<f64> {
 		start_value + (end_value - start_value) * ratio
 	}).collect();
 	if component_count == 4 {
-		let length = result.iter().map(|value| value * value).sum::<f64>().sqrt();
+		let length = hypot_list(&result);
 		if length > 0.0 {
 			for value in result.iter_mut() {
 				*value /= length;
@@ -1130,13 +1241,13 @@ fn sample_channel(channel: &ToonAnimationChannel, time: f64) -> Vec<f64> {
 }
 
 //==============================================================================
-/// 두 돌림 섞기. (가까운 쪽으로 섞어 정규화, ratio 가 1 이면 other)
+/// 두 돌림 섞기. (가까운 쪽으로 섞어 원본처럼 Math.hypot 길이로 정규화, ratio 가 1 이면 other)
 //==============================================================================
 fn mix_rotation(rotation: [f64; 4], other_rotation: [f64; 4], ratio: f64) -> [f64; 4] {
 	let dot: f64 = (0..4).map(|component_index| rotation[component_index] * other_rotation[component_index]).sum();
 	let sign = if dot < 0.0 { -1.0 } else { 1.0 };
 	let mixed: [f64; 4] = [0, 1, 2, 3].map(|component_index| rotation[component_index] + (other_rotation[component_index] * sign - rotation[component_index]) * ratio);
-	let length = mixed.iter().map(|value| value * value).sum::<f64>().sqrt();
+	let length = hypot_list(&mixed);
 	if length <= 0.0 {
 		return rotation;
 	}
@@ -1259,9 +1370,110 @@ fn mix_locals(locals: &mut [ToonSkeletonNode], other_locals: &[ToonSkeletonNode]
 }
 
 //==============================================================================
+/// 두 사원수 곱. (rotation x other_rotation, 뒤의 돌림을 앞 돌림의 공간에서 건다, 원본처럼 Math.hypot 길이로 정규화, 길이가 0 이면 rotation)
+//==============================================================================
+fn multiply_rotation(rotation: [f64; 4], other_rotation: [f64; 4]) -> [f64; 4] {
+	let [x, y, z, w] = rotation;
+	let [other_x, other_y, other_z, other_w] = other_rotation;
+	let result = [
+		w * other_x + x * other_w + y * other_z - z * other_y,
+		w * other_y - x * other_z + y * other_w + z * other_x,
+		w * other_z + x * other_y - y * other_x + z * other_w,
+		w * other_w - x * other_x - y * other_y - z * other_z,
+	];
+	let length = hypot_list(&result);
+	if length <= 0.0 {
+		return rotation;
+	}
+	result.map(|value| value / length)
+}
+
+//==============================================================================
+/// 섞은 자세의 뼈마다 지역 변환 고치기. (write_skin_pose 가 움직임을 읽어 섞은 뒤, 스킨 행렬을 짓기 전에 거는 꼴, 행렬로 둔 노드는 건너뜀)
+/// - 고침은 차례대로 걸린다. (같은 뼈에 둘을 주면 앞 고침 위에 뒤 고침)
+/// - weight 가 0 이하인 고침과 못 찾은 뼈는 건너뛴다.
+///
+/// # 인자
+/// - `locals`: 노드마다의 지역 값. (ToonPoseAdjust::Hook 고리가 받는 것, 고친 값을 여기에 쓴다)
+/// - `skeleton`: read_glb_arrays 의 skeleton. (이름으로 뼈를 찾는다)
+/// - `modifiers`: 뼈마다의 고침. (BoneModifier, 차례대로)
+///
+/// # 예제
+/// 엉덩이를 반만 올리고 같은 뼈에 두 번 고침 걸기
+/// ```rust
+/// use std::collections::HashMap;
+/// use vanilla::{adjust_bones, BoneModifier, ToonSkeleton, ToonSkeletonNode};
+///
+/// let hip = ToonSkeletonNode { name: String::from("hip"), parent_index: None, translation: [0.0, 1.0, 0.0], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: None };
+/// let skeleton = ToonSkeleton { joints: vec![0], inverse_bind_matrices: Vec::new(), nodes: vec![hip], animations: HashMap::new() };
+/// let mut locals = skeleton.nodes.clone();
+/// adjust_bones(&mut locals, &skeleton, &[
+/// 	BoneModifier { name: Some("hip"), translation: Some([0.0, 4.0, 0.0]), weight: 0.5, ..Default::default() },
+/// 	BoneModifier { node_index: Some(0), scale: Some([2.0, 1.0, 1.0]), ..Default::default() },
+/// ]);
+/// assert_eq!(locals[0].translation, [0.0, 3.0, 0.0]);
+/// assert_eq!(locals[0].scale, [2.0, 1.0, 1.0]);
+/// ```
+//==============================================================================
+pub fn adjust_bones(locals: &mut [ToonSkeletonNode], skeleton: &ToonSkeleton, modifiers: &[BoneModifier]) {
+	let mut name_indices: Option<HashMap<&str, usize>> = None;
+	for modifier in modifiers.iter() {
+		let mut node_index = modifier.node_index;
+		if node_index.is_none() {
+			if let Some(name) = modifier.name {
+				let indices = name_indices.get_or_insert_with(|| {
+					let mut indices = HashMap::new();
+					for (index, node) in skeleton.nodes.iter().enumerate() {
+						indices.entry(node.name.as_str()).or_insert(index);
+					}
+					indices
+				});
+				node_index = indices.get(name).copied();
+			}
+		}
+		let local = match node_index.and_then(|node_index| locals.get_mut(node_index)) {
+			Some(local) if local.matrix.is_none() => {
+				local
+			}
+			_ => {
+				continue;
+			}
+		};
+		let is_replace = modifier.mode == BoneModifyMode::Replace;
+		let weight = modifier.weight.clamp(0.0, 1.0);
+		if weight <= 0.0 {
+			continue;
+		}
+		let mix_vector = |before: [f64; 3], after: [f64; 3]| -> [f64; 3] {
+			if weight >= 1.0 {
+				return after;
+			}
+			[0, 1, 2].map(|component_index| before[component_index] + (after[component_index] - before[component_index]) * weight)
+		};
+		if let Some(translation) = modifier.translation {
+			let before = local.translation;
+			let after = if is_replace { translation } else { [0, 1, 2].map(|component_index| before[component_index] + translation[component_index]) };
+			local.translation = mix_vector(before, after);
+		}
+		if let Some(rotation) = modifier.rotation {
+			let before = local.rotation;
+			let after = if is_replace { multiply_rotation([0.0, 0.0, 0.0, 1.0], rotation) } else { multiply_rotation(before, rotation) };
+			local.rotation = if weight >= 1.0 { after } else { mix_rotation(before, after, weight) };
+		}
+		if let Some(scale) = modifier.scale {
+			let before = local.scale;
+			let after = if is_replace { scale } else { [0, 1, 2].map(|component_index| before[component_index] * scale[component_index]) };
+			local.scale = mix_vector(before, after);
+		}
+	}
+}
+
+//==============================================================================
 /// 뼈대 자세 셈하기. (움직임을 그 시각에서 읽어 본마다 행렬을 target 에 16 씩 쓴다, 움직임이 없으면 쉬는 자세)
 /// - blend 를 주면 앞 움직임의 자세를 그 무게만큼 섞는다. (움직임이 바뀔 때 잠깐)
 /// - swing_scales 를 주면 그 움직임의 그 노드는 돌림을 쉬는 자세 쪽으로 줄인다. (섞는 앞 자세에도 같이)
+/// - pose_adjust 를 주면 섞은 뒤, 스킨 행렬을 짓기 전에 뼈마다의 지역 변환을 고친다. (움직임에 없는 자세, 머리 돌리기, 웅크림 같은 뼈 덮어쓰기)
+///   Hook 이면 (locals, skeleton) 으로 불러 그 함수가 locals 를 고치고, Bones 면 adjust_bones 의 뼈마다 고침 표로 건다. (None 이면 움직임 그대로)
 ///
 /// # 인자
 /// - `skeleton`: read_glb_arrays 의 skeleton.
@@ -1270,13 +1482,24 @@ fn mix_locals(locals: &mut [ToonSkeletonNode], other_locals: &[ToonSkeletonNode]
 /// - `target`: 본마다 16 씩 쓸 곳. (skeleton.joints 수 x 16 이상, 모자라면 들어가는 본까지만 쓴다, ToonDrawOptions 의 joint_matrices)
 /// - `blend`: 섞을 앞 자세와 그 무게. (None 이면 섞지 않음)
 /// - `swing_scales`: 움직임 이름마다 (노드 차례, 배율) 목록의 흔들림 배율. (1 이면 그대로, 0 이면 쉬는 자세, None 이면 없음)
+/// - `pose_adjust`: 섞은 뒤 뼈마다의 지역 변환을 고치는 고리나 고침 표. (None 이면 움직임 그대로, 고리가 받는 locals 는 이 부름만의 사본이라 제자리에서 고쳐도 된다)
 //==============================================================================
-pub fn write_skin_pose(skeleton: &ToonSkeleton, animation_name: &str, time: f64, target: &mut [f32], blend: Option<ToonPoseBlend>, swing_scales: Option<&ToonSwingScales>) {
+pub fn write_skin_pose(skeleton: &ToonSkeleton, animation_name: &str, time: f64, target: &mut [f32], blend: Option<ToonPoseBlend>, swing_scales: Option<&ToonSwingScales>, pose_adjust: Option<ToonPoseAdjust>) {
 	let mut locals = read_animation_locals(skeleton, animation_name, time, swing_scales);
 	if let Some(blend) = blend {
 		if blend.weight > 0.0 {
 			let blend_locals = read_animation_locals(skeleton, blend.animation_name, blend.time, swing_scales);
 			mix_locals(&mut locals, &blend_locals, blend.weight.min(1.0));
+		}
+	}
+	match pose_adjust {
+		Some(ToonPoseAdjust::Hook(hook)) => {
+			hook(&mut locals, skeleton);
+		}
+		Some(ToonPoseAdjust::Bones(modifiers)) => {
+			adjust_bones(&mut locals, skeleton, modifiers);
+		}
+		None => {
 		}
 	}
 	let mut globals: Vec<Option<Matrix4>> = vec![None; locals.len()];
@@ -1321,6 +1544,249 @@ pub fn write_skin_pose(skeleton: &ToonSkeleton, animation_name: &str, time: f64,
 		}
 		joint_matrix.multiply(&inverse_bind_matrix);
 		target[target_offset..target_offset + 16].copy_from_slice(&joint_matrix.elements);
+	}
+}
+
+//==============================================================================
+/// write_skin_pose 의 뼈 고침(pose_adjust)과 adjust_bones 시험. (원본 tests/graphics3d/skinposeadjust.test.mjs 와 같은 내용, 원본 예제 fox.glb 가 없으면 그 시험은 건너뛴다)
+//==============================================================================
+#[cfg(test)]
+mod pose_adjust_tests {
+	use super::*;
+
+	/// 원본 예제 자산 자리. (fox.glb, 저장소 옆의 vanilla.js)
+	const EXAMPLE_ASSET_DIRECTORY: &str = "../vanilla.js/examples/ancientmountain/assets";
+
+	//==============================================================================
+	/// fox.glb 의 뼈대. (없으면 None)
+	//==============================================================================
+	fn read_fox_skeleton() -> Option<ToonSkeleton> {
+		let glb_bytes = match std::fs::read(std::path::Path::new(EXAMPLE_ASSET_DIRECTORY).join("fox.glb")) {
+			Ok(glb_bytes) => {
+				glb_bytes
+			}
+			Err(_) => {
+				eprintln!("fox.glb 없음, 건너뜀");
+				return None;
+			}
+		};
+		read_glb_arrays(&glb_bytes, None).unwrap().skeleton
+	}
+
+	//==============================================================================
+	/// 그 시각의 스킨 행렬. (섞기와 흔들림 배율 없이)
+	//==============================================================================
+	fn write_pose(skeleton: &ToonSkeleton, animation_name: &str, time: f64, pose_adjust: Option<ToonPoseAdjust>) -> Vec<f32> {
+		let mut target = vec![0.0f32; skeleton.joints.len() * 16];
+		write_skin_pose(skeleton, animation_name, time, &mut target, None, None, pose_adjust);
+		target
+	}
+
+	//==============================================================================
+	/// 비트까지 같은지. (원본 Object.is 와 같게 비트로 본다)
+	//==============================================================================
+	fn is_same_bits(left: &[f32], right: &[f32]) -> bool {
+		left.len() == right.len() && left.iter().zip(right.iter()).all(|(left_value, right_value)| left_value.to_bits() == right_value.to_bits())
+	}
+
+	//==============================================================================
+	/// 그 노드와 그 아래 노드 차례들.
+	//==============================================================================
+	fn read_subtree(skeleton: &ToonSkeleton, root_index: usize) -> HashSet<usize> {
+		let mut indices = HashSet::from([root_index]);
+		let mut is_growing = true;
+		while is_growing {
+			is_growing = false;
+			for (node_index, node) in skeleton.nodes.iter().enumerate() {
+				if !indices.contains(&node_index) && node.parent_index.map(|parent_index| indices.contains(&parent_index)).unwrap_or(false) {
+					indices.insert(node_index);
+					is_growing = true;
+				}
+			}
+		}
+		indices
+	}
+
+	//==============================================================================
+	/// 작은 뼈대. (뿌리 아래 팔, 팔은 matrix 로 둔 노드 아래 하나 더, 움직임 "Wave")
+	//==============================================================================
+	fn create_small_skeleton() -> ToonSkeleton {
+		let root = ToonSkeletonNode { name: String::from("root"), parent_index: None, translation: [0.0, 1.0, 0.0], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: None };
+		let arm = ToonSkeletonNode { name: String::from("arm"), parent_index: Some(0), translation: [1.0, 0.0, 0.0], rotation: [0.0, 0.0, 0.2, 0.98], scale: [1.0; 3], matrix: None };
+		let fixed = ToonSkeletonNode { name: String::from("fixed"), parent_index: Some(1), translation: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], matrix: Some([1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.5, 0.0, 0.0, 1.0]) };
+		let wave = ToonAnimationChannel { node_index: 1, path: ToonChannelPath::Rotation, times: vec![0.0, 1.0], values: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.7071, 0.7071], is_step: false };
+		let animation = ToonAnimation { duration: 1.0, channels: vec![wave], extras: Value::Null };
+		ToonSkeleton { joints: vec![0, 1, 2], inverse_bind_matrices: Vec::new(), nodes: vec![root, arm, fixed], animations: HashMap::from([(String::from("Wave"), animation)]) }
+	}
+
+	//==============================================================================
+	/// 고리가 없거나 아무것도 고치지 않으면 비트까지 같고, 바꾸기, 무게, 차례, 행렬 노드 건너뛰기. (fox.glb 없이 도는 작은 뼈대)
+	//==============================================================================
+	#[test]
+	fn small_skeleton_adjust() {
+		let skeleton = create_small_skeleton();
+		let base_pose = write_pose(&skeleton, "Wave", 0.4, None);
+		let mut empty_hook = |_locals: &mut [ToonSkeletonNode], _skeleton: &ToonSkeleton| {
+		};
+		assert!(is_same_bits(&base_pose, &write_pose(&skeleton, "Wave", 0.4, Some(ToonPoseAdjust::Hook(&mut empty_hook)))));
+		assert!(is_same_bits(&base_pose, &write_pose(&skeleton, "Wave", 0.4, Some(ToonPoseAdjust::Bones(&[])))));
+		assert!(is_same_bits(&base_pose, &write_pose(&skeleton, "Wave", 0.4, Some(ToonPoseAdjust::Bones(&[BoneModifier { name: Some("arm"), rotation: Some([0.3, 0.0, 0.0, 0.95]), weight: 0.0, ..Default::default() }])))));
+		assert!(is_same_bits(&base_pose, &write_pose(&skeleton, "Wave", 0.4, Some(ToonPoseAdjust::Bones(&[BoneModifier { name: Some("missing"), translation: Some([1.0, 2.0, 3.0]), ..Default::default() }])))));
+		assert!(is_same_bits(&base_pose, &write_pose(&skeleton, "Wave", 0.4, Some(ToonPoseAdjust::Bones(&[BoneModifier { name: Some("fixed"), translation: Some([1.0, 2.0, 3.0]), ..Default::default() }])))));
+		assert!(is_same_bits(&base_pose, &write_pose(&skeleton, "Wave", 0.4, Some(ToonPoseAdjust::Bones(&[BoneModifier { node_index: Some(9), translation: Some([1.0, 2.0, 3.0]), ..Default::default() }])))));
+		let mut locals = skeleton.nodes.clone();
+		adjust_bones(&mut locals, &skeleton, &[BoneModifier { name: Some("root"), translation: Some([1.0, 2.0, 3.0]), rotation: Some([0.0, 0.0, 0.0, 2.0]), scale: Some([2.0, 2.0, 2.0]), mode: BoneModifyMode::Replace, ..Default::default() }]);
+		assert_eq!((locals[0].translation, locals[0].rotation, locals[0].scale), ([1.0, 2.0, 3.0], [0.0, 0.0, 0.0, 1.0], [2.0, 2.0, 2.0]));
+		let mut locals = skeleton.nodes.clone();
+		adjust_bones(&mut locals, &skeleton, &[BoneModifier { name: Some("root"), translation: Some([0.0, 4.0, 0.0]), scale: Some([3.0, 1.0, 1.0]), weight: 0.5, ..Default::default() }, BoneModifier { name: Some("root"), translation: Some([0.0, 1.0, 0.0]), ..Default::default() }]);
+		assert_eq!(locals[0].translation, [0.0, 4.0, 0.0]);
+		assert_eq!(locals[0].scale, [2.0, 1.0, 1.0]);
+		assert_eq!(BoneModifyMode::Add as i32, 0);
+		assert_eq!(BoneModifyMode::Replace as i32, 1);
+	}
+
+	//==============================================================================
+	/// 원본 시험과 같은 내용. (fox.glb 의 Run 0.3 초, 고리 없음과 빈 고리, 한 뼈 고치면 그 아래 본만 바뀜, 번호와 이름, 표와 고리, 바꾸기와 무게)
+	//==============================================================================
+	#[test]
+	fn fox_pose_adjust() {
+		let Some(skeleton) = read_fox_skeleton() else {
+			return;
+		};
+		let joint_count = skeleton.joints.len();
+		let base_pose = write_pose(&skeleton, "Run", 0.3, None);
+		let mut empty_hook = |_locals: &mut [ToonSkeletonNode], _skeleton: &ToonSkeleton| {
+		};
+		assert!(is_same_bits(&base_pose, &write_pose(&skeleton, "Run", 0.3, Some(ToonPoseAdjust::Hook(&mut empty_hook)))));
+		assert!(is_same_bits(&base_pose, &write_pose(&skeleton, "Run", 0.3, Some(ToonPoseAdjust::Bones(&[])))));
+		assert!(is_same_bits(&base_pose, &write_pose(&skeleton, "Run", 0.3, Some(ToonPoseAdjust::Bones(&[BoneModifier { name: Some("b_Tail02_013"), rotation: Some([0.3, 0.0, 0.0, 0.95]), weight: 0.0, ..Default::default() }])))));
+		assert!(is_same_bits(&base_pose, &write_pose(&skeleton, "Run", 0.3, Some(ToonPoseAdjust::Bones(&[BoneModifier { name: Some("missing bone"), translation: Some([1.0, 2.0, 3.0]), ..Default::default() }])))));
+		// 꼬리 둘째 마디를 고치면 그 마디와 그 아래 본만 바뀌고 나머지 스킨 행렬은 비트까지 같다.
+		let tail_index = skeleton.nodes.iter().position(|node| node.name == "b_Tail02_013").unwrap();
+		let subtree = read_subtree(&skeleton, tail_index);
+		let half_angle: f64 = 0.4;
+		let turn = [half_angle.sin(), 0.0, 0.0, half_angle.cos()];
+		let table_pose = write_pose(&skeleton, "Run", 0.3, Some(ToonPoseAdjust::Bones(&[BoneModifier { name: Some("b_Tail02_013"), rotation: Some(turn), mode: BoneModifyMode::Add, ..Default::default() }])));
+		let mut changed_count = 0;
+		for joint_index in 0..joint_count {
+			let range = joint_index * 16..joint_index * 16 + 16;
+			let is_same = is_same_bits(&base_pose[range.clone()], &table_pose[range]);
+			if subtree.contains(&skeleton.joints[joint_index]) {
+				assert!(!is_same, "{}", joint_index);
+				changed_count += 1;
+			}
+			else {
+				assert!(is_same, "{}", joint_index);
+			}
+		}
+		assert!(changed_count >= 1);
+		assert!(is_same_bits(&table_pose, &write_pose(&skeleton, "Run", 0.3, Some(ToonPoseAdjust::Bones(&[BoneModifier { node_index: Some(tail_index), rotation: Some(turn), ..Default::default() }])))));
+		// 표의 Add 돌림은 그 뼈의 공간에서 뒤에 곱한 것(q x 준 돌림)과 같다.
+		let mut turn_hook = |locals: &mut [ToonSkeletonNode], _skeleton: &ToonSkeleton| {
+			let [x, y, z, w] = locals[tail_index].rotation;
+			let (turn_x, turn_w) = (turn[0], turn[3]);
+			locals[tail_index].rotation = [w * turn_x + x * turn_w, y * turn_w + z * turn_x, z * turn_w - y * turn_x, w * turn_w - x * turn_x];
+		};
+		let hook_pose = write_pose(&skeleton, "Run", 0.3, Some(ToonPoseAdjust::Hook(&mut turn_hook)));
+		for (table_value, hook_value) in table_pose.iter().zip(hook_pose.iter()) {
+			assert!((table_value - hook_value).abs() <= 1e-5);
+		}
+		// 고리가 움직임이 없는 노드를 제자리에서 고쳐도 뼈대의 쉬는 자세는 바뀌지 않는다.
+		let animated_nodes: HashSet<usize> = skeleton.animations["Run"].channels.iter().map(|channel| channel.node_index).collect();
+		let still_index = (0..skeleton.nodes.len()).find(|node_index| !animated_nodes.contains(node_index) && skeleton.nodes[*node_index].matrix.is_none()).unwrap();
+		let rest_translation = skeleton.nodes[still_index].translation;
+		let mut move_hook = |locals: &mut [ToonSkeletonNode], _skeleton: &ToonSkeleton| {
+			locals[still_index].translation[1] += 5.0;
+		};
+		let moved_pose = write_pose(&skeleton, "Run", 0.3, Some(ToonPoseAdjust::Hook(&mut move_hook)));
+		assert!(!is_same_bits(&base_pose, &moved_pose));
+		assert_eq!(skeleton.nodes[still_index].translation, rest_translation);
+		assert!(is_same_bits(&base_pose, &write_pose(&skeleton, "Run", 0.3, None)));
+		// Replace 와 weight: 바꾸기는 그 값, 무게 반은 앞과 뒤의 가운데, 고침은 차례대로.
+		let hip_index = skeleton.nodes.iter().position(|node| node.name == "b_Hip_01").unwrap();
+		let read_local = |modifiers: &[BoneModifier]| -> ToonSkeletonNode {
+			let mut captured = None;
+			let mut capture_hook = |locals: &mut [ToonSkeletonNode], pose_skeleton: &ToonSkeleton| {
+				adjust_bones(locals, pose_skeleton, modifiers);
+				captured = Some(locals[hip_index].clone());
+			};
+			write_pose(&skeleton, "Run", 0.3, Some(ToonPoseAdjust::Hook(&mut capture_hook)));
+			captured.unwrap()
+		};
+		let before = read_local(&[]);
+		let replaced = read_local(&[BoneModifier { name: Some("b_Hip_01"), translation: Some([1.0, 2.0, 3.0]), rotation: Some([0.0, 0.0, 0.0, 2.0]), scale: Some([2.0, 2.0, 2.0]), mode: BoneModifyMode::Replace, ..Default::default() }]);
+		assert_eq!((replaced.translation, replaced.rotation, replaced.scale), ([1.0, 2.0, 3.0], [0.0, 0.0, 0.0, 1.0], [2.0, 2.0, 2.0]));
+		let half_added = read_local(&[BoneModifier { name: Some("b_Hip_01"), translation: Some([0.0, 4.0, 0.0]), scale: Some([3.0, 1.0, 1.0]), weight: 0.5, ..Default::default() }]);
+		assert!((half_added.translation[1] - (before.translation[1] + 2.0)).abs() <= 1e-9);
+		assert!((half_added.scale[0] - before.scale[0] * 2.0).abs() <= 1e-9);
+		assert!((half_added.translation[0] - before.translation[0]).abs() <= 1e-12);
+		let twice = read_local(&[BoneModifier { name: Some("b_Hip_01"), translation: Some([0.0, 1.0, 0.0]), ..Default::default() }, BoneModifier { name: Some("b_Hip_01"), translation: Some([0.0, 1.0, 0.0]), ..Default::default() }]);
+		assert!((twice.translation[1] - (before.translation[1] + 2.0)).abs() <= 1e-9);
+	}
+
+	//==============================================================================
+	/// JSON 의 고침 표를 BoneModifier 로. (mode 는 "add", "replace" 글자)
+	//==============================================================================
+	fn read_modifiers(value: &Value) -> Vec<BoneModifier<'_>> {
+		let read_numbers = |value: &Value| -> Option<Vec<f64>> {
+			value.as_array().map(|numbers| numbers.iter().map(|number| number.as_f64().unwrap()).collect())
+		};
+		value.as_array().unwrap().iter().map(|modifier| {
+			BoneModifier {
+				node_index: modifier["nodeIndex"].as_u64().map(|node_index| node_index as usize),
+				name: modifier["name"].as_str(),
+				translation: read_numbers(&modifier["translation"]).map(|numbers| [numbers[0], numbers[1], numbers[2]]),
+				rotation: read_numbers(&modifier["rotation"]).map(|numbers| [numbers[0], numbers[1], numbers[2], numbers[3]]),
+				scale: read_numbers(&modifier["scale"]).map(|numbers| [numbers[0], numbers[1], numbers[2]]),
+				mode: if modifier["mode"].as_str() == Some("replace") { BoneModifyMode::Replace } else { BoneModifyMode::Add },
+				weight: modifier["weight"].as_f64().unwrap_or(1.0),
+			}
+		}).collect()
+	}
+
+	//==============================================================================
+	/// 두 엔진 견주기. (원본 cb59ad0 을 크롬에서 돌려 찍은 tests/assets/skinposeadjust/chrome_skinpose.json 의 본마다 스킨 행렬과 1e-9 안에서 같은지, fox.glb 가 없으면 건너뜀)
+	//==============================================================================
+	#[test]
+	fn fox_pose_matches_vanilla_js() {
+		let Some(skeleton) = read_fox_skeleton() else {
+			return;
+		};
+		let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/assets/skinposeadjust/chrome_skinpose.json")).unwrap();
+		let document: Value = serde_json::from_str(&text).unwrap();
+		assert_eq!(document["jointCount"].as_u64(), Some(skeleton.joints.len() as u64));
+		let mut maximum_error = 0.0f64;
+		let mut compared_count = 0;
+		for pose_case in document["cases"].as_array().unwrap() {
+			let blend = pose_case["blend"].as_object().map(|blend| ToonPoseBlend { animation_name: blend["animationName"].as_str().unwrap(), time: blend["time"].as_f64().unwrap(), weight: blend["weight"].as_f64().unwrap() });
+			let modifiers = if pose_case["modifiers"].is_array() { read_modifiers(&pose_case["modifiers"]) } else { Vec::new() };
+			let mut crouch_hook = |locals: &mut [ToonSkeletonNode], pose_skeleton: &ToonSkeleton| {
+				let crouch_half: f64 = 0.6 / 2.0;
+				adjust_bones(locals, pose_skeleton, &[BoneModifier { name: Some("b_Spine01_02"), rotation: Some([crouch_half.sin(), 0.0, 0.0, crouch_half.cos()]), ..Default::default() }]);
+				let tail_index = pose_skeleton.nodes.iter().position(|node| node.name == "b_Tail01_012").unwrap();
+				locals[tail_index].scale[1] *= 1.2;
+			};
+			let pose_adjust = if pose_case["hook"].as_str() == Some("crouch") {
+				Some(ToonPoseAdjust::Hook(&mut crouch_hook))
+			}
+			else if pose_case["modifiers"].is_array() {
+				Some(ToonPoseAdjust::Bones(&modifiers))
+			}
+			else {
+				None
+			};
+			let mut target = vec![0.0f32; skeleton.joints.len() * 16];
+			write_skin_pose(&skeleton, pose_case["animationName"].as_str().unwrap(), pose_case["time"].as_f64().unwrap(), &mut target, blend, None, pose_adjust);
+			let expected: Vec<f64> = pose_case["jointMatrices"].as_array().unwrap().iter().map(|number| number.as_f64().unwrap()).collect();
+			assert_eq!(expected.len(), target.len());
+			for (index, value) in target.iter().enumerate() {
+				let error = (*value as f64 - expected[index]).abs();
+				assert!(error <= 1e-9, "{} {} {} {}", pose_case["name"], index, value, expected[index]);
+				maximum_error = maximum_error.max(error);
+				compared_count += 1;
+			}
+		}
+		eprintln!("skinposeadjust 두 엔진 견주기: 값 {} 개, 가장 큰 차 {:e}", compared_count, maximum_error);
 	}
 }
 

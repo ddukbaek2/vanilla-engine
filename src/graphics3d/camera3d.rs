@@ -12,6 +12,8 @@
 //! - 원 행렬: set_matrices(보기, 투영) 로 게임이 셈한 행렬을 그대로 쓴다. (기울인 직교, 화면 변환을 곱한 투영 같은 것) 위 함수들이 모두 그 행렬로 돈다.
 //!   보기 행렬은 월드 → 카메라의 강체 변환(카메라는 -Z 를 봄)으로 준다. 눈, 보는 곳(눈 앞 1), 위쪽과 is_orthographic 은 그 행렬에서 뽑는다.
 //!   시야각, 보이는 높이, 가까운 거리, 먼 거리, 가로 세로 비는 마지막으로 준 값 그대로다. set_perspective, set_orthographic, look_at 을 부르면 원 행렬을 버리고 셈하는 길로 돌아간다.
+//! - 보기 덧붙임: set_view_offset(자리, 돌림) 은 카메라 지역 축의 덧붙임을 마지막에 건다. (CameraShake 의 흔들림, 걸음 흔들림, 반동 같은 것, 셈하는 길과 원 행렬 모두)
+//!   보기 행렬과 그 뒤의 행렬, project_to_view, unproject_to_plane 은 덧붙인 카메라로 돈다. get_eye_position, get_target_position, get_up_direction 은 덧붙이기 앞 값이다.
 //==============================================================================
 use std::cell::Cell;
 
@@ -19,6 +21,7 @@ use crate::base::matrix4::Matrix4;
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::base::vector3::Vector3;
+use crate::graphics3d::camerashake::create_offset_view_matrix;
 
 /// 카메라 앞으로 칠 가장 작은 깊이. (이보다 가까우면 투영하지 않는다)
 const MINIMUM_FRONT_DEPTH: f64 = 0.0001;
@@ -102,6 +105,10 @@ pub struct Camera3D {
 	is_matrix_dirty: Cell<bool>,
 	/// set_matrices 로 받은 보기와 투영. (None 이면 셈하는 길)
 	raw_matrices: Option<[Matrix4; 2]>,
+	/// 카메라 지역 자리 덧붙임. (x 오른쪽, y 위, z 뒤)
+	view_offset_position: Vector3,
+	/// 카메라 지역 돌림 덧붙임. (라디안, x pitch, y yaw, z roll)
+	view_offset_rotation: Vector3,
 }
 
 impl Default for Camera3D {
@@ -135,6 +142,8 @@ impl Camera3D {
 			matrices: Cell::new(CameraMatrices { view_matrix: identity_matrix, projection_matrix: identity_matrix, view_projection_matrix: identity_matrix, inverse_view_projection_matrix: identity_matrix }),
 			is_matrix_dirty: Cell::new(true),
 			raw_matrices: None,
+			view_offset_position: Vector3::zero(),
+			view_offset_rotation: Vector3::zero(),
 		}
 	}
 
@@ -377,13 +386,45 @@ impl Camera3D {
 	}
 
 	//==============================================================================
-	/// 행렬 넷 읽기. (바뀐 값이 있으면 다시 셈해 담는다, 원 행렬이 있으면 그것으로)
+	/// 보기 덧붙임 설정. (카메라 지역 축의 자리와 돌림을 보기 행렬 마지막에 건다, 둘 다 영 벡터면 덧붙임 없음)
+	///
+	/// # 인자
+	/// - `position`: 카메라 지역 자리 덧붙임. (장면 길이, x 오른쪽, y 위, z 뒤)
+	/// - `rotation`: 카메라 지역 돌림 덧붙임. (라디안, x pitch, y yaw, z roll, 원본 기본 영 벡터는 Vector3::zero() 를 준다)
+	///
+	/// # 예제
+	/// 카메라 흔들림을 걸고 다시 풀기
+	/// ```rust
+	/// use vanilla::{Camera3D, CameraShake, CameraShakeOptions, Vector3};
+	///
+	/// let mut camera = Camera3D::new();
+	/// camera.look_at(Vector3::create(0.0, 4.0, 10.0), Vector3::zero(), Vector3::up());
+	/// let plain_view_matrix = camera.get_view_matrix();
+	/// let mut camera_shake = CameraShake::default();
+	/// camera_shake.add(CameraShakeOptions { amplitude: 0.1, rotation_amplitude: 0.02, duration: 0.3, ..Default::default() });
+	/// camera_shake.update(1.0 / 60.0);
+	/// let shake = camera_shake.read();
+	/// camera.set_view_offset(shake.position, shake.rotation);
+	/// let shaken_view_matrix = camera.get_view_matrix();
+	/// camera.set_view_offset(Vector3::zero(), Vector3::zero());
+	/// assert_ne!(shaken_view_matrix.get_elements()[12], plain_view_matrix.get_elements()[12]);
+	/// assert_eq!(camera.get_view_matrix().get_elements(), plain_view_matrix.get_elements());
+	/// ```
+	//==============================================================================
+	pub fn set_view_offset(&mut self, position: Vector3, rotation: Vector3) {
+		self.view_offset_position = position;
+		self.view_offset_rotation = rotation;
+		self.is_matrix_dirty.set(true);
+	}
+
+	//==============================================================================
+	/// 행렬 넷 읽기. (바뀐 값이 있으면 다시 셈해 담는다, 원 행렬이 있으면 그것으로, 보기 덧붙임은 마지막에)
 	//==============================================================================
 	fn read_matrices(&self) -> CameraMatrices {
 		if !self.is_matrix_dirty.get() {
 			return self.matrices.get();
 		}
-		let (view_matrix, projection_matrix) = match self.raw_matrices {
+		let (mut view_matrix, projection_matrix) = match self.raw_matrices {
 			Some([raw_view_matrix, raw_projection_matrix]) => {
 				(raw_view_matrix, raw_projection_matrix)
 			}
@@ -391,6 +432,12 @@ impl Camera3D {
 				(Matrix4::create_look_at(self.eye_position, self.target_position, self.up_direction), self.create_projection_matrix())
 			}
 		};
+		let offset_position = self.view_offset_position;
+		let offset_rotation = self.view_offset_rotation;
+		let has_view_offset = offset_position.x != 0.0 || offset_position.y != 0.0 || offset_position.z != 0.0 || offset_rotation.x != 0.0 || offset_rotation.y != 0.0 || offset_rotation.z != 0.0;
+		if has_view_offset {
+			view_matrix = create_offset_view_matrix(&view_matrix, offset_position, offset_rotation);
+		}
 		let mut view_projection_matrix = projection_matrix;
 		view_projection_matrix.multiply(&view_matrix);
 		let matrices = CameraMatrices { view_matrix, projection_matrix, view_projection_matrix, inverse_view_projection_matrix: Matrix4::create_inverse(&view_projection_matrix) };

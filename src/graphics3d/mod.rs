@@ -40,6 +40,7 @@ pub type GlFramebuffer = <glow::Context as glow::HasContext>::Framebuffer;
 /// GL 렌더버퍼 핸들. (glow::Context 의 Renderbuffer, 렌더 타겟의 깊이 버퍼 같은 것)
 pub type GlRenderbuffer = <glow::Context as glow::HasContext>::Renderbuffer;
 pub mod camera3d;
+pub mod camerashake;
 pub mod humanskinrenderer;
 
 // 지금 묶인 GL 객체 읽기. (앞의 것을 돌려 놓을 때, 원본 getParameter(..._BINDING). 웹에서 null 을 먼저 가리는 까닭은 core::graphic::is_gl_binding_present 머리말)
