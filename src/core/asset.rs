@@ -87,6 +87,8 @@ pub struct AssetLoadHandle {
 	is_image_decode_requested: Rc<Cell<bool>>,
 	/// JSON 으로 풀려야 끝나는지. (JsonAsset 이 건다, await 가 다 받은 뒤 JSON 인지 보고 아니면 실패로 끝낸다)
 	is_json_parse_requested: Rc<Cell<bool>>,
+	/// 풀린 그림을 올릴 주인. (ImageAsset::load 가 엔진에 든 Graphic 의 GL 컨텍스트 번호를 건다, None 이면 모른다)
+	image_owner: Rc<Cell<Option<usize>>>,
 }
 
 impl std::fmt::Debug for AssetLoadHandle {
@@ -116,6 +118,7 @@ impl AssetLoadHandle {
 			content_type: Rc::new(RefCell::new(None)),
 			is_image_decode_requested: Rc::new(Cell::new(false)),
 			is_json_parse_requested: Rc::new(Cell::new(false)),
+			image_owner: Rc::new(Cell::new(None)),
 		}
 	}
 
@@ -137,6 +140,7 @@ impl AssetLoadHandle {
 			content_type: Rc::new(RefCell::new(None)),
 			is_image_decode_requested: Rc::new(Cell::new(false)),
 			is_json_parse_requested: Rc::new(Cell::new(false)),
+			image_owner: Rc::new(Cell::new(None)),
 		}
 	}
 
@@ -229,12 +233,21 @@ impl AssetLoadHandle {
 
 	//==============================================================================
 	/// 미리 풀어 둔 그림 설정과 반환. (같은 손잡이를 나눠 든 ImageAsset 이 다시 풀지 않게)
+	/// - 아직 올리지 않은 그림으로 맡긴다. (씬 로딩 화면 동안 Graphic::prepare_loaded_images 가 올린다, 원본 DecodedImageStore)
 	///
 	/// # 인자
 	/// - `image`: 받은 바이트를 풀어 둔 그림.
 	//==============================================================================
 	pub fn set_decoded_image(&self, image: Rc<Image>) {
+		crate::core::decodedimagestore::store(&image, self.image_owner.get());
 		*self.decoded_image.borrow_mut() = Some(image);
+	}
+
+	//==============================================================================
+	/// 풀린 그림을 올릴 주인 걸기. (ImageAsset::load 가 엔진에 든 Graphic 의 것으로 건다)
+	//==============================================================================
+	pub(crate) fn set_image_owner(&self, owner: Option<usize>) {
+		self.image_owner.set(owner);
 	}
 
 	//==============================================================================

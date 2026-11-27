@@ -65,6 +65,8 @@ impl ImageAsset {
 	pub fn load(&mut self, engine: &Engine, asset_path: &str) -> AssetLoadHandle {
 		let load_handle = self.asset_base.request_load(engine, asset_path);
 		load_handle.request_image_decode();
+		// 풀린 그림은 이 엔진의 Graphic 이 로딩 화면 동안 올린다. (그래픽을 내어 준 동안이면 주인을 모른다)
+		load_handle.set_image_owner(engine.get_graphic().map(|graphic| graphic.read_image_owner()));
 		load_handle
 	}
 

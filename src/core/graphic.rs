@@ -1279,6 +1279,8 @@ impl Graphic {
 		crate::core::imagetexturecache::register_pixel_read_context(&gl);
 		// 상태 캐시. (원본 WebGLStateCache.attach, 엔진의 상태 함수가 이것을 거쳐 부르고, 그리는 중 상태 읽기는 기억한 값으로 답한다)
 		crate::core::glstatecache::attach(&gl);
+		// 읽은 그림을 미리 올릴 수 있는 주인으로 알린다. (원본 DecodedImageStore.registerOwner)
+		crate::core::decodedimagestore::register_owner(&gl);
 		// 셰이더 프로그램.
 		let shader_program = ShaderProgram::new(&gl, VERTEXSHADER_SOURCE, FRAGMENTSHADER_SOURCE)?;
 
@@ -3360,6 +3362,93 @@ impl Graphic {
 		};
 		self.soft_disc_texture = Some(soft_disc_texture);
 		soft_disc_texture
+	}
+
+	//==============================================================================
+	/// 그림을 GPU 에 미리 올리기. (원본 prepareImage, 처음 그리는 프레임에 올리기가 몰리지 않게 씬을 불러오는 동안 부른다)
+	/// - 지금 이미지 스무딩과 밉맵 설정으로 올린다. (그릴 때 설정이 다르면 그때 거르기만 바꾼다)
+	/// - 이미 올린 그림이면 아무것도 하지 않는다. 크기가 0 인 그림은 올리지 않는다.
+	/// - 코드로 지은 그림(Image::create_from_pixels 같은 것)처럼 ImageAsset 으로 읽지 않은 그림을 씬의 load 에서 올려 둘 때 쓴다.
+	///
+	/// # 인자
+	/// - `image`: 올릴 그림.
+	///
+	/// # 돌려줌
+	/// 텍스처가 있으면 true. (크기가 0 이거나 GL 텍스처를 만들지 못하면 false)
+	///
+	/// # 예제
+	/// 씬을 불러오는 동안 코드로 지은 그림을 올려 두기
+	/// ```rust,no_run
+	/// use std::rc::Rc;
+	/// use vanilla::{Engine, Image};
+	///
+	/// fn load(engine: &Engine) -> Rc<Image> {
+	/// 	let dot_image = Image::create_from_pixels(32, 32, [255u8, 102, 0, 255].repeat(32 * 32));
+	/// 	if let Some(mut graphic) = engine.get_graphic_mut() {
+	/// 		let is_prepared = graphic.prepare_image(&dot_image);
+	/// 		println!("{}", is_prepared);
+	/// 	}
+	/// 	dot_image
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn prepare_image(&mut self, image: &Rc<Image>) -> bool {
+		if image.get_width() == 0 || image.get_height() == 0 {
+			return false;
+		}
+		// 텍스처를 묶기 전에 쌓아 둔 묶음을 먼저 그린다.
+		self.flush_batch();
+		self.get_image_texture(image).is_some()
+	}
+
+	//==============================================================================
+	/// 읽었지만 아직 올리지 않은 그림 올리기. (원본 prepareLoadedImages, ImageAsset 과 AssetLoader 가 읽어 푼 그림, 푼 차례로)
+	/// - 엔진이 씬의 맡긴 애셋이 다 읽힌 뒤(로딩 화면 동안) 프레임마다 나눠 부른다. 씬이 따로 부를 일은 없다.
+	/// - 시간 한도를 주면 그 시간을 넘긴 뒤에는 멈추고 남은 수를 돌려준다. (한 번에 적어도 하나는 올린다, 유니티의 asyncUploadTimeSlice 와 같다)
+	/// - 제 것(이 Graphic 을 든 엔진으로 읽은 그림)만 올린다. 주인을 모르는 그림은 Graphic 이 하나뿐일 때만 올린다. (원본과 같음)
+	///
+	/// # 인자
+	/// - `time_limit_milliseconds`: 이번에 쓸 시간 한도. (밀리초, f64::INFINITY 면 모두)
+	///
+	/// # 돌려줌
+	/// 아직 올리지 않고 남은 그림 수. (0 이면 다 올렸다)
+	///
+	/// # 예제
+	/// 그림을 읽은 뒤 바로 올리기
+	/// ```rust,no_run
+	/// use vanilla::{Engine, ImageAsset};
+	///
+	/// async fn load(engine: &Engine, image_asset: &mut ImageAsset) {
+	/// 	let _ = image_asset.load(engine, "examples/assets/spritesheet.png").await;
+	/// 	if let Some(mut graphic) = engine.get_graphic_mut() {
+	/// 		let remaining_count = graphic.prepare_loaded_images(f64::INFINITY);
+	/// 		println!("{}", remaining_count);
+	/// 	}
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn prepare_loaded_images(&mut self, time_limit_milliseconds: f64) -> usize {
+		let pending_image_list = crate::core::decodedimagestore::get_pending_image_list(self.read_image_owner());
+		let start_instant = web_time::Instant::now();
+		let mut image_index = 0;
+		while image_index < pending_image_list.len() {
+			let image = &pending_image_list[image_index];
+			image_index += 1;
+			// 올렸거나 크기가 0 이라 올리지 못하는 그림은 맡긴 것에서 뺀다. (GL 텍스처를 만들지 못한 그림은 그릴 때 다시 본다)
+			self.prepare_image(image);
+			crate::core::decodedimagestore::release(image);
+			if start_instant.elapsed().as_secs_f64() * 1000.0 >= time_limit_milliseconds {
+				break;
+			}
+		}
+		pending_image_list.len() - image_index
+	}
+
+	//==============================================================================
+	/// 읽은 그림의 주인 번호. (이 Graphic 의 GL 컨텍스트, ImageAsset::load 가 손잡이에 건다)
+	//==============================================================================
+	pub(crate) fn read_image_owner(&self) -> usize {
+		crate::core::decodedimagestore::read_owner(&self.gl)
 	}
 
 	//==============================================================================
@@ -6015,6 +6104,35 @@ mod tests {
 				graphic.end_opacity_layer();
 				assert_eq!(read_pixel(&mut graphic, 8, 8), [255, 0, 0], "투명도 층 안의 깊이를 비우지 않는 3D 패스가 가려졌다");
 			}
+		}
+
+		/// 읽은 그림 미리 올리기: 제 것과 주인을 모르는 것(Graphic 이 하나뿐일 때)만 올리고, 시간 한도를 넘기면 남은 수를 돌려주는지. (원본 prepareLoadedImages)
+		#[test]
+		fn prepare_loaded_images_uploads_own_images() {
+			let Some(mut graphic) = create_test_graphic() else {
+				eprintln!("graphic: 창 없는 GL 컨텍스트를 짓지 못해 건너뜀");
+				return;
+			};
+			let create_image = || Image::create_from_pixels(2, 2, [255u8, 102, 0, 255].repeat(4));
+			let own_image = create_image();
+			let unknown_owner_image = create_image();
+			let other_owner_image = create_image();
+			let empty_image = Image::create_from_pixels(0, 0, Vec::new());
+			let owner = graphic.read_image_owner();
+			crate::core::decodedimagestore::store(&own_image, Some(owner));
+			crate::core::decodedimagestore::store(&unknown_owner_image, None);
+			crate::core::decodedimagestore::store(&other_owner_image, Some(owner + 1));
+			crate::core::decodedimagestore::store(&empty_image, Some(owner));
+			assert!(!graphic.prepare_image(&empty_image), "크기가 0 인 그림은 올리지 않는다");
+			// 시간 한도 0 이면 하나만 올리고 남은 수를 돌려준다.
+			assert_eq!(graphic.prepare_loaded_images(0.0), 2);
+			assert_eq!(graphic.prepare_loaded_images(f64::INFINITY), 0);
+			assert_eq!(graphic.prepare_loaded_images(f64::INFINITY), 0);
+			let is_uploaded = |graphic: &Graphic, image: &Rc<Image>| graphic.image_texture_cache.find_texture(image, true, false).is_some();
+			assert!(is_uploaded(&graphic, &own_image), "제 그림을 올리지 않았다");
+			assert!(is_uploaded(&graphic, &unknown_owner_image), "주인을 모르는 그림을 올리지 않았다 (Graphic 하나)");
+			assert!(!is_uploaded(&graphic, &other_owner_image), "남의 그림을 올렸다");
+			assert_eq!(crate::core::decodedimagestore::get_pending_image_list(owner + 1).len(), 1, "남의 그림은 맡긴 채로 남는다");
 		}
 
 		/// 게임이 run_external_pass 밖에서 GlContext 로 상태를 바꿔 두고 돌아와도 다음 2D 그리기가 제 상태를 다시 거는지. (원본 db99208, externalglstatechrome)

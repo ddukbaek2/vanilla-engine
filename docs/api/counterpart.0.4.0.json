@@ -10315,6 +10315,30 @@
 			"vanilla-engine": {
 				"module": "core/graphic",
 				"class": "Graphic",
+				"name": "prepare_image"
+			},
+			"vanilla.js": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "prepareImage"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "prepare_loaded_images"
+			},
+			"vanilla.js": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "prepareLoadedImages"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/graphic",
+				"class": "Graphic",
 				"name": "draw_line"
 			},
 			"vanilla.js": {

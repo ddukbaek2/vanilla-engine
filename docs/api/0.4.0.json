@@ -18707,8 +18707,8 @@
 								}
 							],
 							"description": {
-								"ko": "미리 풀어 둔 그림 설정과 반환. (같은 손잡이를 나눠 든 ImageAsset 이 다시 풀지 않게)",
-								"en": "Sets and returns a pre-decoded image. (so an ImageAsset sharing the same handle does not decode it again)"
+								"ko": "미리 풀어 둔 그림 설정과 반환. (같은 손잡이를 나눠 든 ImageAsset 이 다시 풀지 않게)\n- 아직 올리지 않은 그림으로 맡긴다. (씬 로딩 화면 동안 Graphic::prepare_loaded_images 가 올린다, 원본 DecodedImageStore)",
+								"en": "Sets and returns the image decoded in advance. (so ImageAsset instances sharing the same handle do not decode again)\n- Stores it as an image not uploaded yet. (Graphic::prepare_loaded_images uploads it during the scene loading screen, the original DecodedImageStore)"
 							},
 							"since": "0.4.0",
 							"source": "src/core/asset.rs"
@@ -43670,6 +43670,94 @@
 								"class": "Graphic",
 								"name": "getSoftDiscTexture"
 							}
+						},
+						{
+							"kind": "method",
+							"name": "prepare_image",
+							"signature": "pub fn prepare_image(&mut self, image: &Rc<Image>) -> bool",
+							"params": [
+								{
+									"name": "image",
+									"type": "&Rc<Image>",
+									"description": {
+										"ko": "올릴 그림.",
+										"en": "The image to upload."
+									}
+								}
+							],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "텍스처가 있으면 true. (크기가 0 이거나 GL 텍스처를 만들지 못하면 false)",
+									"en": "true if there is a texture. (false if the size is 0 or the GL texture cannot be created)"
+								}
+							},
+							"description": {
+								"ko": "그림을 GPU 에 미리 올리기. (원본 prepareImage, 처음 그리는 프레임에 올리기가 몰리지 않게 씬을 불러오는 동안 부른다)\n- 지금 이미지 스무딩과 밉맵 설정으로 올린다. (그릴 때 설정이 다르면 그때 거르기만 바꾼다)\n- 이미 올린 그림이면 아무것도 하지 않는다. 크기가 0 인 그림은 올리지 않는다.\n- 코드로 지은 그림(Image::create_from_pixels 같은 것)처럼 ImageAsset 으로 읽지 않은 그림을 씬의 load 에서 올려 둘 때 쓴다.",
+								"en": "Uploads an image to the GPU in advance. (the original prepareImage, called while the scene loads so uploads do not pile up on the first drawing frame)\n- Uploads with the current image smoothing and mipmap settings. (If the settings differ when drawing, only the filtering is changed then)\n- Does nothing if the image is already uploaded. Does not upload an image of size 0.\n- Used to upload in the scene's load an image not read through ImageAsset, such as an image built in code (Image::create_from_pixels and the like)."
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "prepareImage"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "씬을 불러오는 동안 코드로 지은 그림을 올려 두기",
+										"en": "Upload an image built in code while the scene loads"
+									},
+									"code": "use std::rc::Rc;\nuse vanilla::{Engine, Image};\n\nfn load(engine: &Engine) -> Rc<Image> {\n\tlet dot_image = Image::create_from_pixels(32, 32, [255u8, 102, 0, 255].repeat(32 * 32));\n\tif let Some(mut graphic) = engine.get_graphic_mut() {\n\t\tlet is_prepared = graphic.prepare_image(&dot_image);\n\t\tprintln!(\"{}\", is_prepared);\n\t}\n\tdot_image\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "prepare_loaded_images",
+							"signature": "pub fn prepare_loaded_images(&mut self, time_limit_milliseconds: f64) -> usize",
+							"params": [
+								{
+									"name": "time_limit_milliseconds",
+									"type": "f64",
+									"description": {
+										"ko": "이번에 쓸 시간 한도. (밀리초, f64::INFINITY 면 모두)",
+										"en": "The time limit to use this time. (milliseconds, f64::INFINITY for all)"
+									}
+								}
+							],
+							"returns": {
+								"type": "usize",
+								"description": {
+									"ko": "아직 올리지 않고 남은 그림 수. (0 이면 다 올렸다)",
+									"en": "The number of images left not uploaded yet. (0 when all are uploaded)"
+								}
+							},
+							"description": {
+								"ko": "읽었지만 아직 올리지 않은 그림 올리기. (원본 prepareLoadedImages, ImageAsset 과 AssetLoader 가 읽어 푼 그림, 푼 차례로)\n- 엔진이 씬의 맡긴 애셋이 다 읽힌 뒤(로딩 화면 동안) 프레임마다 나눠 부른다. 씬이 따로 부를 일은 없다.\n- 시간 한도를 주면 그 시간을 넘긴 뒤에는 멈추고 남은 수를 돌려준다. (한 번에 적어도 하나는 올린다, 유니티의 asyncUploadTimeSlice 와 같다)\n- 제 것(이 Graphic 을 든 엔진으로 읽은 그림)만 올린다. 주인을 모르는 그림은 Graphic 이 하나뿐일 때만 올린다. (원본과 같음)",
+								"en": "Uploads images read but not uploaded yet. (the original prepareLoadedImages, images read and decoded by ImageAsset and AssetLoader, in decode order)\n- The engine calls it split across frames after the scene's tracked assets are read (during the loading screen). The scene has no need to call it itself.\n- Given a time limit, stops after exceeding that time and returns the remaining count. (Uploads at least one at a time, same as Unity's asyncUploadTimeSlice)\n- Uploads only its own (images read with the engine holding this Graphic). Images with an unknown owner are uploaded only when there is a single Graphic. (same as the original)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "prepareLoadedImages"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "그림을 읽은 뒤 바로 올리기",
+										"en": "Upload right after reading an image"
+									},
+									"code": "use vanilla::{Engine, ImageAsset};\n\nasync fn load(engine: &Engine, image_asset: &mut ImageAsset) {\n\tlet _ = image_asset.load(engine, \"examples/assets/spritesheet.png\").await;\n\tif let Some(mut graphic) = engine.get_graphic_mut() {\n\t\tlet remaining_count = graphic.prepare_loaded_images(f64::INFINITY);\n\t\tprintln!(\"{}\", remaining_count);\n\t}\n}",
+									"language": "rust"
+								}
+							]
 						},
 						{
 							"kind": "method",
