@@ -1382,6 +1382,7 @@ impl Text {
 	/// ```
 	//==============================================================================
 	pub fn set_fit_width(&mut self, width: f64, minimum_ratio: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		let fit_width = width.max(0.0);
 		let fit_minimum_ratio = math::clamp(minimum_ratio, 0.0, 1.0);
 		if self.fit_width != fit_width || self.fit_minimum_ratio != fit_minimum_ratio {
@@ -1459,6 +1460,7 @@ impl Text {
 	/// - `font_family`: 폰트 이름.
 	//==============================================================================
 	pub fn set_font_family(&mut self, font_family: &str) {
+		self.component_base.mark_drawn_rect_dirty();
 		if self.font_family != font_family {
 			self.font_family = font_family.to_string();
 			self.update_font_string();
@@ -1483,6 +1485,7 @@ impl Text {
 	/// - `word_wrap_width`: 줄바꿈 폭. (픽셀, 0 이하면 줄바꿈 문자로만 나눈다)
 	//==============================================================================
 	pub fn set_word_wrap_width(&mut self, word_wrap_width: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		if self.word_wrap_width != word_wrap_width {
 			self.word_wrap_width = word_wrap_width;
 			self.is_layout_dirty = true;
@@ -1541,6 +1544,7 @@ impl Text {
 	/// - `wrap_mode`: 줄바꿈 방식.
 	//==============================================================================
 	pub fn set_wrap_mode(&mut self, wrap_mode: TextWrapMode) {
+		self.component_base.mark_drawn_rect_dirty();
 		if self.wrap_mode != wrap_mode {
 			self.wrap_mode = wrap_mode;
 			self.is_layout_dirty = true;
@@ -1564,6 +1568,7 @@ impl Text {
 	/// - `line_spacing`: 줄 간격. (글자 크기의 배수, 기본 1.25)
 	//==============================================================================
 	pub fn set_line_spacing(&mut self, line_spacing: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.line_spacing = line_spacing;
 	}
 
@@ -1584,6 +1589,7 @@ impl Text {
 	/// - `visible_character_count`: 보일 글자 묶음 수. (-1 이면 전체)
 	//==============================================================================
 	pub fn set_visible_character_count(&mut self, visible_character_count: i32) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.visible_character_count = visible_character_count.max(-1);
 	}
 
@@ -1604,6 +1610,7 @@ impl Text {
 	/// - `text`: 글. (줄바꿈 문자로 여러 줄)
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
+		self.component_base.mark_drawn_rect_dirty();
 		if self.text != text {
 			self.text = text.to_string();
 			self.is_layout_dirty = true;
@@ -1627,6 +1634,7 @@ impl Text {
 	/// - `font_size`: 글자 크기. (픽셀, 기본 32)
 	//==============================================================================
 	pub fn set_font_size(&mut self, font_size: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		if self.font_size != font_size {
 			self.font_size = font_size;
 			self.update_font_string();
@@ -1650,6 +1658,7 @@ impl Text {
 	/// - `color`: 글자 색. (기본 흰색)
 	//==============================================================================
 	pub fn set_text_color(&mut self, color: impl Into<Color>) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.text_color = color.into();
 	}
 
@@ -1670,6 +1679,7 @@ impl Text {
 	/// - `color`: 외곽선 색. (기본 흰색)
 	//==============================================================================
 	pub fn set_stroke_color(&mut self, color: impl Into<Color>) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.stroke_color = color.into();
 	}
 
@@ -1690,6 +1700,7 @@ impl Text {
 	/// - `stroke_width`: 외곽선 두께. (픽셀, 기본 0)
 	//==============================================================================
 	pub fn set_stroke_width(&mut self, stroke_width: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.stroke_width = stroke_width;
 	}
 
@@ -1710,6 +1721,7 @@ impl Text {
 	/// - `is_bold`: true 면 굵게.
 	//==============================================================================
 	pub fn set_bold(&mut self, is_bold: bool) {
+		self.component_base.mark_drawn_rect_dirty();
 		if self.is_bold != is_bold {
 			self.is_bold = is_bold;
 			self.update_font_string();
@@ -1733,6 +1745,7 @@ impl Text {
 	/// - `is_italic`: true 면 기울임.
 	//==============================================================================
 	pub fn set_italic(&mut self, is_italic: bool) {
+		self.component_base.mark_drawn_rect_dirty();
 		if self.is_italic != is_italic {
 			self.is_italic = is_italic;
 			self.update_font_string();
@@ -1756,6 +1769,7 @@ impl Text {
 	/// - `is_underline`: true 면 밑줄을 긋는다.
 	//==============================================================================
 	pub fn set_underline(&mut self, is_underline: bool) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.is_underline = is_underline;
 	}
 
@@ -1776,6 +1790,7 @@ impl Text {
 	/// - `is_strikethrough`: true 면 취소선을 긋는다.
 	//==============================================================================
 	pub fn set_strikethrough(&mut self, is_strikethrough: bool) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.is_strikethrough = is_strikethrough;
 	}
 
@@ -1796,6 +1811,7 @@ impl Text {
 	/// - `text_align`: 가로 정렬. (기본 Center)
 	//==============================================================================
 	pub fn set_text_align(&mut self, text_align: TextAlign) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.text_align = text_align;
 	}
 
@@ -1818,6 +1834,7 @@ impl Text {
 	/// - `text_direction`: 글자 방향.
 	//==============================================================================
 	pub fn set_text_direction(&mut self, text_direction: TextDirection) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.text_direction = text_direction;
 	}
 
@@ -1838,6 +1855,7 @@ impl Text {
 	/// - `text_baseline`: 세로 기준선. (기본 Middle)
 	//==============================================================================
 	pub fn set_text_baseline(&mut self, text_baseline: TextBaseline) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.text_baseline = text_baseline;
 	}
 

@@ -86,6 +86,10 @@ impl UILineChart {
 	/// - `value`: 끝에 더할 값.
 	//==============================================================================
 	pub fn push_value(&mut self, value: f64) {
+		// 범위를 정했으면 범위 밖 값이 그리는 사각형을 넓힐 수 있다. (범위를 정하지 않았으면 값이 늘 내용 영역 안이다)
+		if self.min_value.is_some() || self.max_value.is_some() {
+			self.component_base.mark_drawn_rect_dirty();
+		}
 		self.value_list.push(value);
 		if self.value_list.len() > self.max_sample_count {
 			let excess_count = self.value_list.len() - self.max_sample_count;
@@ -178,6 +182,7 @@ impl UILineChart {
 	/// - `max_sample_count`: 들고 그릴 표본 수 상한. (기본 60, 2 보다 작으면 2)
 	//==============================================================================
 	pub fn set_max_sample_count(&mut self, max_sample_count: usize) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.max_sample_count = max_sample_count.max(2);
 		if self.value_list.len() > self.max_sample_count {
 			let excess_count = self.value_list.len() - self.max_sample_count;
@@ -201,6 +206,7 @@ impl UILineChart {
 	/// - `max_value`: 영역 위 끝에 올 값. None 이면 지금 값들의 최대.
 	//==============================================================================
 	pub fn set_value_range(&mut self, min_value: Option<f64>, max_value: Option<f64>) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.min_value = min_value;
 		self.max_value = max_value;
 	}
@@ -211,6 +217,7 @@ impl UILineChart {
 	/// - `value_list`: 새 값 목록. (복사해 든다)
 	//==============================================================================
 	pub fn set_value_list(&mut self, value_list: &[f64]) {
+		self.component_base.mark_drawn_rect_dirty();
 		let start_index = value_list.len().saturating_sub(self.max_sample_count);
 		self.value_list = value_list[start_index..].to_vec();
 	}
@@ -248,6 +255,7 @@ impl UILineChart {
 	/// - `line_width`: 폴리라인 두께. (픽셀, 기본 1.5)
 	//==============================================================================
 	pub fn set_line_width(&mut self, line_width: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.line_width = line_width;
 	}
 }
@@ -293,11 +301,32 @@ impl Component for UILineChart {
 	}
 
 	//==============================================================================
-	/// 내용 영역 안에 그리는지. (늘 true)
+	/// 그리는 사각형. (원본 UILineChart.calculateDrawnRect)
+	/// - 내용 영역에 선 두께만큼 넓힌 것. 값 범위를 정했으면 범위 밖 값이 놓이는 높이까지. (범위 밖 값의 선은 내용 영역 밖에 그린다)
 	//==============================================================================
-	#[reflect(skip)]
-	fn is_drawn_inside_content(&self) -> bool {
-		true
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, _graphic: &mut Graphic) -> Option<Rect> {
+		let content_size = transform.get_content_size();
+		let width = content_size.x;
+		let height = content_size.y;
+		let mut minimum_y = height.min(0.0);
+		let mut maximum_y = height.max(0.0);
+		if self.value_list.len() >= 2 && (self.min_value.is_some() || self.max_value.is_some()) {
+			let mut low_value = self.value_list[0];
+			let mut high_value = self.value_list[0];
+			for value in self.value_list.iter().copied() {
+				low_value = low_value.min(value);
+				high_value = high_value.max(value);
+			}
+			let range_low_value = self.min_value.unwrap_or(low_value);
+			let range_high_value = self.max_value.unwrap_or(high_value);
+			let value_range = (range_high_value - range_low_value).max(0.0001);
+			let low_y = height - (low_value - range_low_value) / value_range * (height - 4.0) - 2.0;
+			let high_y = height - (high_value - range_low_value) / value_range * (height - 4.0) - 2.0;
+			minimum_y = minimum_y.min(low_y).min(high_y);
+			maximum_y = maximum_y.max(low_y).max(high_y);
+		}
+		let margin = self.line_width.max(1.0) + 1.0;
+		Some(Rect::create(width.min(0.0) - margin, minimum_y - margin, width.abs() + margin * 2.0, maximum_y - minimum_y + margin * 2.0))
 	}
 
 	//==============================================================================
@@ -451,6 +480,7 @@ impl UIBarChart {
 	/// - `value_list`: 막대로 그릴 값 목록. (복사해 든다)
 	//==============================================================================
 	pub fn set_value_list(&mut self, value_list: &[f64]) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.value_list = value_list.to_vec();
 	}
 
@@ -505,6 +535,7 @@ impl UIBarChart {
 	/// - `bar_gap`: 막대 사이 간격. (픽셀, 기본 4)
 	//==============================================================================
 	pub fn set_bar_gap(&mut self, bar_gap: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.bar_gap = bar_gap;
 	}
 }
@@ -550,11 +581,23 @@ impl Component for UIBarChart {
 	}
 
 	//==============================================================================
-	/// 내용 영역 안에 그리는지. (늘 true)
+	/// 그리는 사각형. (원본 UIBarChart.calculateDrawnRect)
+	/// - 내용 영역. 막대 폭이 음수가 되면 옆으로, 높이가 1 보다 낮으면 위로(막대는 적어도 1 픽셀) 넘친다. 한 단위씩 넓힌다.
 	//==============================================================================
-	#[reflect(skip)]
-	fn is_drawn_inside_content(&self) -> bool {
-		true
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, _graphic: &mut Graphic) -> Option<Rect> {
+		let bar_count = self.value_list.len();
+		if bar_count == 0 {
+			return Some(Rect::create(0.0, 0.0, 0.0, 0.0));
+		}
+		let content_size = transform.get_content_size();
+		let width = content_size.x;
+		let height = content_size.y;
+		let bar_width = self.calculate_bar_width(width);
+		let minimum_x = 0.0_f64.min(bar_width).min(width);
+		let maximum_x = width.max(width - bar_width).max(0.0);
+		let minimum_y = 0.0_f64.min(height - 1.0);
+		let maximum_y = height.max(0.0);
+		Some(Rect::create(minimum_x - 1.0, minimum_y - 1.0, maximum_x - minimum_x + 2.0, maximum_y - minimum_y + 2.0))
 	}
 
 	//==============================================================================

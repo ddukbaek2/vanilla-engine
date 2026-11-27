@@ -13,6 +13,7 @@
 //! - 원본과 다른 점: 원본은 색을 "rgba(r, g, b, a)" 문자열로 넘겨 RGB 가 0 ~ 255 정수로 반올림된다. 러스트 판도 같은 반올림을 해서 Color 로 넘긴다.
 //==============================================================================
 use crate::base::color::Color;
+use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{BlendMode, Graphic};
@@ -96,6 +97,7 @@ impl TrailRenderer {
 	/// 흔적 지우기.
 	//==============================================================================
 	pub fn clear(&mut self) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.point_list.clear();
 	}
 
@@ -127,6 +129,7 @@ impl TrailRenderer {
 	/// - `end_width`: 오래된 점 쪽 굵기. (노드 좌표, 기본 0. 그릴 때 0.1 보다 가늘게 하지 않는다)
 	//==============================================================================
 	pub fn set_width(&mut self, start_width: f64, end_width: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.start_width = start_width;
 		self.end_width = end_width;
 	}
@@ -213,6 +216,10 @@ impl Component for TrailRenderer {
 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f64) {
 		let local_position = context.get_transform().get_local_position();
 
+		// 점이 있으면 나이 들고 빠지며 노드 자리도 바뀌므로 그리는 사각형을 다시 셈하게 한다. (하위 트리 그리기 경계)
+		if !self.point_list.is_empty() {
+			self.component_base.mark_drawn_rect_dirty();
+		}
 		let point_lifetime = self.point_lifetime;
 		for point in self.point_list.iter_mut() {
 			point.age += time_delta;
@@ -229,11 +236,35 @@ impl Component for TrailRenderer {
 				return;
 			}
 		}
+		self.component_base.mark_drawn_rect_dirty();
 		self.point_list.push(TrailPoint {
 			x: local_position.x,
 			y: local_position.y,
 			age: 0.0,
 		});
+	}
+
+	//==============================================================================
+	/// 그리는 사각형. (원본 TrailRenderer.calculateDrawnRect)
+	/// - 점들의 경계 상자를 지금 노드 자리만큼 당기고 큰 굵기의 반 + 1 만큼 넓힌 것. 점이 둘보다 적으면 크기 0.
+	//==============================================================================
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, _graphic: &mut Graphic) -> Option<Rect> {
+		if self.point_list.len() < 2 {
+			return Some(Rect::create(0.0, 0.0, 0.0, 0.0));
+		}
+		let node_position = transform.get_local_position();
+		let extent = self.start_width.abs().max(self.end_width.abs()).max(0.1) * 0.5 + 1.0;
+		let mut minimum_x = f64::INFINITY;
+		let mut minimum_y = f64::INFINITY;
+		let mut maximum_x = f64::NEG_INFINITY;
+		let mut maximum_y = f64::NEG_INFINITY;
+		for point in self.point_list.iter() {
+			minimum_x = minimum_x.min(point.x);
+			minimum_y = minimum_y.min(point.y);
+			maximum_x = maximum_x.max(point.x);
+			maximum_y = maximum_y.max(point.y);
+		}
+		Some(Rect::create(minimum_x - node_position.x - extent, minimum_y - node_position.y - extent, maximum_x - minimum_x + extent * 2.0, maximum_y - minimum_y + extent * 2.0))
 	}
 
 	//==============================================================================

@@ -18,6 +18,52 @@ use crate::core::component::{Component, RequiredComponent};
 use std::any::Any;
 use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::NodeId;
+use std::cell::RefCell;
+
+//==============================================================================
+/// 하위 트리 그리기 경계 더러움을 트리에 알리는 열쇠. (노드가 든 트리 번호와 노드 핸들, NodeTree 가 노드를 만들 때 트랜스폼과 컴포넌트에 단다)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DrawBoundsKey {
+	pub(crate) tree_serial: u32,
+	pub(crate) node_id: NodeId,
+}
+
+thread_local! {
+	/// 아직 조상으로 번지지 않은 하위 트리 그리기 경계 더러움. (열쇠, 부모 쪽인지) NodeTree 가 경계를 읽기 전에 제 것을 꺼내 조상으로 번진다.
+	static DRAW_BOUNDS_DIRTY_LIST: RefCell<Vec<(DrawBoundsKey, bool)>> = const { RefCell::new(Vec::new()) };
+}
+
+//==============================================================================
+/// 하위 트리 그리기 경계 더러움 알리기. (열쇠가 없으면 트리에 들지 않은 것이라 할 일이 없다)
+/// - `is_parent` 가 true 면 그 노드의 부모 경계가(변환, 켜짐, 보임), false 면 그 노드 자신의 경계가(내용 크기, 컴포넌트) 바뀐 것이다.
+//==============================================================================
+pub(crate) fn push_draw_bounds_dirty(draw_bounds_key: Option<DrawBoundsKey>, is_parent: bool) {
+	if let Some(draw_bounds_key) = draw_bounds_key {
+		let _ = DRAW_BOUNDS_DIRTY_LIST.try_with(|dirty_list| {
+			dirty_list.borrow_mut().push((draw_bounds_key, is_parent));
+		});
+	}
+}
+
+//==============================================================================
+/// 그 트리의 하위 트리 그리기 경계 더러움 꺼내기. (꺼낸 것은 목록에서 빠진다, 다른 트리 것은 남는다)
+//==============================================================================
+pub(crate) fn take_draw_bounds_dirty(tree_serial: u32, target_list: &mut Vec<(NodeId, bool)>) {
+	let _ = DRAW_BOUNDS_DIRTY_LIST.try_with(|dirty_list| {
+		let mut dirty_list = dirty_list.borrow_mut();
+		if dirty_list.is_empty() {
+			return;
+		}
+		dirty_list.retain(|(draw_bounds_key, is_parent)| {
+			if draw_bounds_key.tree_serial != tree_serial {
+				return true;
+			}
+			target_list.push((draw_bounds_key.node_id, *is_parent));
+			false
+		});
+	});
+}
 
 //==============================================================================
 /// 노드 트랜스폼. (컴포넌트가 tick / draw 에서 받아 읽고 바꾸는 노드 상태)
@@ -48,6 +94,7 @@ pub struct NodeTransform {
 	content_size: Vector2,
 	anchor: Vector2,
 	is_visible: bool,
+	draw_bounds_key: Option<DrawBoundsKey>,
 }
 
 impl NodeTransform {
@@ -67,6 +114,7 @@ impl NodeTransform {
 			content_size: Vector2::zero(),
 			anchor: Pivot::MIDDLE_CENTER,
 			is_visible: true,
+			draw_bounds_key: None,
 		}
 	}
 
@@ -77,7 +125,10 @@ impl NodeTransform {
 	/// - `local_position`: 부모 내용 영역의 왼쪽 위에서 본 피봇 점의 자리.
 	//==============================================================================
 	pub fn set_local_position(&mut self, local_position: Vector2) {
-		self.local_position = local_position;
+		if self.local_position != local_position {
+			self.local_position = local_position;
+			self.mark_parent_draw_bounds_dirty();
+		}
 	}
 
 	//==============================================================================
@@ -97,7 +148,10 @@ impl NodeTransform {
 	/// - `local_scale`: 축마다 배율. (1 이 원래 크기, 음수면 그 축으로 뒤집혀 그려진다)
 	//==============================================================================
 	pub fn set_local_scale(&mut self, local_scale: Vector2) {
-		self.local_scale = local_scale;
+		if self.local_scale != local_scale {
+			self.local_scale = local_scale;
+			self.mark_parent_draw_bounds_dirty();
+		}
 	}
 
 	//==============================================================================
@@ -117,7 +171,10 @@ impl NodeTransform {
 	/// - `local_rotation`: 회전. (도, 양수면 화면에서 시계 방향)
 	//==============================================================================
 	pub fn set_local_rotation(&mut self, local_rotation: f64) {
-		self.local_rotation = local_rotation;
+		if self.local_rotation != local_rotation {
+			self.local_rotation = local_rotation;
+			self.mark_parent_draw_bounds_dirty();
+		}
 	}
 
 	//==============================================================================
@@ -157,7 +214,10 @@ impl NodeTransform {
 	/// - `pivot`: 내용 크기 안의 기준점 비율. ((0, 0) 왼쪽 위, (1, 1) 오른쪽 아래, Pivot 상수)
 	//==============================================================================
 	pub fn set_pivot(&mut self, pivot: Vector2) {
-		self.pivot = pivot;
+		if self.pivot != pivot {
+			self.pivot = pivot;
+			self.mark_parent_draw_bounds_dirty();
+		}
 	}
 
 	//==============================================================================
@@ -177,7 +237,10 @@ impl NodeTransform {
 	/// - `content_size`: 내용 크기. (노드 좌표, 배율을 걸기 전)
 	//==============================================================================
 	pub fn set_content_size(&mut self, content_size: Vector2) {
-		self.content_size = content_size;
+		if self.content_size != content_size {
+			self.content_size = content_size;
+			self.mark_draw_bounds_dirty();
+		}
 	}
 
 	//==============================================================================
@@ -198,7 +261,7 @@ impl NodeTransform {
 	/// - `y`: 로컬 위치 y.
 	//==============================================================================
 	pub fn set_local_position_xy(&mut self, x: f64, y: f64) {
-		self.local_position = Vector2::create(x, y);
+		self.set_local_position(Vector2::create(x, y));
 	}
 
 	//==============================================================================
@@ -209,7 +272,7 @@ impl NodeTransform {
 	/// - `y`: 세로 배율.
 	//==============================================================================
 	pub fn set_local_scale_xy(&mut self, x: f64, y: f64) {
-		self.local_scale = Vector2::create(x, y);
+		self.set_local_scale(Vector2::create(x, y));
 	}
 
 	//==============================================================================
@@ -220,7 +283,7 @@ impl NodeTransform {
 	/// - `height`: 내용 높이.
 	//==============================================================================
 	pub fn set_content_size_xy(&mut self, width: f64, height: f64) {
-		self.content_size = Vector2::create(width, height);
+		self.set_content_size(Vector2::create(width, height));
 	}
 
 	//==============================================================================
@@ -236,8 +299,8 @@ impl NodeTransform {
 	/// - `height`: 내용 높이.
 	//==============================================================================
 	pub fn set_rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
-		self.content_size = Vector2::create(width, height);
-		self.local_position = Vector2::create(x + width * self.pivot.x, y + height * self.pivot.y);
+		self.set_content_size(Vector2::create(width, height));
+		self.set_local_position(Vector2::create(x + width * self.pivot.x, y + height * self.pivot.y));
 	}
 
 	//==============================================================================
@@ -283,7 +346,7 @@ impl NodeTransform {
 	//==============================================================================
 	pub fn set_anchored_position(&mut self, anchored_position: Vector2, parent_content_size: Vector2) {
 		let anchor_point = parent_content_size.multiply(self.anchor);
-		self.local_position = anchor_point.add(anchored_position);
+		self.set_local_position(anchor_point.add(anchored_position));
 	}
 
 	//==============================================================================
@@ -307,7 +370,39 @@ impl NodeTransform {
 	/// - `is_visible`: 그릴지. (false 면 이 노드와 자손을 그리지 않고 터치도 받지 않는다)
 	//==============================================================================
 	pub fn set_visible(&mut self, is_visible: bool) {
-		self.is_visible = is_visible;
+		if self.is_visible != is_visible {
+			self.is_visible = is_visible;
+			self.mark_parent_draw_bounds_dirty();
+		}
+	}
+
+	//==============================================================================
+	/// 이 노드의 하위 트리 그리기 경계가 바뀌었음을 알린다. (원본 TransformNode.markDrawBoundsDirty, 내용 크기 세터가 부른다)
+	/// - 트리에 든 노드면 다음에 경계를 읽을 때(그리기 전) 이 노드와 조상이 다시 셈한다. 트리에 들지 않았으면 할 일이 없다.
+	//==============================================================================
+	pub(crate) fn mark_draw_bounds_dirty(&self) {
+		push_draw_bounds_dirty(self.draw_bounds_key, false);
+	}
+
+	//==============================================================================
+	/// 부모의 하위 트리 그리기 경계가 바뀌었음을 알린다. (원본 TransformNode.markParentDrawBoundsDirty, 위치, 배율, 회전, 피봇, 보임 세터가 부른다)
+	//==============================================================================
+	pub(crate) fn mark_parent_draw_bounds_dirty(&self) {
+		push_draw_bounds_dirty(self.draw_bounds_key, true);
+	}
+
+	//==============================================================================
+	/// 경계 더러움 열쇠. (NodeTree 가 노드를 만들 때 단다)
+	//==============================================================================
+	pub(crate) fn get_draw_bounds_key(&self) -> Option<DrawBoundsKey> {
+		self.draw_bounds_key
+	}
+
+	//==============================================================================
+	/// 경계 더러움 열쇠 달기. (NodeTree 가 노드를 만들 때)
+	//==============================================================================
+	pub(crate) fn set_draw_bounds_key(&mut self, draw_bounds_key: Option<DrawBoundsKey>) {
+		self.draw_bounds_key = draw_bounds_key;
 	}
 
 	//==============================================================================
@@ -387,8 +482,64 @@ pub struct WorldNode {
 	pub(crate) components: Vec<Box<dyn Component>>,
 	pub(crate) parent_id: Option<NodeId>,
 	pub(crate) child_ids: Vec<NodeId>,
+	pub(crate) draw_bounds_cache: DrawBoundsCache,
 	/// 지난번 그릴 때 변환의 가장 큰 배율. (0 이면 아직 모른다, 글 굽기 배율을 움직이는 동안 묶는 데 쓴다)
 	last_drawn_maximum_scale: f64,
+	last_drawn_frame_number: u64,
+}
+
+//==============================================================================
+/// 노드의 하위 트리 그리기 경계 캐시. (NodeTree 가 읽고 쓴다, 원본 TransformNode 의 #drawBounds 둘레 칸)
+//==============================================================================
+#[derive(Clone, Debug)]
+pub(crate) struct DrawBoundsCache {
+	/// DRAW_BOUNDS_DIRTY, DRAW_BOUNDS_KNOWN, DRAW_BOUNDS_UNKNOWN.
+	pub(crate) state: u8,
+	/// 셈해 둔 하위 트리 경계. (이 노드의 내용 좌표)
+	pub(crate) bounds: Rect,
+	/// 셈한 때의 컴포넌트 그리는 사각형 세대. (ComponentBase::get_drawn_rect_generation)
+	pub(crate) generation: u64,
+	/// 마지막으로 셈한 차례 번호. (0 이면 셈한 적 없다)
+	pub(crate) stamp: u64,
+	/// 부모가 셈하며 적어 둔 이 노드의 하위 트리 경계. (부모의 내용 좌표)
+	pub(crate) parent_bounds: Rect,
+	/// 부모가 적은 때 부모의 차례 번호. (u64::MAX 면 적은 적 없다)
+	pub(crate) parent_stamp: u64,
+	/// 적어 둔 경계가 아무것도 그리지 않는지.
+	pub(crate) is_parent_bounds_empty: bool,
+	/// 자식 범위 칸. (자식마다 CHILD_RANGE_STRIDE 칸 + 끝에 건너뛰면 세는 수 합)
+	pub(crate) child_range_list: Vec<f64>,
+	/// 자식 범위 칸을 적은 때의 차례 번호. (stamp 와 같아야 맞다, u64::MAX 면 없다)
+	pub(crate) child_range_stamp: u64,
+	/// 자식 범위 칸을 적은 때의 자식 수.
+	pub(crate) child_range_count: usize,
+}
+
+/// 경계를 다시 셈할 차례.
+pub(crate) const DRAW_BOUNDS_DIRTY: u8 = 0;
+/// 셈해 둔 경계가 맞다.
+pub(crate) const DRAW_BOUNDS_KNOWN: u8 = 1;
+/// 하위 트리에 어디에 그리는지 모르는 것이 있다. (그리기를 건너뛰지 않는다)
+pub(crate) const DRAW_BOUNDS_UNKNOWN: u8 = 2;
+
+impl DrawBoundsCache {
+	//==============================================================================
+	/// 생성. (다시 셈할 차례)
+	//==============================================================================
+	pub(crate) fn new() -> DrawBoundsCache {
+		DrawBoundsCache {
+			state: DRAW_BOUNDS_DIRTY,
+			bounds: Rect::create(0.0, 0.0, 0.0, 0.0),
+			generation: 0,
+			stamp: 0,
+			parent_bounds: Rect::create(0.0, 0.0, 0.0, 0.0),
+			parent_stamp: u64::MAX,
+			is_parent_bounds_empty: false,
+			child_range_list: Vec::new(),
+			child_range_stamp: u64::MAX,
+			child_range_count: 0,
+		}
+	}
 }
 
 impl WorldNode {
@@ -413,7 +564,9 @@ impl WorldNode {
 			components: Vec::new(),
 			parent_id: None,
 			child_ids: Vec::new(),
+			draw_bounds_cache: DrawBoundsCache::new(),
 			last_drawn_maximum_scale: 0.0,
+			last_drawn_frame_number: 0,
 		}
 	}
 
@@ -553,7 +706,10 @@ impl WorldNode {
 	/// - `is_active`: 켤지. (false 면 이 노드와 자손이 tick, 그리기, 터치에서 빠진다)
 	//==============================================================================
 	pub fn set_active(&mut self, is_active: bool) {
-		self.is_active = is_active;
+		if self.is_active != is_active {
+			self.is_active = is_active;
+			self.transform.mark_parent_draw_bounds_dirty();
+		}
 	}
 
 	//==============================================================================
@@ -593,7 +749,10 @@ impl WorldNode {
 	/// - `is_gizmo_visible`: 기즈모(내용 테두리와 피봇 점)를 그릴지.
 	//==============================================================================
 	pub fn set_gizmo_visible(&mut self, is_gizmo_visible: bool) {
-		self.is_gizmo_visible = is_gizmo_visible;
+		if self.is_gizmo_visible != is_gizmo_visible {
+			self.is_gizmo_visible = is_gizmo_visible;
+			self.transform.mark_draw_bounds_dirty();
+		}
 	}
 
 	//==============================================================================
@@ -850,13 +1009,16 @@ impl WorldNode {
 	}
 
 	//==============================================================================
-	/// 지난번 그릴 때 변환의 가장 큰 배율. (NodeTree 가 그릴 때 Graphic.update_text_bake_scale_moving 으로 쓴다)
+	/// 지난번 그릴 때의 가장 큰 배율과 그 그리기 프레임 번호 기억. (NodeTree 가 push_transform 뒤에 부른다, 원본 setLastDrawnMaximumScale)
+	/// - 그리기 프레임 번호는 Graphic::begin_frame_statistics 마다 하나씩 오른다. 지난 프레임에 그리지 않은 노드(화면 밖이라 하위 트리째 건너뛴 것)는 다음에 그릴 때 처음 그리는 것으로 본다.
 	///
 	/// # 인자
-	/// - `last_drawn_maximum_scale`: 지난번 그릴 때 변환의 가장 큰 배율. (0 이면 모른다)
+	/// - `last_drawn_maximum_scale`: 변환의 가장 큰 배율. (0 이면 모른다)
+	/// - `frame_number`: 그린 그리기 프레임 번호. (모르면 0)
 	//==============================================================================
-	pub fn set_last_drawn_maximum_scale(&mut self, last_drawn_maximum_scale: f64) {
+	pub fn set_last_drawn_maximum_scale(&mut self, last_drawn_maximum_scale: f64, frame_number: u64) {
 		self.last_drawn_maximum_scale = last_drawn_maximum_scale;
+		self.last_drawn_frame_number = frame_number;
 	}
 
 	//==============================================================================
@@ -867,6 +1029,68 @@ impl WorldNode {
 	//==============================================================================
 	pub fn get_last_drawn_maximum_scale(&self) -> f64 {
 		self.last_drawn_maximum_scale
+	}
+
+	//==============================================================================
+	/// 지난번 그린 그리기 프레임 번호. (원본 getLastDrawnFrameNumber)
+	///
+	/// # 돌려줌
+	/// set_last_drawn_maximum_scale 로 기억한 프레임 번호. (그린 적 없으면 0)
+	///
+	/// # 예제
+	/// 기억한 배율과 프레임 번호 읽기
+	/// ```rust
+	/// use vanilla::WorldNode;
+	///
+	/// let mut node = WorldNode::new("label");
+	/// assert_eq!(node.get_last_drawn_frame_number(), 0);
+	/// node.set_last_drawn_maximum_scale(2.0, 7);
+	/// assert_eq!(node.get_last_drawn_maximum_scale(), 2.0);
+	/// assert_eq!(node.get_last_drawn_frame_number(), 7);
+	/// ```
+	//==============================================================================
+	pub fn get_last_drawn_frame_number(&self) -> u64 {
+		self.last_drawn_frame_number
+	}
+
+	//==============================================================================
+	/// 이 노드의 하위 트리 그리기 경계가 바뀌었음을 알린다. (원본 TransformNode.markDrawBoundsDirty)
+	/// - 내용 크기, 기즈모 표시, 컴포넌트 더하고 빼기는 엔진이 알아서 부른다. 컴포넌트의 그리는 사각형이 바뀌면 컴포넌트가 mark_drawn_rect_dirty 를 부른다.
+	/// - 다음에 경계를 읽을 때(그리기 전) 이 노드와 조상이 다시 셈한다. 트리에 들지 않은 노드면 할 일이 없다.
+	///
+	/// # 예제
+	/// 경계를 다시 셈하게 하기
+	/// ```rust
+	/// use vanilla::{NodeTree, Paint, Pivot};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let node_id = node_tree.create_child(root_id, "panel");
+	/// node_tree[node_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[node_id].set_rect(10.0, 20.0, 100.0, 50.0);
+	/// node_tree[node_id].mark_draw_bounds_dirty();
+	/// node_tree[node_id].mark_parent_draw_bounds_dirty();
+	/// ```
+	//==============================================================================
+	pub fn mark_draw_bounds_dirty(&self) {
+		self.transform.mark_draw_bounds_dirty();
+	}
+
+	//==============================================================================
+	/// 부모의 하위 트리 그리기 경계가 바뀌었음을 알린다. (원본 TransformNode.markParentDrawBoundsDirty, 이 노드의 변환, 켜짐, 보임이 바뀌면 엔진이 알아서 부른다)
+	//==============================================================================
+	pub fn mark_parent_draw_bounds_dirty(&self) {
+		self.transform.mark_parent_draw_bounds_dirty();
+	}
+
+	//==============================================================================
+	/// 경계 더러움 열쇠 달기. (NodeTree 가 노드를 만들 때, 트랜스폼과 붙은 컴포넌트 모두)
+	//==============================================================================
+	pub(crate) fn set_draw_bounds_key(&mut self, draw_bounds_key: Option<DrawBoundsKey>) {
+		self.transform.set_draw_bounds_key(draw_bounds_key);
+		for component in self.components.iter_mut() {
+			component.get_component_base_mut().set_draw_bounds_key(draw_bounds_key);
+		}
 	}
 
 	//==============================================================================
@@ -935,10 +1159,13 @@ impl WorldNode {
 		// 원본 addComponent 처럼 자기 자리를 먼저 잡고, 의존 컴포넌트를 그 뒤에 붙인 다음 붙는다.
 		let component_index = self.components.len();
 		let boxed_component: Box<dyn Component> = Box::new(component);
+		let mut boxed_component = boxed_component;
+		boxed_component.get_component_base_mut().set_draw_bounds_key(self.transform.get_draw_bounds_key());
 		let required_component_list = boxed_component.require();
 		self.components.push(boxed_component);
 		self.add_required_components(required_component_list);
 		self.components[component_index].attach(&mut self.transform);
+		self.transform.mark_draw_bounds_dirty();
 		let component_reference: &mut dyn Component = self.components[component_index].as_mut();
 		component_reference.as_any_mut().downcast_mut::<T>().expect("added component type")
 	}
@@ -957,6 +1184,7 @@ impl WorldNode {
 			}
 			let mut boxed_component = (required_component.create)();
 			self.add_required_components(boxed_component.require());
+			boxed_component.get_component_base_mut().set_draw_bounds_key(self.transform.get_draw_bounds_key());
 			boxed_component.attach(&mut self.transform);
 			self.components.push(boxed_component);
 		}
@@ -1072,7 +1300,18 @@ impl WorldNode {
 			component.detach(transform);
 			false
 		});
-		before_count - self.components.len()
+		let removed_count = before_count - self.components.len();
+		if removed_count > 0 {
+			self.transform.mark_draw_bounds_dirty();
+		}
+		removed_count
+	}
+
+	//==============================================================================
+	/// 트랜스폼(읽기)과 컴포넌트 목록(쓰기)을 같이 빌리기. (NodeTree 가 하위 트리 경계를 셀 때)
+	//==============================================================================
+	pub(crate) fn split_transform_and_components(&mut self) -> (&NodeTransform, &mut Vec<Box<dyn Component>>) {
+		(&self.transform, &mut self.components)
 	}
 
 	//==============================================================================
@@ -1162,7 +1401,8 @@ impl WorldNode {
 			let mut drawn_rect: Option<Rect> = None;
 			let mut is_drawn_rect_known = true;
 			for component in self.components.iter_mut() {
-				if !component.is_enable() {
+				// 그리지 않는 컴포넌트(draw 를 덮어쓰지 않은 것)는 아무것도 그리지 않는 것으로 본다.
+				if !component.is_enable() || !component.is_draw_overridden() {
 					continue;
 				}
 				let component_rect = match component.calculate_drawn_rect(&self.transform, graphic) {

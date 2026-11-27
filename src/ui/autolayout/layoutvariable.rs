@@ -23,7 +23,11 @@ struct LayoutVariableData {
 	id: u64,
 	name: RefCell<String>,
 	value: Cell<f64>,
+	value_changed_event: RefCell<Option<LayoutVariableEvent>>,
 }
+
+/// 값이 바뀐 변수를 받는 함수. (원본 setValueChangedEvent 의 함수)
+pub type LayoutVariableEvent = Rc<dyn Fn(&LayoutVariable)>;
 
 //==============================================================================
 /// 레이아웃 솔버 미지수. (복제해도 같은 변수를 가리킨다)
@@ -71,6 +75,7 @@ impl LayoutVariable {
 				id,
 				name: RefCell::new(name.to_string()),
 				value: Cell::new(0.0),
+				value_changed_event: RefCell::new(None),
 			}),
 		}
 	}
@@ -112,7 +117,55 @@ impl LayoutVariable {
 	/// - `value`: 넣을 값.
 	//==============================================================================
 	pub fn set_value(&self, value: f64) {
+		if self.data.value.get() == value {
+			return;
+		}
 		self.data.value.set(value);
+		let value_changed_event = self.data.value_changed_event.borrow().clone();
+		if let Some(value_changed_event) = value_changed_event {
+			value_changed_event(self);
+		}
+	}
+
+	//==============================================================================
+	/// 값이 바뀔 때 부를 함수 설정. (원본 setValueChangedEvent, 솔버가 푼 값이 달라질 때만 부른다, None 이면 부르지 않는다)
+	/// - 변수를 가진 쪽이 바뀐 것을 알아챈다. (원본 UINode 는 자리와 크기 변수에 걸어 하위 트리 그리기 경계를 다시 셈하게 한다. 러스트 판 UINode 는 노드 트랜스폼에 풀어 넣으므로 트랜스폼 세터가 알린다)
+	///
+	/// # 인자
+	/// - `value_changed_event`: 바뀐 변수를 받는 함수. None 이면 지운다.
+	///
+	/// # 예제
+	/// 값이 바뀔 때 알기
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::LayoutVariable;
+	///
+	/// let width = LayoutVariable::new("width");
+	/// let changed_count = Rc::new(Cell::new(0));
+	/// let counter = changed_count.clone();
+	/// width.set_value_changed_event(Some(Rc::new(move |variable: &LayoutVariable| {
+	/// 	assert_eq!(variable.get_value(), 120.0);
+	/// 	counter.set(counter.get() + 1);
+	/// })));
+	/// width.set_value(120.0);
+	/// width.set_value(120.0);
+	/// assert_eq!(changed_count.get(), 1);
+	/// assert!(width.get_value_changed_event().is_some());
+	/// ```
+	//==============================================================================
+	pub fn set_value_changed_event(&self, value_changed_event: Option<LayoutVariableEvent>) {
+		*self.data.value_changed_event.borrow_mut() = value_changed_event;
+	}
+
+	//==============================================================================
+	/// 값이 바뀔 때 부를 함수 반환. (원본 getValueChangedEvent)
+	///
+	/// # 돌려줌
+	/// 건 함수. 없으면 None.
+	//==============================================================================
+	pub fn get_value_changed_event(&self) -> Option<LayoutVariableEvent> {
+		self.data.value_changed_event.borrow().clone()
 	}
 
 	//==============================================================================

@@ -18,6 +18,7 @@
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;
+use crate::base::rect::Rect;
 use crate::base::seededrandom::SeededRandom;
 use crate::base::vector2::Vector2;
 #[cfg(target_arch = "wasm32")]
@@ -336,6 +337,9 @@ impl ParticleSystem {
 	pub fn stop(&mut self, is_clearing: bool) {
 		self.is_playing = false;
 		if is_clearing {
+			if !self.particle_list.is_empty() {
+				self.component_base.mark_drawn_rect_dirty();
+			}
 			self.particle_list.clear();
 			self.emission_accumulator = 0.0;
 			if let (Some(random), Some(random_seed)) = (self.random.as_mut(), self.random_seed) {
@@ -366,6 +370,9 @@ impl ParticleSystem {
 	/// ```
 	//==============================================================================
 	pub fn emit(&mut self, count: usize, origin_offset: Option<Vector2>) {
+		if count > 0 {
+			self.component_base.mark_drawn_rect_dirty();
+		}
 		for _ in 0..count {
 			self.spawn_particle(origin_offset);
 		}
@@ -452,6 +459,18 @@ impl ParticleSystem {
 	/// ```
 	//==============================================================================
 	pub fn simulate(&mut self, time_delta: f64) {
+		// 앞이나 뒤에 파티클이 하나라도 있으면 그리는 사각형이 바뀐다. (하위 트리 그리기 경계)
+		let had_particles = !self.particle_list.is_empty();
+		self.simulate_particles(time_delta);
+		if had_particles || !self.particle_list.is_empty() {
+			self.component_base.mark_drawn_rect_dirty();
+		}
+	}
+
+	//==============================================================================
+	/// 진행 본체. (simulate 가 부른다)
+	//==============================================================================
+	fn simulate_particles(&mut self, time_delta: f64) {
 		// 방출.
 		if self.is_playing {
 			let previous_elapsed = self.play_elapsed_seconds;
@@ -783,6 +802,7 @@ impl ParticleSystem {
 	/// - `end_scale`: 수명 끝 배율. (기본 1)
 	//==============================================================================
 	pub fn set_size_over_lifetime(&mut self, start_scale: f64, end_scale: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.size_over_lifetime_start = start_scale;
 		self.size_over_lifetime_end = end_scale;
 	}
@@ -827,6 +847,7 @@ impl ParticleSystem {
 	/// - `render_shape`: 입자를 그릴 모양.
 	//==============================================================================
 	pub fn set_render_shape(&mut self, render_shape: ParticleRenderShape) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.render_shape = render_shape;
 	}
 
@@ -837,6 +858,7 @@ impl ParticleSystem {
 	/// - `image`: Image 렌더로 그릴 그림. None 이면 Image 렌더도 흰 사각형에 입자 색으로 그린다.
 	//==============================================================================
 	pub fn set_image(&mut self, image: Option<Rc<Image>>) {
+		self.component_base.mark_drawn_rect_dirty();
 		#[cfg(target_arch = "wasm32")]
 		{
 			self.pending_image_load = None;
@@ -936,6 +958,7 @@ impl ParticleSystem {
 	/// - `frequency`: 살랑이는 각속도. (초당 라디안, 기본 4)
 	//==============================================================================
 	pub fn set_wobble(&mut self, amplitude: f64, frequency: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.wobble_amplitude = amplitude;
 		self.wobble_frequency = frequency;
 	}
@@ -947,6 +970,7 @@ impl ParticleSystem {
 	/// - `streak_scale`: 속력에 곱할 띠 길이 비율. (초, 기본 0.06)
 	//==============================================================================
 	pub fn set_streak_scale(&mut self, streak_scale: f64) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.streak_scale = streak_scale;
 	}
 
@@ -957,6 +981,7 @@ impl ParticleSystem {
 	/// - `is_world_space`: 참이면 낼 때 노드 로컬 위치를 더하고 그릴 때 노드 위치를 뺀다. (기본 거짓)
 	//==============================================================================
 	pub fn set_world_space(&mut self, is_world_space: bool) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.is_world_space = is_world_space;
 	}
 
@@ -1201,6 +1226,7 @@ impl ParticleSystem {
 	/// - `is_manual_tick`: 참이면 노드 tick 은 노드 위치만 읽어 두고 진행은 simulate 를 부를 때만 한다. (기본 거짓)
 	//==============================================================================
 	pub fn set_manual_tick(&mut self, is_manual_tick: bool) {
+		self.component_base.mark_drawn_rect_dirty();
 		self.is_manual_tick = is_manual_tick;
 	}
 
@@ -1315,6 +1341,56 @@ impl Component for ParticleSystem {
 			return;
 		}
 		self.simulate(time_delta);
+	}
+
+	//==============================================================================
+	/// 그리는 사각형. (원본 ParticleSystem.calculateDrawnRect)
+	/// - 살아 있는 파티클마다 크기의 반 x 루트 2(돌린 사각형, 그림), 꼬리 쿼드면 머리와 꼬리를 품고 굵기 반, 흔들림 폭만큼 좌우, 한 단위 여유. 없으면 크기 0.
+	/// - 월드 공간에 수동 틱이면 None. (노드를 옮길 때 다시 셀 길이 없다)
+	//==============================================================================
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, _graphic: &mut Graphic) -> Option<Rect> {
+		if self.particle_list.is_empty() {
+			return Some(Rect::create(0.0, 0.0, 0.0, 0.0));
+		}
+		// 월드 공간이면 그릴 때 노드 위치를 뺀다. 수동 틱이면 노드를 옮길 때 다시 셀 길이 없어 모른다.
+		let mut base_offset_x = 0.0;
+		let mut base_offset_y = 0.0;
+		if self.is_world_space {
+			if self.is_manual_tick {
+				return None;
+			}
+			let node_position = transform.get_local_position();
+			base_offset_x = -node_position.x;
+			base_offset_y = -node_position.y;
+		}
+		let is_streak = self.render_shape == ParticleRenderShape::Streak;
+		let wobble_extent = self.wobble_amplitude.abs();
+		let mut minimum_x = f64::INFINITY;
+		let mut minimum_y = f64::INFINITY;
+		let mut maximum_x = f64::NEG_INFINITY;
+		let mut maximum_y = f64::NEG_INFINITY;
+		for particle in self.particle_list.iter() {
+			let life_ratio = particle.age / particle.lifetime;
+			let size_scale = self.size_over_lifetime_start + (self.size_over_lifetime_end - self.size_over_lifetime_start) * life_ratio;
+			let draw_size = (particle.size * size_scale).max(0.1);
+			let head_x = particle.x + base_offset_x;
+			let head_y = particle.y + base_offset_y;
+			let mut tail_x = head_x;
+			let mut tail_y = head_y;
+			let mut extent = draw_size * 0.5 * std::f64::consts::SQRT_2;
+			if is_streak {
+				tail_x = head_x - particle.velocity_x * self.streak_scale;
+				tail_y = head_y - particle.velocity_y * self.streak_scale;
+				extent = draw_size * 0.5;
+			}
+			let extent_x = extent + wobble_extent + 1.0;
+			let extent_y = extent + 1.0;
+			minimum_x = minimum_x.min(head_x - extent_x).min(tail_x - extent_x);
+			minimum_y = minimum_y.min(head_y - extent_y).min(tail_y - extent_y);
+			maximum_x = maximum_x.max(head_x + extent_x).max(tail_x + extent_x);
+			maximum_y = maximum_y.max(head_y + extent_y).max(tail_y + extent_y);
+		}
+		Some(Rect::create(minimum_x, minimum_y, maximum_x - minimum_x, maximum_y - minimum_y))
 	}
 
 	//==============================================================================

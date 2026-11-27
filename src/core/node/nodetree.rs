@@ -24,9 +24,10 @@ use crate::core::component::mask::Mask;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::engine::Engine;
 use crate::core::graphic::Graphic;
-use crate::core::node::worldnode::{NodeTransform, WorldNode};
+use crate::core::node::worldnode::{take_draw_bounds_dirty, DrawBoundsKey, NodeTransform, WorldNode, DRAW_BOUNDS_DIRTY, DRAW_BOUNDS_KNOWN, DRAW_BOUNDS_UNKNOWN};
 use slotmap::{new_key_type, SlotMap};
 use std::ops::{Index, IndexMut};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 new_key_type! {
 	/// 노드 핸들. (칸 번호 + 세대 번호. 지운 칸을 다시 써도 옛 핸들은 세대가 달라 걸러진다)
@@ -76,6 +77,129 @@ pub struct NodeTree {
 	culled_node_count: u32,
 	/// 다시 쓰는 빈 자리표. (컴포넌트를 잠깐 꺼낼 때마다 새로 잡지 않는다. 겹쳐 꺼내는 깊이만큼 늘어난다)
 	placeholder_pool: Vec<Box<dyn Component>>,
+	/// 트리 번호. (노드와 컴포넌트의 경계 더러움이 어느 트리 것인지 가린다)
+	tree_serial: u32,
+	/// 하위 트리 경계를 셈한 차례 번호. (셀 때마다 하나씩 늘려 그 노드에 적는다, 자식이 부모 좌표로 옮긴 경계를 언제 적었는지 견준다)
+	draw_bounds_stamp_counter: u64,
+	/// 꺼낸 경계 더러움을 잠깐 담는 칸. (다시 쓴다)
+	draw_bounds_dirty_scratch: Vec<(NodeId, bool)>,
+}
+
+/// 다음 트리 번호.
+static NEXT_TREE_SERIAL: AtomicU32 = AtomicU32::new(1);
+
+// 자식 범위 칸의 한 자식 몫. (부모 좌표 경계를 앞에서부터 모은 가장 큰 아래와 오른쪽, 뒤에서부터 모은 가장 작은 위와 왼쪽, 앞 자식 가운데 건너뛰면 세는 수)
+const CHILD_RANGE_STRIDE: usize = 5;
+const CHILD_RANGE_PREFIX_MAXIMUM_BOTTOM: usize = 0;
+const CHILD_RANGE_PREFIX_MAXIMUM_RIGHT: usize = 1;
+const CHILD_RANGE_SUFFIX_MINIMUM_TOP: usize = 2;
+const CHILD_RANGE_SUFFIX_MINIMUM_LEFT: usize = 3;
+const CHILD_RANGE_PREFIX_COUNT: usize = 4;
+
+//==============================================================================
+/// 사각형 합을 모으는 칸. (하위 트리 경계 셈)
+//==============================================================================
+struct BoundsAccumulator {
+	is_found: bool,
+	minimum_x: f64,
+	minimum_y: f64,
+	maximum_x: f64,
+	maximum_y: f64,
+}
+
+impl BoundsAccumulator {
+	//==============================================================================
+	/// 생성. (아직 아무것도 모으지 않았다)
+	//==============================================================================
+	fn new() -> BoundsAccumulator {
+		BoundsAccumulator {
+			is_found: false,
+			minimum_x: 0.0,
+			minimum_y: 0.0,
+			maximum_x: 0.0,
+			maximum_y: 0.0,
+		}
+	}
+
+	//==============================================================================
+	/// 사각형 더하기. (크기가 0 이하면 아무것도 그리지 않는 것이라 빼고)
+	//==============================================================================
+	fn add_rect(&mut self, rect: Rect) {
+		if !(rect.size.x > 0.0 && rect.size.y > 0.0) {
+			return;
+		}
+		self.add_bounds(rect.position.x, rect.position.y, rect.position.x + rect.size.x, rect.position.y + rect.size.y);
+	}
+
+	//==============================================================================
+	/// 최소, 최대 좌표로 더하기.
+	//==============================================================================
+	fn add_bounds(&mut self, minimum_x: f64, minimum_y: f64, maximum_x: f64, maximum_y: f64) {
+		if !self.is_found {
+			self.minimum_x = minimum_x;
+			self.minimum_y = minimum_y;
+			self.maximum_x = maximum_x;
+			self.maximum_y = maximum_y;
+			self.is_found = true;
+			return;
+		}
+		self.minimum_x = self.minimum_x.min(minimum_x);
+		self.minimum_y = self.minimum_y.min(minimum_y);
+		self.maximum_x = self.maximum_x.max(maximum_x);
+		self.maximum_y = self.maximum_y.max(maximum_y);
+	}
+
+	//==============================================================================
+	/// 모은 사각형. (아무것도 없으면 크기 0)
+	//==============================================================================
+	fn to_rect(&self) -> Rect {
+		if !self.is_found {
+			return Rect::create(0.0, 0.0, 0.0, 0.0);
+		}
+		Rect::create(self.minimum_x, self.minimum_y, self.maximum_x - self.minimum_x, self.maximum_y - self.minimum_y)
+	}
+}
+
+//==============================================================================
+/// 노드 트랜스폼으로 하위 트리 경계를 부모의 내용 좌표로 옮긴 경계 상자. (원본 WorldNode.transformDrawBoundsToParent, TransformNode.transformLocalRectToParent)
+/// - 차례: 피봇만큼 당김 → 배율 → 회전 → 옮김. (WorldNode::push_transform 의 옮김, 회전, 배율, 피봇과 같은 결과)
+//==============================================================================
+fn transform_draw_bounds_to_parent(transform: &NodeTransform, rect: Rect) -> Rect {
+	let content_size = transform.get_content_size();
+	let pivot = transform.get_pivot();
+	let pivot_offset_x = content_size.x * pivot.x;
+	let pivot_offset_y = content_size.y * pivot.y;
+	let local_position = transform.get_local_position();
+	let local_scale = transform.get_local_scale();
+	let local_rotation = transform.get_local_rotation();
+	let radian = math::degree_to_radian(local_rotation);
+	let cos_radian = if radian == 0.0 { 1.0 } else { radian.cos() };
+	let sin_radian = if radian == 0.0 { 0.0 } else { radian.sin() };
+	let left_x = (rect.position.x - pivot_offset_x) * local_scale.x;
+	let top_y = (rect.position.y - pivot_offset_y) * local_scale.y;
+	let right_x = (rect.position.x + rect.size.x - pivot_offset_x) * local_scale.x;
+	let bottom_y = (rect.position.y + rect.size.y - pivot_offset_y) * local_scale.y;
+	let corner_list: [(f64, f64); 4] = [(left_x, top_y), (right_x, top_y), (left_x, bottom_y), (right_x, bottom_y)];
+	let mut minimum_x = f64::INFINITY;
+	let mut minimum_y = f64::INFINITY;
+	let mut maximum_x = f64::NEG_INFINITY;
+	let mut maximum_y = f64::NEG_INFINITY;
+	for (corner_x, corner_y) in corner_list {
+		let rotated_x = cos_radian * corner_x - sin_radian * corner_y;
+		let rotated_y = sin_radian * corner_x + cos_radian * corner_y;
+		minimum_x = minimum_x.min(rotated_x);
+		minimum_y = minimum_y.min(rotated_y);
+		maximum_x = maximum_x.max(rotated_x);
+		maximum_y = maximum_y.max(rotated_y);
+	}
+	Rect::create(minimum_x + local_position.x, minimum_y + local_position.y, maximum_x - minimum_x, maximum_y - minimum_y)
+}
+
+//==============================================================================
+/// 사각형의 네 값이 모두 수인지.
+//==============================================================================
+fn is_rect_finite(rect: &Rect) -> bool {
+	rect.position.x.is_finite() && rect.position.y.is_finite() && rect.size.x.is_finite() && rect.size.y.is_finite()
 }
 
 impl NodeTree {
@@ -90,6 +214,11 @@ impl NodeTree {
 		let mut root = WorldNode::new("root");
 		root.set_pivot(Vector2::zero());
 		let root_id = nodes.insert(root);
+		let tree_serial = NEXT_TREE_SERIAL.fetch_add(1, Ordering::Relaxed);
+		nodes[root_id].set_draw_bounds_key(Some(DrawBoundsKey {
+			tree_serial,
+			node_id: root_id,
+		}));
 		NodeTree {
 			nodes,
 			root_id,
@@ -97,6 +226,9 @@ impl NodeTree {
 			pending_destroy_ids: Vec::new(),
 			culled_node_count: 0,
 			placeholder_pool: Vec::new(),
+			tree_serial,
+			draw_bounds_stamp_counter: 0,
+			draw_bounds_dirty_scratch: Vec::new(),
 		}
 	}
 
@@ -222,7 +354,13 @@ impl NodeTree {
 	/// 새 노드 핸들.
 	//==============================================================================
 	pub fn create_node(&mut self, name: &str) -> NodeId {
-		self.nodes.insert(WorldNode::new(name))
+		let node_id = self.nodes.insert(WorldNode::new(name));
+		let tree_serial = self.tree_serial;
+		self.nodes[node_id].set_draw_bounds_key(Some(DrawBoundsKey {
+			tree_serial,
+			node_id,
+		}));
+		node_id
 	}
 
 	//==============================================================================
@@ -294,6 +432,7 @@ impl NodeTree {
 		let insert_index = child_index.min(parent_node.child_ids.len());
 		parent_node.child_ids.insert(insert_index, child_id);
 		self.nodes[child_id].parent_id = Some(parent_id);
+		self.mark_draw_bounds_dirty_upward(Some(parent_id));
 		true
 	}
 
@@ -316,6 +455,7 @@ impl NodeTree {
 			parent_node.child_ids.retain(|candidate_id| *candidate_id != child_id);
 		}
 		self.nodes[child_id].parent_id = None;
+		self.mark_draw_bounds_dirty_upward(Some(parent_id));
 	}
 
 	//==============================================================================
@@ -634,6 +774,7 @@ impl NodeTree {
 		}
 		parent_node.child_ids.remove(old_child_index);
 		parent_node.child_ids.insert(new_child_index, node_id);
+		self.mark_draw_bounds_dirty_upward(Some(parent_id));
 	}
 
 	//==============================================================================
@@ -1287,6 +1428,9 @@ impl NodeTree {
 	/// 붙인 컴포넌트의 차례 번호.
 	//==============================================================================
 	fn add_boxed_component(&mut self, node_id: NodeId, mut boxed_component: Box<dyn Component>) -> usize {
+		let draw_bounds_key = self.nodes[node_id].get_transform().get_draw_bounds_key();
+		boxed_component.get_component_base_mut().set_draw_bounds_key(draw_bounds_key);
+		self.mark_draw_bounds_dirty_upward(Some(node_id));
 		let component_index = self.nodes[node_id].components.len();
 		let placeholder = self.take_placeholder();
 		self.nodes[node_id].components.push(placeholder);
@@ -1436,6 +1580,7 @@ impl NodeTree {
 	//==============================================================================
 	pub fn draw(&mut self, graphic: &mut Graphic) {
 		self.culled_node_count = 0;
+		self.apply_draw_bounds_dirty();
 		let root_id = self.root_id;
 		self.draw_node(root_id, graphic);
 		graphic.add_culled_node_count(self.culled_node_count);
@@ -1450,7 +1595,7 @@ impl NodeTree {
 	/// - `graphic`: 그릴 Graphic. (부모의 트랜스폼이 걸린 상태)
 	//==============================================================================
 	pub fn draw_node(&mut self, node_id: NodeId, graphic: &mut Graphic) {
-		let node = match self.nodes.get_mut(node_id) {
+		let node = match self.nodes.get(node_id) {
 			Some(node) => {
 				node
 			}
@@ -1461,20 +1606,44 @@ impl NodeTree {
 		if !node.is_active() {
 			return;
 		}
-		node.push_transform(graphic);
-		node.push_component_transforms(graphic);
 
+		// 부모가 셈해 둔 이 노드의 경계(부모 좌표)가 부모 좌표의 보이는 사각형 밖이면 변환을 걸지 않고 건너뛴다. (스크롤 목록의 많은 줄을 하나씩 들어가지 않는다)
+		if self.is_node_culled_in_parent(node_id, graphic) {
+			graphic.add_culled_subtree_count(1);
+			return;
+		}
+
+		let node = &mut self.nodes[node_id];
+		node.push_transform(graphic);
+
+		// 배율이 움직이는 노드의 글은 묶은 배율로 굽는다. (지난 프레임에 그리지 않은 노드는 처음 그리는 것으로 본다, 자식은 저마다 다시 정한다, 컴포넌트를 다 그리면 푼다)
+		let frame_number = graphic.get_draw_frame_number();
+		let last_drawn_maximum_scale = if node.get_last_drawn_frame_number().saturating_add(1) >= frame_number {
+			node.get_last_drawn_maximum_scale()
+		}
+		else {
+			0.0
+		};
+		let drawn_maximum_scale = graphic.update_text_bake_scale_moving(last_drawn_maximum_scale);
+		node.set_last_drawn_maximum_scale(drawn_maximum_scale, frame_number);
+
+		// 하위 트리 그리기 경계가 화면과 자르기 밖이면 이 노드와 자손의 그리기를 통째로 건너뛴다. (기즈모를 모두 그리면 건너뛰지 않는다)
+		let is_force_gizmos_visible = graphic.is_force_gizmos_visible();
+		if self.is_node_subtree_culled(node_id, graphic, is_force_gizmos_visible) {
+			graphic.add_culled_subtree_count(1);
+			graphic.set_text_bake_scale_moving(false);
+			self.nodes[node_id].pop_transform(graphic);
+			return;
+		}
+
+		let node = &mut self.nodes[node_id];
+		node.push_component_transforms(graphic);
 		if node.is_visible() {
 			// 투명도 층이면 이 노드와 자손을 층에 모아 그렸다가 한 번에 얹는다. (CSS opacity)
 			let is_opacity_layer = node.is_opacity_layer() && graphic.get_global_alpha() < 1.0;
 			if is_opacity_layer {
 				graphic.begin_opacity_layer();
 			}
-
-			// 배율이 움직이는 노드의 글은 묶은 배율로 굽는다. (컴포넌트를 다 그리면 푼다, 자식은 저마다 다시 정한다)
-			let last_drawn_maximum_scale = node.get_last_drawn_maximum_scale();
-			let drawn_maximum_scale = graphic.update_text_bake_scale_moving(last_drawn_maximum_scale);
-			node.set_last_drawn_maximum_scale(drawn_maximum_scale);
 
 			// 컴포넌트. (화면 밖이면 건너뛴다)
 			let (clip_round_size, is_culled) = node.draw_components(graphic);
@@ -1490,11 +1659,7 @@ impl NodeTree {
 			}
 
 			// 자식. (그리는 동안에는 트리가 바뀌지 않는다)
-			let child_count = self.nodes[node_id].child_ids.len();
-			for child_index in 0..child_count {
-				let child_id = self.nodes[node_id].child_ids[child_index];
-				self.draw_node(child_id, graphic);
-			}
+			self.draw_children(node_id, graphic);
 
 			// 마스크가 있으면 클리핑 종료.
 			if clip_round_size.is_some() {
@@ -1505,14 +1670,475 @@ impl NodeTree {
 				graphic.end_opacity_layer();
 			}
 		}
+		graphic.set_text_bake_scale_moving(false);
 
 		let node = &mut self.nodes[node_id];
-		let is_force_gizmos_visible = graphic.is_force_gizmos_visible();
 		if is_force_gizmos_visible || node.is_gizmo_visible() {
 			node.draw_gizmos(graphic);
 		}
 		node.pop_component_transforms(graphic);
 		node.pop_transform(graphic);
+	}
+
+	//==============================================================================
+	/// 자식 목록 출력. (자식 차례대로 draw_node, draw_node 가 부른다, 원본 TransformNode.drawChildren)
+	/// - 하위 트리 거르기가 켜졌으면 부모 좌표의 보이는 사각형(Graphic::read_local_visible_bounds)으로 보이는 자식 범위를 이분 찾기로 좁혀 그 앞뒤 자식은 부르지 않는다.
+	///   범위 밖 자식 가운데 하나씩 거를 때 셀 것은 Graphic::add_culled_subtree_count 로 더한다. (건너뛴 하위 트리 수가 하나씩 거를 때와 같다)
+	/// - 지금 변환은 이 노드의 내용 좌표여야 한다. (push_transform 을 건 뒤)
+	///
+	/// # 인자
+	/// - `node_id`: 자식을 그릴 노드.
+	/// - `graphic`: 그릴 Graphic.
+	///
+	/// # 예제
+	/// 화면 밖 자식은 부르지 않는다
+	/// ```rust
+	/// use vanilla::{NodeTree, Paint, Pivot};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let list_id = node_tree.create_child(root_id, "list");
+	/// node_tree[list_id].set_pivot(Pivot::TOP_LEFT);
+	/// for row_index in 0..100 {
+	/// 	let row_id = node_tree.create_child(list_id, "row");
+	/// 	node_tree[row_id].set_pivot(Pivot::TOP_LEFT);
+	/// 	node_tree[row_id].set_rect(0.0, row_index as f64 * 40.0, 200.0, 36.0);
+	/// 	node_tree.add_component(row_id, Paint::new());
+	/// }
+	/// assert_eq!(node_tree.get_child_count(list_id), 100);
+	/// ```
+	//==============================================================================
+	pub fn draw_children(&mut self, node_id: NodeId, graphic: &mut Graphic) {
+		let child_count = match self.nodes.get(node_id) {
+			Some(node) => {
+				node.child_ids.len()
+			}
+			None => {
+				return;
+			}
+		};
+		let (first_index, last_index) = match self.find_visible_child_range(node_id, graphic, child_count) {
+			Some(child_range) => {
+				child_range
+			}
+			None => {
+				(0, child_count)
+			}
+		};
+		let mut child_index = first_index;
+		while child_index < last_index && child_index < child_count {
+			let child_id = self.nodes[node_id].child_ids[child_index];
+			self.draw_node(child_id, graphic);
+			child_index += 1;
+		}
+	}
+
+	//==============================================================================
+	/// 보이는 자식 범위 찾기. (찾으면 (첫 자리, 끝 자리 + 1) 을 돌려주고 범위 밖 자식 가운데 건너뛰면 세는 수를 graphic 에 더한다)
+	/// - 자식 범위 칸이 이번 경계 셈과 같은 차례이고 이 노드가 더럽지 않을 때만. 지금 변환은 이 노드의 내용 좌표.
+	/// - 첫 자식: 앞에서부터 모은 가장 큰 아래가 보이는 위 이상이고 가장 큰 오른쪽이 보이는 왼쪽 이상인 첫 자리. (그 앞 자식은 모두 위나 왼쪽 밖)
+	/// - 끝 자식: 뒤에서부터 모은 가장 작은 위가 보이는 아래 이하이고 가장 작은 왼쪽이 보이는 오른쪽 이하인 끝 자리. (그 뒤 자식은 모두 아래나 오른쪽 밖)
+	//==============================================================================
+	fn find_visible_child_range(&self, node_id: NodeId, graphic: &mut Graphic, child_count: usize) -> Option<(usize, usize)> {
+		let cache = &self.nodes[node_id].draw_bounds_cache;
+		if child_count < 2 || cache.child_range_stamp != cache.stamp || cache.child_range_count != child_count || cache.state == DRAW_BOUNDS_DIRTY {
+			return None;
+		}
+		if cache.generation != ComponentBase::get_drawn_rect_generation() {
+			return None;
+		}
+		let visible_rect = graphic.read_local_visible_bounds()?;
+		let visible_minimum_x = visible_rect.position.x;
+		let visible_minimum_y = visible_rect.position.y;
+		let visible_maximum_x = visible_minimum_x + visible_rect.size.x;
+		let visible_maximum_y = visible_minimum_y + visible_rect.size.y;
+		let child_range_list = &cache.child_range_list;
+
+		// 첫 자식. (조건이 한 번 참이면 뒤로 내내 참이다)
+		let mut low_index = 0;
+		let mut high_index = child_count;
+		while low_index < high_index {
+			let middle_index = (low_index + high_index) / 2;
+			let middle_offset = middle_index * CHILD_RANGE_STRIDE;
+			if child_range_list[middle_offset + CHILD_RANGE_PREFIX_MAXIMUM_BOTTOM] >= visible_minimum_y && child_range_list[middle_offset + CHILD_RANGE_PREFIX_MAXIMUM_RIGHT] >= visible_minimum_x {
+				high_index = middle_index;
+			}
+			else {
+				low_index = middle_index + 1;
+			}
+		}
+		let first_index = low_index;
+
+		// 끝 자식. (조건이 참인 자리는 앞쪽에 모인다, 처음으로 거짓인 자리)
+		low_index = 0;
+		high_index = child_count;
+		while low_index < high_index {
+			let middle_index = (low_index + high_index) / 2;
+			let middle_offset = middle_index * CHILD_RANGE_STRIDE;
+			if child_range_list[middle_offset + CHILD_RANGE_SUFFIX_MINIMUM_TOP] <= visible_maximum_y && child_range_list[middle_offset + CHILD_RANGE_SUFFIX_MINIMUM_LEFT] <= visible_maximum_x {
+				low_index = middle_index + 1;
+			}
+			else {
+				high_index = middle_index;
+			}
+		}
+		let end_index = low_index;
+
+		// 범위 밖 자식 가운데 건너뛰면 세는 수. (부모 좌표에서 먼저 거르기가 하나씩 건너뛰었을 수와 같다)
+		let total_count = child_range_list[child_count * CHILD_RANGE_STRIDE + CHILD_RANGE_PREFIX_COUNT];
+		let mut culled_count = total_count;
+		if first_index < end_index {
+			let first_count = child_range_list[first_index * CHILD_RANGE_STRIDE + CHILD_RANGE_PREFIX_COUNT];
+			let end_count = child_range_list[end_index * CHILD_RANGE_STRIDE + CHILD_RANGE_PREFIX_COUNT];
+			culled_count = first_count + (total_count - end_count);
+		}
+		if culled_count > 0.0 {
+			graphic.add_culled_subtree_count(culled_count as u32);
+		}
+		Some((first_index, end_index))
+	}
+
+	//==============================================================================
+	/// 노드를 부모 좌표에서 보아 화면 밖이라 건너뛸지. (draw_node 가 노드에 변환을 걸기 전에 부른다, 지금 변환은 부모의 내용 좌표)
+	//==============================================================================
+	fn is_node_culled_in_parent(&self, node_id: NodeId, graphic: &mut Graphic) -> bool {
+		if !graphic.is_culling_enabled() || !graphic.is_subtree_culling_enabled() || graphic.is_force_gizmos_visible() {
+			return false;
+		}
+		let draw_bounds = match self.read_parent_draw_bounds(node_id) {
+			Some(draw_bounds) => {
+				draw_bounds
+			}
+			None => {
+				return false;
+			}
+		};
+		if !(draw_bounds.size.x > 0.0 && draw_bounds.size.y > 0.0) {
+			return true;
+		}
+		let visible_rect = match graphic.read_local_visible_bounds() {
+			Some(visible_rect) => {
+				visible_rect
+			}
+			None => {
+				return false;
+			}
+		};
+		let left_x = draw_bounds.position.x;
+		let top_y = draw_bounds.position.y;
+		left_x > visible_rect.position.x + visible_rect.size.x || top_y > visible_rect.position.y + visible_rect.size.y || left_x + draw_bounds.size.x < visible_rect.position.x || top_y + draw_bounds.size.y < visible_rect.position.y
+	}
+
+	//==============================================================================
+	/// 하위 트리 그리기 경계가 화면과 자르기 밖이라 건너뛸지. (draw_node 가 노드에 변환을 건 뒤 부른다)
+	//==============================================================================
+	fn is_node_subtree_culled(&mut self, node_id: NodeId, graphic: &mut Graphic, is_force_gizmos_visible: bool) -> bool {
+		if !graphic.is_culling_enabled() || !graphic.is_subtree_culling_enabled() || is_force_gizmos_visible {
+			return false;
+		}
+		let draw_bounds = match self.read_subtree_draw_bounds_now(node_id, graphic) {
+			Some(draw_bounds) => {
+				draw_bounds
+			}
+			None => {
+				return false;
+			}
+		};
+		if !(draw_bounds.size.x > 0.0 && draw_bounds.size.y > 0.0) {
+			return true;
+		}
+		!graphic.is_local_rect_visible(draw_bounds)
+	}
+
+	//==============================================================================
+	/// 노드와 컴포넌트가 알린 경계 더러움을 조상으로 번진다. (그리기와 경계 읽기 앞에)
+	//==============================================================================
+	fn apply_draw_bounds_dirty(&mut self) {
+		let mut dirty_list = std::mem::take(&mut self.draw_bounds_dirty_scratch);
+		take_draw_bounds_dirty(self.tree_serial, &mut dirty_list);
+		for (node_id, is_parent) in dirty_list.iter().copied() {
+			let start_id = if is_parent {
+				self.nodes.get(node_id).and_then(|node| node.parent_id)
+			}
+			else {
+				Some(node_id)
+			};
+			self.mark_draw_bounds_dirty_upward(start_id);
+		}
+		dirty_list.clear();
+		self.draw_bounds_dirty_scratch = dirty_list;
+	}
+
+	//==============================================================================
+	/// 노드와 조상의 하위 트리 그리기 경계를 다시 셈할 차례로. (이미 그런 노드에서 멈춘다, 그 위는 이미 그렇다)
+	//==============================================================================
+	fn mark_draw_bounds_dirty_upward(&mut self, start_id: Option<NodeId>) {
+		let mut current_id = start_id;
+		while let Some(node_id) = current_id {
+			let node = match self.nodes.get_mut(node_id) {
+				Some(node) => {
+					node
+				}
+				None => {
+					break;
+				}
+			};
+			if node.draw_bounds_cache.state == DRAW_BOUNDS_DIRTY {
+				break;
+			}
+			node.draw_bounds_cache.state = DRAW_BOUNDS_DIRTY;
+			current_id = node.parent_id;
+		}
+	}
+
+	//==============================================================================
+	/// 하위 트리 그리기 경계 읽기. (이 노드의 내용 좌표, push_transform 을 건 뒤의 좌표, 원본 TransformNode.readSubtreeDrawBounds)
+	/// - 이 노드와 켜지고 보이는 자손이 그리는 곳을 모두 품는 사각형이다. 크기가 0 이면 아무것도 그리지 않는다.
+	/// - 바뀐 때만 다시 셈하고 그 밖에는 셈해 둔 것을 준다. 그리기 순회가 이 사각형이 화면과 자르기 밖이면 하위 트리를 통째로 건너뛴다.
+	/// - 자기 그림: 켜지고 그리는 컴포넌트(Component::is_draw_overridden)의 calculate_drawn_rect. 내용 영역 안에서만 그리는 컴포넌트는 내용 영역을 한 단위씩 넓혀 본다.
+	/// - 자식: 자식의 경계를 자식의 변환(위치, 회전, 배율, 피봇)으로 옮긴 이 노드의 내용 좌표 경계 상자. 마스크로 잘라도 줄이지 않는다. (넉넉하게 본다)
+	///
+	/// # 인자
+	/// - `node_id`: 읽을 노드.
+	/// - `graphic`: 컴포넌트가 그리는 사각형을 셀 때 쓰는 Graphic. (글 크기 재기)
+	///
+	/// # 돌려줌
+	/// 경계. 어디에 그리는지 모르는 것(경계를 알리지 않는 컴포넌트, 기즈모를 그리는 노드)이 들거나 없는 노드면 None.
+	///
+	/// # 예제
+	/// 자식 경계가 부모 좌표로 모인다
+	/// ```rust,no_run
+	/// use vanilla::{Graphic, NodeTree, Paint, Pivot, Rect};
+	///
+	/// fn read_bounds(graphic: &mut Graphic) {
+	/// 	let mut node_tree = NodeTree::new();
+	/// 	let root_id = node_tree.get_root_id();
+	/// 	let list_id = node_tree.create_child(root_id, "list");
+	/// 	node_tree[list_id].set_pivot(Pivot::TOP_LEFT);
+	/// 	let row_id = node_tree.create_child(list_id, "row");
+	/// 	node_tree[row_id].set_pivot(Pivot::TOP_LEFT);
+	/// 	node_tree[row_id].set_rect(10.0, 20.0, 100.0, 30.0);
+	/// 	node_tree.add_component(row_id, Paint::new());
+	/// 	let bounds = node_tree.read_subtree_draw_bounds(list_id, graphic).expect("known");
+	/// 	assert_eq!(bounds, Rect::create(9.0, 19.0, 102.0, 32.0));
+	/// 	assert_eq!(node_tree.read_parent_draw_bounds(row_id), Some(Rect::create(9.0, 19.0, 102.0, 32.0)));
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn read_subtree_draw_bounds(&mut self, node_id: NodeId, graphic: &mut Graphic) -> Option<Rect> {
+		self.apply_draw_bounds_dirty();
+		self.read_subtree_draw_bounds_now(node_id, graphic)
+	}
+
+	//==============================================================================
+	/// 하위 트리 그리기 경계 읽기. (더러움을 번진 뒤, 그리기 순회 안에서)
+	//==============================================================================
+	fn read_subtree_draw_bounds_now(&mut self, node_id: NodeId, graphic: &mut Graphic) -> Option<Rect> {
+		let drawn_rect_generation = ComponentBase::get_drawn_rect_generation();
+		let cache = &self.nodes.get(node_id)?.draw_bounds_cache;
+		if cache.state == DRAW_BOUNDS_DIRTY || cache.generation != drawn_rect_generation {
+			// 새 차례 번호를 먼저 적는다. (셈하며 자식에 적는 부모 좌표 경계가 이 번호를 단다, 앞 차례에 적은 것은 맞지 않게 된다)
+			self.draw_bounds_stamp_counter += 1;
+			let draw_bounds_stamp = self.draw_bounds_stamp_counter;
+			self.nodes[node_id].draw_bounds_cache.stamp = draw_bounds_stamp;
+			let calculated_bounds = self.calculate_subtree_draw_bounds(node_id, graphic);
+			let cache = &mut self.nodes[node_id].draw_bounds_cache;
+			match calculated_bounds {
+				Some(bounds) if is_rect_finite(&bounds) => {
+					cache.bounds = bounds;
+					cache.state = DRAW_BOUNDS_KNOWN;
+				}
+				_ => {
+					cache.state = DRAW_BOUNDS_UNKNOWN;
+				}
+			}
+			cache.generation = drawn_rect_generation;
+		}
+		let cache = &self.nodes[node_id].draw_bounds_cache;
+		if cache.state != DRAW_BOUNDS_KNOWN {
+			return None;
+		}
+		Some(cache.bounds)
+	}
+
+	//==============================================================================
+	/// 부모가 셈해 둔 이 노드의 하위 트리 그리기 경계 읽기. (부모의 내용 좌표, 이 노드의 변환을 건 경계 상자, 원본 TransformNode.readParentDrawBounds)
+	/// - 부모가 하위 트리 경계를 셈할 때 자식마다 옮겨 적어 둔 것이다. 이 노드의 변환이나 경계가 바뀌면 부모가 다시 셈하므로 그때까지 그대로 쓴다.
+	/// - 그리기 순회가 부모의 변환 아래에서 이 사각형을 먼저 보아, 부모 좌표의 보이는 사각형 밖이면 이 노드에 변환을 걸지 않고 건너뛴다.
+	///
+	/// # 인자
+	/// - `node_id`: 읽을 노드.
+	///
+	/// # 돌려줌
+	/// 부모 좌표 경계. 부모가 아직 셈하지 않았거나 셈한 뒤 바뀌었거나, 이 노드가 어디에 그리는지 모르면 None. (아무것도 그리지 않으면 크기 0)
+	//==============================================================================
+	pub fn read_parent_draw_bounds(&self, node_id: NodeId) -> Option<Rect> {
+		let node = self.nodes.get(node_id)?;
+		let parent = self.nodes.get(node.parent_id?)?;
+		let parent_cache = &parent.draw_bounds_cache;
+		let cache = &node.draw_bounds_cache;
+		if cache.parent_stamp != parent_cache.stamp || parent_cache.state == DRAW_BOUNDS_DIRTY || parent_cache.generation != ComponentBase::get_drawn_rect_generation() {
+			return None;
+		}
+		if cache.is_parent_bounds_empty {
+			return Some(Rect::create(cache.parent_bounds.position.x, cache.parent_bounds.position.y, 0.0, 0.0));
+		}
+		Some(cache.parent_bounds)
+	}
+
+	//==============================================================================
+	/// 하위 트리 그리기 경계 셈하기. (자기 그림과 켜지고 보이는 자식들 경계의 합, 원본 TransformNode.calculateSubtreeDrawBounds, 모르면 None)
+	/// - 모르더라도 켜지고 보이는 자식의 경계는 모두 읽는다. (자식이 셈해 두어야 자손이 바뀐 것이 이 노드까지 번진다)
+	/// - 부모 좌표로 옮긴 자식의 경계는 자식에 적고(read_parent_draw_bounds), 자식 범위 칸을 채운다(draw_children 의 이분 찾기).
+	//==============================================================================
+	fn calculate_subtree_draw_bounds(&mut self, node_id: NodeId, graphic: &mut Graphic) -> Option<Rect> {
+		let mut is_known = true;
+		let mut accumulator = BoundsAccumulator::new();
+
+		// 켜지고 그리는 컴포넌트. (기즈모를 그리는 노드는 모른다)
+		{
+			let node = &mut self.nodes[node_id];
+			if node.is_gizmo_visible() {
+				is_known = false;
+			}
+			else {
+				let content_size = node.get_transform().get_content_size();
+				let (transform, component_list) = node.split_transform_and_components();
+				let mut is_inside_content_reported = false;
+				for component in component_list.iter_mut() {
+					if !component.is_enable() || !component.is_draw_overridden() {
+						continue;
+					}
+					if component.is_drawn_inside_content() {
+						is_inside_content_reported = true;
+					}
+					match component.calculate_drawn_rect(transform, graphic) {
+						Some(component_rect) => {
+							accumulator.add_rect(component_rect);
+						}
+						None => {
+							// 기본 calculate_drawn_rect 는 내용 크기가 0 이면 None 이다. (내용 영역 안에서만 그리므로 아래 넓힌 내용 영역으로 본다)
+							let is_empty_content = !(content_size.x > 0.0 && content_size.y > 0.0);
+							if !(component.is_drawn_inside_content() && is_empty_content) {
+								is_known = false;
+								break;
+							}
+						}
+					}
+				}
+				// 내용 영역 안에서만 그리는 컴포넌트는 내용 영역을 한 단위씩 넓혀 본다. (화면 밖 거르기와 같다)
+				if is_known && is_inside_content_reported {
+					accumulator.add_bounds(content_size.x.min(0.0) - 1.0, content_size.y.min(0.0) - 1.0, content_size.x.max(0.0) + 1.0, content_size.y.max(0.0) + 1.0);
+				}
+			}
+		}
+
+		// 켜지고 보이는 자식. (모르는 것이 나와도 자식이 셈해 두게 끝까지 읽는다)
+		// 자식 범위 칸에 자식마다 부모 좌표 경계를 적는다. 모르는 자식은 막음(위와 왼쪽 -무한, 아래와 오른쪽 +무한), 꺼진 자식과 그리지 않는 자식은 빔(반대).
+		let draw_bounds_stamp = self.nodes[node_id].draw_bounds_cache.stamp;
+		let child_count = self.nodes[node_id].child_ids.len();
+		let mut child_range_list = std::mem::take(&mut self.nodes[node_id].draw_bounds_cache.child_range_list);
+		let range_length = (child_count + 1) * CHILD_RANGE_STRIDE;
+		if child_count > 0 && child_range_list.len() < range_length {
+			child_range_list.resize(range_length, 0.0);
+		}
+		for child_index in 0..child_count {
+			let child_id = self.nodes[node_id].child_ids[child_index];
+			let range_offset = child_index * CHILD_RANGE_STRIDE;
+			child_range_list[range_offset + CHILD_RANGE_PREFIX_MAXIMUM_BOTTOM] = f64::INFINITY;
+			child_range_list[range_offset + CHILD_RANGE_PREFIX_MAXIMUM_RIGHT] = f64::INFINITY;
+			child_range_list[range_offset + CHILD_RANGE_SUFFIX_MINIMUM_TOP] = f64::NEG_INFINITY;
+			child_range_list[range_offset + CHILD_RANGE_SUFFIX_MINIMUM_LEFT] = f64::NEG_INFINITY;
+			child_range_list[range_offset + CHILD_RANGE_PREFIX_COUNT] = 0.0;
+			// 꺼진 자식은 draw_node 가 바로 돌아가므로 빔. 숨긴 자식은 기즈모가 그릴 수 있어 막음.
+			let child = &self.nodes[child_id];
+			if !child.is_active() {
+				child_range_list[range_offset + CHILD_RANGE_PREFIX_MAXIMUM_BOTTOM] = f64::NEG_INFINITY;
+				child_range_list[range_offset + CHILD_RANGE_PREFIX_MAXIMUM_RIGHT] = f64::NEG_INFINITY;
+				child_range_list[range_offset + CHILD_RANGE_SUFFIX_MINIMUM_TOP] = f64::INFINITY;
+				child_range_list[range_offset + CHILD_RANGE_SUFFIX_MINIMUM_LEFT] = f64::INFINITY;
+				continue;
+			}
+			if !child.is_visible() {
+				continue;
+			}
+			let child_bounds = match self.read_subtree_draw_bounds_now(child_id, graphic) {
+				Some(child_bounds) => {
+					child_bounds
+				}
+				None => {
+					is_known = false;
+					continue;
+				}
+			};
+			let is_child_empty = !(child_bounds.size.x > 0.0 && child_bounds.size.y > 0.0);
+			let child = &mut self.nodes[child_id];
+			let parent_bounds = transform_draw_bounds_to_parent(child.get_transform(), child_bounds);
+			if is_rect_finite(&parent_bounds) {
+				let child_cache = &mut child.draw_bounds_cache;
+				child_cache.parent_bounds = parent_bounds;
+				child_cache.is_parent_bounds_empty = is_child_empty;
+				child_cache.parent_stamp = draw_bounds_stamp;
+				child_range_list[range_offset + CHILD_RANGE_PREFIX_COUNT] = 1.0;
+				if is_child_empty {
+					child_range_list[range_offset + CHILD_RANGE_PREFIX_MAXIMUM_BOTTOM] = f64::NEG_INFINITY;
+					child_range_list[range_offset + CHILD_RANGE_PREFIX_MAXIMUM_RIGHT] = f64::NEG_INFINITY;
+					child_range_list[range_offset + CHILD_RANGE_SUFFIX_MINIMUM_TOP] = f64::INFINITY;
+					child_range_list[range_offset + CHILD_RANGE_SUFFIX_MINIMUM_LEFT] = f64::INFINITY;
+				}
+				else {
+					child_range_list[range_offset + CHILD_RANGE_PREFIX_MAXIMUM_BOTTOM] = parent_bounds.position.y + parent_bounds.size.y;
+					child_range_list[range_offset + CHILD_RANGE_PREFIX_MAXIMUM_RIGHT] = parent_bounds.position.x + parent_bounds.size.x;
+					child_range_list[range_offset + CHILD_RANGE_SUFFIX_MINIMUM_TOP] = parent_bounds.position.y;
+					child_range_list[range_offset + CHILD_RANGE_SUFFIX_MINIMUM_LEFT] = parent_bounds.position.x;
+				}
+			}
+			if !is_known || is_child_empty {
+				continue;
+			}
+			accumulator.add_rect(parent_bounds);
+		}
+
+		// 자식 범위 칸을 앞에서부터(가장 큰 아래와 오른쪽, 건너뛰면 세는 수), 뒤에서부터(가장 작은 위와 왼쪽) 모은다. (자식을 그릴 때 이분 찾기로 보이는 범위를 찾는다)
+		let cache_child_range_stamp;
+		if child_count > 0 {
+			let mut prefix_maximum_bottom = f64::NEG_INFINITY;
+			let mut prefix_maximum_right = f64::NEG_INFINITY;
+			let mut prefix_count = 0.0;
+			for range_index in 0..child_count {
+				let range_offset = range_index * CHILD_RANGE_STRIDE;
+				prefix_maximum_bottom = prefix_maximum_bottom.max(child_range_list[range_offset + CHILD_RANGE_PREFIX_MAXIMUM_BOTTOM]);
+				prefix_maximum_right = prefix_maximum_right.max(child_range_list[range_offset + CHILD_RANGE_PREFIX_MAXIMUM_RIGHT]);
+				child_range_list[range_offset + CHILD_RANGE_PREFIX_MAXIMUM_BOTTOM] = prefix_maximum_bottom;
+				child_range_list[range_offset + CHILD_RANGE_PREFIX_MAXIMUM_RIGHT] = prefix_maximum_right;
+				let countable = child_range_list[range_offset + CHILD_RANGE_PREFIX_COUNT];
+				child_range_list[range_offset + CHILD_RANGE_PREFIX_COUNT] = prefix_count;
+				prefix_count += countable;
+			}
+			child_range_list[child_count * CHILD_RANGE_STRIDE + CHILD_RANGE_PREFIX_COUNT] = prefix_count;
+			let mut suffix_minimum_top = f64::INFINITY;
+			let mut suffix_minimum_left = f64::INFINITY;
+			for range_index in (0..child_count).rev() {
+				let range_offset = range_index * CHILD_RANGE_STRIDE;
+				suffix_minimum_top = suffix_minimum_top.min(child_range_list[range_offset + CHILD_RANGE_SUFFIX_MINIMUM_TOP]);
+				suffix_minimum_left = suffix_minimum_left.min(child_range_list[range_offset + CHILD_RANGE_SUFFIX_MINIMUM_LEFT]);
+				child_range_list[range_offset + CHILD_RANGE_SUFFIX_MINIMUM_TOP] = suffix_minimum_top;
+				child_range_list[range_offset + CHILD_RANGE_SUFFIX_MINIMUM_LEFT] = suffix_minimum_left;
+			}
+			cache_child_range_stamp = draw_bounds_stamp;
+		}
+		else {
+			cache_child_range_stamp = u64::MAX;
+		}
+		let cache = &mut self.nodes[node_id].draw_bounds_cache;
+		cache.child_range_list = child_range_list;
+		cache.child_range_stamp = cache_child_range_stamp;
+		cache.child_range_count = child_count;
+
+		if !is_known {
+			return None;
+		}
+		Some(accumulator.to_rect())
 	}
 
 	//==============================================================================

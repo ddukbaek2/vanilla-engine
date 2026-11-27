@@ -30,9 +30,10 @@ use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
-use crate::core::node::worldnode::NodeTransform;
+use crate::core::node::worldnode::{push_draw_bounds_dirty, DrawBoundsKey, NodeTransform};
 use crate::core::reflection::Reflect;
 use std::any::{Any, TypeId};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 //==============================================================================
 /// 의존 컴포넌트 하나. (그 타입과 없을 때 만드는 함수, 원본 require 가 돌려주는 클래스 자리)
@@ -282,7 +283,11 @@ impl<'a> dyn Component + 'a {
 pub struct ComponentBase {
 	is_enable: bool,
 	is_gizmo_visible: bool,
+	draw_bounds_key: Option<DrawBoundsKey>,
 }
+
+/// 컴포넌트 그리는 사각형 세대. (모든 컴포넌트의 그리는 사각형이 한꺼번에 바뀔 수 있을 때 하나 오른다, 글꼴 적재 같은)
+static DRAWN_RECT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 impl ComponentBase {
 	//==============================================================================
@@ -295,6 +300,7 @@ impl ComponentBase {
 		ComponentBase {
 			is_enable: true,
 			is_gizmo_visible: false,
+			draw_bounds_key: None,
 		}
 	}
 
@@ -305,7 +311,10 @@ impl ComponentBase {
 	/// - `is_enable`: 켤지. (false 면 tick, 그리기, 터치, 휠에서 빠진다)
 	//==============================================================================
 	pub fn set_enable(&mut self, is_enable: bool) {
-		self.is_enable = is_enable;
+		if self.is_enable != is_enable {
+			self.is_enable = is_enable;
+			self.mark_drawn_rect_dirty();
+		}
 	}
 
 	//==============================================================================
@@ -325,7 +334,10 @@ impl ComponentBase {
 	/// - `is_gizmo_visible`: 노드의 기즈모를 그릴 때 이 컴포넌트의 draw_gizmos 도 부를지.
 	//==============================================================================
 	pub fn set_gizmo_visible(&mut self, is_gizmo_visible: bool) {
-		self.is_gizmo_visible = is_gizmo_visible;
+		if self.is_gizmo_visible != is_gizmo_visible {
+			self.is_gizmo_visible = is_gizmo_visible;
+			self.mark_drawn_rect_dirty();
+		}
 	}
 
 	//==============================================================================
@@ -336,6 +348,59 @@ impl ComponentBase {
 	//==============================================================================
 	pub fn is_gizmo_visible(&self) -> bool {
 		self.is_gizmo_visible
+	}
+
+	//==============================================================================
+	/// 그리는 사각형(Component::calculate_drawn_rect)이 바뀌었음을 노드에 알린다. (원본 Component.markDrawnRectDirty)
+	/// - 붙은 노드와 조상이 다음 그리기 전에 하위 트리 그리기 경계를 다시 셈한다. 노드에 붙지 않았으면 할 일이 없다.
+	/// - 그리는 사각형을 바꾸는 세터마다 부른다. (부르지 않으면 넓어진 그림이 화면에 들어와도 하위 트리째 건너뛰어 안 그려질 수 있다)
+	///
+	/// # 예제
+	/// 세터에서 알리기
+	/// ```rust
+	/// use vanilla::ComponentBase;
+	///
+	/// let component_base = ComponentBase::new();
+	/// component_base.mark_drawn_rect_dirty();
+	/// ```
+	//==============================================================================
+	pub fn mark_drawn_rect_dirty(&self) {
+		push_draw_bounds_dirty(self.draw_bounds_key, false);
+	}
+
+	//==============================================================================
+	/// 경계 더러움 열쇠 달기. (노드에 붙을 때 WorldNode 가 단다)
+	//==============================================================================
+	pub(crate) fn set_draw_bounds_key(&mut self, draw_bounds_key: Option<DrawBoundsKey>) {
+		self.draw_bounds_key = draw_bounds_key;
+	}
+
+	//==============================================================================
+	/// 모든 컴포넌트의 그리는 사각형이 바뀌었음을 알린다. (원본 Component.markAllDrawnRectsDirty, 글꼴을 새로 읽어 글 너비가 바뀔 때 같은)
+	/// - 세대를 하나 올려 모든 노드가 다음에 경계를 읽을 때 다시 셈하게 한다.
+	///
+	/// # 예제
+	/// 세대가 오른다
+	/// ```rust
+	/// use vanilla::ComponentBase;
+	///
+	/// let generation = ComponentBase::get_drawn_rect_generation();
+	/// ComponentBase::mark_all_drawn_rects_dirty();
+	/// assert!(ComponentBase::get_drawn_rect_generation() > generation);
+	/// ```
+	//==============================================================================
+	pub fn mark_all_drawn_rects_dirty() {
+		DRAWN_RECT_GENERATION.fetch_add(1, Ordering::Relaxed);
+	}
+
+	//==============================================================================
+	/// 컴포넌트 그리는 사각형 세대. (원본 Component.getDrawnRectGeneration, mark_all_drawn_rects_dirty 마다 하나 오른다)
+	///
+	/// # 돌려줌
+	/// 지금 세대. (1 부터)
+	//==============================================================================
+	pub fn get_drawn_rect_generation() -> u64 {
+		DRAWN_RECT_GENERATION.load(Ordering::Relaxed)
 	}
 }
 
@@ -637,6 +702,25 @@ pub trait Component: AsAny + Reflect {
 	//==============================================================================
 	fn is_drawn_inside_content(&self) -> bool {
 		false
+	}
+
+	//==============================================================================
+	/// draw 를 덮어썼는지. (원본은 component.draw 가 Component.prototype.draw 와 다른지로 본다)
+	/// - false 면 아무것도 그리지 않는 컴포넌트라 화면 밖 거르기와 하위 트리 그리기 경계에서 빠진다. (ButtonMotion, UINode 같은)
+	/// - #[reflect] 를 붙인 impl Component 블록에 fn draw 가 없으면 매크로가 false 를 돌려주게 짓는다. 매크로 없이 쓰면 기본 true. (어디에 그리는지 모르는 것으로 본다)
+	///
+	/// # 돌려줌
+	/// draw 를 덮어썼으면 true.
+	//==============================================================================
+	fn is_draw_overridden(&self) -> bool {
+		true
+	}
+
+	//==============================================================================
+	/// 그리는 사각형(calculate_drawn_rect)이 바뀌었음을 노드에 알린다. (원본 Component.markDrawnRectDirty, ComponentBase::mark_drawn_rect_dirty)
+	//==============================================================================
+	fn mark_drawn_rect_dirty(&self) {
+		self.get_component_base().mark_drawn_rect_dirty();
 	}
 
 	//==============================================================================
