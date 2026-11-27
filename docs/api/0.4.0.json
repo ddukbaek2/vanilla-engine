@@ -6485,7 +6485,13 @@
 								"en": "Constructor."
 							},
 							"since": "0.3.2",
-							"source": "src/base/color.rs"
+							"source": "src/base/color.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/color",
+								"class": "Color",
+								"name": "create"
+							}
 						},
 						{
 							"kind": "static",
@@ -24919,7 +24925,13 @@
 								"en": "Sets the image path. (written and read by the UI document)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/component/shadowimage.rs"
+							"source": "src/core/component/shadowimage.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/component/shadowimage",
+								"class": "ShadowImage",
+								"name": "setImagePath"
+							}
 						},
 						{
 							"kind": "method",
@@ -24938,7 +24950,13 @@
 								"en": "Returns the image path. (empty string if not set. The UI document writes it separately as imagePath like Sprite, so it is excluded from reflection saved properties)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/component/shadowimage.rs"
+							"source": "src/core/component/shadowimage.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/component/shadowimage",
+								"class": "ShadowImage",
+								"name": "getImagePath"
+							}
 						},
 						{
 							"kind": "method",
@@ -26720,7 +26738,13 @@
 								"en": "Sets the image path. (the original sprite.imagePath, written and read by the UI document)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/component/sprite.rs"
+							"source": "src/core/component/sprite.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/component/sprite",
+								"class": "Sprite",
+								"name": "setImagePath"
+							}
 						},
 						{
 							"kind": "method",
@@ -26739,7 +26763,13 @@
 								"en": "Returns the image path. (empty string if not set)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/component/sprite.rs"
+							"source": "src/core/component/sprite.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/component/sprite",
+								"class": "Sprite",
+								"name": "getImagePath"
+							}
 						},
 						{
 							"kind": "method",
@@ -29035,7 +29065,13 @@
 								"en": "View scale mode."
 							},
 							"since": "0.3.2",
-							"source": "src/core/engine.rs"
+							"source": "src/core/engine.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/engine",
+								"class": "EngineConfiguration",
+								"name": "viewScaleMode"
+							}
 						},
 						{
 							"kind": "field",
@@ -45347,6 +45383,12 @@
 							},
 							"since": "0.3.2",
 							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "resolveShaderProgram"
+							},
 							"examples": [
 								{
 									"title": {
@@ -55514,7 +55556,13 @@
 								"en": "Point in the node area → view coordinates."
 							},
 							"since": "0.3.2",
-							"source": "src/core/node/nodetree.rs"
+							"source": "src/core/node/nodetree.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/worldnode",
+								"class": "WorldNode",
+								"name": "convertNodePositionToViewPosition"
+							}
 						},
 						{
 							"kind": "method",
@@ -55550,7 +55598,13 @@
 								"en": "View coordinates → point in the node area. (None if the matrix is not invertible)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/node/nodetree.rs"
+							"source": "src/core/node/nodetree.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/worldnode",
+								"class": "WorldNode",
+								"name": "convertViewPositionToNodePosition"
+							}
 						},
 						{
 							"kind": "method",
@@ -58186,7 +58240,13 @@
 								"en": "Sets visibility. (NodeTransform::set_visible, tick still runs when off)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/node/worldnode.rs"
+							"source": "src/core/node/worldnode.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/node/transformnode",
+								"class": "TransformNode",
+								"name": "setVisible"
+							}
 						},
 						{
 							"kind": "method",
@@ -59346,7 +59406,13 @@
 								"en": "Sets the background color. (draw_scene_background fills it)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/scene.rs"
+							"source": "src/core/scene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/scene",
+								"class": "Scene",
+								"name": "setSceneBackgroundColor"
+							}
 						},
 						{
 							"kind": "method",
@@ -59365,7 +59431,13 @@
 								"en": "Returns the background color."
 							},
 							"since": "0.3.2",
-							"source": "src/core/scene.rs"
+							"source": "src/core/scene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/scene",
+								"class": "Scene",
+								"name": "getSceneBackgroundColor"
+							}
 						},
 						{
 							"kind": "method",
@@ -59665,6 +59737,12 @@
 							},
 							"since": "0.3.2",
 							"source": "src/core/scene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/scene",
+								"class": "Scene",
+								"name": "drawSceneBackground"
+							},
 							"examples": [
 								{
 									"title": {
@@ -72170,6 +72248,94 @@
 						},
 						{
 							"kind": "method",
+							"name": "read_glyph_path_bounds",
+							"signature": "pub fn read_glyph_path_bounds(&self, glyph_index: u16, pixel_size: f32, skew: f32) -> Option<(f32, f32, f32, f32)>",
+							"params": [
+								{
+									"name": "glyph_index",
+									"type": "u16",
+									"description": {
+										"ko": "글리프 번호.",
+										"en": "Glyph ID."
+									}
+								},
+								{
+									"name": "pixel_size",
+									"type": "f32",
+									"description": {
+										"ko": "글자 크기. (픽셀)",
+										"en": "Font size. (pixels)"
+									}
+								},
+								{
+									"name": "skew",
+									"type": "f32",
+									"description": {
+										"ko": "가로 기울임. (x 에 y x skew 를 더한다, 가짜 기울임은 SYNTHETIC_ITALIC_SKEW, 아니면 0. 크롬처럼 경로의 점을 기울인 뒤 상자를 잰다)",
+										"en": "Horizontal skew. (adds y x skew to x; SYNTHETIC_ITALIC_SKEW for fake italic, otherwise 0. Like Chrome, the bounds are measured after skewing the path points)"
+									}
+								}
+							],
+							"returns": {
+								"type": "Option<(f32, f32, f32, f32)>",
+								"description": {
+									"ko": "(왼쪽, 아래, 오른쪽, 위). (펜 원점에서 픽셀, 위가 양수)",
+									"en": "(left, bottom, right, top). (pixels from the pen origin, up is positive)"
+								}
+							},
+							"description": {
+								"ko": "measureText 의 닿는 상자에 쓰는 글리프 상자. (맥 크롬처럼 윤곽 경로의 상자, 블링크 skia_text_metrics.cc 의 SkFontGetBoundsForGlyph 가 맥에서 부르는\nGetPathBoundsForGlyph. 경로는 CoreText 윤곽(CTFontCreatePathForGlyph)이고 상자는 곡선 조절점까지 넣은 SkPath::getBounds 다)\n- 윤곽 표(glyf, CFF, CFF2)의 점(곡선 조절점 포함)을 그 크기의 축 값으로 읽은 상자를 픽셀로 줄인다. 반올림하지 않는다.\n- 윤곽을 엔진이 읽지 못하는 글꼴(색 이모지 sbix, 윤곽 표가 없는 hvgl 같은)과 윤곽이 빈 글리프는 None 이다. (크롬도 경로가 없으면 정수 상자 getBounds 다)",
+								"en": "Glyph bounds used for the measureText bounding box. (the outline path bounds like Mac Chrome: GetPathBoundsForGlyph, which Blink skia_text_metrics.cc SkFontGetBoundsForGlyph calls on Mac.\nThe path is the CoreText outline (CTFontCreatePathForGlyph) and the bounds are SkPath::getBounds including curve control points)\n- Reads the points of the outline table (glyf, CFF, CFF2), including curve control points, with the axis values for that size, and scales the bounds to pixels. No rounding.\n- Fonts whose outlines the engine cannot read (color emoji sbix, hvgl without an outline table, and the like) and glyphs with an empty outline are None. (Chrome also uses the integer getBounds when there is no path)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/textshaping.rs"
+						},
+						{
+							"kind": "method",
+							"name": "read_glyph_skia_bounds",
+							"signature": "pub fn read_glyph_skia_bounds(&self, glyph_index: u16, pixel_size: f32, skew: f32) -> Option<(f32, f32, f32, f32)>",
+							"params": [
+								{
+									"name": "glyph_index",
+									"type": "u16",
+									"description": {
+										"ko": "글리프 번호.",
+										"en": "Glyph ID."
+									}
+								},
+								{
+									"name": "pixel_size",
+									"type": "f32",
+									"description": {
+										"ko": "글자 크기. (픽셀)",
+										"en": "Font size. (pixels)"
+									}
+								},
+								{
+									"name": "skew",
+									"type": "f32",
+									"description": {
+										"ko": "가로 기울임. (x 에 y x skew 를 더한다, 가짜 기울임이 아니면 0)",
+										"en": "Horizontal skew. (adds y x skew to x; 0 unless fake italic)"
+									}
+								}
+							],
+							"returns": {
+								"type": "Option<(f32, f32, f32, f32)>",
+								"description": {
+									"ko": "(왼쪽, 아래, 오른쪽, 위). (펜 원점에서 픽셀, 위가 양수)",
+									"en": "(left, bottom, right, top). (pixels from the pen origin, up is positive)"
+								}
+							},
+							"description": {
+								"ko": "measureText 의 닿는 상자에 쓰는 경로 없는 글리프(맥 색 이모지 같은 CoreText 래스터 글꼴)의 정수 상자. (스키아 getBounds 와 같은 셈, 맥이 아니거나 CoreText 래스터 글꼴이 아니면 None)\n- 스키아 SkScalerContext_Mac::generateMetrics: 스키아가 지은 CTFont 의 상자를 바깥 정수로 넓히고 사방 1 픽셀 더 넓힌다(outset(1, 1)). 가짜 기울임이면 상자를 기울인 뒤 넓힌다.",
+								"en": "Integer bounds of a glyph without a path (a CoreText raster font such as Mac color emoji) used for the measureText bounding box. (the same calculation as Skia getBounds; None when not on Mac or not a CoreText raster font)\n- Skia SkScalerContext_Mac::generateMetrics: expands the bounds of the CTFont Skia builds outward to integers and then by 1 pixel on every side (outset(1, 1)). For fake italic, the bounds are skewed before expanding."
+							},
+							"since": "0.4.0",
+							"source": "src/core/textshaping.rs"
+						},
+						{
+							"kind": "method",
 							"name": "draw_glyph_outline",
 							"signature": "pub fn draw_glyph_outline(&self, glyph_index: u16, pixel_size: f32, outline_builder: &mut dyn rustybuzz::ttf_parser::OutlineBuilder) -> bool",
 							"params": [
@@ -73428,6 +73594,52 @@
 				},
 				{
 					"kind": "method",
+					"name": "is_subpixel_positioned",
+					"signature": "pub fn is_subpixel_positioned(face: &ResolvedFontFace, pixel_size: f32) -> bool",
+					"params": [
+						{
+							"name": "face",
+							"type": "&ResolvedFontFace",
+							"description": {
+								"ko": "그릴 얼굴.",
+								"en": "Face to draw."
+							}
+						},
+						{
+							"name": "pixel_size",
+							"type": "f32",
+							"description": {
+								"ko": "글자 크기. (픽셀)",
+								"en": "Font size. (pixels)"
+							}
+						}
+					],
+					"returns": {
+						"type": "bool",
+						"description": {
+							"ko": "켜면 true. 끄면 글리프 자리를 반올림한 정수 자리에 두고 서브픽셀 몫은 0 이다.",
+							"en": "true when on. When off, the glyph is placed at the rounded integer position and the subpixel part is 0."
+						}
+					},
+					"description": {
+						"ko": "글리프 자리를 1/4 픽셀 서브픽셀로 나눌지. (크롬 블링크가 SkFont::setSubpixel 에 주는 값)\n- 맥, 윈도우: 늘 켠다. (안티에일리어스 글)\n- 리눅스: fontconfig 의 힌팅이 꽉(hintfull)이면 끄고 그 밖은 켠다. (WebFontRenderStyle::ApplyToSkFont 의 force_subpixel_positioning 은 힌팅이 kFull 이 아닐 때 참이고,\n  use_subpixel_positioning 은 기기 배율이 1 보다 클 때만 참이다. 안티에일리어스가 꺼진 글꼴은 크롬 GetFontRenderParams 가 힌팅을 꽉으로 바꾼다)\n  얼굴의 가족 이름, 크기, 굵기, 기울기로 묻는다. (rasterize_glyph_at 의 힌팅과 같은 물음)\n- 그 밖(웹): 끈다. (브라우저 캔버스가 정한다)",
+						"en": "Whether to split glyph positions into 1/4 pixel subpixels. (the value Chrome Blink gives SkFont::setSubpixel)\n- Mac, Windows: always on. (antialiased text)\n- Linux: off when fontconfig hinting is full (hintfull), otherwise on. (In WebFontRenderStyle::ApplyToSkFont, force_subpixel_positioning is true when hinting is not kFull,\n  and use_subpixel_positioning is true only when the device scale is greater than 1. For fonts with antialiasing off, Chrome GetFontRenderParams changes hinting to full)\n  Queried by the face's family name, size, weight, and slant. (the same query as the hinting in rasterize_glyph_at)\n- Otherwise (web): off. (the browser canvas decides)"
+					},
+					"since": "0.4.0",
+					"source": "src/core/textshaping.rs",
+					"examples": [
+						{
+							"title": {
+								"ko": "맥과 윈도우는 늘 켠다",
+								"en": "Mac and Windows are always on"
+							},
+							"code": "use std::rc::Rc;\nuse vanilla::core::textshaping::{is_subpixel_positioned, LoadedFont, ResolvedFontFace};\nuse vanilla::platform::find_fallback_font_file;\nuse vanilla::FontFaceDescriptors;\n\nif let Some(source) = find_fallback_font_file(\"A\", 400, false, false) {\n\tlet face = ResolvedFontFace {\n\t\tfont: Rc::new(LoadedFont::create_from_bytes(std::fs::read(&source.path).expect(\"font file\")).expect(\"font\")),\n\t\tdescriptors: FontFaceDescriptors::new(),\n\t\tis_synthetic_bold: false,\n\t\tis_synthetic_italic: false,\n\t};\n\tlet is_subpixel = is_subpixel_positioned(&face, 16.0);\n\tif cfg!(any(target_os = \"macos\", target_os = \"windows\")) {\n\t\tassert!(is_subpixel);\n\t}\n}",
+							"language": "rust"
+						}
+					]
+				},
+				{
+					"kind": "method",
 					"name": "rasterize_glyph_at",
 					"signature": "pub fn rasterize_glyph_at(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32, subpixel_x: f32, luminance_color: [u8; 3]) -> GlyphRaster",
 					"params": [
@@ -73480,8 +73692,8 @@
 						}
 					},
 					"description": {
-						"ko": "서브픽셀 자리와 글자 색 밝기로 글리프 래스터. (맥은 CoreText, 윈도우는 DirectWrite, 리눅스는 skrifa 힌팅 윤곽으로 크롬처럼 그린다)\n- 맥: 색이 아닌 글리프는 크롬 맥 Canvas2D 와 같은 길로 그린다. (스키아 SkScalerContext_Mac 의 A8 마스크: 글꼴 부드럽게, CoreGraphics 감마 풀기, 글자 색 밝기의 감마 전보정)\n  글자 색 밝기는 맥 스키아처럼 글꼴 부드럽게가 회색이면 1/2 을 곱한 색의 3 비트 단계이고, 감마는 크롬 맥의 sRGB, 대비는 0 이다. (SkTypeface_Mac::onFilterRec, 크로미엄 skia/BUILD.gn)\n  가짜 기울임은 CoreText 의 글자 행렬 기울기로 그린다. 색 글리프는 rasterize_glyph 와 같다.\n- 윈도우: 색이 아닌 글리프는 크롬 윈도우 Canvas2D 와 같은 길로 DirectWrite 가 그린다. (스키아 SkScalerContext_DW 의 A8: 격자 맞춤, gasp 로 고른 렌더링 모드, ClearType 이 켜졌으면 크롬처럼 3x1 텍스처의 세 채널 평균, 꺼졌으면 그레이스케일)\n  감마 전보정은 글자 색 밝기 단계의 표로, 대비와 감마는 크롬처럼 Avalon.Graphics 키가 있으면 시스템 값, 없으면 대비 1, sRGB 다. 가짜 기울임은 DirectWrite 글자 행렬의 기울기다.\n- 리눅스: 색이 아닌 글리프는 크롬 리눅스처럼 skrifa 윤곽에 fontconfig 의 힌팅 단계로 힌팅을 걸어 칠하고 감마 1.2, 대비 0.2 로 전보정한다. (스키아 SkTypeface_Fontations)\n- 그 밖은 서브픽셀 자리와 밝기를 쓰지 않는다.",
-						"en": "Glyph raster by subpixel position and text color luminance. (Mac uses CoreText, Windows uses DirectWrite, Linux draws like Chrome with hinted skrifa outlines)\n- Mac: non-color glyphs are drawn the same way as Chrome Mac Canvas2D. (the A8 mask of Skia SkScalerContext_Mac: font smoothing, undoing CoreGraphics gamma, gamma precorrection by text color luminance)\n  As in Mac Skia, the text color luminance is a 3-bit step of the color multiplied by 1/2 when font smoothing is gray, the gamma is Chrome Mac's sRGB, and the contrast is 0. (SkTypeface_Mac::onFilterRec, Chromium skia/BUILD.gn)\n  Fake italic is drawn with the slant of the CoreText text matrix. Color glyphs are the same as rasterize_glyph.\n- Windows: non-color glyphs are drawn by DirectWrite the same way as Chrome Windows Canvas2D. (the A8 of Skia SkScalerContext_DW: grid fitting, the rendering mode picked by gasp, when ClearType is on the average of the three channels of a 3x1 texture like Chrome, otherwise grayscale)\n  Gamma precorrection uses a table by text color luminance step, and contrast and gamma are the system values if the Avalon.Graphics key exists, otherwise contrast 1 and sRGB, like Chrome. Fake italic is the slant of the DirectWrite text matrix.\n- Linux: non-color glyphs are painted like Chrome Linux by hinting skrifa outlines with fontconfig's hinting level, and precorrected with gamma 1.2 and contrast 0.2. (Skia SkTypeface_Fontations)\n- Otherwise subpixel position and luminance are not used."
+						"ko": "서브픽셀 자리와 글자 색 밝기로 글리프 래스터. (맥은 CoreText, 윈도우는 DirectWrite, 리눅스는 skrifa 힌팅 윤곽으로 크롬처럼 그린다)\n- 맥: 색이 아닌 글리프는 크롬 맥 Canvas2D 와 같은 길로 그린다. (스키아 SkScalerContext_Mac 의 A8 마스크: 글꼴 부드럽게, CoreGraphics 감마 풀기, 글자 색 밝기의 감마 전보정)\n  글자 색 밝기는 맥 스키아처럼 글꼴 부드럽게가 회색이면 1/2 을 곱한 색의 3 비트 단계이고, 감마는 크롬 맥의 sRGB, 대비는 0 이다. (SkTypeface_Mac::onFilterRec, 크로미엄 skia/BUILD.gn)\n  가짜 기울임은 CoreText 의 글자 행렬 기울기로 그린다. 색 글리프는 rasterize_glyph 와 같다.\n- 윈도우: 색이 아닌 글리프는 크롬 윈도우 Canvas2D 와 같은 길로 DirectWrite 가 그린다. (스키아 SkScalerContext_DW 의 A8: 격자 맞춤, gasp 로 고른 렌더링 모드, ClearType 이 켜졌으면 크롬처럼 3x1 텍스처의 세 채널 평균, 꺼졌으면 그레이스케일)\n  감마 전보정은 글자 색 밝기 단계의 표로, 대비와 감마는 크롬처럼 Avalon.Graphics 키가 있으면 시스템 값, 없으면 대비 1, sRGB 다. 가짜 기울임은 DirectWrite 글자 행렬의 기울기다.\n- 리눅스: 색이 아닌 글리프는 크롬 리눅스처럼 skrifa 윤곽에 fontconfig 의 힌팅 단계로 힌팅을 걸어 스키아와 같은 해석적 AA 로 칠하고 감마 1.2, 대비 0.2 로 전보정한다. (스키아 SkTypeface_Fontations, SkScan_AAAPath)\n  fontconfig 힌팅이 꽉(hintfull)인 글꼴은 서브픽셀 자리를 끈다. (is_subpixel_positioned, 부르는 쪽이 subpixel_x 를 0 으로 준다)\n- 그 밖은 서브픽셀 자리와 밝기를 쓰지 않는다.",
+						"en": "Glyph raster by subpixel position and text color luminance. (Mac uses CoreText, Windows uses DirectWrite, Linux draws like Chrome with hinted skrifa outlines)\n- Mac: non-color glyphs are drawn the same way as Chrome Mac Canvas2D. (the A8 mask of Skia SkScalerContext_Mac: font smoothing, undoing CoreGraphics gamma, gamma precorrection by text color luminance)\n  As in Mac Skia, the text color luminance is a 3-bit step of the color multiplied by 1/2 when font smoothing is gray, the gamma is Chrome Mac's sRGB, and the contrast is 0. (SkTypeface_Mac::onFilterRec, Chromium skia/BUILD.gn)\n  Fake italic is drawn with the slant of the CoreText text matrix. Color glyphs are the same as rasterize_glyph.\n- Windows: non-color glyphs are drawn by DirectWrite the same way as Chrome Windows Canvas2D. (the A8 of Skia SkScalerContext_DW: grid fitting, the rendering mode picked by gasp, when ClearType is on the average of the three channels of a 3x1 texture like Chrome, otherwise grayscale)\n  Gamma precorrection uses a table by text color luminance step, and contrast and gamma are the system values if the Avalon.Graphics key exists, otherwise contrast 1 and sRGB, like Chrome. Fake italic is the slant of the DirectWrite text matrix.\n- Linux: non-color glyphs are painted like Chrome Linux by hinting skrifa outlines with fontconfig's hinting level, filled with the same analytic AA as Skia, and precorrected with gamma 1.2 and contrast 0.2. (Skia SkTypeface_Fontations, SkScan_AAAPath)\n  Fonts whose fontconfig hinting is full (hintfull) turn off subpixel positioning. (is_subpixel_positioned; the caller passes 0 for subpixel_x)\n- Otherwise subpixel position and luminance are not used."
 					},
 					"since": "0.4.0",
 					"source": "src/core/textshaping.rs",
@@ -78491,7 +78703,13 @@
 								"en": "Creates. (minimum display 3 seconds, black background, ViewScaleMode::None)\n- Loading colors are black, #333333, #ffffff, and the fade is black for 0.35 seconds. The safe area node is created in initialize."
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "constructor"
+							}
 						},
 						{
 							"kind": "method",
@@ -78510,7 +78728,13 @@
 								"en": "Returns the developer tools. (None before initialize or if EngineConfiguration::use_dev_tools is off)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "getDevTools"
+							}
 						},
 						{
 							"kind": "method",
@@ -78529,7 +78753,13 @@
 								"en": "Returns the developer tools. (mutable)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "getDevTools"
+							}
 						},
 						{
 							"kind": "method",
@@ -78635,6 +78865,12 @@
 							},
 							"since": "0.3.2",
 							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "setViewScaleMode"
+							},
 							"examples": [
 								{
 									"title": {
@@ -78663,7 +78899,13 @@
 								"en": "Returns the current ViewScaleMode."
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "getViewScaleMode"
+							}
 						},
 						{
 							"kind": "method",
@@ -78684,7 +78926,13 @@
 								"en": "Sets the path of the loading screen center image. (only the gauge without an image for empty text. Set before create)"
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "setLoadingImageUrl"
+							}
 						},
 						{
 							"kind": "method",
@@ -78705,7 +78953,13 @@
 								"en": "Sets the minimum display time of the loading screen. (milliseconds. Set before create)"
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "setLoadingMinDurationMs"
+							}
 						},
 						{
 							"kind": "method",
@@ -78727,6 +78981,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "setLoadingDrawer"
+							},
 							"examples": [
 								{
 									"title": {
@@ -78755,7 +79015,13 @@
 								"en": "Whether there is a loading screen drawing function."
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "hasLoadingDrawer"
+							}
 						},
 						{
 							"kind": "method",
@@ -78774,7 +79040,13 @@
 								"en": "Returns the loading screen drawing function. (None if absent, borrow it with borrow_mut to call it)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "getLoadingDrawer"
+							}
 						},
 						{
 							"kind": "method",
@@ -78811,7 +79083,13 @@
 								"en": "Sets the loading screen colors. (background, gauge background, gauge. Outside the view also becomes the background color. Defaults are black, #333333, #ffffff)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "setLoadingColors"
+							}
 						},
 						{
 							"kind": "method",
@@ -78832,7 +79110,13 @@
 								"en": "Sets the color outside the loading screen view (the rest of the canvas). (the fourth value of the original setLoadingColors, call after set_loading_colors)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "setLoadingOutsideColor"
+							}
 						},
 						{
 							"kind": "method",
@@ -78853,7 +79137,13 @@
 								"en": "Reports loading progress. (0 ~ 1, never decreases. After reporting, the gauge follows this value instead of the elapsed time)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "setLoadingProgress"
+							}
 						},
 						{
 							"kind": "method",
@@ -78913,6 +79203,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "trackAssetLoader"
+							},
 							"examples": [
 								{
 									"title": {
@@ -78976,7 +79272,13 @@
 								"en": "Sets the canvas background color. (fills the whole canvas in pre_draw)"
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/scene",
+								"class": "Scene",
+								"name": "setSceneBackgroundColor"
+							}
 						},
 						{
 							"kind": "method",
@@ -79014,7 +79316,13 @@
 								"en": "Returns the last computed safe area rectangle. (view coordinates)"
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "getSafeAreaRect"
+							}
 						},
 						{
 							"kind": "method",
@@ -79035,7 +79343,13 @@
 								"en": "Sets the safe area insets directly. (CSS pixels, None reads the view manager's get_safe_area_insets)"
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "setSafeAreaInsets"
+							}
 						},
 						{
 							"kind": "method",
@@ -79056,7 +79370,13 @@
 								"en": "Creates. (called first in the scene's create. The front part of the original load + load_assets)\n- Calls begin_loading with the real time elapsed since the engine started, then calls load_assets."
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/scene",
+								"class": "Scene",
+								"name": "create"
+							}
 						},
 						{
 							"kind": "method",
@@ -79098,7 +79418,13 @@
 								"en": "Loads assets. (the default part of the original loadAssets: the loading image. The scene's own assets are requested in the scene's create and handed over with track_asset)\n- Does nothing if the loading image path is empty."
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "loadAssets"
+							}
 						},
 						{
 							"kind": "method",
@@ -79173,7 +79499,13 @@
 								"en": "Loading gauge progress. (elapsed time / minimum display time, 0 ~ 1)"
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "getLoadingProgress"
+							}
 						},
 						{
 							"kind": "method",
@@ -79192,7 +79524,13 @@
 								"en": "Whether skip was pressed."
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "isLoadTouchedToSkip"
+							}
 						},
 						{
 							"kind": "method",
@@ -79221,7 +79559,13 @@
 								"en": "Draws the loading screen. (the engine calls it every frame until initialize. Outside color canvas + background color view + (the drawing function, or if none, loading image in the center + gauge at the bottom))\n- Before drawing, updates the loading gate, updates the handed over loads, and makes the displayed progress catch up."
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "drawOnLoad"
+							}
 						},
 						{
 							"kind": "method",
@@ -79242,7 +79586,13 @@
 								"en": "Initializes. (called first in the scene's initialize. Applies the ViewScaleMode, creates the safe area node)\n- Applies the play area reference, and creates the developer tools if EngineConfiguration::use_dev_tools is on."
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "initialize"
+							}
 						},
 						{
 							"kind": "method",
@@ -79271,7 +79621,13 @@
 								"en": "Screen size changed. (resets the play area reference and redoes the default layout. game_scene! calls the scene's layout after this)"
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "resize"
+							}
 						},
 						{
 							"kind": "method",
@@ -79292,7 +79648,13 @@
 								"en": "Layout. (recomputes the safe area rectangle and applies it to the node)"
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "layout"
+							}
 						},
 						{
 							"kind": "method",
@@ -79320,7 +79682,13 @@
 								"en": "Computes the safe area. (view coordinates)\n- Insets set directly are divided by the view scale and subtracted, otherwise the view manager's insets (already in view coordinates) are subtracted. When the play area reference is used, computes with the canvas size divided by the scale."
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "computeSafeAreaRect"
+							}
 						},
 						{
 							"kind": "static",
@@ -79365,6 +79733,12 @@
 							},
 							"since": "0.3.2",
 							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "calculateSafeAreaRect"
+							},
 							"examples": [
 								{
 									"title": {
@@ -79439,6 +79813,12 @@
 							},
 							"since": "0.3.2",
 							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "tick"
+							},
 							"examples": [
 								{
 									"title": {
@@ -79495,7 +79875,13 @@
 								"en": "Whether the developer tools are taking input. (visible, and the pressed point is inside the panel)"
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "isDevToolsCapturingInput"
+							}
 						},
 						{
 							"kind": "method",
@@ -79524,7 +79910,13 @@
 								"en": "Pre-draw. (fills the whole canvas with the background color and applies the view coordinate system. Including outside the safe area)"
 							},
 							"since": "0.3.2",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "preDraw"
+							}
 						},
 						{
 							"kind": "method",
@@ -79553,7 +79945,13 @@
 								"en": "Post-draw. (draws the darkening curtain over the whole canvas including the safe area, and draws the developer tools on top)\n- A fade starter the scene did not take out is handed to the next polling turn here."
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "postDraw"
+							}
 						},
 						{
 							"kind": "method",
@@ -79582,7 +79980,13 @@
 								"en": "Draws the darkening curtain. (over the whole canvas including the safe area, the original drawScreenFade)\n- Does not draw if the curtain's opacity is 0. Sets the view coordinate system again after drawing."
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "drawScreenFade"
+							}
 						},
 						{
 							"kind": "method",
@@ -79611,6 +80015,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "fadeScreen"
+							},
 							"examples": [
 								{
 									"title": {
@@ -79687,6 +80097,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "fadeScreen"
+							},
 							"examples": [
 								{
 									"title": {
@@ -79734,7 +80150,13 @@
 								"en": "Whether it is fading. (darkening, waiting for the handle, or brightening)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "isScreenFading"
+							}
 						},
 						{
 							"kind": "method",
@@ -79755,7 +80177,13 @@
 								"en": "Sets the color of the darkening curtain. (default black)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "setScreenFadeColor"
+							}
 						},
 						{
 							"kind": "method",
@@ -79776,7 +80204,13 @@
 								"en": "Sets the darkening time and the brightening time. (seconds, default 0.35, immediate if 0)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "setScreenFadeSeconds"
+							}
 						},
 						{
 							"kind": "method",
@@ -79795,7 +80229,13 @@
 								"en": "Opacity of the darkening curtain. (0 ~ 1)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "getScreenFadeAlpha"
+							}
 						},
 						{
 							"kind": "method",
@@ -79823,7 +80263,13 @@
 								"en": "Whether there is UI (a pressable node: a button, a window's dimmer and panel, a scroll box) at that point. (view coordinates)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "isUserInterfaceAt"
+							}
 						},
 						{
 							"kind": "method",
@@ -79845,6 +80291,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "setPlayInputEnabled"
+							},
 							"examples": [
 								{
 									"title": {
@@ -79876,6 +80328,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "setPlayInputHandler"
+							},
 							"examples": [
 								{
 									"title": {
@@ -79904,7 +80362,13 @@
 								"en": "Takes out the collected play inputs. (in arrival order, empties them when taken)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "takePlayInputs"
+							}
 						},
 						{
 							"kind": "method",
@@ -79932,7 +80396,13 @@
 								"en": "View coordinates → play area coordinates. (the top left of the safe area is 0, 0)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "convertViewToPlayArea"
+							}
 						},
 						{
 							"kind": "method",
@@ -79970,6 +80440,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "setPlayAreaReference"
+							},
 							"examples": [
 								{
 									"title": {
@@ -79998,7 +80474,13 @@
 								"en": "Fixed side length of the play area. (not used if 0)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "getPlayAreaFixedLength"
+							}
 						},
 						{
 							"kind": "method",
@@ -80026,7 +80508,13 @@
 								"en": "Applies the play area reference to the reference resolution. (computed only from the canvas and inset sizes, so calling it any number of times gives the same result. If changed, recomputes the view area and returns true)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "applyPlayAreaReference"
+							}
 						},
 						{
 							"kind": "static",
@@ -80087,6 +80575,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "calculatePlayAreaReferenceLength"
+							},
 							"examples": [
 								{
 									"title": {
@@ -80120,6 +80614,11 @@
 					"traits": [
 						"'static"
 					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "game/gamescene",
+						"class": "GameScene"
+					},
 					"source": "src/game/gamescene.rs",
 					"members": [
 						{
@@ -80179,7 +80678,13 @@
 								"en": "Loads the scene's assets. (overrides the original async load_assets, after the base requests the loading image)\n- To load with await, hand over a loading task with engine.spawn_scene_task(self, ...) and register it with get_game_scene_base_mut().get_scene_base_mut().track_task."
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "loadAssets"
+							}
 						},
 						{
 							"kind": "method",
@@ -80208,6 +80713,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "fadeScreen"
+							},
 							"examples": [
 								{
 									"title": {
@@ -80246,7 +80757,13 @@
 								"en": "Draws more on top of the loading screen. (after the base's loading screen)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "drawOnLoad"
+							}
 						},
 						{
 							"kind": "method",
@@ -80267,7 +80784,13 @@
 								"en": "Initializes. (after the base initialize, once the safe area node exists)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "initialize"
+							}
 						},
 						{
 							"kind": "method",
@@ -80288,7 +80811,13 @@
 								"en": "Destroys."
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/scene",
+								"class": "Scene",
+								"name": "destroy"
+							}
 						},
 						{
 							"kind": "method",
@@ -80309,7 +80838,13 @@
 								"en": "Layout. (overrides the original layout, after the base recomputes the safe area)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "layout"
+							}
 						},
 						{
 							"kind": "method",
@@ -80338,7 +80873,13 @@
 								"en": "Updates. (after the base tick: nodes, touches, tweens, layout, fade, developer tools)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "tick"
+							}
 						},
 						{
 							"kind": "method",
@@ -80367,7 +80908,13 @@
 								"en": "Pre-draw. (after the base fills the background)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "preDraw"
+							}
 						},
 						{
 							"kind": "method",
@@ -80396,7 +80943,13 @@
 								"en": "Draw. (after drawing the node tree)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/scene",
+								"class": "Scene",
+								"name": "draw"
+							}
 						},
 						{
 							"kind": "method",
@@ -80425,7 +80978,13 @@
 								"en": "Post-draw. (before the base's fade curtain and developer tools)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "postDraw"
+							}
 						},
 						{
 							"kind": "method",
@@ -80446,7 +81005,13 @@
 								"en": "Finalizes. (before unload when taking down, overrides the original Scene.finalize)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/scene",
+								"class": "Scene",
+								"name": "finalize"
+							}
 						},
 						{
 							"kind": "method",
@@ -80467,7 +81032,13 @@
 								"en": "Unloads. (after finalize when taking down, overrides the original Scene.unload)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/scene",
+								"class": "Scene",
+								"name": "unload"
+							}
 						},
 						{
 							"kind": "method",
@@ -80488,7 +81059,13 @@
 								"en": "Page process restore and visibility restore. (overrides the original onPageProcessRestored, onPageVisibilityRestored)\n- This function is the page process restore one. Visibility restore is on_page_visibility_restored."
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/scene",
+								"class": "Scene",
+								"name": "onPageProcessRestored"
+							}
 						},
 						{
 							"kind": "method",
@@ -80509,7 +81086,13 @@
 								"en": "Page visibility restored. (overrides the original onPageVisibilityRestored)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/scene",
+								"class": "Scene",
+								"name": "onPageVisibilityRestored"
+							}
 						},
 						{
 							"kind": "method",
@@ -80538,7 +81121,13 @@
 								"en": "Touch hooks of the scene. (overrides the original touchPress, touchMove, touchRelease, touchCancel, touchWheel, called by the engine after the base passes them to the UI and play input)\n- This function is the press one. Move, release, cancel, and wheel are touch_move, touch_release, touch_cancel, touch_wheel."
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "touchPress"
+							}
 						},
 						{
 							"kind": "method",
@@ -80567,7 +81156,13 @@
 								"en": "Touch move. (overrides the original touchMove)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "touchMove"
+							}
 						},
 						{
 							"kind": "method",
@@ -80596,7 +81191,13 @@
 								"en": "Touch release. (overrides the original touchRelease)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "touchRelease"
+							}
 						},
 						{
 							"kind": "method",
@@ -80625,7 +81226,13 @@
 								"en": "Touch cancel. (overrides the original touchCancel)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "touchCancel"
+							}
 						},
 						{
 							"kind": "method",
@@ -80662,7 +81269,13 @@
 								"en": "Wheel. (overrides the original touchWheel)"
 							},
 							"since": "0.4.0",
-							"source": "src/game/gamescene.rs"
+							"source": "src/game/gamescene.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "game/gamescene",
+								"class": "GameScene",
+								"name": "touchWheel"
+							}
 						}
 					],
 					"examples": [
@@ -135836,6 +136449,66 @@
 				},
 				{
 					"kind": "method",
+					"name": "read_glyph_skia_bounds",
+					"signature": "pub fn read_glyph_skia_bounds(path: &Path, face_index: u32, glyph_index: u16, pixel_size: f32, variation_list: &[(u32, f32)]) -> Option<CGRect>",
+					"params": [
+						{
+							"name": "path",
+							"type": "&Path",
+							"description": {
+								"ko": "글꼴 파일 경로.",
+								"en": "Font file path."
+							}
+						},
+						{
+							"name": "face_index",
+							"type": "u32",
+							"description": {
+								"ko": "모음(TTC) 안의 얼굴 번호.",
+								"en": "Face index within the collection (TTC)."
+							}
+						},
+						{
+							"name": "glyph_index",
+							"type": "u16",
+							"description": {
+								"ko": "글리프 번호.",
+								"en": "Glyph ID."
+							}
+						},
+						{
+							"name": "pixel_size",
+							"type": "f32",
+							"description": {
+								"ko": "글자 크기. (픽셀)",
+								"en": "Font size. (pixels)"
+							}
+						},
+						{
+							"name": "variation_list",
+							"type": "&[(u32, f32)]",
+							"description": {
+								"ko": "축 값 목록. ((4 글자 태그의 수, 값))",
+								"en": "List of axis values. ((the number of the 4-letter tag, value))"
+							}
+						}
+					],
+					"returns": {
+						"type": "Option<CGRect>",
+						"description": {
+							"ko": "글리프 상자. (펜 원점에서 픽셀, 위가 양수) CoreText 가 글꼴을 짓지 못했거나 상자의 가로나 세로가 0 이하면 None.",
+							"en": "Glyph bounds. (pixels from the pen origin, up is positive) None when CoreText could not build the font or the bounds width or height is 0 or less."
+						}
+					},
+					"description": {
+						"ko": "스키아가 짓는 CTFont 의 글리프 상자. (크롬 맥 measureText 의 경로 없는 글리프 상자 셈, 반올림하지 않는다)\n- 스키아 SkScalerContext_Mac 은 글꼴을 SkCTFontCreateExactCopy 로 다시 짓는다. 광학 크기 속성(NSCTFontOpticalSizeAttribute)은 바탕 글꼴의 값이나\n  글자 크기이고, 자간 속성(NSCTFontUnscaledTrackingAttribute)을 0 으로 두어 trak 과 그 밖의 자간을 끈다. 그 글꼴의 CTFontGetBoundingRectsForGlyphs 다.\n- 색 이모지는 이 글꼴에서 키우기에 따른 자리 밀림이 빠진다. (16px 에서 바탕 글꼴 0.46 ~ 20.46, 스키아 글꼴 0 ~ 20)",
+						"en": "Glyph bounds of the CTFont Skia builds. (the glyph-without-path bounds calculation of Mac Chrome measureText; no rounding)\n- Skia SkScalerContext_Mac rebuilds the font with SkCTFontCreateExactCopy. The optical size attribute (NSCTFontOpticalSizeAttribute) is the base font's value or\n  the text size, and the tracking attribute (NSCTFontUnscaledTrackingAttribute) is set to 0 to turn off trak and other tracking. These are CTFontGetBoundingRectsForGlyphs of that font.\n- In this font, color emoji lose the position shift from scaling up. (at 16px, base font 0.46 to 20.46, Skia font 0 to 20)"
+					},
+					"since": "0.4.0",
+					"source": "src/platform/desktop/coretextglyph.rs"
+				},
+				{
+					"kind": "method",
 					"name": "read_emoji_scale",
 					"signature": "pub fn read_emoji_scale(path: &Path, face_index: u32, pixel_size: f32) -> f32",
 					"params": [
@@ -145990,7 +146663,13 @@
 								"en": "Returns the transitioner."
 							},
 							"since": "0.3.2",
-							"source": "src/ui/uidialog.rs"
+							"source": "src/ui/uidialog.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uidialog",
+								"class": "UIDialog",
+								"name": "getPopupMotion"
+							}
 						},
 						{
 							"kind": "method",
@@ -146009,7 +146688,13 @@
 								"en": "Blocker node handle."
 							},
 							"since": "0.3.2",
-							"source": "src/ui/uidialog.rs"
+							"source": "src/ui/uidialog.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uidialog",
+								"class": "UIDialog",
+								"name": "getOverlayNode"
+							}
 						},
 						{
 							"kind": "method",
@@ -146028,7 +146713,13 @@
 								"en": "Card node handle."
 							},
 							"since": "0.3.2",
-							"source": "src/ui/uidialog.rs"
+							"source": "src/ui/uidialog.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uidialog",
+								"class": "UIDialog",
+								"name": "getPanelNode"
+							}
 						},
 						{
 							"kind": "method",
@@ -146047,7 +146738,13 @@
 								"en": "Confirm button node handle."
 							},
 							"since": "0.3.2",
-							"source": "src/ui/uidialog.rs"
+							"source": "src/ui/uidialog.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uidialog",
+								"class": "UIDialog",
+								"name": "getConfirmNode"
+							}
 						},
 						{
 							"kind": "method",
@@ -146066,7 +146763,13 @@
 								"en": "Cancel button node handle."
 							},
 							"since": "0.3.2",
-							"source": "src/ui/uidialog.rs"
+							"source": "src/ui/uidialog.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uidialog",
+								"class": "UIDialog",
+								"name": "getCancelNode"
+							}
 						}
 					],
 					"examples": [
@@ -147098,7 +147801,13 @@
 								"en": "Returns the option list."
 							},
 							"since": "0.3.2",
-							"source": "src/ui/uidropdown.rs"
+							"source": "src/ui/uidropdown.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uidropdown",
+								"class": "UIDropdown",
+								"name": "getOptionList"
+							}
 						},
 						{
 							"kind": "method",
@@ -147142,7 +147851,13 @@
 								"en": "Popup list node handle. (a child of the tree root while expanded)"
 							},
 							"since": "0.3.2",
-							"source": "src/ui/uidropdown.rs"
+							"source": "src/ui/uidropdown.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uidropdown",
+								"class": "UIDropdown",
+								"name": "getPopupNode"
+							}
 						},
 						{
 							"kind": "method",
@@ -147161,7 +147876,13 @@
 								"en": "List of option row node handles."
 							},
 							"since": "0.3.2",
-							"source": "src/ui/uidropdown.rs"
+							"source": "src/ui/uidropdown.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uidropdown",
+								"class": "UIDropdown",
+								"name": "getOptionNodes"
+							}
 						}
 					],
 					"examples": [
@@ -148038,7 +148759,13 @@
 								"en": "Sets the image path. (original imageView.imagePath, written and read by the UI document)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiimageview.rs"
+							"source": "src/ui/uiimageview.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiimageview",
+								"class": "UIImageView",
+								"name": "setImagePath"
+							}
 						},
 						{
 							"kind": "method",
@@ -148057,7 +148784,13 @@
 								"en": "Returns the image path."
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uiimageview.rs"
+							"source": "src/ui/uiimageview.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uiimageview",
+								"class": "UIImageView",
+								"name": "getImagePath"
+							}
 						}
 					],
 					"examples": [
@@ -158616,6 +159349,11 @@
 					},
 					"since": "0.3.2",
 					"source": "src/ui/uiview.rs",
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "ui/uiview",
+						"name": "isViewPositionInsideNode"
+					},
 					"examples": [
 						{
 							"title": {
@@ -169382,8 +170120,8 @@
 							"source": "src/ui/uiscene.rs",
 							"counterpart": {
 								"engine": "vanilla.js",
-								"module": "ui/uiscene",
-								"class": "UIScene",
+								"module": "core/scene",
+								"class": "Scene",
 								"name": "setSceneBackgroundColor"
 							}
 						},
