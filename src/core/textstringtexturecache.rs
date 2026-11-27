@@ -1847,7 +1847,7 @@ impl TextStringTextureCache {
 		let mut minimum_bottom = i32::MAX;
 		let mut glyph_raster_list: Vec<(textshaping::GlyphRaster, i32, i32)> = Vec::new();
 		for shaped_glyph in &shaped_text.glyph_list {
-			let (integer_x, subpixel_x, integer_y) = split_glyph_position(shaped_glyph.position_x, shaped_glyph.position_y);
+			let (integer_x, subpixel_x, integer_y) = split_glyph_position(shaped_glyph.position_x, shaped_glyph.position_y, read_glyph_subpixel_positioning(&face_list, shaped_glyph, font_size));
 			let glyph_raster = match rasterize_shaped_glyph(&face_list, &font_description, character, shaped_glyph, font_size, subpixel_x, WHITE_LUMINANCE_COLOR) {
 				Some(glyph_raster) => {
 					glyph_raster
@@ -2188,7 +2188,7 @@ fn lay_out_text(face_list: &[ResolvedFontFace], font_description: &FontDescripti
 	let mut top_extent: f32 = font_ascent;
 	let mut bottom_extent: f32 = font_descent;
 	for shaped_glyph in &shaped_text.glyph_list {
-		let (integer_x, subpixel_x, integer_y) = split_glyph_position(shaped_glyph.position_x, shaped_glyph.position_y);
+		let (integer_x, subpixel_x, integer_y) = split_glyph_position(shaped_glyph.position_x, shaped_glyph.position_y, read_glyph_subpixel_positioning(face_list, shaped_glyph, pixel_size));
 		let glyph_raster = match rasterize_shaped_glyph(face_list, font_description, text, shaped_glyph, pixel_size, subpixel_x, luminance_color) {
 			Some(glyph_raster) => {
 				glyph_raster
@@ -2321,15 +2321,35 @@ fn blend_coverage(destination: u8, source: u8) -> u8 {
 }
 
 //==============================================================================
+/// 모양 지은 글리프의 자리를 서브픽셀로 나눌지. (그 글리프 얼굴의 textshaping::is_subpixel_positioned, 시스템 글꼴 조각은 끈다)
+//==============================================================================
+fn read_glyph_subpixel_positioning(face_list: &[ResolvedFontFace], shaped_glyph: &textshaping::ShapedGlyph, pixel_size: f32) -> bool {
+	match face_list.get(shaped_glyph.face_index) {
+		Some(face) => {
+			textshaping::is_subpixel_positioned(face, pixel_size)
+		}
+		None => {
+			false
+		}
+	}
+}
+
+//==============================================================================
 /// 글리프 자리를 정수 자리와 서브픽셀 몫으로 나누기. ((정수 x, 서브픽셀 x, 정수 y), y 는 위가 양수)
 /// - 맥, 윈도우, 리눅스: 크롬 스키아처럼 x 에 1/8 을 더해 내린 것이 정수 자리이고 나머지를 1/4 단위로 내린 것이 서브픽셀 몫이다. y 는 아래가 양수인 기기 좌표에서 1/2 을 더해 내린다.
 ///   (SkGlyphPositionRoundingSpec 의 가로 정렬 글: halfAxisSampleFreq (1/8, 1/2), SkPackedGlyphID 의 서브픽셀 2 비트, SubRunContainer 의 floor)
 ///   블링크는 윈도우에서 안티에일리어스면(font_platform_data_win.cc), 리눅스에서 힌팅이 꽉이 아니면(WebFontRenderStyle::ApplyToSkFont) 서브픽셀 자리를 켠다.
+///   서브픽셀 자리를 끈 글리프(is_subpixel 거짓, 리눅스 hintfull)는 스키아처럼 x 에도 1/2 을 더해 내리고 서브픽셀 몫이 없다. (halfAxisSampleFreq (1/2, 1/2))
 /// - 그 밖은 둘 다 반올림하고 서브픽셀 몫이 없다.
 //==============================================================================
-fn split_glyph_position(position_x: f32, position_y: f32) -> (i32, f32, i32) {
+fn split_glyph_position(position_x: f32, position_y: f32, is_subpixel: bool) -> (i32, f32, i32) {
 	#[cfg(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android"), not(target_arch = "wasm32"))))]
 	{
+		if !is_subpixel {
+			let integer_x = (position_x + 0.5).floor();
+			let integer_y = -((-position_y + 0.5).floor());
+			return (integer_x as i32, 0.0, integer_y as i32);
+		}
 		let rounded_x = position_x + SUBPIXEL_ROUND;
 		let integer_x = rounded_x.floor();
 		let subpixel_x = (((rounded_x - integer_x) * SUBPIXEL_STEP_COUNT).floor() / SUBPIXEL_STEP_COUNT).min(1.0 - 1.0 / SUBPIXEL_STEP_COUNT);
@@ -2338,6 +2358,7 @@ fn split_glyph_position(position_x: f32, position_y: f32) -> (i32, f32, i32) {
 	}
 	#[cfg(not(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android"), not(target_arch = "wasm32")))))]
 	{
+		let _ = is_subpixel;
 		(position_x.round() as i32, 0.0, position_y.round() as i32)
 	}
 }

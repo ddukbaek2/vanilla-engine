@@ -2028,13 +2028,70 @@ pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f3
 }
 
 //==============================================================================
+/// 글리프 자리를 1/4 픽셀 서브픽셀로 나눌지. (크롬 블링크가 SkFont::setSubpixel 에 주는 값)
+/// - 맥, 윈도우: 늘 켠다. (안티에일리어스 글)
+/// - 리눅스: fontconfig 의 힌팅이 꽉(hintfull)이면 끄고 그 밖은 켠다. (WebFontRenderStyle::ApplyToSkFont 의 force_subpixel_positioning 은 힌팅이 kFull 이 아닐 때 참이고,
+///   use_subpixel_positioning 은 기기 배율이 1 보다 클 때만 참이다. 안티에일리어스가 꺼진 글꼴은 크롬 GetFontRenderParams 가 힌팅을 꽉으로 바꾼다)
+///   얼굴의 가족 이름, 크기, 굵기, 기울기로 묻는다. (rasterize_glyph_at 의 힌팅과 같은 물음)
+/// - 그 밖(웹): 끈다. (브라우저 캔버스가 정한다)
+///
+/// # 인자
+/// - `face`: 그릴 얼굴.
+/// - `pixel_size`: 글자 크기. (픽셀)
+///
+/// # 돌려줌
+/// 켜면 true. 끄면 글리프 자리를 반올림한 정수 자리에 두고 서브픽셀 몫은 0 이다.
+///
+/// # 예제
+/// 맥과 윈도우는 늘 켠다
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::core::textshaping::{is_subpixel_positioned, LoadedFont, ResolvedFontFace};
+/// use vanilla::platform::find_fallback_font_file;
+/// use vanilla::FontFaceDescriptors;
+///
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let face = ResolvedFontFace {
+/// 		font: Rc::new(LoadedFont::create_from_bytes(std::fs::read(&source.path).expect("font file")).expect("font")),
+/// 		descriptors: FontFaceDescriptors::new(),
+/// 		is_synthetic_bold: false,
+/// 		is_synthetic_italic: false,
+/// 	};
+/// 	let is_subpixel = is_subpixel_positioned(&face, 16.0);
+/// 	if cfg!(any(target_os = "macos", target_os = "windows")) {
+/// 		assert!(is_subpixel);
+/// 	}
+/// }
+/// ```
+//==============================================================================
+pub fn is_subpixel_positioned(face: &ResolvedFontFace, pixel_size: f32) -> bool {
+	#[cfg(any(target_os = "macos", target_os = "windows"))]
+	{
+		let _ = (face, pixel_size);
+		true
+	}
+	#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+	{
+		let shaping_face = face.font.get_shaping_face();
+		let (is_antialiased, hint_level, _) = crate::platform::desktop::systemfont::read_font_render_style(&read_family_name(shaping_face), pixel_size, shaping_face.weight().to_number(), shaping_face.is_italic());
+		is_antialiased && hint_level != 3
+	}
+	#[cfg(not(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android")))))]
+	{
+		let _ = (face, pixel_size);
+		false
+	}
+}
+
+//==============================================================================
 /// 서브픽셀 자리와 글자 색 밝기로 글리프 래스터. (맥은 CoreText, 윈도우는 DirectWrite, 리눅스는 skrifa 힌팅 윤곽으로 크롬처럼 그린다)
 /// - 맥: 색이 아닌 글리프는 크롬 맥 Canvas2D 와 같은 길로 그린다. (스키아 SkScalerContext_Mac 의 A8 마스크: 글꼴 부드럽게, CoreGraphics 감마 풀기, 글자 색 밝기의 감마 전보정)
 ///   글자 색 밝기는 맥 스키아처럼 글꼴 부드럽게가 회색이면 1/2 을 곱한 색의 3 비트 단계이고, 감마는 크롬 맥의 sRGB, 대비는 0 이다. (SkTypeface_Mac::onFilterRec, 크로미엄 skia/BUILD.gn)
 ///   가짜 기울임은 CoreText 의 글자 행렬 기울기로 그린다. 색 글리프는 rasterize_glyph 와 같다.
 /// - 윈도우: 색이 아닌 글리프는 크롬 윈도우 Canvas2D 와 같은 길로 DirectWrite 가 그린다. (스키아 SkScalerContext_DW 의 A8: 격자 맞춤, gasp 로 고른 렌더링 모드, ClearType 이 켜졌으면 크롬처럼 3x1 텍스처의 세 채널 평균, 꺼졌으면 그레이스케일)
 ///   감마 전보정은 글자 색 밝기 단계의 표로, 대비와 감마는 크롬처럼 Avalon.Graphics 키가 있으면 시스템 값, 없으면 대비 1, sRGB 다. 가짜 기울임은 DirectWrite 글자 행렬의 기울기다.
-/// - 리눅스: 색이 아닌 글리프는 크롬 리눅스처럼 skrifa 윤곽에 fontconfig 의 힌팅 단계로 힌팅을 걸어 칠하고 감마 1.2, 대비 0.2 로 전보정한다. (스키아 SkTypeface_Fontations)
+/// - 리눅스: 색이 아닌 글리프는 크롬 리눅스처럼 skrifa 윤곽에 fontconfig 의 힌팅 단계로 힌팅을 걸어 스키아와 같은 해석적 AA 로 칠하고 감마 1.2, 대비 0.2 로 전보정한다. (스키아 SkTypeface_Fontations, SkScan_AAAPath)
+///   fontconfig 힌팅이 꽉(hintfull)인 글꼴은 서브픽셀 자리를 끈다. (is_subpixel_positioned, 부르는 쪽이 subpixel_x 를 0 으로 준다)
 /// - 그 밖은 서브픽셀 자리와 밝기를 쓰지 않는다.
 ///
 /// # 인자
@@ -2673,7 +2730,7 @@ fn read_family_name(face: &rustybuzz::Face<'_>) -> String {
 ///   skrifa 의 Target::Smooth 에 symmetric_rendering 참, preserve_linear_metrics 거짓. 힌팅이 꼭 있어야 하는 글꼴은 Strong. (스키아 src/ports/fontations/src/hinting.rs, SkTypeface_fontations.cpp)
 /// - 서브픽셀 자리: 블링크는 힌팅이 꽉이 아니면 서브픽셀 자리를 켠다. (WebFontRenderStyle::ApplyToSkFont)
 /// - 감마 전보정: 크롬 리눅스의 감마 1.2, 대비 0.2. (크로미엄 skia/BUILD.gn, Fontations 의 onFilterRec 은 FreeType 과 달리 A8 의 전보정을 끄지 않는다)
-/// - 칠하기는 엔진의 면적 덮개 래스터라이저다. (스키아는 해석적 AA SkScan_AAAPath 라 끝자리가 조금 다를 수 있다)
+/// - 칠하기는 스키아 SkScan_AAAPath 와 같은 해석적 AA 다. (core/analyticrasterizer.rs, 상자는 조절점까지 넣은 경로 경계를 내림, 올림한 것)
 //==============================================================================
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 fn rasterize_hinted_outline_mask(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32, subpixel_x: f32, luminance_color: [u8; 3]) -> Option<GlyphRaster> {
@@ -2776,7 +2833,7 @@ fn rasterize_hinted_outline_mask(face: &ResolvedFontFace, glyph_index: u16, pixe
 		};
 		outline_glyph.draw(settings, &mut outline_pen).is_ok()
 	};
-	let mut glyph_raster = match colorglyph::rasterize_outline(&draw_outline, 1.0) {
+	let mut glyph_raster = match crate::core::analyticrasterizer::rasterize_outline(&draw_outline, 1.0) {
 		Some((coverage, width, height, left_x, top_y)) => {
 			GlyphRaster {
 				coverage,
