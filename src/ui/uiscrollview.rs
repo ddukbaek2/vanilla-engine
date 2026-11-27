@@ -19,7 +19,7 @@ use crate::base::math;
 use crate::base::vector2::Vector2;
 use crate::core::component::mask::Mask;
 use crate::core::component::{Component, ComponentBase};
-use crate::core::graphic::Graphic;
+use crate::core::graphic::{GeometryKey, Graphic};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
 use crate::ui::uiscrollbar::{ScrollBarAxis, UIScrollBar};
@@ -1070,6 +1070,15 @@ impl Component for UIScrollView {
 	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		self.ui_view.draw_background(transform, graphic);
+	}
+
+	//==============================================================================
+	/// 그리기 입력 적기. (배경의 입력)
+	//==============================================================================
+	#[reflect(skip)]
+	fn write_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) -> bool {
+		self.ui_view.write_background_geometry_key(transform, geometry_key);
+		true
 	}
 
 	//==============================================================================

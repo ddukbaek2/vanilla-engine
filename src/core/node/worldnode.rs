@@ -1471,7 +1471,7 @@ impl WorldNode {
 				continue;
 			}
 			if !is_culled {
-				component.draw(&self.transform, graphic);
+				graphic.draw_component(component.as_mut(), &self.transform);
 			}
 			if let Some(round_size) = component.get_clip_round_size() {
 				clip_round_size = Some(round_size);

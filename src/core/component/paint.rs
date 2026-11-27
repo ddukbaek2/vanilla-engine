@@ -4,7 +4,7 @@
 use crate::base::color::Color;
 use crate::base::rect::Rect;
 use crate::core::component::{Component, ComponentBase};
-use crate::core::graphic::Graphic;
+use crate::core::graphic::{GeometryKey, Graphic};
 use crate::core::node::worldnode::NodeTransform;
 
 //==============================================================================
@@ -80,6 +80,15 @@ impl Paint {
 		let mut paint = Paint::new();
 		paint.set_color(color);
 		paint
+	}
+
+	//==============================================================================
+	/// 그리기 입력을 기하 캐시 열쇠에 적기. (색, 둥근 크기, 내용 크기, Sprite 가 이미지 없을 때도 쓴다)
+	//==============================================================================
+	pub(crate) fn write_paint_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) {
+		geometry_key.add(self.get_color());
+		geometry_key.add(self.round_size);
+		geometry_key.add(transform.get_content_size());
 	}
 
 	//==============================================================================
@@ -197,5 +206,14 @@ impl Component for Paint {
 	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		self.draw_paint(transform, graphic);
+	}
+
+	//==============================================================================
+	/// 그리기 입력 적기. (색, 둥근 크기, 내용 크기, 원본 Paint.writeGeometryKey)
+	//==============================================================================
+	#[reflect(skip)]
+	fn write_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) -> bool {
+		self.write_paint_geometry_key(transform, geometry_key);
+		true
 	}
 }

@@ -10,7 +10,7 @@ use crate::base::vector2::Vector2;
 use crate::core::component::paint::Paint;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::frame::Frame;
-use crate::core::graphic::{BlendMode, Graphic};
+use crate::core::graphic::{BlendMode, GeometryKey, Graphic};
 use crate::core::image::Image;
 use crate::core::node::worldnode::NodeTransform;
 use std::rc::Rc;
@@ -436,6 +436,26 @@ impl Sprite {
 	}
 
 	//==============================================================================
+	/// 그리기 입력을 기하 캐시 열쇠에 적기. (UIImageView 가 함께 쓴다)
+	//==============================================================================
+	pub(crate) fn write_sprite_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) {
+		geometry_key.add(self.image.as_ref());
+		if let Some(image) = &self.image {
+			geometry_key.add(image.get_width());
+			geometry_key.add(image.get_height());
+		}
+		geometry_key.add(self.get_color());
+		geometry_key.add(self.get_round_size());
+		geometry_key.add(self.is_horizontal_flip);
+		geometry_key.add(self.is_vertical_flip);
+		geometry_key.add(self.sprite_draw_mode as u32);
+		geometry_key.add(self.sprite_blend_mode.get_name());
+		geometry_key.add(self.image_rect);
+		geometry_key.add(self.nine_slice);
+		geometry_key.add(transform.get_content_size());
+	}
+
+	//==============================================================================
 	/// 둥근 모서리 크기 반환.
 	///
 	/// # 돌려줌
@@ -502,6 +522,15 @@ impl Component for Sprite {
 
 	/// 조각, 나인 슬라이스, 타일 모두 내용 영역 안에 그리고, 뒤집어도 영역 안에서 뒤집으므로 늘 영역 안이다.
 	fn is_drawn_inside_content(&self) -> bool {
+		true
+	}
+
+	//==============================================================================
+	/// 그리기 입력 적기. (그림과 그 크기, 색, 둥근 크기, 뒤집기, 출력 방식, 블렌드, 그림 영역, 나인슬라이스, 내용 크기, 원본 Sprite.writeGeometryKey)
+	//==============================================================================
+	#[reflect(skip)]
+	fn write_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) -> bool {
+		self.write_sprite_geometry_key(transform, geometry_key);
 		true
 	}
 

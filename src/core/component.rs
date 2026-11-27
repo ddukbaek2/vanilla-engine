@@ -28,7 +28,7 @@ pub mod text;
 
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
-use crate::core::graphic::Graphic;
+use crate::core::graphic::{GeometryCache, GeometryCacheSlot, GeometryKey, Graphic};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::{push_draw_bounds_dirty, DrawBoundsKey, NodeTransform};
 use crate::core::reflection::Reflect;
@@ -284,6 +284,8 @@ pub struct ComponentBase {
 	is_enable: bool,
 	is_gizmo_visible: bool,
 	draw_bounds_key: Option<DrawBoundsKey>,
+	/// Graphic::draw_component 가 이 컴포넌트에 둔 기하 캐시. (복제하면 비운다)
+	geometry_cache_slot: GeometryCacheSlot,
 }
 
 /// 컴포넌트 그리는 사각형 세대. (모든 컴포넌트의 그리는 사각형이 한꺼번에 바뀔 수 있을 때 하나 오른다, 글꼴 적재 같은)
@@ -301,7 +303,22 @@ impl ComponentBase {
 			is_enable: true,
 			is_gizmo_visible: false,
 			draw_bounds_key: None,
+			geometry_cache_slot: GeometryCacheSlot::default(),
 		}
+	}
+
+	//==============================================================================
+	/// 기하 캐시 꺼내기. (Graphic::draw_component 가 그리는 동안 쥔다)
+	//==============================================================================
+	pub(crate) fn take_geometry_cache(&mut self) -> Option<Box<GeometryCache>> {
+		self.geometry_cache_slot.geometry_cache.take()
+	}
+
+	//==============================================================================
+	/// 기하 캐시 돌려 두기.
+	//==============================================================================
+	pub(crate) fn put_geometry_cache(&mut self, geometry_cache: Box<GeometryCache>) {
+		self.geometry_cache_slot.geometry_cache = Some(geometry_cache);
 	}
 
 	//==============================================================================
@@ -670,6 +687,61 @@ pub trait Component: AsAny + Reflect {
 	/// - `_graphic`: 그릴 Graphic.
 	//==============================================================================
 	fn draw(&mut self, _transform: &NodeTransform, _graphic: &mut Graphic) {
+	}
+
+	//==============================================================================
+	/// 그리기 입력을 기하 캐시 열쇠에 적기. (Graphic::draw_component 가 draw 앞에 부른다, 원본 writeGeometryKey)
+	/// - true 를 돌려주는 컴포넌트만 Graphic 이 그린 정점을 캐시해, 적은 입력과 변환이 그대로면 draw 를 부르지 않는다.
+	/// - draw 가 읽는 값(색, 크기, 글, 그림 등)을 모두 적어야 한다. 하나라도 빠지면 바뀐 것을 놓친다. (기본 false, 캐시하지 않음)
+	///
+	/// # 인자
+	/// - `_transform`: 이 노드의 트랜스폼. (content_size 를 읽는다)
+	/// - `_geometry_key`: 적을 열쇠.
+	///
+	/// # 돌려줌
+	/// 입력을 다 적었으면 true.
+	///
+	/// # 예제
+	/// 색과 크기로만 그리는 컴포넌트의 입력 적기
+	/// ```rust
+	/// use vanilla::{Color, Component, ComponentBase, GeometryKey, Graphic, NodeTransform, Rect};
+	///
+	/// #[derive(Default)]
+	/// struct Box2D {
+	/// 	component_base: ComponentBase,
+	/// 	color: Color,
+	/// }
+	///
+	/// impl Component for Box2D {
+	/// 	fn get_component_base(&self) -> &ComponentBase {
+	/// 		&self.component_base
+	/// 	}
+	///
+	/// 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+	/// 		&mut self.component_base
+	/// 	}
+	///
+	/// 	fn write_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) -> bool {
+	/// 		geometry_key.add(self.color);
+	/// 		geometry_key.add(transform.get_content_size());
+	/// 		true
+	/// 	}
+	///
+	/// 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
+	/// 		let content_size = transform.get_content_size();
+	/// 		graphic.set_fill_color(self.color);
+	/// 		graphic.draw_rect(Rect::create(0.0, 0.0, content_size.x, content_size.y));
+	/// 	}
+	/// }
+	///
+	/// let box_2d = Box2D::default();
+	/// let mut geometry_key = GeometryKey::new();
+	/// geometry_key.begin();
+	/// println!("{} {}", box_2d.write_geometry_key(&NodeTransform::default(), &mut geometry_key), geometry_key.end());
+	/// ```
+	//==============================================================================
+	fn write_geometry_key(&self, _transform: &NodeTransform, _geometry_key: &mut GeometryKey) -> bool {
+		false
 	}
 
 	//==============================================================================
