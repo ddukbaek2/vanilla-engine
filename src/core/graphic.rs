@@ -4068,7 +4068,7 @@ impl Graphic {
 	fn get_text_entry(&mut self, text_draw_kind: TextDrawKind, text: &str, line_width: f64, bake_scale: f64, text_direction: TextDirection) -> Option<TextEntry> {
 		let shaping_direction = text_direction.to_shaping_direction();
 		if !self.text_string_texture_cache.has_pending_deleted_textures() {
-			if let Some(entry) = self.text_string_texture_cache.find_entry(text_draw_kind, text, &self.font_string, line_width as f32, bake_scale as f32, shaping_direction) {
+			if let Some(entry) = self.text_string_texture_cache.find_entry(text_draw_kind, text, &self.font_string, line_width, bake_scale, shaping_direction) {
 				return Some(entry);
 			}
 		}
@@ -4076,7 +4076,7 @@ impl Graphic {
 		// 새로 굽거나 오래된 것을 버리면 텍스처 바인드가 바뀐다. (지울 텍스처가 묶음에 남아 있을 수 있어 먼저 내보낸다)
 		self.flush_batch();
 		self.bound_texture.set(None);
-		self.text_string_texture_cache.get_entry(&self.gl, text_draw_kind, text, &self.font_string, line_width as f32, bake_scale as f32, shaping_direction)
+		self.text_string_texture_cache.get_entry(&self.gl, text_draw_kind, text, &self.font_string, line_width, bake_scale, shaping_direction)
 	}
 
 	//==============================================================================

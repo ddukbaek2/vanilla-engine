@@ -205,7 +205,7 @@ pub fn measure_text_without_graphic(font_string: &str, text: &str) -> Option<Tex
 /// - 데스크탑만. 글꼴이 하나도 없거나 아직 등록한 캐시가 없으면 None 이다.
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn rasterize_text_without_graphic(text: &str, font_string: &str, bake_scale: f32, padding: i32, direction: ShapingDirection, color: Color) -> Option<TextRaster> {
+pub(crate) fn rasterize_text_without_graphic(text: &str, font_string: &str, bake_scale: f64, padding: i32, direction: ShapingDirection, color: Color) -> Option<TextRaster> {
 	SHARED_MEASURE_CACHE.with(|shared_measure_cache_cell| {
 		let shared_measure_cache = shared_measure_cache_cell.borrow();
 		shared_measure_cache.as_ref()?.rasterize_text_with_color(text, font_string, bake_scale, padding, direction, color)
@@ -475,8 +475,8 @@ struct CachedTextEntry {
 	direction: ShapingDirection,
 	text: String,
 	font_string: String,
-	line_width: f32,
-	bake_scale: f32,
+	line_width: f64,
+	bake_scale: f64,
 	entry: TextEntry,
 	last_used_frame_number: u64,
 }
@@ -485,7 +485,7 @@ impl CachedTextEntry {
 	//==============================================================================
 	/// 키가 같은지. (선 두께와 배율은 비트로 맞춘다)
 	//==============================================================================
-	fn is_same_key(&self, text_draw_kind: TextDrawKind, is_antialias: bool, direction: ShapingDirection, text: &str, font_string: &str, line_width: f32, bake_scale: f32) -> bool {
+	fn is_same_key(&self, text_draw_kind: TextDrawKind, is_antialias: bool, direction: ShapingDirection, text: &str, font_string: &str, line_width: f64, bake_scale: f64) -> bool {
 		self.text_draw_kind == text_draw_kind && self.is_antialias == is_antialias && self.direction == direction && self.line_width.to_bits() == line_width.to_bits() && self.bake_scale.to_bits() == bake_scale.to_bits() && self.font_string == font_string && self.text == text
 	}
 }
@@ -1608,7 +1608,7 @@ impl TextStringTextureCache {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn get_entry(&mut self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32, direction: ShapingDirection) -> Option<TextEntry> {
+	pub fn get_entry(&mut self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<TextEntry> {
 		if text.is_empty() {
 			return None;
 		}
@@ -1659,7 +1659,7 @@ impl TextStringTextureCache {
 	//==============================================================================
 	/// 이미 구운 문자열 찾기. (GL 을 건드리지 않는다, 없으면 None)
 	//==============================================================================
-	pub(crate) fn find_entry(&mut self, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32, direction: ShapingDirection) -> Option<TextEntry> {
+	pub(crate) fn find_entry(&mut self, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<TextEntry> {
 		let is_antialias = self.is_text_antialias_enabled;
 		let entry_hash = create_entry_hash(text_draw_kind, is_antialias, direction, text, font_string, line_width, bake_scale);
 		let frame_number = self.frame_number;
@@ -1723,7 +1723,7 @@ impl TextStringTextureCache {
 	/// # 돌려줌
 	/// 래스터. 글이 비었거나 데스크탑에서 그릴 얼굴이 하나도 없으면 None.
 	//==============================================================================
-	pub fn rasterize_text(&self, text: &str, font_string: &str, bake_scale: f32, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
+	pub fn rasterize_text(&self, text: &str, font_string: &str, bake_scale: f64, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
 		self.rasterize_text_with_color(text, font_string, bake_scale, padding, direction, Color::white())
 	}
 
@@ -1758,7 +1758,7 @@ impl TextStringTextureCache {
 	/// }
 	/// ```
 	//==============================================================================
-	pub fn rasterize_text_with_color(&self, text: &str, font_string: &str, bake_scale: f32, padding: i32, direction: ShapingDirection, color: Color) -> Option<TextRaster> {
+	pub fn rasterize_text_with_color(&self, text: &str, font_string: &str, bake_scale: f64, padding: i32, direction: ShapingDirection, color: Color) -> Option<TextRaster> {
 		let luminance_color = [(color.red * 255.0).round().clamp(0.0, 255.0) as u8, (color.green * 255.0).round().clamp(0.0, 255.0) as u8, (color.blue * 255.0).round().clamp(0.0, 255.0) as u8];
 		if text.is_empty() {
 			return None;
@@ -1776,7 +1776,7 @@ impl TextStringTextureCache {
 				return None;
 			}
 		}
-		let laid_out_text = lay_out_text(&face_list, &font_description, text, font_description.font_size * bake_scale, direction, padding.max(1), luminance_color)?;
+		let laid_out_text = lay_out_text(&face_list, &font_description, text, (f64::from(font_description.font_size) * bake_scale) as f32, direction, padding.max(1), luminance_color)?;
 		Some(TextRaster {
 			coverage: laid_out_text.coverage,
 			color_pixels: laid_out_text.color_pixels,
@@ -2097,7 +2097,7 @@ impl TextStringTextureCache {
 	//==============================================================================
 	/// 문자열 굽기.
 	//==============================================================================
-	fn bake_entry(&self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32, direction: ShapingDirection) -> Option<TextEntry> {
+	fn bake_entry(&self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f64, bake_scale: f64, direction: ShapingDirection) -> Option<TextEntry> {
 		let font_description = parse_font_string(font_string);
 		let face_list = self.resolve_covering_face_list(text, &font_description);
 		if face_list.is_empty() || self.is_browser_raster {
@@ -2115,14 +2115,16 @@ impl TextStringTextureCache {
 		// 비트맵 여백. (외곽선 두께만큼)
 		let stroke_radius = match text_draw_kind {
 			TextDrawKind::Stroke => {
-				(line_width * bake_scale * 0.5).max(0.5)
+				// 원본은 lineWidth * scale 을 double 로 곱해 캔버스에 넣고, 블링크가 float 로 줄인다.
+				(((line_width * bake_scale) as f32) * 0.5).max(0.5)
 			}
 			TextDrawKind::Fill => {
 				0.0
 			}
 		};
 		let padding = stroke_radius.ceil() as i32 + 1;
-		let pixel_size = font_description.font_size * bake_scale;
+		// 원본은 글 크기에 배율을 double 로 곱해 글꼴 글을 짓고, 블링크가 float 로 든다.
+		let pixel_size = (f64::from(font_description.font_size) * bake_scale) as f32;
 		let laid_out_text = lay_out_text(&face_list, &font_description, text, pixel_size, direction, padding, WHITE_LUMINANCE_COLOR)?;
 		let mut coverage = laid_out_text.coverage;
 		let mut color_pixels = laid_out_text.color_pixels;
@@ -2149,13 +2151,13 @@ impl TextStringTextureCache {
 
 		Some(TextEntry {
 			texture,
-			advance_width: (laid_out_text.advance_width / bake_scale) as f64,
-			font_ascent: (laid_out_text.font_ascent / bake_scale) as f64,
-			font_descent: (laid_out_text.font_descent / bake_scale) as f64,
-			pen_offset_x: (laid_out_text.origin_x / bake_scale) as f64,
-			baseline_offset_y: (laid_out_text.baseline_y as f32 / bake_scale) as f64,
-			quad_width: (bitmap_width as f32 / bake_scale) as f64,
-			quad_height: (bitmap_height as f32 / bake_scale) as f64,
+			advance_width: f64::from(laid_out_text.advance_width) / bake_scale,
+			font_ascent: f64::from(laid_out_text.font_ascent) / bake_scale,
+			font_descent: f64::from(laid_out_text.font_descent) / bake_scale,
+			pen_offset_x: f64::from(laid_out_text.origin_x) / bake_scale,
+			baseline_offset_y: laid_out_text.baseline_y as f64 / bake_scale,
+			quad_width: bitmap_width as f64 / bake_scale,
+			quad_height: bitmap_height as f64 / bake_scale,
 		})
 	}
 }
@@ -2256,11 +2258,11 @@ fn lay_out_text(face_list: &[ResolvedFontFace], font_description: &FontDescripti
 /// 브라우저 시스템 글꼴로 글 모양 래스터 받기. (웹, 글꼴 바이트가 없을 때 rasterize_text 자리)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
-fn rasterize_system_font_text(font_description: &FontDescription, text: &str, bake_scale: f32, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
-	let pixel_size = font_description.font_size * bake_scale;
-	let glyph_raster = crate::platform::web::systemfont::rasterize_piece(font_description, pixel_size as f64, text, direction == ShapingDirection::RightToLeft)?;
+fn rasterize_system_font_text(font_description: &FontDescription, text: &str, bake_scale: f64, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
+	let pixel_size = f64::from(font_description.font_size) * bake_scale;
+	let glyph_raster = crate::platform::web::systemfont::rasterize_piece(font_description, pixel_size, text, direction == ShapingDirection::RightToLeft)?;
 	let mut scaled_description = font_description.clone();
-	scaled_description.font_size = pixel_size;
+	scaled_description.font_size = pixel_size as f32;
 	let text_metrics = crate::platform::web::systemfont::measure_text(&scaled_description, text);
 	let width = glyph_raster.width + padding * 2;
 	let height = glyph_raster.height + padding * 2;
@@ -2361,8 +2363,8 @@ fn create_system_font_measure(font_description: &FontDescription, pixel_size: f3
 /// 브라우저 시스템 글꼴로 굽기. (웹. 글꼴 바이트가 하나도 없을 때)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
-fn bake_system_font_entry(gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f32, bake_scale: f32, is_antialias: bool, direction: ShapingDirection) -> Option<TextEntry> {
-	let mut system_font_bitmap = crate::platform::web::systemfont::bake_text(text_draw_kind, text, font_description, line_width as f64, bake_scale as f64, direction)?;
+fn bake_system_font_entry(gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f64, bake_scale: f64, is_antialias: bool, direction: ShapingDirection) -> Option<TextEntry> {
+	let mut system_font_bitmap = crate::platform::web::systemfont::bake_text(text_draw_kind, text, font_description, line_width, bake_scale, direction)?;
 	if !is_antialias {
 		// 프리멀티플라이드라 알파로 가르고 색은 곧은 색으로 채운다. (흰 글자는 네 칸 모두 덮인 정도, 색 이모지는 제 색)
 		apply_premultiplied_alpha_threshold(&mut system_font_bitmap.pixels);
@@ -2370,13 +2372,13 @@ fn bake_system_font_entry(gl: &glow::Context, text_draw_kind: TextDrawKind, text
 	let texture = upload_text_texture(gl, system_font_bitmap.bitmap_width, system_font_bitmap.bitmap_height, &system_font_bitmap.pixels, is_antialias)?;
 	Some(TextEntry {
 		texture,
-		advance_width: (system_font_bitmap.advance_width / bake_scale as f64) as f64,
-		font_ascent: (system_font_bitmap.font_ascent / bake_scale as f64) as f64,
-		font_descent: (system_font_bitmap.font_descent / bake_scale as f64) as f64,
-		pen_offset_x: (system_font_bitmap.pen_x / bake_scale as f64) as f64,
-		baseline_offset_y: (system_font_bitmap.baseline_y / bake_scale as f64) as f64,
-		quad_width: (system_font_bitmap.bitmap_width as f32 / bake_scale) as f64,
-		quad_height: (system_font_bitmap.bitmap_height as f32 / bake_scale) as f64,
+		advance_width: system_font_bitmap.advance_width / bake_scale,
+		font_ascent: system_font_bitmap.font_ascent / bake_scale,
+		font_descent: system_font_bitmap.font_descent / bake_scale,
+		pen_offset_x: system_font_bitmap.pen_x / bake_scale,
+		baseline_offset_y: system_font_bitmap.baseline_y / bake_scale,
+		quad_width: system_font_bitmap.bitmap_width as f64 / bake_scale,
+		quad_height: system_font_bitmap.bitmap_height as f64 / bake_scale,
 	})
 }
 
@@ -2525,7 +2527,7 @@ fn upload_text_texture(gl: &glow::Context, bitmap_width: i32, bitmap_height: i32
 //==============================================================================
 /// 구운 문자열 키의 해시. (방식, 안티앨리어싱, 문단 방향, 폰트 문자열, 선 두께, 배율, 글)
 //==============================================================================
-fn create_entry_hash(text_draw_kind: TextDrawKind, is_antialias: bool, direction: ShapingDirection, text: &str, font_string: &str, line_width: f32, bake_scale: f32) -> u64 {
+fn create_entry_hash(text_draw_kind: TextDrawKind, is_antialias: bool, direction: ShapingDirection, text: &str, font_string: &str, line_width: f64, bake_scale: f64) -> u64 {
 	let mut hasher = DefaultHasher::new();
 	text_draw_kind.hash(&mut hasher);
 	is_antialias.hash(&mut hasher);

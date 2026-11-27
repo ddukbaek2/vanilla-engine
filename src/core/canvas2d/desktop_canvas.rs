@@ -1886,7 +1886,7 @@ impl Canvas2D {
 				Color::create(0.5, 0.5, 0.5, 1.0)
 			}
 		};
-		let text_raster = match rasterize_text_without_graphic(text, &self.state.font.drawing_font, text_scale, padding, ShapingDirection::LeftToRight, luminance_color) {
+		let text_raster = match rasterize_text_without_graphic(text, &self.state.font.drawing_font, f64::from(text_scale), padding, ShapingDirection::LeftToRight, luminance_color) {
 			Some(text_raster) => {
 				text_raster
 			}
