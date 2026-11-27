@@ -229,6 +229,7 @@ mod engine_dialog {
 	/// 본문 CONTEXT_DIALOG_BODY_TEXT 13px 줄 20, 제목과 본문 사이 DIALOG_CONTENT_MARGIN_TOP_TEXT 8, 본문과 입력 칸 사이 RELATED_CONTROL_VERTICAL 8,
 	/// 아래 여백 입력 칸이 있으면 CONTROL 24 없으면 TEXT 16, 단추 줄 여백 (0, 20, 20, 20), 단추 사이 8, 단추 최소 폭 64 안쪽 16 글 13px 500 알약 꼴,
 	/// 입력 칸 안쪽 10 모서리 8, 대화 상자 모서리 12, 기본 밝은 팔레트 색. 단추와 입력 칸 높이는 글꼴 높이 + 위아래 10 을 기본 글꼴로 셈한 값이다)
+	/// 글꼴은 system-ui 다. (크롬 질문 창 views 는 운영체제 UI 글꼴, 맥 NSFont systemFontOfSize, 윈도우 NONCLIENTMETRICS, 리눅스 GTK 글꼴로 그리고 크롬의 system-ui 도 같은 글꼴을 고른다. 원본도 같은 글)
 	const DIALOG_WIDTH: f32 = 400.0;
 	const DIALOG_MARGIN: f32 = 8.0;
 	const DIALOG_PADDING_TOP: f32 = 20.0;

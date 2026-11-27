@@ -443,6 +443,26 @@ pub fn resolve_generic_family_name(generic_family: GenericFamily) -> Option<Stri
 }
 
 //==============================================================================
+/// CSS 시스템 글꼴 낱말의 글꼴 이름과 크기. (Canvas2D font 의 small-caption, menu, status-bar)
+/// - 윈도우 크롬만 이 셋을 운영체제 글꼴로 정한다. (layout_theme_font_provider_win.cc 의 SystemFontFamily, SystemFontSize)
+///   브라우저가 NONCLIENTMETRICS 의 lfSmCaptionFont, lfMenuFont, lfStatusFont 를 gfx SystemFonts 로 고쳐(접근성 글자 배율과 화면 언어 배율을 곱하고
+///   시스템 DPI 배율로 나눔) GDI 로 지은 글꼴의 tmHeight - tmInternalLeading 를 크기로 넘긴다. (system_fonts_win.cc, render_view_host_impl.cc 의 GetFontInfo)
+///   렌더러는 그 크기가 12 보다 작고 코드 페이지가 936 이면 12 로 올린다. (font_cache_skia_win.cc 의 EnsureMinimumFontHeightIfNeeded)
+/// - 그 밖의 운영체제와 낱말은 None 이다. (크롬 기본 제공자 layout_theme_font_provider_default.cc 의 Arial 16px)
+//==============================================================================
+pub(crate) fn read_system_font_keyword(keyword: &str) -> Option<(String, f32)> {
+	#[cfg(target_os = "windows")]
+	{
+		platform_font::read_system_font_keyword(keyword)
+	}
+	#[cfg(not(target_os = "windows"))]
+	{
+		let _ = keyword;
+		None
+	}
+}
+
+//==============================================================================
 /// 맥: CoreText.
 //==============================================================================
 #[cfg(target_os = "macos")]
@@ -819,6 +839,116 @@ mod platform_font {
 			}
 		}
 		family_name
+	}
+
+	/// 화면 언어가 바꾸는 UI 글꼴 이름과 배율. (ui/strings 의 app_locale_settings_<언어>.xtb 의 IDS_UI_FONT_FAMILY, IDS_UI_FONT_SIZE_SCALER, 없으면 default 와 100)
+	const UI_FONT_LOCALE_TABLE: [(&str, Option<&str>, i32); 7] = [("bn", Some("Vrinda"), 120), ("gu", None, 115), ("hi", None, 125), ("kn", None, 130), ("ml", None, 120), ("mr", None, 125), ("te", None, 130)];
+
+	//==============================================================================
+	/// CSS 시스템 글꼴 낱말 small-caption, menu, status-bar 의 글꼴 이름과 크기. (크롬 gfx SystemFonts 와 같은 차례, 그 밖의 낱말은 None)
+	/// - 배율 = 화면 언어 배율(l10n_util_win.cc 의 AdjustUiFont) x 접근성 글자 배율(UISettings.TextScaleFactor) / 시스템 DPI 배율(LOGPIXELSY / 96)
+	/// - lfHeight 에 배율을 곱해 반올림하고(0 이 되면 부호대로 1), 화면 언어가 이름을 바꾸면 그 이름으로 GDI 글꼴을 지어 tmHeight - tmInternalLeading (1 이상)
+	//==============================================================================
+	pub fn read_system_font_keyword(keyword: &str) -> Option<(String, f32)> {
+		use windows_sys::Win32::Graphics::Gdi::{CreateFontIndirectW, DeleteObject, GetDC, GetDeviceCaps, GetObjectW, GetTextMetricsW, ReleaseDC, SelectObject, LOGFONTW, LOGPIXELSY, TEXTMETRICW};
+		use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, NONCLIENTMETRICSW, SPI_GETNONCLIENTMETRICS};
+		let mut non_client_metrics: NONCLIENTMETRICSW = unsafe { std::mem::zeroed() };
+		non_client_metrics.cbSize = std::mem::size_of::<NONCLIENTMETRICSW>() as u32;
+		let is_read = unsafe { SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, non_client_metrics.cbSize, &mut non_client_metrics as *mut NONCLIENTMETRICSW as *mut c_void, 0) } != 0;
+		if !is_read {
+			return None;
+		}
+		let mut log_font: LOGFONTW = match keyword {
+			"small-caption" => {
+				non_client_metrics.lfSmCaptionFont
+			}
+			"menu" => {
+				non_client_metrics.lfMenuFont
+			}
+			"status-bar" => {
+				non_client_metrics.lfStatusFont
+			}
+			_ => {
+				return None;
+			}
+		};
+		// 화면 언어 배율과 이름. (크롬 화면 언어의 언어 부분)
+		let browser_locale = super::read_browser_locale();
+		let language = browser_locale.split(['-', '_']).next().unwrap_or("").to_ascii_lowercase();
+		let mut font_scale = 1.0_f64;
+		if let Some((_, family_override, scaler)) = UI_FONT_LOCALE_TABLE.iter().find(|(table_language, _, _)| *table_language == language) {
+			font_scale = *scaler as f64 / 100.0;
+			if let Some(family_override) = family_override {
+				let wide_name: Vec<u16> = family_override.encode_utf16().collect();
+				log_font.lfFaceName = [0; 32];
+				log_font.lfFaceName[..wide_name.len()].copy_from_slice(&wide_name);
+			}
+		}
+		font_scale *= read_text_scale_factor();
+		let screen_context = unsafe { GetDC(0) };
+		if screen_context == 0 {
+			return None;
+		}
+		let system_scale = unsafe { GetDeviceCaps(screen_context, LOGPIXELSY as i32) } as f64 / 96.0;
+		if system_scale > 0.0 {
+			font_scale /= system_scale;
+		}
+		// base::ClampRound 은 반을 0 에서 먼 쪽으로 올린다. (f64::round 와 같다)
+		let mut font_height = (log_font.lfHeight as f64 * font_scale).round() as i32;
+		if log_font.lfHeight != 0 && font_height == 0 {
+			font_height = if log_font.lfHeight > 0 {
+				1
+			}
+			else {
+				-1
+			};
+		}
+		log_font.lfHeight = font_height;
+		let font_handle = unsafe { CreateFontIndirectW(&log_font) };
+		if font_handle == 0 {
+			unsafe { ReleaseDC(0, screen_context) };
+			return None;
+		}
+		let previous_object = unsafe { SelectObject(screen_context, font_handle) };
+		// 만든 글꼴의 이름. (GetObject 의 lfFaceName)
+		let mut mapped_log_font: LOGFONTW = unsafe { std::mem::zeroed() };
+		unsafe { GetObjectW(font_handle, std::mem::size_of::<LOGFONTW>() as i32, &mut mapped_log_font as *mut LOGFONTW as *mut c_void) };
+		let mut text_metric: TEXTMETRICW = unsafe { std::mem::zeroed() };
+		let is_metric_read = unsafe { GetTextMetricsW(screen_context, &mut text_metric) } != 0;
+		unsafe {
+			SelectObject(screen_context, previous_object);
+			DeleteObject(font_handle);
+			ReleaseDC(0, screen_context);
+		}
+		if !is_metric_read {
+			return None;
+		}
+		let face_name = &mapped_log_font.lfFaceName;
+		let name_length = face_name.iter().position(|character| *character == 0).unwrap_or(face_name.len());
+		let family_name = String::from_utf16_lossy(&face_name[..name_length]);
+		if family_name.is_empty() {
+			return None;
+		}
+		let mut font_size = (text_metric.tmHeight - text_metric.tmInternalLeading).max(1);
+		// 렌더러: 간체 중국어 코드 페이지는 12 보다 작게 두지 않는다.
+		if font_size < 12 && unsafe { windows_sys::Win32::Globalization::GetACP() } == 936 {
+			font_size = 12;
+		}
+		Some((family_name, font_size as f32))
+	}
+
+	//==============================================================================
+	/// 접근성 글자 배율. (UISettings.TextScaleFactor, 크롬 uwp_text_scale_factor.cc. 읽지 못하면 1)
+	//==============================================================================
+	fn read_text_scale_factor() -> f64 {
+		match windows::UI::ViewManagement::UISettings::new().and_then(|ui_settings| ui_settings.TextScaleFactor()) {
+			Ok(text_scale_factor) if text_scale_factor >= 1.0 => {
+				text_scale_factor
+			}
+			_ => {
+				1.0
+			}
+		}
 	}
 
 	//==============================================================================
