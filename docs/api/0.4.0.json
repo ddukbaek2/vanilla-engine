@@ -30535,8 +30535,8 @@
 							"source": "src/core/engine.rs",
 							"counterpart": {
 								"engine": "vanilla.js",
-								"module": "core/scenemanager",
-								"class": "SceneManager",
+								"module": "core/engine",
+								"class": "Engine",
 								"name": "getAllLoadedScenes"
 							}
 						},
@@ -43215,7 +43215,13 @@
 								"en": "Flushes the gathered batch. (called before changing GL state, at the end of a frame, and before using GL directly)\n- Binds the batch textures to units from 0 up. Units of unused slots get the white texture, so a texture from an earlier draw never forms a feedback loop even if it is the current target (render target). (same as the original)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/graphic.rs"
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "flushBatch"
+							}
 						},
 						{
 							"kind": "method",
@@ -43236,7 +43242,13 @@
 								"en": "Turns batching on or off. (on by default. When off, one draw call per draw, like the original)\n- When on, consecutive draws (images, shapes, text, vertex-color quads) are accumulated with transform and color carried in the vertices and drawn in one draw call.\n- One batch binds several textures (the smaller of the device texture unit count and 16), so the batch continues when the texture changes. (the same scheme as PixiJS)\n- Axis-aligned clips (begin_clip_rect) whose edges lie on pixel boundaries are clipped by the shader with a clip rectangle carried in the vertices, so they do not break the batch. (rotated or rounded clips use the stencil)\n- When the texture slots fill up, when the blend, a stencil clip or a swapped-in shader changes, or when the buffer is full, what has accumulated is drawn, and the engine draws the rest at the end of the frame."
 							},
 							"since": "0.3.2",
-							"source": "src/core/graphic.rs"
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "setBatchingEnabled"
+							}
 						},
 						{
 							"kind": "method",
@@ -43255,7 +43267,13 @@
 								"en": "Whether batching is on."
 							},
 							"since": "0.3.2",
-							"source": "src/core/graphic.rs"
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "isBatchingEnabled"
+							}
 						},
 						{
 							"kind": "method",
@@ -44876,7 +44894,13 @@
 								"en": "Measures a string. (with the given font string, the current font string is not changed)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/graphic.rs"
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "measureTextWithFontString"
+							}
 						},
 						{
 							"kind": "method",
@@ -70386,6 +70410,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/core/viewmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/viewmanager",
+								"class": "ViewManager",
+								"name": "limitRenderPixelRatio"
+							},
 							"examples": [
 								{
 									"title": {
@@ -120976,7 +121006,13 @@
 								"en": "Inspects a node. (shows the panel, switches to the Node Hierarchy tab, expands the ancestors, and selects that node)"
 							},
 							"since": "0.4.0",
-							"source": "src/misc/devtools.rs"
+							"source": "src/misc/devtools.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/devtools",
+								"class": "DevTools",
+								"name": "inspectNode"
+							}
 						},
 						{
 							"kind": "method",
@@ -124871,7 +124907,13 @@
 								"en": "Sets the save folder directly. (None uses the default folder derived from the app name. Unused on the web)"
 							},
 							"since": "0.3.2",
-							"source": "src/misc/localstorage.rs"
+							"source": "src/misc/localstorage.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/localstorage",
+								"class": "LocalStorage",
+								"name": "setStorageDirectory"
+							}
 						},
 						{
 							"kind": "static",
@@ -131875,7 +131917,13 @@
 								"en": "Overrides with the query of the page address. (reads the address query on the web, the environment variable `VANILLA_<name>` on desktop. The lite path if the value is not 0 or false)"
 							},
 							"since": "0.4.0",
-							"source": "src/misc/graphicsqualitygovernor.rs"
+							"source": "src/misc/graphicsqualitygovernor.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "misc/graphicsqualitygovernor",
+								"class": "GraphicsQualityGovernor",
+								"name": "applyPageQuery"
+							}
 						},
 						{
 							"kind": "method",
@@ -153788,7 +153836,13 @@
 								"en": "Sets the template node. (serialized and cloned with a UIDocument in which game components are registered)"
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uilistview.rs"
+							"source": "src/ui/uilistview.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uilistview",
+								"class": "UIListView",
+								"name": "setTemplateNodeWithDocument"
+							}
 						},
 						{
 							"kind": "method",
@@ -160777,8 +160831,8 @@
 							"source": "src/ui/uidocument.rs",
 							"counterpart": {
 								"engine": "vanilla.js",
-								"module": "base/object",
-								"class": "Object",
+								"module": "ui/uidocument",
+								"class": "UIDocument",
 								"name": "constructor"
 							}
 						},
@@ -161125,6 +161179,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/ui/uidocument.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uidocument",
+								"class": "UIDocument",
+								"name": "getNodeTypeName"
+							},
 							"examples": [
 								{
 									"title": {
@@ -161204,6 +161264,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/ui/uidocument.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uidocument",
+								"class": "UIDocument",
+								"name": "createComponent"
+							},
 							"examples": [
 								{
 									"title": {
@@ -161321,6 +161387,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/ui/uidocument.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uidocument",
+								"class": "UIDocument",
+								"name": "loadImages"
+							},
 							"examples": [
 								{
 									"title": {
@@ -161358,7 +161430,13 @@
 								"en": "Attaches the held images. (puts in found images, keeps images still loading. Returns the remaining count)\n- from_json_text and deserialize_node call this once at the end. If images load later, as on the web, call it in the scene's tick until the remaining count becomes 0.\n- Images not found (resolver gave None, asset missing or failed) log a warning and are dropped. That component stays without an image as in the original."
 							},
 							"since": "0.4.0",
-							"source": "src/ui/uidocument.rs"
+							"source": "src/ui/uidocument.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "ui/uidocument",
+								"class": "UIDocument",
+								"name": "bindPendingImages"
+							}
 						},
 						{
 							"kind": "method",
