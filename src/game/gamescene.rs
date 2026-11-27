@@ -69,7 +69,6 @@ use crate::base::color::Color;
 use crate::base::pivot::Pivot;
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
-use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::{NodeId, NodeTree};
@@ -2412,6 +2411,7 @@ macro_rules! game_scene {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::core::asset::AssetLoadHandle;
 	use crate::core::engine::EngineConfiguration;
 	use crate::core::viewmanager::SafeAreaSide;
 
