@@ -44,6 +44,10 @@ harness = false
 name = "toonambientocclusion"
 harness = false
 
+[[test]]
+name = "toonoutlinefast"
+harness = false
+
 # 해 그림자 치우침 찍기 시험. (원본 tests/graphics3d/shadowbiaschrome.test.mjs 와 같은 장면)
 [[test]]
 name = "shadowbias"
