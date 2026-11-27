@@ -282,12 +282,12 @@ pub fn format_number(value: f64, locale: &str) -> Result<String, FormatError> {
 /// format_number 의 글 뒤에 unit_suffix 를 붙인 글. 언어 태그가 틀리면 format_number 처럼 Err(FormatError::InvalidLanguageTag).
 ///
 /// # 예제
-/// 원과 점수 단위
+/// 골드와 점수 단위
 /// ```rust
 /// use vanilla::format;
 ///
-/// assert_eq!(format::format_number_with_unit(1200000.0, "원", "ko-KR").unwrap(), "1,200,000원");
-/// assert_eq!(format::format_number_with_unit(-5.0, "점", "ko-KR").unwrap(), "-5점");
+/// assert_eq!(format::format_number_with_unit(1200000.0, " G", "ko-KR").unwrap(), "1,200,000 G");
+/// assert_eq!(format::format_number_with_unit(-5.0, "pt", "en-US").unwrap(), "-5pt");
 /// ```
 //==============================================================================
 pub fn format_number_with_unit(value: f64, unit_suffix: &str, locale: &str) -> Result<String, FormatError> {
