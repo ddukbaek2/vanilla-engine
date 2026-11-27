@@ -5,6 +5,8 @@
 //   노란 점과 이름표는 렌더러와 같은 Camera3D 의 project_to_view 로 3D 점 위에 얹은 2D 다. 판 다음 형제인 노란 띠는 3D 위에 그려진다.
 // - 오른쪽 판: 같은 장면을 ToonPostProcess 에 그려 채도 낮춤, 따뜻한 색조, 안개빛, 대비, 가장자리 어둡게를 건다.
 // - 두 판은 ToonView3D::set_renderer 로 렌더러 하나를 나눠 쓰고, 그릴 것은 set_draw_callback 의 클로저가 들고 있는다.
+// - 그리기 함수의 화면 사각형은 Rect 의 position, size 이고, 출력(ToonViewOutput)의 output_framebuffer, output_viewport 로 후처리를 낸다. (원본은 사각형 객체의 outputFramebuffer, outputViewport)
+// - 환경 변수 VANILLA_RENDER_SCALE=0.5 처럼 주면 두 판의 3D 만 그 배율로 그려 늘여 얹는다. (원본 ?renderScale=0.5, ToonView3D::set_render_scale, 이름표와 띠 같은 2D 는 기기 화소 그대로)
 // - 실행: cargo run --example toonview
 //==============================================================================
 use std::cell::{Cell, RefCell};
@@ -12,7 +14,7 @@ use std::f64::consts::PI;
 use std::rc::Rc;
 use vanilla::{
 	create_box_geometry, create_faceted_chunk_geometry, create_part_matrix, create_sphere_geometry, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, NodeId, NodeTree, Paint, Pivot, Rect, Scene, SceneBase, Text, TextAlign, ToonDrawOptions, ToonDrawQueue, ToonGeometry, ToonInstance,
-	ToonMesh, ToonMeshArrays, ToonMeshPiece, ToonPartOptions, Camera3D, ToonPostProcess, ToonRenderer, ToonView3D, Vector2, Vector3,
+	ToonMesh, ToonMeshArrays, ToonMeshPiece, ToonPartOptions, Camera3D, ToonPostProcess, ToonRenderer, ToonView3D, ToonViewOutput, Vector2, Vector3,
 };
 
 //==============================================================================
@@ -80,7 +82,7 @@ impl PanelDrawer {
 	//==============================================================================
 	// 판 그리기. (ToonView3D 의 그리기 함수)
 	//==============================================================================
-	fn draw(&mut self, renderer: &mut ToonRenderer, camera: &Camera3D, screen_rect: Rect, gl: &glow::Context, drawing_buffer_height: i32) {
+	fn draw(&mut self, renderer: &mut ToonRenderer, camera: &Camera3D, screen_rect: Rect, gl: &glow::Context, output: ToonViewOutput) {
 		if self.meshes.is_none() {
 			self.meshes = PanelDrawer::create_meshes(renderer, gl);
 		}
@@ -145,8 +147,7 @@ impl PanelDrawer {
 			renderer.set_hdr_output(true);
 			post_process.begin(gl, [0.05, 0.06, 0.09]);
 			queue.draw(gl, renderer, camera);
-			let bottom = drawing_buffer_height - screen_rect.position.y.round() as i32 - height;
-			post_process.end(gl, None, [screen_rect.position.x.round() as i32, bottom, width, height]);
+			post_process.end(gl, output.output_framebuffer, output.output_viewport);
 		}
 		self.frame_count += 1;
 		if self.frame_count == 30 {
@@ -196,6 +197,19 @@ fn create_panel(node_tree: &mut NodeTree, parent_id: NodeId, rect: Rect, color_t
 }
 
 //==============================================================================
+// 3D 렌더 스케일 읽기. (환경 변수 VANILLA_RENDER_SCALE, 원본 ?renderScale, 없거나 0 이거나 수가 아니면 1)
+//==============================================================================
+fn read_render_scale() -> f64 {
+	let render_scale = std::env::var("VANILLA_RENDER_SCALE").ok().and_then(|render_scale_text| render_scale_text.parse::<f64>().ok()).unwrap_or(1.0);
+	if render_scale == 0.0 || render_scale.is_nan() {
+		1.0
+	}
+	else {
+		render_scale
+	}
+}
+
+//==============================================================================
 // 글 노드.
 //==============================================================================
 fn create_text(node_tree: &mut NodeTree, parent_id: NodeId, position: Vector2, text_value: &str, color_text: &str) -> NodeId {
@@ -228,8 +242,9 @@ impl Scene for ToonViewScene {
 		for (panel_id, is_graded) in [(left_panel_id, false), (right_panel_id, true)] {
 			let mut panel_drawer = PanelDrawer::new(is_graded, self.elapsed_seconds.clone());
 			let toon_view = node_tree[panel_id].add_component(ToonView3D::new());
-			toon_view.set_draw_callback(Some(Box::new(move |renderer, camera, screen_rect, gl, drawing_buffer_height| {
-				panel_drawer.draw(renderer, camera, screen_rect, gl, drawing_buffer_height);
+			toon_view.set_render_scale(read_render_scale());
+			toon_view.set_draw_callback(Some(Box::new(move |renderer, camera, screen_rect, gl, output| {
+				panel_drawer.draw(renderer, camera, screen_rect, gl, output);
 			})));
 			toon_view.set_fallback_draw_callback(Some(Box::new(draw_fallback)));
 			toon_view.get_camera_mut().set_perspective(0.75, 0.1, 100.0);

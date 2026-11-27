@@ -1171,7 +1171,8 @@ impl WebApplication {
 		// 원본 graphic.js 와 같은 컨텍스트 옵션.
 		let context_options = js_sys::Object::new();
 		let preserve_drawing_buffer = self.engine_runner.engine.get_engine_configuration().preserve_drawing_buffer;
-		for (option_name, option_value) in [("alpha", false), ("stencil", true), ("premultipliedAlpha", true), ("preserveDrawingBuffer", preserve_drawing_buffer)] {
+		let is_antialias = self.engine_runner.engine.get_engine_configuration().antialias;
+		for (option_name, option_value) in [("alpha", false), ("stencil", true), ("premultipliedAlpha", true), ("preserveDrawingBuffer", preserve_drawing_buffer), ("antialias", is_antialias)] {
 			js_sys::Reflect::set(&context_options, &JsValue::from_str(option_name), &JsValue::from_bool(option_value)).map_err(describe_js_error)?;
 		}
 		let context = canvas
@@ -1269,7 +1270,8 @@ impl WebApplication {
 			let canvas_rect = window_state.canvas.get_bounding_client_rect();
 			(canvas_rect.width().round(), canvas_rect.height().round(), None, None)
 		};
-		let is_resize_requested = std::mem::take(&mut self.engine_runner.engine.is_resize_requested);
+		// 렌더 배율 상한을 바꿨으면 프레임 머리에서 창 크기 바뀜과 같은 길로 맞춘다. (원본 Engine 의 isViewRectPending, 그리는 중에 바꾸면 그 프레임이 까맣다)
+		let is_resize_requested = std::mem::take(&mut self.engine_runner.engine.is_resize_requested) || self.engine_runner.engine.get_view_manager().is_view_rect_pending();
 		if !is_resize_requested && window_state.canvas_width == canvas_width && window_state.canvas_height == canvas_height && window_state.device_pixel_ratio == device_pixel_ratio {
 			return;
 		}
