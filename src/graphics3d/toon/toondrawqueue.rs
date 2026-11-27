@@ -16,6 +16,7 @@
 //! - 인스턴스 묶음(add_mesh_instanced)은 불투명이면 몸과 바깥선을 한 번에 그리고, 비치면 인스턴스 자리의 가운데로 한 덩어리로 정렬한다.
 //! - 그림자: draw_shadows(gl, renderer, shadow_map) 가 casts_shadow 가 true 인 불투명한 것만 그림자 깊이로 그린다. draw 보다 먼저 부른다.
 //!   점광과 스포트라이트 그림자는 draw_local_shadows(gl, renderer, shadow_atlas) 가 아틀라스의 칸마다 같은 것을 그린다. (렌더러에 set_local_shadows 로 건다)
+//!   그림자 판의 set_update_mode(ShadowUpdateMode) 를 따른다. 기본 OnChange 는 빛과 드리우개가 그대로면 다시 그리지 않고, 오래 그대로인 것은 구워 두고 움직이는 것만 덧그린다. (화면은 매 프레임 그린 것과 같다)
 //! - 사용: 매 프레임 clear() → add_mesh / add_mesh_instanced / add_pass → (draw_shadows) → draw(gl, renderer, camera) 나 draw_with_matrices(gl, renderer, 보기 행렬, 투영 행렬)
 //!   draw 는 renderer.begin_frame_with_camera 와 end_frame 을 스스로 부른다. draw_with_matrices 는 begin_frame_with_matrices 를 부른다. (직교 원 행렬 카메라)
 //!   화면 사각형(ToonRenderer::set_screen_rect)은 그 전에 건다. clear 는 담은 모형과 단계 콜백을 모두 비운다. (화면 공간 바깥선은 그대로 둔다)
@@ -30,7 +31,7 @@ use std::collections::HashMap;
 use crate::base::matrix4::Matrix4;
 use crate::core::graphic::GlTexture;
 use crate::graphics3d::camera3d::Camera3D;
-use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowMap};
+use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowCache, ShadowCasterRecord, ShadowMap, ShadowRenderTarget, ShadowUpdateMode};
 use crate::graphics3d::toon::toonmaterial::ToonBlendMode;
 use crate::graphics3d::toon::toonrenderer::{ToonDrawOptions, ToonInstance, ToonMesh, ToonRenderer};
 use crate::graphics3d::toon::toonscreenoutline::{ToonLineDrawOptions, ToonScreenOutline, TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID};
@@ -144,6 +145,75 @@ fn read_sort_ids(item: &ToonDrawItem) -> (u64, u64, u64) {
 }
 
 //==============================================================================
+/// 그림자 캐시에서 드리우개를 움직이지 않는 것으로 굽기까지 그대로여야 하는 프레임 수. (원본 SHADOW_STATIC_FRAME_COUNT, 자주 섰다 움직이는 것이 구운 판을 자꾸 다시 굽지 않게)
+//==============================================================================
+const SHADOW_STATIC_FRAME_COUNT: u32 = 30;
+
+//==============================================================================
+/// 드리우개 기록 쓰기. (원본 writeCasterRecord, 그림자 깊이에 닿는 값을 기록과 견주고 새 값으로 바꾼다, 다르면 true)
+/// - 모형, 재질, 모형 행렬이나 인스턴스 행렬, 관절 행렬, 번호 버퍼의 범위, 화면 밖 거르기, 뒤집기. (틴트, 색, 바깥선 같은 것은 깊이에 닿지 않는다)
+/// - 원본은 모형과 재질을 참조로 견준다. 러스트 판은 모형 번호와 재질 번호로 견준다. (지우고 다시 지은 것이 같은 주소에 와도 다르게 본다)
+/// - 원본의 인스턴스 버퍼(addMeshInstanceBuffer 와 버퍼의 generation)는 러스트 ToonDrawQueue 에 아직 담는 길이 없어 견주지 않는다.
+//==============================================================================
+fn write_caster_record(record: &mut ShadowCasterRecord, item: &ToonDrawItem) -> bool {
+	let options = &item.options;
+	let matrix_count = item.instance_list.map_or(1, |instance_list| instance_list.len());
+	let joint_count = options.joint_matrices.map_or(0, |joint_matrices| joint_matrices.len());
+	let value_count = matrix_count * 16 + joint_count;
+	let mesh_id = Some(item.mesh.get_mesh_id());
+	let material_id = options.material.map(|material| material.get_id());
+	let mirrored_value = match options.is_mirrored {
+		None => {
+			-1
+		}
+		Some(true) => {
+			1
+		}
+		Some(false) => {
+			0
+		}
+	};
+	let header = [matrix_count as i64, options.index_start as i64, options.index_count as i64, options.is_culled as i64, mirrored_value, options.joint_matrices.map_or(-1, |joint_matrices| joint_matrices.len() as i64)];
+	let mut is_changed = record.mesh_id != mesh_id || record.material_id != material_id || record.header != header;
+	record.mesh_id = mesh_id;
+	record.material_id = material_id;
+	record.header = header;
+	if record.values.len() != value_count {
+		record.values = vec![0.0; value_count];
+		is_changed = true;
+	}
+	let mut value_index = 0;
+	let mut write = |value: f32| {
+		// 값으로 견준다. (원본 !== 와 같이 NaN 은 늘 다르고, 0 과 -0 은 같다)
+		if record.values[value_index] != value || value.is_nan() {
+			record.values[value_index] = value;
+			is_changed = true;
+		}
+		value_index += 1;
+	};
+	match item.instance_list {
+		Some(instance_list) => {
+			for instance in instance_list {
+				for &element in instance.model_matrix.elements.iter() {
+					write(element);
+				}
+			}
+		}
+		None => {
+			for &element in item.model_matrix.elements.iter() {
+				write(element);
+			}
+		}
+	}
+	if let Some(joint_matrices) = options.joint_matrices {
+		for &joint_value in joint_matrices {
+			write(joint_value);
+		}
+	}
+	is_changed
+}
+
+//==============================================================================
 /// 그릴 꼴이 비치는지. (alpha 나 틴트의 알파가 1 보다 작거나 섞는 방식이 곧은 알파가 아님)
 //==============================================================================
 fn is_transparent_options(options: &ToonDrawOptions) -> bool {
@@ -253,6 +323,7 @@ impl<'a> ToonDrawQueue<'a> {
 
 	//==============================================================================
 	/// 그림자 깊이 그리기. (불투명하고 casts_shadow 가 true 인 것만, 앞의 프레임버퍼와 뷰포트는 되돌린다)
+	/// - shadow_map.set_update_mode 의 갱신 방식을 따른다. (기본 OnChange 는 빛과 드리우개가 그대로면 그리지 않는다)
 	///
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
@@ -260,19 +331,22 @@ impl<'a> ToonDrawQueue<'a> {
 	/// - `shadow_map`: ShadowMap.
 	//==============================================================================
 	pub fn draw_shadows(&self, gl: &GlContext, renderer: &mut ToonRenderer, shadow_map: &ShadowMap) {
-		renderer.begin_shadow_pass(gl, shadow_map);
-		for &item_index in self.read_opaque_index_list().iter() {
-			let item = &self.item_list[item_index];
-			if !item.options.casts_shadow {
-				continue;
+		let mut light_key = Vec::with_capacity(17);
+		light_key.extend_from_slice(&shadow_map.get_light_view_projection_matrix().elements);
+		light_key.push(shadow_map.get_resolution() as f32);
+		self.draw_shadow_casters(gl, renderer, shadow_map.get_shadow_cache(), light_key, &|renderer: &mut ToonRenderer| {
+			renderer.begin_shadow_pass(gl, shadow_map);
+		}, &|renderer: &mut ToonRenderer, caster_index_list: &[usize]| {
+			for &item_index in caster_index_list {
+				let item = &self.item_list[item_index];
+				ToonDrawQueue::draw_item(gl, renderer, item, item.options);
 			}
-			ToonDrawQueue::draw_item(gl, renderer, item, item.options);
-		}
-		renderer.end_shadow_pass(gl);
+		});
 	}
 
 	//==============================================================================
 	/// 점광과 스포트라이트 그림자 깊이 그리기. (불투명하고 casts_shadow 가 true 인 것을 아틀라스의 칸마다, 앞의 프레임버퍼와 뷰포트는 되돌린다)
+	/// - shadow_atlas.set_update_mode 의 갱신 방식을 따른다. (기본 OnChange 는 빛과 드리우개가 그대로면 그리지 않는다)
 	///
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
@@ -280,18 +354,159 @@ impl<'a> ToonDrawQueue<'a> {
 	/// - `shadow_atlas`: ShadowAtlas. (update_lights 를 부른 것)
 	//==============================================================================
 	pub fn draw_local_shadows(&self, gl: &GlContext, renderer: &mut ToonRenderer, shadow_atlas: &ShadowAtlas) {
-		renderer.begin_shadow_atlas_pass(gl, shadow_atlas);
-		for tile_index in 0..shadow_atlas.get_tile_count() {
-			renderer.set_shadow_atlas_tile(gl, shadow_atlas, tile_index);
-			for &item_index in self.read_opaque_index_list().iter() {
-				let item = &self.item_list[item_index];
-				if !item.options.casts_shadow {
-					continue;
+		let tile_count = shadow_atlas.get_tile_count();
+		let mut light_key = Vec::with_capacity(1 + tile_count * 19);
+		light_key.push(shadow_atlas.get_resolution() as f32);
+		for tile_index in 0..tile_count {
+			let tile = shadow_atlas.get_tile(tile_index);
+			light_key.extend_from_slice(&tile.view_projection_matrix.elements);
+			light_key.push(tile.x as f32);
+			light_key.push(tile.y as f32);
+			light_key.push(tile.size as f32);
+		}
+		self.draw_shadow_casters(gl, renderer, shadow_atlas.get_shadow_cache(), light_key, &|renderer: &mut ToonRenderer| {
+			renderer.begin_shadow_atlas_pass(gl, shadow_atlas);
+		}, &|renderer: &mut ToonRenderer, caster_index_list: &[usize]| {
+			for tile_index in 0..tile_count {
+				renderer.set_shadow_atlas_tile(gl, shadow_atlas, tile_index);
+				for &item_index in caster_index_list {
+					let item = &self.item_list[item_index];
+					ToonDrawQueue::draw_item(gl, renderer, item, item.options);
 				}
-				ToonDrawQueue::draw_item(gl, renderer, item, item.options);
+			}
+		});
+	}
+
+	//==============================================================================
+	/// 그림자 드리우개 그리기. (원본 drawShadowCasters, 그림자 판의 갱신 방식대로 다시 그리거나 건너뛴다, 불투명하고 casts_shadow 가 true 인 것만)
+	/// - EveryFrame: 판을 비우고 전부 그린다.
+	/// - Interval: N 프레임마다(처음과 request_update 뒤에는 바로) 판을 비우고 전부 그린다. 사이의 프레임은 그리지 않는다.
+	/// - OnChange: 드리우개를 담은 차례로 앞의 프레임과 견준다. SHADOW_STATIC_FRAME_COUNT 프레임 그대로인 것은 구운 판에 굽고,
+	///   나머지(움직이는 것, 정점 조각이 있는 재질)는 매 프레임 구운 판을 판에 옮긴 뒤 그 위에 덧그린다.
+	///   구운 것이 바뀌거나 빠지거나 새로 구울 것이 생기거나 request_update 를 부르면 다시 굽는다. 움직이는 것이 없고 판이 구운 판과 같으면 아무것도 그리지 않는다.
+	///   빛 행렬이나 칸이 바뀐 프레임은 전부를 판에 바로 그리고, 빛이 멈춘 다음 프레임에 굽는다.
+	///   깊이는 LEQUAL 로 가장 가까운 것이 남으므로 굽고 덧그린 판은 전부를 한 번에 그린 판과 같다.
+	/// - 캐시는 RefCell 이라 그리기(begin_pass 가 begin_render 로 캐시를 빌린다) 전에 빌림을 놓는다.
+	/// - 구운 판을 짓지 못하면(GL 오류) 그 프레임은 전부를 판에 바로 그린다. (원본은 짓기가 늘 된다)
+	//==============================================================================
+	fn draw_shadow_casters(&self, gl: &GlContext, renderer: &mut ToonRenderer, shadow_cache: &RefCell<ShadowCache>, light_key: Vec<f32>, begin_pass: &dyn Fn(&mut ToonRenderer), draw_casters: &dyn Fn(&mut ToonRenderer, &[usize])) {
+		let caster_index_list: Vec<usize> = self.read_opaque_index_list().iter().copied().filter(|&item_index| self.item_list[item_index].options.casts_shadow).collect();
+		let draw_pass = |renderer: &mut ToonRenderer, render_target: ShadowRenderTarget, index_list: &[usize]| {
+			shadow_cache.borrow_mut().render_target = render_target;
+			begin_pass(renderer);
+			draw_casters(renderer, index_list);
+			renderer.end_shadow_pass(gl);
+		};
+		let update_mode = shadow_cache.borrow().update_mode;
+		match update_mode {
+			ShadowUpdateMode::EveryFrame => {
+				{
+					let mut cache = shadow_cache.borrow_mut();
+					cache.caster_record_list.clear();
+					cache.light_key = None;
+					cache.has_cache = false;
+				}
+				draw_pass(renderer, ShadowRenderTarget::Live, &caster_index_list);
+				return;
+			}
+			ShadowUpdateMode::Interval => {
+				let is_due = {
+					let mut cache = shadow_cache.borrow_mut();
+					let is_due = cache.is_update_requested || cache.frame_count % cache.update_interval as u64 == 0;
+					cache.frame_count += 1;
+					if is_due {
+						cache.is_update_requested = false;
+						cache.has_cache = false;
+					}
+					is_due
+				};
+				if is_due {
+					draw_pass(renderer, ShadowRenderTarget::Live, &caster_index_list);
+				}
+				return;
+			}
+			ShadowUpdateMode::OnChange => {
 			}
 		}
-		renderer.end_shadow_pass(gl);
+
+		// 바뀔 때만. (드리우개를 담은 차례로 견준다)
+		let mut static_index_list: Vec<usize> = Vec::new();
+		let mut dynamic_index_list: Vec<usize> = Vec::new();
+		let (is_light_changed, is_cache_stale) = {
+			let mut cache_slot = shadow_cache.borrow_mut();
+			let cache = &mut *cache_slot;
+			let is_light_changed = cache.light_key.as_deref() != Some(light_key.as_slice());
+			let mut is_cache_stale = cache.is_update_requested;
+			cache.is_update_requested = false;
+			cache.light_key = Some(light_key);
+			let record_list = &mut cache.caster_record_list;
+			if record_list.len() > caster_index_list.len() {
+				is_cache_stale = is_cache_stale || record_list[caster_index_list.len()..].iter().any(|record| record.is_static);
+				record_list.truncate(caster_index_list.len());
+			}
+			for (caster_position, &item_index) in caster_index_list.iter().enumerate() {
+				let item = &self.item_list[item_index];
+				if caster_position >= record_list.len() {
+					record_list.push(ShadowCasterRecord::default());
+				}
+				let record = &mut record_list[caster_position];
+				let is_vertex_animated = item.options.material.is_some_and(|material| !material.get_vertex_chunk().is_empty());
+				if write_caster_record(record, item) || is_vertex_animated {
+					is_cache_stale = is_cache_stale || record.is_static;
+					record.is_static = false;
+					record.stable_frame_count = 0;
+				}
+				else {
+					record.stable_frame_count += 1;
+					if !record.is_static && record.stable_frame_count >= SHADOW_STATIC_FRAME_COUNT {
+						record.is_static = true;
+						is_cache_stale = true;
+					}
+				}
+				if record.is_static {
+					static_index_list.push(item_index);
+				}
+				else {
+					dynamic_index_list.push(item_index);
+				}
+			}
+			if is_light_changed {
+				cache.has_cache = false;
+			}
+			(is_light_changed, is_cache_stale)
+		};
+		if is_light_changed {
+			// 빛이 바뀐 프레임은 전부를 판에 바로 그린다. (빛이 매 프레임 움직여도 굽고 옮기는 몫이 더 들지 않게, 구운 판은 빛이 멈춘 다음 프레임에 굽는다)
+			draw_pass(renderer, ShadowRenderTarget::Live, &caster_index_list);
+			return;
+		}
+		let has_cache = shadow_cache.borrow().has_cache;
+		if is_cache_stale || (!has_cache && !static_index_list.is_empty()) {
+			shadow_cache.borrow_mut().has_cache = !static_index_list.is_empty();
+			if !static_index_list.is_empty() {
+				draw_pass(renderer, ShadowRenderTarget::Cache, &static_index_list);
+				if !shadow_cache.borrow().has_cache {
+					// 구운 판을 짓지 못했다.
+					draw_pass(renderer, ShadowRenderTarget::Live, &caster_index_list);
+					return;
+				}
+			}
+			shadow_cache.borrow_mut().is_depth_current = false;
+		}
+		let render_target = if shadow_cache.borrow().has_cache {
+			ShadowRenderTarget::Copy
+		}
+		else {
+			ShadowRenderTarget::Live
+		};
+		if !dynamic_index_list.is_empty() {
+			draw_pass(renderer, render_target, &dynamic_index_list);
+			return;
+		}
+		if !shadow_cache.borrow().is_depth_current {
+			draw_pass(renderer, render_target, &dynamic_index_list);
+			shadow_cache.borrow_mut().is_depth_current = true;
+		}
 	}
 
 	//==============================================================================

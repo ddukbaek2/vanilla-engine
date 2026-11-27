@@ -10,7 +10,11 @@
 //! - 텍셀 스냅의 반올림은 원본 Math.round 와 같이 0.5 를 위로 올린다. (러스트 round 는 0 에서 먼 쪽이라 음수에서 다르다)
 //! - 원본 해상도 기본값 인자 2048 은 DEFAULT_SHADOWMAP_RESOLUTION 으로 둔다. (러스트에 기본값 인자가 없다)
 //! - 해 그림자 치우침은 set_bias(깊이, 노멀) 의 그림자 텍셀 단위 값이다. (기본 1, 1, 유니티 URP 의 Depth Bias, Normal Bias 와 같은 단위, 받는 쪽 ToonRenderer 가 텍셀 크기와 기울기를 곱해 건다)
+//! - 그림자 갱신 방식(원본 ShadowUpdateMode)은 ShadowMap 과 ShadowAtlas 가 하나씩 가진 그림자 깊이 캐시(원본 createShadowCache)에 둔다. ToonDrawQueue 가 견주고 begin_render 가 그 결정대로 묶는다.
+//!   begin_render 가 &self 로 캐시를 고치므로 캐시는 RefCell 에 둔다. (원본은 객체 안 값을 바로 고친다)
 //==============================================================================
+use std::cell::RefCell;
+
 use crate::base::matrix4::Matrix4;
 use crate::base::vector3::Vector3;
 use crate::core::graphic::GlTexture;
@@ -38,6 +42,130 @@ const DEFAULT_SHADOW_NORMAL_BIAS: f64 = 1.0;
 /// 점광 큐브 여섯 면의 앞쪽과 위쪽. (+x, -x, +y, -y, +z, -z 차례, 오른쪽은 앞쪽 x 위쪽, 셰이더의 면 고르기와 같다)
 const CUBE_FACE_FORWARDS: [[f64; 3]; 6] = [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0]];
 const CUBE_FACE_UPS: [[f64; 3]; 6] = [[0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0]];
+
+//==============================================================================
+/// 그림자 깊이를 다시 그리는 방식. (원본 ShadowUpdateMode, ShadowMap 과 ShadowAtlas 의 set_update_mode, ToonDrawQueue::draw_shadows 와 draw_local_shadows 가 따른다)
+/// - EveryFrame: 매 프레임 드리우개 전부를 다시 그린다.
+/// - OnChange: 빛과 드리우개가 그대로면 다시 그리지 않는다. 오래 그대로인 드리우개는 따로 구워 두고, 움직이는 것만 매 프레임 그 위에 덧그린다. (기본, 화면은 매 프레임 그린 것과 같다)
+/// - Interval: N 프레임마다 한 번 전부 다시 그린다. (사이의 프레임은 앞의 그림자를 그대로 써서, 움직이는 것의 그림자가 늦게 따라온다)
+///
+/// # 예제
+/// 해 그림자는 바뀔 때만, 점광 그림자는 네 프레임마다
+/// ```rust,no_run
+/// use vanilla::{GlContext, ShadowAtlas, ShadowMap, ShadowUpdateMode, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION};
+///
+/// fn choose_shadow_updates(gl: &GlContext) {
+/// 	let mut shadow_map = ShadowMap::new(gl, 1024).unwrap();
+/// 	shadow_map.set_update_mode(ShadowUpdateMode::OnChange, 1);
+/// 	let mut shadow_atlas = ShadowAtlas::new(gl, 1024, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION).unwrap();
+/// 	shadow_atlas.set_update_mode(ShadowUpdateMode::Interval, 4);
+/// 	println!("{:?} {:?} {}", shadow_map.get_update_mode(), shadow_atlas.get_update_mode(), shadow_atlas.get_update_interval());
+/// 	shadow_map.destroy(gl);
+/// 	shadow_atlas.destroy(gl);
+/// }
+/// ```
+//==============================================================================
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ShadowUpdateMode {
+	/// 매 프레임 전부.
+	EveryFrame,
+	/// 바뀔 때만. (기본)
+	#[default]
+	OnChange,
+	/// N 프레임마다.
+	Interval,
+}
+
+//==============================================================================
+/// 다음 begin_render 가 그릴 곳. (원본 캐시의 renderTarget 글 "live", "cache", "copy")
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ShadowRenderTarget {
+	/// 판을 비우고 그린다.
+	Live,
+	/// 구운 판을 비우고 그린다.
+	Cache,
+	/// 구운 판을 판에 옮기고 그 위에 덧그린다. (비우지 않는다)
+	Copy,
+}
+
+//==============================================================================
+/// 드리우개 하나의 앞 프레임 기록. (원본 writeCasterRecord 의 기록, ToonDrawQueue 가 쓰고 견준다)
+/// - header 는 인스턴스 수, 번호 시작, 번호 수, 거르기, 뒤집기, 관절 행렬 길이를 정수 그대로 둔다. (원본은 Float32Array 에 fround 로 넣는다, 값이 같으면 판정이 같다)
+/// - values 는 모형 행렬이나 인스턴스 행렬마다 16 수와 관절 행렬 값이다.
+//==============================================================================
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ShadowCasterRecord {
+	/// 모형 번호. (None 은 아직 견준 적 없음)
+	pub(crate) mesh_id: Option<u64>,
+	/// 재질 번호. (None 은 재질 없음)
+	pub(crate) material_id: Option<u32>,
+	pub(crate) header: [i64; 6],
+	pub(crate) values: Vec<f32>,
+	/// 그대로였던 프레임 수.
+	pub(crate) stable_frame_count: u32,
+	/// 구운 판에 들었는지.
+	pub(crate) is_static: bool,
+}
+
+//==============================================================================
+/// 그림자 깊이 캐시. (원본 createShadowCache 의 결과, ShadowMap 과 ShadowAtlas 가 하나씩 갖는다, 갱신 방식, 움직이지 않는 드리우개를 구운 판, ToonDrawQueue 가 드리우개를 견준 기록)
+/// - 유니티 HDRP 의 빛마다의 그림자 갱신 방식(매 프레임, 요청할 때)과 언리얼의 캐시된 그림자 맵(움직이지 않는 것을 구워 두고 움직이는 것만 매 프레임 덧그린다) 꼴이다.
+/// - render_target 은 다음 begin_render 가 그릴 곳이다. begin_render 가 쓰고 Live 로 되돌린다.
+/// - 구운 판(cache_target)은 처음 구울 때 짓는다. (EveryFrame 과 Interval 은 짓지 않는다)
+//==============================================================================
+pub(crate) struct ShadowCache {
+	pub(crate) resolution: i32,
+	pub(crate) update_mode: ShadowUpdateMode,
+	pub(crate) update_interval: u32,
+	pub(crate) is_update_requested: bool,
+	pub(crate) frame_count: u64,
+	pub(crate) render_target: ShadowRenderTarget,
+	/// 구운 판. (프레임버퍼, 깊이 텍스처)
+	pub(crate) cache_target: Option<(GlFramebuffer, GlTexture)>,
+	/// 앞 프레임의 빛 행렬과 판의 꼴. (다르면 다시 굽는다)
+	pub(crate) light_key: Option<Vec<f32>>,
+	pub(crate) caster_record_list: Vec<ShadowCasterRecord>,
+	/// 구운 판에 구운 것이 있는지.
+	pub(crate) has_cache: bool,
+	/// 판이 구운 판과 같은지. (움직이는 것을 덧그리지 않은 채)
+	pub(crate) is_depth_current: bool,
+}
+
+impl ShadowCache {
+	//==============================================================================
+	/// 생성. (원본 createShadowCache, 기본 OnChange, 처음 그리기는 전부)
+	//==============================================================================
+	fn new(resolution: i32) -> ShadowCache {
+		ShadowCache { resolution, update_mode: ShadowUpdateMode::OnChange, update_interval: 1, is_update_requested: true, frame_count: 0, render_target: ShadowRenderTarget::Live, cache_target: None, light_key: None, caster_record_list: Vec::new(), has_cache: false, is_depth_current: false }
+	}
+
+	//==============================================================================
+	/// 갱신 방식 정하기. (원본 setUpdateMode, interval 은 1 보다 작으면 1, 정하면 다음 그리기에서 전부 다시 그린다)
+	//==============================================================================
+	fn set_update_mode(&mut self, update_mode: ShadowUpdateMode, update_interval: u32) {
+		self.update_mode = update_mode;
+		self.update_interval = update_interval.max(1);
+		self.frame_count = 0;
+		self.is_update_requested = true;
+	}
+
+	//==============================================================================
+	/// 지우기. (원본 deleteShadowCache, 구운 판의 프레임버퍼와 텍스처)
+	//==============================================================================
+	fn delete(&mut self, gl: &crate::GlContext) {
+		if let Some((framebuffer, depth_texture)) = self.cache_target.take() {
+			unsafe {
+				crate::core::glstatecache::delete_framebuffer(gl, framebuffer);
+				crate::core::glstatecache::delete_texture(gl, depth_texture);
+			}
+		}
+		self.caster_record_list.clear();
+		self.light_key = None;
+		self.has_cache = false;
+		self.is_depth_current = false;
+	}
+}
 
 //==============================================================================
 /// 깊이 판 짓기. (하드웨어 비교 샘플링 sampler2DShadow 의 DEPTH_COMPONENT24 텍스처와 컬러 없는 프레임버퍼, 앞의 텍스처와 프레임버퍼 묶음은 돌린다)
@@ -68,19 +196,46 @@ fn create_depth_target(gl: &crate::GlContext, resolution: i32) -> Result<(GlFram
 }
 
 //==============================================================================
-/// 그림자 깊이 판 묶기. (원본 bindShadowTarget, 판을 묶고 뷰포트를 판 전체로, 깊이를 비운다, 해 그림자 판과 점광 판이 같이 쓴다)
-/// - 가위 시험을 끈다. (2D 자르기 안의 바깥 패스에서 불려도 판 전체를 비우고 그린다)
+/// 그림자 깊이 판 묶기. (원본 bindShadowTarget, 캐시의 render_target 대로 판이나 구운 판을 묶고 비우거나, 구운 판을 판에 옮긴다, 뷰포트는 판 전체, 해 그림자 판과 점광 판이 같이 쓴다)
+/// - 가위 시험을 끈다. (2D 자르기 안의 바깥 패스에서 불려도 판 전체를 비우고 옮기고 그린다)
 /// - 깊이 시험과 깊이 쓰기를 켠다.
+/// - 구운 판을 짓지 못하면(GL 오류) 판에 그리고 has_cache 를 끈다. (ToonDrawQueue 가 보고 전부를 판에 그린다)
 //==============================================================================
-fn bind_shadow_target(gl: &crate::GlContext, framebuffer: GlFramebuffer, resolution: i32) {
+fn bind_shadow_target(gl: &crate::GlContext, shadow_cache: &mut ShadowCache, framebuffer: GlFramebuffer) {
+	let render_target = shadow_cache.render_target;
+	let resolution = shadow_cache.resolution;
+	shadow_cache.render_target = ShadowRenderTarget::Live;
+	shadow_cache.is_depth_current = false;
+	if render_target == ShadowRenderTarget::Cache && shadow_cache.cache_target.is_none() {
+		shadow_cache.cache_target = create_depth_target(gl, resolution).ok();
+		if shadow_cache.cache_target.is_none() {
+			shadow_cache.has_cache = false;
+		}
+	}
+	let cache_framebuffer = shadow_cache.cache_target.map(|(cache_framebuffer, _)| cache_framebuffer);
 	unsafe {
-		// 비우기는 가위 시험을 받는다.
+		// 비우기와 깊이 옮기기는 가위 시험을 받는다.
 		crate::core::glstatecache::disable(gl, glow::SCISSOR_TEST);
-		crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(framebuffer));
+		if let (ShadowRenderTarget::Copy, Some(cache_framebuffer)) = (render_target, cache_framebuffer) {
+			crate::core::glstatecache::bind_framebuffer(gl, glow::READ_FRAMEBUFFER, Some(cache_framebuffer));
+			crate::core::glstatecache::bind_framebuffer(gl, glow::DRAW_FRAMEBUFFER, Some(framebuffer));
+			gl.blit_framebuffer(0, 0, resolution, resolution, 0, 0, resolution, resolution, glow::DEPTH_BUFFER_BIT, glow::NEAREST);
+		}
+		let target_framebuffer = match (render_target, cache_framebuffer) {
+			(ShadowRenderTarget::Cache, Some(cache_framebuffer)) => {
+				cache_framebuffer
+			}
+			_ => {
+				framebuffer
+			}
+		};
+		crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(target_framebuffer));
 		crate::core::glstatecache::viewport(gl, 0, 0, resolution, resolution);
 		crate::core::glstatecache::enable(gl, glow::DEPTH_TEST);
 		crate::core::glstatecache::depth_mask(gl, true);
-		gl.clear(glow::DEPTH_BUFFER_BIT);
+		if render_target != ShadowRenderTarget::Copy || cache_framebuffer.is_none() {
+			gl.clear(glow::DEPTH_BUFFER_BIT);
+		}
 	}
 }
 
@@ -158,6 +313,8 @@ pub struct ShadowMap {
 	depth_bias: f64,
 	/// 노멀 치우침. (그림자 텍셀 단위)
 	normal_bias: f64,
+	/// 갱신 방식과 구운 판. (원본 createShadowCache)
+	shadow_cache: RefCell<ShadowCache>,
 }
 
 impl ShadowMap {
@@ -174,7 +331,7 @@ impl ShadowMap {
 	//==============================================================================
 	pub fn new(gl: &crate::GlContext, resolution: i32) -> Result<ShadowMap, String> {
 		let (framebuffer, depth_texture) = create_depth_target(gl, resolution)?;
-		Ok(ShadowMap { framebuffer, depth_texture, resolution, light_view_projection_matrix: Matrix4::create_identity(), depth_bias: DEFAULT_SHADOW_DEPTH_BIAS, normal_bias: DEFAULT_SHADOW_NORMAL_BIAS })
+		Ok(ShadowMap { framebuffer, depth_texture, resolution, light_view_projection_matrix: Matrix4::create_identity(), depth_bias: DEFAULT_SHADOW_DEPTH_BIAS, normal_bias: DEFAULT_SHADOW_NORMAL_BIAS, shadow_cache: RefCell::new(ShadowCache::new(resolution)) })
 	}
 
 	//==============================================================================
@@ -223,14 +380,74 @@ impl ShadowMap {
 	}
 
 	//==============================================================================
-	/// 깊이 패스 시작. (프레임버퍼 바인드 + 뷰포트 + 깊이 클리어)
+	/// 깊이 패스 시작. (프레임버퍼 바인드 + 뷰포트 + 깊이 클리어, ToonDrawQueue 가 캐시를 쓸 때는 구운 판에 그리거나 구운 판을 옮겨 그 위에 덧그린다)
 	/// - 가위 시험을 끄고 깊이 시험과 깊이 쓰기를 켠다. 끝나면 부르는 쪽이 다음 패스의 프레임버퍼와 뷰포트를 다시 잡는다.
 	///
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn begin_render(&self, gl: &crate::GlContext) {
-		bind_shadow_target(gl, self.framebuffer, self.resolution);
+		bind_shadow_target(gl, &mut self.shadow_cache.borrow_mut(), self.framebuffer);
+	}
+
+	//==============================================================================
+	/// 그림자를 다시 그리는 방식 정하기. (원본 setUpdateMode, ToonDrawQueue 가 따른다, 기본 ShadowUpdateMode::OnChange, 정하면 다음 그리기에서 전부 다시 그린다)
+	/// - 원본의 updateInterval 기본값 인자 1 은 러스트에 기본값 인자가 없어 늘 준다. (Interval 이 아니면 쓰지 않는다)
+	///
+	/// # 인자
+	/// - `update_mode`: ShadowUpdateMode.
+	/// - `update_interval`: Interval 일 때 몇 프레임마다 그릴지. (1 보다 작으면 1)
+	///
+	/// # 예제
+	/// 그림자를 세 프레임마다 그리기
+	/// ```rust,no_run
+	/// use vanilla::{GlContext, ShadowMap, ShadowUpdateMode};
+	///
+	/// fn draw_shadow_every_third_frame(gl: &GlContext) {
+	/// 	let mut shadow_target = ShadowMap::new(gl, 1024).unwrap();
+	/// 	shadow_target.set_update_mode(ShadowUpdateMode::Interval, 3);
+	/// 	println!("{:?} {}", shadow_target.get_update_mode(), shadow_target.get_update_interval());
+	/// 	shadow_target.set_update_mode(ShadowUpdateMode::EveryFrame, 1);
+	/// 	shadow_target.destroy(gl);
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn set_update_mode(&mut self, update_mode: ShadowUpdateMode, update_interval: u32) {
+		self.shadow_cache.get_mut().set_update_mode(update_mode, update_interval);
+	}
+
+	//==============================================================================
+	/// 그림자를 다시 그리는 방식 반환. (원본 getUpdateMode)
+	///
+	/// # 돌려줌
+	/// ShadowUpdateMode. (기본 OnChange)
+	//==============================================================================
+	pub fn get_update_mode(&self) -> ShadowUpdateMode {
+		self.shadow_cache.borrow().update_mode
+	}
+
+	//==============================================================================
+	/// Interval 의 프레임 수 반환. (원본 getUpdateInterval)
+	///
+	/// # 돌려줌
+	/// 몇 프레임마다 그리는지. (1 이상, 기본 1)
+	//==============================================================================
+	pub fn get_update_interval(&self) -> u32 {
+		self.shadow_cache.borrow().update_interval
+	}
+
+	//==============================================================================
+	/// 다음 그리기에서 전부 다시 그리게 하기. (원본 requestUpdate, 드리우개 기록이 못 보는 바뀜, 예를 들어 모형의 꼭짓점을 고쳤을 때)
+	//==============================================================================
+	pub fn request_update(&mut self) {
+		self.shadow_cache.get_mut().is_update_requested = true;
+	}
+
+	//==============================================================================
+	/// 그림자 깊이 캐시 반환. (원본 getShadowCache, ToonDrawQueue 가 쓴다, 공개 API 가 아니다)
+	//==============================================================================
+	pub(crate) fn get_shadow_cache(&self) -> &RefCell<ShadowCache> {
+		&self.shadow_cache
 	}
 
 	//==============================================================================
@@ -324,7 +541,7 @@ impl ShadowMap {
 	}
 
 	//==============================================================================
-	/// 파괴. (GL 리소스 해제)
+	/// 파괴. (GL 리소스 해제, 프레임버퍼와 깊이 텍스처, 구운 판을 지운다)
 	///
 	/// # 인자
 	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
@@ -334,6 +551,7 @@ impl ShadowMap {
 			crate::core::glstatecache::delete_framebuffer(gl, self.framebuffer);
 			crate::core::glstatecache::delete_texture(gl, self.depth_texture);
 		}
+		self.shadow_cache.borrow_mut().delete(gl);
 	}
 }
 
@@ -480,6 +698,8 @@ pub struct ShadowAtlas {
 	tile_size: i32,
 	light_list: Vec<ShadowAtlasLight>,
 	tile_list: Vec<ShadowAtlasTile>,
+	/// 갱신 방식과 구운 판. (원본 createShadowCache)
+	shadow_cache: RefCell<ShadowCache>,
 }
 
 impl ShadowAtlas {
@@ -498,7 +718,7 @@ impl ShadowAtlas {
 	//==============================================================================
 	pub fn new(gl: &crate::GlContext, resolution: i32, tile_resolution: i32) -> Result<ShadowAtlas, String> {
 		let (framebuffer, depth_texture) = create_depth_target(gl, resolution)?;
-		Ok(ShadowAtlas { framebuffer, depth_texture, resolution, tile_resolution: tile_resolution.min(resolution).max(1), grid_size: 1, tile_size: resolution, light_list: Vec::new(), tile_list: Vec::new() })
+		Ok(ShadowAtlas { framebuffer, depth_texture, resolution, tile_resolution: tile_resolution.min(resolution).max(1), grid_size: 1, tile_size: resolution, light_list: Vec::new(), tile_list: Vec::new(), shadow_cache: RefCell::new(ShadowCache::new(resolution)) })
 	}
 
 	//==============================================================================
@@ -563,14 +783,74 @@ impl ShadowAtlas {
 	}
 
 	//==============================================================================
-	/// 깊이 패스 시작. (프레임버퍼를 묶고 판 전체를 비운다, 칸마다 begin_tile)
+	/// 깊이 패스 시작. (프레임버퍼를 묶고 판 전체를 비운다, 칸마다 begin_tile, ToonDrawQueue 가 캐시를 쓸 때는 구운 판에 그리거나 구운 판을 옮겨 그 위에 덧그린다)
 	/// - 뷰포트를 판 전체로, 가위 시험을 끄고, 깊이 시험과 깊이 쓰기를 켠다.
 	///
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn begin_render(&self, gl: &crate::GlContext) {
-		bind_shadow_target(gl, self.framebuffer, self.resolution);
+		bind_shadow_target(gl, &mut self.shadow_cache.borrow_mut(), self.framebuffer);
+	}
+
+	//==============================================================================
+	/// 그림자를 다시 그리는 방식 정하기. (원본 setUpdateMode, ToonDrawQueue 가 따른다, 기본 ShadowUpdateMode::OnChange, 정하면 다음 그리기에서 전부 다시 그린다)
+	/// - 원본의 updateInterval 기본값 인자 1 은 러스트에 기본값 인자가 없어 늘 준다. (Interval 이 아니면 쓰지 않는다)
+	///
+	/// # 인자
+	/// - `update_mode`: ShadowUpdateMode.
+	/// - `update_interval`: Interval 일 때 몇 프레임마다 그릴지. (1 보다 작으면 1)
+	///
+	/// # 예제
+	/// 그림자를 세 프레임마다 그리기
+	/// ```rust,no_run
+	/// use vanilla::{GlContext, ShadowAtlas, ShadowUpdateMode, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION};
+	///
+	/// fn draw_shadow_every_third_frame(gl: &GlContext) {
+	/// 	let mut shadow_target = ShadowAtlas::new(gl, 1024, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION).unwrap();
+	/// 	shadow_target.set_update_mode(ShadowUpdateMode::Interval, 3);
+	/// 	println!("{:?} {}", shadow_target.get_update_mode(), shadow_target.get_update_interval());
+	/// 	shadow_target.set_update_mode(ShadowUpdateMode::EveryFrame, 1);
+	/// 	shadow_target.destroy(gl);
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn set_update_mode(&mut self, update_mode: ShadowUpdateMode, update_interval: u32) {
+		self.shadow_cache.get_mut().set_update_mode(update_mode, update_interval);
+	}
+
+	//==============================================================================
+	/// 그림자를 다시 그리는 방식 반환. (원본 getUpdateMode)
+	///
+	/// # 돌려줌
+	/// ShadowUpdateMode. (기본 OnChange)
+	//==============================================================================
+	pub fn get_update_mode(&self) -> ShadowUpdateMode {
+		self.shadow_cache.borrow().update_mode
+	}
+
+	//==============================================================================
+	/// Interval 의 프레임 수 반환. (원본 getUpdateInterval)
+	///
+	/// # 돌려줌
+	/// 몇 프레임마다 그리는지. (1 이상, 기본 1)
+	//==============================================================================
+	pub fn get_update_interval(&self) -> u32 {
+		self.shadow_cache.borrow().update_interval
+	}
+
+	//==============================================================================
+	/// 다음 그리기에서 전부 다시 그리게 하기. (원본 requestUpdate, 드리우개 기록이 못 보는 바뀜, 예를 들어 모형의 꼭짓점을 고쳤을 때)
+	//==============================================================================
+	pub fn request_update(&mut self) {
+		self.shadow_cache.get_mut().is_update_requested = true;
+	}
+
+	//==============================================================================
+	/// 그림자 깊이 캐시 반환. (원본 getShadowCache, ToonDrawQueue 가 쓴다, 공개 API 가 아니다)
+	//==============================================================================
+	pub(crate) fn get_shadow_cache(&self) -> &RefCell<ShadowCache> {
+		&self.shadow_cache
 	}
 
 	//==============================================================================
@@ -700,7 +980,7 @@ impl ShadowAtlas {
 	}
 
 	//==============================================================================
-	/// 파괴. (GL 리소스 해제)
+	/// 파괴. (GL 리소스 해제, 프레임버퍼와 깊이 텍스처, 구운 판을 지운다)
 	///
 	/// # 인자
 	/// - `gl`: 이 아틀라스를 지은 GL 컨텍스트.
@@ -710,6 +990,7 @@ impl ShadowAtlas {
 			crate::core::glstatecache::delete_framebuffer(gl, self.framebuffer);
 			crate::core::glstatecache::delete_texture(gl, self.depth_texture);
 		}
+		self.shadow_cache.borrow_mut().delete(gl);
 	}
 }
 
