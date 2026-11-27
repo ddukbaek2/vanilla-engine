@@ -241,6 +241,43 @@ fn dispatch_web_event(web_application_cell: &RefCell<WebApplication>, handler: i
 }
 
 //==============================================================================
+/// 기본 프레임버퍼가 안티에일리어싱(멀티샘플)인지. (원본 getContextAttributes().antialias 가 false 가 아니면 true, 컨텍스트가 없으면 true)
+//==============================================================================
+pub(crate) fn is_default_framebuffer_antialiased() -> bool {
+	ENGINE_GL_CONTEXT.with(|engine_gl_context| {
+		let context = match engine_gl_context.borrow().as_ref() {
+			Some(context) => {
+				context.clone()
+			}
+			None => {
+				return true;
+			}
+		};
+		let context_value: &JsValue = context.as_ref();
+		let attribute_reader = match js_sys::Reflect::get(context_value, &JsValue::from_str("getContextAttributes")).ok().and_then(|value| value.dyn_into::<js_sys::Function>().ok()) {
+			Some(attribute_reader) => {
+				attribute_reader
+			}
+			None => {
+				return true;
+			}
+		};
+		let context_attributes = match attribute_reader.call0(context_value) {
+			Ok(context_attributes) => {
+				context_attributes
+			}
+			Err(_) => {
+				return true;
+			}
+		};
+		if context_attributes.is_null() || context_attributes.is_undefined() {
+			return true;
+		}
+		js_sys::Reflect::get(&context_attributes, &JsValue::from_str("antialias")).ok().and_then(|value| value.as_bool()) != Some(false)
+	})
+}
+
+//==============================================================================
 /// GL 의 묶인 것(..._BINDING, CURRENT_PROGRAM)이 있는지. (원본 getParameter 가 null 이 아닌지)
 /// - glow 웹 컨텍스트는 묶인 것이 없을 때(null) 읽으면 "A resource was created externally" 로 패닉하고 감싼 컨텍스트를 내주지 않는다.
 ///   그래서 컨텍스트를 만들 때 같은 것을 따로 들고 있다가 여기서 읽는다. 컨텍스트가 아직 없으면 false.

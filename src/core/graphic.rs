@@ -123,40 +123,107 @@ void main() {
 }
 ";
 
+/// 묶어 그리기의 자르기 사각형 표 칸 수. (0 번은 자르지 않는 칸, 차면 그때까지 쌓인 것을 그린다, 원본과 같음)
+const BATCH_CLIP_SLOT_CAPACITY: usize = 32;
+
+/// 묶어 그리기의 텍스처 칸 수 상한. (기기의 MAX_TEXTURE_IMAGE_UNITS 와 이 값 가운데 작은 것, PixiJS 와 같은 16, 원본과 같음)
+const BATCH_TEXTURE_SLOT_LIMIT: usize = 16;
+
+/// 자르지 않는 칸의 사각형 끝. (디바이스 픽셀, f32 로 정확한 2^24)
+const BATCH_UNCLIPPED_EXTENT: f32 = 16777216.0;
+
+/// 셰이더 자르기 경계가 화소 경계(또는 화소 가운데)에 놓였다고 보는 차이. (디바이스 픽셀, 변환 셈의 오차만 받는다)
+const CLIP_EDGE_EPSILON: f64 = 1.0 / 256.0;
+
+//==============================================================================
+/// 자르기 경계가 화소 가운데(정수 + 0.5)에 걸쳤는지. (래스터 동점 규칙이 기기마다 다를 수 있는 자리)
+//==============================================================================
+fn is_clip_edge_on_pixel_center(edge: f64) -> bool {
+	let fraction = edge - edge.floor();
+	(fraction - 0.5).abs() < CLIP_EDGE_EPSILON
+}
+
 /// 묶어 그리기 버텍스 셰이더. (정점은 쌓을 때 이미 디바이스 픽셀 좌표로 바꿔 둔다, 원본과 같음)
+/// - vertexSlot.x 는 텍스처 칸 번호, vertexSlot.y 는 자르기 사각형 표의 칸 번호다. (텍스처와 축에 맞는 자르기가 바뀌어도 묶음이 이어진다)
+/// - 표 칸 수는 BATCH_CLIP_SLOT_CAPACITY 와 같다.
 const BATCH_VERTEXSHADER_SOURCE: &str = "#version 300 es
 in vec2 vertexPosition;
 in vec2 vertexTextureCoordinate;
 in vec4 vertexColor;
 in vec4 vertexTintColor;
+in vec2 vertexSlot;
 uniform mat3 projectionMatrix;
+uniform vec4 clipRectList[32];
 out vec2 fragmentTextureCoordinate;
 out vec4 fragmentColor;
 out vec4 fragmentTintColor;
+flat out int fragmentTextureSlot;
+flat out vec4 fragmentClipRect;
+flat out float fragmentParticleAlpha;
 void main() {
 	vec3 transformedPosition = projectionMatrix * vec3(vertexPosition, 1.0);
 	gl_Position = vec4(transformedPosition.xy, 0.0, 1.0);
 	fragmentTextureCoordinate = vertexTextureCoordinate;
 	fragmentColor = vertexColor;
 	fragmentTintColor = vertexTintColor;
+	fragmentTextureSlot = int(vertexSlot.x + 0.5);
+	fragmentClipRect = clipRectList[int(vertexSlot.y + 0.5)];
+	fragmentParticleAlpha = vertexTintColor.a < 0.0 ? vertexTintColor.r : -1.0;
 }
 ";
 
-/// 묶어 그리기 프래그먼트 셰이더. (기본 셰이더와 같은 셈. 정점 색은 mainColor.rgb * mainColor.a * globalAlpha 와 mainColor.a * globalAlpha, 원본과 같음)
-const BATCH_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
+//==============================================================================
+/// 묶어 그리기 프래그먼트 셰이더 글 짓기. (기본 셰이더와 같은 셈. 정점 색은 mainColor.rgb * mainColor.a * globalAlpha 와 mainColor.a * globalAlpha, 원본 createBatchFragmentShaderSource 와 같은 글)
+/// - 텍스처는 칸 수만큼의 샘플러 배열에 묶고 칸 번호로 고른다. (GLSL ES 3.00 은 샘플러 배열을 상수로만 짚을 수 있어 칸마다 갈래를 둔다, PixiJS 와 같은 꼴)
+/// - 자르기는 화소 가운데(gl_FragCoord)를 디바이스 픽셀로 옮겨 사각형 [왼쪽, 오른쪽) x [위, 아래) 밖이면 버린다. (스텐실에 사각형을 그려 자른 것과 화소까지 같다)
+/// - 틴트 알파가 음수인 정점은 정점 색 쿼드(draw_colored_quads)다. 정점 색은 곱하지 않은 색 그대로, 틴트 빨강 칸에 전역 알파를 싣고 파티클 셰이더와 같은 식으로 셈한다.
+//==============================================================================
+fn create_batch_fragment_shader_source(texture_slot_count: usize) -> String {
+	let mut texture_sample_source = String::new();
+	for slot_index in 0..texture_slot_count {
+		let branch_source = if slot_index == 0 {
+			format!("if (fragmentTextureSlot == {})", slot_index)
+		}
+		else if slot_index == texture_slot_count - 1 {
+			String::from("else")
+		}
+		else {
+			format!("else if (fragmentTextureSlot == {})", slot_index)
+		};
+		texture_sample_source.push_str(&format!("\t{} {{\n\t\ttextureColor = texture(mainTextureList[{}], fragmentTextureCoordinate, textureLodBias);\n\t}}\n", branch_source, slot_index));
+	}
+	format!(
+		"#version 300 es
 precision highp float;
 in vec2 fragmentTextureCoordinate;
 in vec4 fragmentColor;
 in vec4 fragmentTintColor;
-uniform sampler2D mainTexture;
+flat in int fragmentTextureSlot;
+flat in vec4 fragmentClipRect;
+flat in float fragmentParticleAlpha;
+uniform sampler2D mainTextureList[{}];
 uniform float textureLodBias;
+uniform float framebufferHeight;
 out vec4 outputColor;
-void main() {
-	vec4 textureColor = texture(mainTexture, fragmentTextureCoordinate, textureLodBias);
+void main() {{
+	vec2 devicePosition = vec2(gl_FragCoord.x, framebufferHeight - gl_FragCoord.y);
+	if (devicePosition.x < fragmentClipRect.x || devicePosition.y < fragmentClipRect.y || devicePosition.x >= fragmentClipRect.z || devicePosition.y >= fragmentClipRect.w) {{
+		discard;
+	}}
+	vec4 textureColor = vec4(0.0);
+{}	if (fragmentParticleAlpha >= 0.0) {{
+		float finalAlpha = textureColor.a * fragmentColor.a * fragmentParticleAlpha;
+		vec3 finalColor = textureColor.rgb * fragmentColor.rgb * fragmentColor.a * fragmentParticleAlpha;
+		outputColor = vec4(finalColor, finalAlpha);
+		return;
+	}}
 	vec3 tintedColor = mix(textureColor.rgb, fragmentTintColor.rgb * textureColor.a, fragmentTintColor.a);
 	outputColor = vec4(tintedColor * fragmentColor.rgb, textureColor.a * fragmentColor.a);
+}}
+",
+		texture_slot_count, texture_sample_source
+	)
 }
-";
 
 /// 셰이더 섞기 함수. (고정 블렌딩으로 안 되는 블렌드 모드에서 그릴 영역 아래와 섞는다, 원본과 같은 글)
 /// - backdropTexture 는 그리기 직전에 지금 프레임버퍼에서 그릴 영역만 떠 온 것이다. (프레임버퍼와 같은 크기와 형식, 프리멀티플라이드)
@@ -371,8 +438,8 @@ pub const FLOATS_PER_VERTEX: usize = 4;
 /// 파티클 버텍스 1개당 float 수. (x, y, u, v, r, g, b, a)
 pub const PARTICLE_FLOATS_PER_VERTEX: usize = 8;
 const PARTICLE_VERTEX_CAPACITY: usize = 8192;
-/// 묶어 그리기 버텍스 1개당 float 수. (x, y, u, v, r, g, b, a, 틴트 r, g, b, a)
-const BATCH_FLOATS_PER_VERTEX: usize = 12;
+/// 묶어 그리기 버텍스 1개당 float 수. (x, y, u, v, r, g, b, a, 틴트 r, g, b, a, 텍스처 칸, 자르기 칸)
+const BATCH_FLOATS_PER_VERTEX: usize = 14;
 
 /// 스크래치 버텍스 버퍼 용량. (버텍스 수)
 const VERTEX_CAPACITY: usize = 4096;
@@ -966,6 +1033,20 @@ struct ClipEntry {
 	rect: Rect,
 	round_size: f64,
 	transform_matrix: TransformMatrix,
+	/// 이 자르기를 셰이더로 자르는지. (false 면 스텐실)
+	is_shader_clip: bool,
+	/// 이 칸이 맨 위일 때 셰이더 자르기가 걸리는지. (이 자르기나 바깥 자르기가 셰이더 자르기)
+	is_shader_clip_active: bool,
+	/// 걸린 셰이더 자르기를 모두 겹친 사각형. (디바이스 픽셀, 왼쪽, 위, 오른쪽, 아래)
+	shader_clip_rect: [f32; 4],
+	/// 셰이더 자르기의 표 칸 번호와 그 칸을 적은 묶음 세대. (세대가 지금 묶음이 아니면 다시 적는다)
+	shader_clip_slot: usize,
+	shader_clip_slot_generation: i64,
+	/// 걸린 자르기(겹친 것 모두)의 디바이스 픽셀 경계 상자. (거르기가 쓴다)
+	cull_minimum_x: f64,
+	cull_minimum_y: f64,
+	cull_maximum_x: f64,
+	cull_maximum_y: f64,
 }
 
 //==============================================================================
@@ -1127,7 +1208,32 @@ pub struct Graphic {
 	batch_suspend_depth: u32,
 	batch_vertex_data: Vec<f32>,
 	batch_vertex_count: usize,
-	batch_texture: Option<GlTexture>,
+	/// 쌓인 정점이 쓰는 텍스처. (칸 번호 차례, 앞의 batch_texture_count 칸)
+	batch_texture_list: [Option<GlTexture>; BATCH_TEXTURE_SLOT_LIMIT],
+	batch_texture_count: usize,
+	/// 텍스처 칸 수. (기기의 MAX_TEXTURE_IMAGE_UNITS 와 BATCH_TEXTURE_SLOT_LIMIT 가운데 작은 것, 묶음 자원을 지을 때 정한다)
+	batch_texture_slot_count: usize,
+	/// 1 번부터의 텍스처 유닛에 묶어 둔 것. (0 번은 bound_texture 가 기억한다, None 이면 모른다)
+	batch_bound_texture_list: [Cell<Option<GlTexture>>; BATCH_TEXTURE_SLOT_LIMIT],
+	/// 자르기 사각형 표. (칸마다 왼쪽, 위, 오른쪽, 아래 디바이스 픽셀)
+	batch_clip_rect_data: [f32; BATCH_CLIP_SLOT_CAPACITY * 4],
+	/// 표에 적은 칸 수. (0 번 자르지 않는 칸 포함)
+	batch_clip_rect_count: usize,
+	/// 묶음을 그릴 때마다 늘어나는 번호. (자르기 칸 번호가 지금 묶음 것인지 견준다)
+	batch_generation: i64,
+	/// 축에 맞는 자르기(셰이더로 자르기)가 걸렸는지.
+	is_shader_clip_active: bool,
+	/// 걸린 셰이더 자르기를 모두 겹친 사각형. (디바이스 픽셀, 왼쪽, 위, 오른쪽, 아래)
+	shader_clip_rect: [f32; 4],
+	/// 지금 셰이더 자르기의 표 칸 번호. (shader_clip_slot_generation 이 지금 묶음이 아니면 다시 적는다)
+	shader_clip_slot: usize,
+	shader_clip_slot_generation: i64,
+	/// 스텐실에 적은 자르기 수. (돌아간 자르기, 둥근 자르기)
+	stencil_clip_depth: i32,
+	/// 묶지 않는 그리기에 셰이더 자르기를 가위로 걸어 두었는지.
+	is_clip_scissor_enabled: bool,
+	/// 기본 프레임버퍼가 멀티샘플인지. (-1 모름, 0 아님, 1 멀티샘플)
+	framebuffer_sample_state: i32,
 	is_culling_enabled: bool,
 	/// 마지막으로 사용 중으로 건 셰이더 프로그램. (모르면 None, 같으면 use_program 을 건너뛴다)
 	bound_program: Cell<Option<GlProgram>>,
@@ -1146,6 +1252,8 @@ pub struct Graphic {
 //==============================================================================
 struct ExternalPassGuard<'a> {
 	graphic: &'a mut Graphic,
+	/// 패스 앞에서 스텐실에 적어 둔 셰이더 자르기 수. (되돌릴 때 지운다)
+	shader_clip_count: usize,
 }
 
 impl Drop for ExternalPassGuard<'_> {
@@ -1154,6 +1262,9 @@ impl Drop for ExternalPassGuard<'_> {
 	//==============================================================================
 	fn drop(&mut self) {
 		self.graphic.restore_render_state();
+		if self.shader_clip_count > 0 {
+			self.graphic.write_shader_clips_to_stencil(false);
+		}
 	}
 }
 
@@ -1298,7 +1409,20 @@ impl Graphic {
 			batch_suspend_depth: 0,
 			batch_vertex_data: vec![0.0; BATCH_VERTEX_CAPACITY * BATCH_FLOATS_PER_VERTEX],
 			batch_vertex_count: 0,
-			batch_texture: None,
+			batch_texture_list: [None; BATCH_TEXTURE_SLOT_LIMIT],
+			batch_texture_count: 0,
+			batch_texture_slot_count: 1,
+			batch_bound_texture_list: std::array::from_fn(|_| Cell::new(None)),
+			batch_clip_rect_data: create_batch_clip_rect_data(),
+			batch_clip_rect_count: 1,
+			batch_generation: 0,
+			is_shader_clip_active: false,
+			shader_clip_rect: [0.0; 4],
+			shader_clip_slot: 0,
+			shader_clip_slot_generation: -1,
+			stencil_clip_depth: 0,
+			is_clip_scissor_enabled: false,
+			framebuffer_sample_state: -1,
 			is_culling_enabled: true,
 			bound_program: Cell::new(None),
 			bound_texture: Cell::new(None),
@@ -1364,14 +1488,34 @@ impl Graphic {
 		self.global_alpha = 1.0;
 		self.image_tint_color = None;
 		self.batch_vertex_count = 0;
-		self.batch_texture = None;
+		self.clear_batch_textures();
+		self.batch_clip_rect_count = 1;
 		self.apply_blend_mode(BlendMode::Normal);
+
+		// 기본 프레임버퍼가 멀티샘플인지 처음 한 번 읽어 둔다. (프레임 첫머리는 기본 프레임버퍼를 칠한다)
+		if self.framebuffer_sample_state < 0 {
+			if let Some(is_multisampled) = read_default_framebuffer_multisampled(&self.gl) {
+				self.framebuffer_sample_state = if is_multisampled {
+					1
+				}
+				else {
+					0
+				};
+			}
+		}
 
 		// 클리핑 상태 리셋. (비정상 종료로 스택이 남아 있어도 복구)
 		unsafe {
 			if !self.clip_stack.is_empty() {
 				self.clip_stack.clear();
 				self.gl.disable(glow::STENCIL_TEST);
+			}
+			self.stencil_clip_depth = 0;
+			self.is_shader_clip_active = false;
+			self.shader_clip_slot = 0;
+			if self.is_clip_scissor_enabled {
+				self.gl.disable(glow::SCISSOR_TEST);
+				self.is_clip_scissor_enabled = false;
 			}
 			self.gl.color_mask(true, true, true, true);
 			self.gl.clear_stencil(0);
@@ -1428,6 +1572,9 @@ impl Graphic {
 		self.bound_program.set(None);
 		self.bound_texture.set(None);
 		self.bound_backdrop_texture.set(None);
+		for bound_texture in self.batch_bound_texture_list.iter() {
+			bound_texture.set(None);
+		}
 
 		// 밖의 GL 코드는 모든 채널을 쓰는 마스크를 기대하므로 되돌린다.
 		if self.is_color_mask_known.get() {
@@ -1513,8 +1660,11 @@ impl Graphic {
 		if is_depth_cleared {
 			self.clear_depth_buffer();
 		}
+
+		// 셰이더 자르기는 바깥 패스가 모르므로 그동안 스텐실에 적어 둔다.
+		let shader_clip_count = self.write_shader_clips_to_stencil(true);
 		self.forget_bound_render_state();
-		let guard = ExternalPassGuard { graphic: self };
+		let guard = ExternalPassGuard { graphic: self, shader_clip_count };
 		pass(&guard.graphic.gl)
 	}
 
@@ -2005,15 +2155,19 @@ impl Graphic {
 
 		// 묶어 그리기. (클립 영역 기록 중이 아니고 바꿔 끼운 셰이더가 없을 때. 바꿔 끼운 셰이더는 제 유니폼을 쓰므로 바로 그린다)
 		let is_batchable = self.is_batching_enabled && self.batch_suspend_depth == 0 && self.shader_program_override.is_none() && !is_shader_blend_draw;
-		if is_batchable {
+		if is_batchable && self.prepare_batch_resources() {
 			self.append_batch_vertices(vertex_count, texture, color);
 			return;
 		}
 		self.flush_batch();
+
+		// 묶지 않고 그리는 것에는 셰이더 자르기를 가위로 건다. (화소 가운데 기준이 같아 결과가 같다)
+		self.apply_clip_scissor();
 		if is_shader_blend_draw {
 			self.apply_shader_blend_composite_function(true);
 			self.draw_vertices_with_shader_blend(vertex_count, texture, color, shader_blend_mode_index);
 			self.apply_shader_blend_composite_function(false);
+			self.release_clip_scissor();
 			return;
 		}
 
@@ -2036,6 +2190,29 @@ impl Graphic {
 		}
 		self.draw_call_count += 1;
 		self.draw_vertex_count += vertex_count as u32;
+		self.release_clip_scissor();
+	}
+
+	//==============================================================================
+	/// 묶음 자원 준비. (처음 쓸 때 짓는다. 지을 수 없으면 알리고 묶어 그리기를 꺼 낱장으로 그린다)
+	///
+	/// # 돌려줌
+	/// 묶음에 쌓을 수 있으면 true.
+	//==============================================================================
+	fn prepare_batch_resources(&mut self) -> bool {
+		if self.batch_shader_program.is_some() {
+			return true;
+		}
+		match self.ensure_batch_resources() {
+			Ok(()) => {
+				true
+			}
+			Err(error) => {
+				eprintln!("Graphic: batch resources failed: {}", error);
+				self.is_batching_enabled = false;
+				false
+			}
+		}
 	}
 
 	//==============================================================================
@@ -2244,6 +2421,7 @@ impl Graphic {
 				self.gl.bind_texture(glow::TEXTURE_2D, Some(backdrop_target.texture));
 				self.gl.active_texture(glow::TEXTURE0);
 				self.bound_backdrop_texture.set(Some(backdrop_target.texture));
+				self.batch_bound_texture_list[1].set(None);
 			}
 		}
 		Ok(())
@@ -2444,10 +2622,8 @@ impl Graphic {
 	/// 묶음에 정점 더하기. (현재 변환을 CPU 에서 곱하고, 기본 셰이더와 같은 색 셈을 정점 색 하나로 미리 곱해 틴트와 함께 정점마다 싣는다)
 	//==============================================================================
 	fn append_batch_vertices(&mut self, vertex_count: usize, texture: GlTexture, color: Color) {
-		if self.batch_texture != Some(texture) || self.batch_vertex_count + vertex_count > BATCH_VERTEX_CAPACITY {
-			self.flush_batch();
-			self.batch_texture = Some(texture);
-		}
+		let texture_slot = self.prepare_batch(vertex_count, texture) as f32;
+		let clip_slot = self.shader_clip_slot as f32;
 		let matrix = self.transform_matrix;
 		let color_alpha = color.alpha * self.global_alpha;
 		let color_red = color.red * color_alpha;
@@ -2476,6 +2652,100 @@ impl Graphic {
 			batch_vertex[6] = color_blue as f32;
 			batch_vertex[7] = color_alpha as f32;
 			batch_vertex[8..12].copy_from_slice(&tint_color_value_list.map(|value| value as f32));
+			batch_vertex[12] = texture_slot;
+			batch_vertex[13] = clip_slot;
+			write_offset += BATCH_FLOATS_PER_VERTEX;
+		}
+		self.batch_vertex_count += vertex_count;
+	}
+
+	//==============================================================================
+	/// 묶음에 정점을 쌓을 자리 마련. (텍스처 칸 번호를 돌려준다, 원본 prepareSpriteBatch)
+	/// - 텍스처가 묶음에 없으면 빈 칸에 넣는다. 칸이 다 찼거나, 셰이더 자르기의 새 표 칸이 없거나, 정점 자리가 모자라면 그때까지 쌓인 것을 먼저 그린다.
+	/// - 셰이더 자르기의 표 칸 번호는 shader_clip_slot 에 맞춰 둔다. (자르기가 걸리지 않았으면 0)
+	/// - 묶음 자원은 부르는 쪽(draw_vertices, draw_colored_quads)이 먼저 지어 둔다.
+	//==============================================================================
+	fn prepare_batch(&mut self, vertex_count: usize, texture: GlTexture) -> usize {
+		let mut texture_slot = self.find_batch_texture_slot(texture);
+		let is_texture_slot_missing = texture_slot.is_none() && self.batch_texture_count >= self.batch_texture_slot_count;
+		let is_clip_slot_missing = self.is_shader_clip_active && self.shader_clip_slot_generation != self.batch_generation && self.batch_clip_rect_count >= BATCH_CLIP_SLOT_CAPACITY;
+		let is_vertex_capacity_missing = self.batch_vertex_count + vertex_count > BATCH_VERTEX_CAPACITY;
+		if is_texture_slot_missing || is_clip_slot_missing || is_vertex_capacity_missing {
+			self.flush_batch();
+			texture_slot = None;
+		}
+		let texture_slot = match texture_slot {
+			Some(texture_slot) => {
+				texture_slot
+			}
+			None => {
+				let texture_slot = self.batch_texture_count;
+				self.batch_texture_list[texture_slot] = Some(texture);
+				self.batch_texture_count += 1;
+				texture_slot
+			}
+		};
+		if !self.is_shader_clip_active {
+			self.shader_clip_slot = 0;
+		}
+		else if self.shader_clip_slot_generation != self.batch_generation {
+			let clip_slot = self.batch_clip_rect_count;
+			self.batch_clip_rect_data[clip_slot * 4..clip_slot * 4 + 4].copy_from_slice(&self.shader_clip_rect);
+			self.batch_clip_rect_count += 1;
+			self.shader_clip_slot = clip_slot;
+			self.shader_clip_slot_generation = self.batch_generation;
+
+			// 맨 위 자르기 칸에도 적어, 안쪽 자르기를 마치고 돌아올 때 같은 묶음이면 표 칸을 다시 쓴다.
+			if let Some(top_entry) = self.clip_stack.last_mut() {
+				top_entry.shader_clip_slot = clip_slot;
+				top_entry.shader_clip_slot_generation = self.batch_generation;
+			}
+		}
+		texture_slot
+	}
+
+	//==============================================================================
+	/// 묶음에서 텍스처의 칸 번호 찾기. (없으면 None, 원본 findSpriteBatchTextureSlot)
+	//==============================================================================
+	fn find_batch_texture_slot(&self, texture: GlTexture) -> Option<usize> {
+		(0..self.batch_texture_count).rev().find(|&slot_index| self.batch_texture_list[slot_index] == Some(texture))
+	}
+
+	//==============================================================================
+	/// 묶음의 텍스처 칸 비우기.
+	//==============================================================================
+	fn clear_batch_textures(&mut self) {
+		for slot_index in 0..self.batch_texture_count {
+			self.batch_texture_list[slot_index] = None;
+		}
+		self.batch_texture_count = 0;
+	}
+
+	//==============================================================================
+	/// 정점 색 쿼드(x, y, u, v, r, g, b, a)를 묶음에 쌓기. (draw_colored_quads 가 고정 블렌딩일 때 부른다, 원본 appendColoredQuadsToSpriteBatch)
+	/// - 정점 색은 그대로 싣고 틴트 칸에 (전역 알파, 0, 0, -1) 을 적어, 묶음 셰이더가 파티클 셰이더와 같은 식으로 셈하게 한다. (화소까지 같게)
+	//==============================================================================
+	fn append_batch_colored_quads(&mut self, vertex_count: usize, texture: GlTexture) {
+		let texture_slot = self.prepare_batch(vertex_count, texture) as f32;
+		let clip_slot = self.shader_clip_slot as f32;
+		let global_alpha = self.global_alpha as f32;
+		let matrix = self.transform_matrix;
+		let mut write_offset = self.batch_vertex_count * BATCH_FLOATS_PER_VERTEX;
+		for vertex_index in 0..vertex_count {
+			let read_offset = vertex_index * PARTICLE_FLOATS_PER_VERTEX;
+			let particle_vertex = &self.particle_vertex_data[read_offset..read_offset + PARTICLE_FLOATS_PER_VERTEX];
+			let position_x = particle_vertex[0] as f64;
+			let position_y = particle_vertex[1] as f64;
+			let batch_vertex = &mut self.batch_vertex_data[write_offset..write_offset + BATCH_FLOATS_PER_VERTEX];
+			batch_vertex[0] = (matrix.a * position_x + matrix.c * position_y + matrix.e) as f32;
+			batch_vertex[1] = (matrix.b * position_x + matrix.d * position_y + matrix.f) as f32;
+			batch_vertex[2..8].copy_from_slice(&particle_vertex[2..8]);
+			batch_vertex[8] = global_alpha;
+			batch_vertex[9] = 0.0;
+			batch_vertex[10] = 0.0;
+			batch_vertex[11] = -1.0;
+			batch_vertex[12] = texture_slot;
+			batch_vertex[13] = clip_slot;
 			write_offset += BATCH_FLOATS_PER_VERTEX;
 		}
 		self.batch_vertex_count += vertex_count;
@@ -2483,25 +2753,30 @@ impl Graphic {
 
 	//==============================================================================
 	/// 모아 둔 묶음 내보내기. (GL 상태를 바꾸기 전, 프레임 끝, GL 을 직접 쓰기 전에 부른다)
+	/// - 묶음의 텍스처를 0 번부터의 유닛에 묶는다. 쓰지 않는 칸의 유닛에는 흰 텍스처를 묶어, 지난 그리기의 텍스처가 지금 그리는 칸(렌더 타겟)이어도 되먹임이 생기지 않게 한다. (원본과 같음)
 	//==============================================================================
 	pub fn flush_batch(&mut self) {
 		if self.batch_vertex_count == 0 {
 			return;
 		}
 		let vertex_count = self.batch_vertex_count;
+		let texture_count = self.batch_texture_count;
+		let batch_texture_list = self.batch_texture_list;
+		let first_texture = batch_texture_list[0];
 		self.batch_vertex_count = 0;
-		let texture = match self.batch_texture.take() {
-			Some(texture) => {
-				texture
+		self.clear_batch_textures();
+		let clip_rect_count = self.batch_clip_rect_count;
+		self.batch_clip_rect_count = 1;
+		self.batch_generation += 1;
+		let first_texture = match first_texture {
+			Some(first_texture) if texture_count > 0 => {
+				first_texture
 			}
-			None => {
+			_ => {
 				return;
 			}
 		};
-		if let Err(error) = self.ensure_batch_resources() {
-			eprintln!("Graphic: batch resources failed: {}", error);
-			return;
-		}
+		self.release_clip_scissor();
 		let batch_shader_program = match &self.batch_shader_program {
 			Some(batch_shader_program) => {
 				batch_shader_program
@@ -2512,14 +2787,46 @@ impl Graphic {
 		};
 		self.use_shader_program(batch_shader_program);
 		let projection_matrix_location = batch_shader_program.get_uniform_location(&self.gl, "projectionMatrix");
+		let framebuffer_height_location = batch_shader_program.get_uniform_location(&self.gl, "framebufferHeight");
+		let clip_rect_list_location = batch_shader_program.get_uniform_location(&self.gl, "clipRectList");
 		let vertex_bytes = float_slice_to_bytes(&self.batch_vertex_data[..vertex_count * BATCH_FLOATS_PER_VERTEX]);
 		unsafe {
 			self.gl.bind_vertex_array(self.batch_vertex_array);
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, self.batch_vertex_buffer);
 			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
+			self.gl.uniform_1_f32(framebuffer_height_location.as_ref(), self.applied_viewport_height as f32);
+			self.gl.uniform_4_f32_slice(clip_rect_list_location.as_ref(), &self.batch_clip_rect_data[..clip_rect_count * 4]);
 		}
-		self.bind_main_texture(texture);
+
+		// 텍스처 묶기. (0 번 유닛은 bind_main_texture 가 기억하고, 1 번 유닛은 셰이더 섞기의 떠 온 아래와 같이 쓴다)
+		self.bind_main_texture(first_texture);
+		let mut is_texture_unit_changed = false;
+		for slot_index in 1..self.batch_texture_slot_count {
+			let texture = if slot_index < texture_count {
+				batch_texture_list[slot_index]
+			}
+			else {
+				Some(self.white_texture)
+			};
+			if self.batch_bound_texture_list[slot_index].get() == texture {
+				continue;
+			}
+			unsafe {
+				self.gl.active_texture(glow::TEXTURE0 + slot_index as u32);
+				self.gl.bind_texture(glow::TEXTURE_2D, texture);
+			}
+			self.batch_bound_texture_list[slot_index].set(texture);
+			is_texture_unit_changed = true;
+			if slot_index == 1 {
+				self.bound_backdrop_texture.set(None);
+			}
+		}
+		if is_texture_unit_changed {
+			unsafe {
+				self.gl.active_texture(glow::TEXTURE0);
+			}
+		}
 		self.apply_color_mask();
 		unsafe {
 			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
@@ -2605,7 +2912,19 @@ impl Graphic {
 		}
 		let viewport_width = self.applied_viewport_width as f64;
 		let viewport_height = self.applied_viewport_height as f64;
-		maximum_x >= 0.0 && maximum_y >= 0.0 && minimum_x <= viewport_width && minimum_y <= viewport_height
+
+		// 걸린 자르기의 경계 상자도 본다. (자르기 밖은 보이지 않는다, 유니티 RectMask2D 와 같다)
+		let mut visible_minimum_x = 0.0;
+		let mut visible_minimum_y = 0.0;
+		let mut visible_maximum_x = viewport_width;
+		let mut visible_maximum_y = viewport_height;
+		if let Some(clip_entry) = self.clip_stack.last() {
+			visible_minimum_x = clip_entry.cull_minimum_x.max(visible_minimum_x);
+			visible_minimum_y = clip_entry.cull_minimum_y.max(visible_minimum_y);
+			visible_maximum_x = clip_entry.cull_maximum_x.min(visible_maximum_x);
+			visible_maximum_y = clip_entry.cull_maximum_y.min(visible_maximum_y);
+		}
+		maximum_x >= visible_minimum_x && maximum_y >= visible_minimum_y && minimum_x <= visible_maximum_x && minimum_y <= visible_maximum_y
 	}
 
 	//==============================================================================
@@ -2679,14 +2998,20 @@ impl Graphic {
 		if self.batch_shader_program.is_some() {
 			return Ok(());
 		}
-		let batch_shader_program = ShaderProgram::new(&self.gl, BATCH_VERTEXSHADER_SOURCE, BATCH_FRAGMENTSHADER_SOURCE)?;
+		let maximum_texture_unit_count = unsafe { self.gl.get_parameter_i32(glow::MAX_TEXTURE_IMAGE_UNITS) };
+		let texture_slot_count = (maximum_texture_unit_count.max(1) as usize).min(BATCH_TEXTURE_SLOT_LIMIT);
+		let batch_shader_program = ShaderProgram::new(&self.gl, BATCH_VERTEXSHADER_SOURCE, &create_batch_fragment_shader_source(texture_slot_count))?;
+		self.batch_texture_slot_count = texture_slot_count;
+		self.clear_batch_textures();
+		self.batch_clip_rect_data = create_batch_clip_rect_data();
+		self.batch_clip_rect_count = 1;
 		unsafe {
 			let batch_vertex_array = self.gl.create_vertex_array()?;
 			let batch_vertex_buffer = self.gl.create_buffer()?;
 			self.gl.bind_vertex_array(Some(batch_vertex_array));
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(batch_vertex_buffer));
 			let stride_bytes = (BATCH_FLOATS_PER_VERTEX * 4) as i32;
-			let attribute_layout: [(&str, i32, i32); 4] = [("vertexPosition", 2, 0), ("vertexTextureCoordinate", 2, 8), ("vertexColor", 4, 16), ("vertexTintColor", 4, 32)];
+			let attribute_layout: [(&str, i32, i32); 5] = [("vertexPosition", 2, 0), ("vertexTextureCoordinate", 2, 8), ("vertexColor", 4, 16), ("vertexTintColor", 4, 32), ("vertexSlot", 2, 48)];
 			for (attribute_name, component_count, byte_offset) in attribute_layout {
 				let attribute_location = batch_shader_program.get_attribute_location(&self.gl, attribute_name);
 				if let Some(attribute_location) = attribute_location {
@@ -2700,9 +3025,10 @@ impl Graphic {
 			self.batch_vertex_buffer = Some(batch_vertex_buffer);
 		}
 		self.use_shader_program(&batch_shader_program);
-		let main_texture_location = batch_shader_program.get_uniform_location(&self.gl, "mainTexture");
+		let texture_unit_list: Vec<i32> = (0..texture_slot_count as i32).collect();
+		let main_texture_list_location = batch_shader_program.get_uniform_location(&self.gl, "mainTextureList");
 		unsafe {
-			self.gl.uniform_1_i32(main_texture_location.as_ref(), 0);
+			self.gl.uniform_1_i32_slice(main_texture_list_location.as_ref(), &texture_unit_list);
 		}
 		self.apply_image_mipmap_bias(&batch_shader_program);
 		self.batch_shader_program = Some(batch_shader_program);
@@ -2800,22 +3126,30 @@ impl Graphic {
 		if vertex_count == 0 {
 			return;
 		}
+
+		// 고정 블렌딩이면 묶음에 이어 쌓는다. (이미지, 도형, 글자와 같은 드로우 콜에 들어간다, 원본과 같음)
+		let shader_blend_mode_index = self.get_draw_shader_blend_mode_index();
+		let is_shader_blend_draw = shader_blend_mode_index > 0;
+		let stored_vertex_count = vertex_count.min(self.particle_vertex_data.len() / PARTICLE_FLOATS_PER_VERTEX);
+		if self.is_batching_enabled && self.batch_suspend_depth == 0 && !is_shader_blend_draw && stored_vertex_count <= BATCH_VERTEX_CAPACITY && self.prepare_batch_resources() {
+			self.append_batch_colored_quads(stored_vertex_count, texture);
+			return;
+		}
 		self.flush_batch();
 		if let Err(error) = self.ensure_particle_batch_resources() {
 			eprintln!("Graphic: particle resources failed: {}", error);
 			return;
 		}
-		let vertex_count = vertex_count.min(PARTICLE_VERTEX_CAPACITY).min(self.particle_vertex_data.len() / PARTICLE_FLOATS_PER_VERTEX);
+		let vertex_count = stored_vertex_count.min(PARTICLE_VERTEX_CAPACITY);
 
 		// 셰이더 섞기 모드는 섞기 프로그램으로 그린다.
-		let shader_blend_mode_index = self.get_draw_shader_blend_mode_index();
-		let is_shader_blend_draw = shader_blend_mode_index > 0;
 		if is_shader_blend_draw {
 			if let Err(error) = self.ensure_particle_blend_shader_program() {
 				eprintln!("Graphic: particle blend shader program failed: {}", error);
 				return;
 			}
 		}
+		self.apply_clip_scissor();
 		let selected_shader_program = if is_shader_blend_draw {
 			&self.particle_blend_shader_program
 		}
@@ -2868,6 +3202,7 @@ impl Graphic {
 			self.gl.bind_vertex_array(Some(self.vertex_array));
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 		}
+		self.release_clip_scissor();
 	}
 
 	//==============================================================================
@@ -4106,21 +4441,94 @@ impl Graphic {
 	/// ```
 	//==============================================================================
 	pub fn begin_clip_rect(&mut self, rect: Rect, round_size: f64) {
-		// 모아 둔 것은 지금 스텐실 상태로 먼저 내보낸다.
-		self.flush_batch();
-
 		// 상태 저장. (Canvas2D save 대응)
 		self.push_state();
 
-		let previous_clip_depth = self.clip_stack.len() as i32;
-		self.clip_stack.push(ClipEntry {
+		// 디바이스 픽셀 경계 상자. (네 꼭짓점을 옮긴 것, 거르기와 셰이더 자르기에 쓴다)
+		let matrix = self.transform_matrix;
+		let left_x = rect.position.x;
+		let top_y = rect.position.y;
+		let right_x = left_x + rect.size.x;
+		let bottom_y = top_y + rect.size.y;
+		let corner_list: [(f64, f64); 4] = [(left_x, top_y), (right_x, top_y), (left_x, bottom_y), (right_x, bottom_y)];
+		let mut minimum_x = f64::MAX;
+		let mut minimum_y = f64::MAX;
+		let mut maximum_x = f64::MIN;
+		let mut maximum_y = f64::MIN;
+		for (corner_x, corner_y) in corner_list {
+			let transformed_x = matrix.a * corner_x + matrix.c * corner_y + matrix.e;
+			let transformed_y = matrix.b * corner_x + matrix.d * corner_y + matrix.f;
+			minimum_x = minimum_x.min(transformed_x);
+			minimum_y = minimum_y.min(transformed_y);
+			maximum_x = maximum_x.max(transformed_x);
+			maximum_y = maximum_y.max(transformed_y);
+		}
+
+		// 축에 맞는 각진 사각형은 스텐실 대신 셰이더로 자른다. (묶음을 끊지 않는다, 유니티 RectMask2D 와 같은 꼴)
+		// 돌아갔거나 둥근 자르기, 화소 가운데 기준과 스텐실 결과가 갈릴 수 있는 경계는 스텐실로 자른다. 바깥 셰이더 자르기는 그 안에서도 그대로 걸린다.
+		let is_axis_aligned = (matrix.b == 0.0 && matrix.c == 0.0) || (matrix.a == 0.0 && matrix.d == 0.0);
+		let mut is_shader_clip = false;
+		let mut shader_minimum_x = minimum_x;
+		let mut shader_minimum_y = minimum_y;
+		let mut shader_maximum_x = maximum_x;
+		let mut shader_maximum_y = maximum_y;
+		if round_size <= 0.0 && is_axis_aligned {
+			if self.is_framebuffer_multisampled() {
+				// 멀티샘플 화면에서 스텐실은 샘플마다 걸려 화소 사이 경계가 반쯤 칠해진다. 경계가 화소 경계에 놓일 때만 화소 가운데 기준과 같다. (반올림은 원본 Math.round 와 같게)
+				shader_minimum_x = (minimum_x + 0.5).floor();
+				shader_minimum_y = (minimum_y + 0.5).floor();
+				shader_maximum_x = (maximum_x + 0.5).floor();
+				shader_maximum_y = (maximum_y + 0.5).floor();
+				is_shader_clip = (shader_minimum_x - minimum_x).abs() < CLIP_EDGE_EPSILON && (shader_minimum_y - minimum_y).abs() < CLIP_EDGE_EPSILON && (shader_maximum_x - maximum_x).abs() < CLIP_EDGE_EPSILON && (shader_maximum_y - maximum_y).abs() < CLIP_EDGE_EPSILON;
+			}
+			else {
+				// 샘플이 하나면 스텐실도 화소 가운데로 고른다. 가운데에 딱 걸친 경계(동점 규칙이 기기마다 다를 수 있다)만 스텐실로 둔다.
+				is_shader_clip = !is_clip_edge_on_pixel_center(minimum_x) && !is_clip_edge_on_pixel_center(minimum_y) && !is_clip_edge_on_pixel_center(maximum_x) && !is_clip_edge_on_pixel_center(maximum_y);
+			}
+		}
+		let mut clip_entry = ClipEntry {
 			rect,
 			round_size,
-			transform_matrix: self.transform_matrix,
-		});
+			transform_matrix: matrix,
+			is_shader_clip,
+			is_shader_clip_active: is_shader_clip,
+			shader_clip_rect: [shader_minimum_x as f32, shader_minimum_y as f32, shader_maximum_x as f32, shader_maximum_y as f32],
+			shader_clip_slot: 0,
+			shader_clip_slot_generation: -1,
+			cull_minimum_x: minimum_x,
+			cull_minimum_y: minimum_y,
+			cull_maximum_x: maximum_x,
+			cull_maximum_y: maximum_y,
+		};
+		if let Some(parent_entry) = self.clip_stack.last() {
+			clip_entry.cull_minimum_x = parent_entry.cull_minimum_x.max(minimum_x);
+			clip_entry.cull_minimum_y = parent_entry.cull_minimum_y.max(minimum_y);
+			clip_entry.cull_maximum_x = parent_entry.cull_maximum_x.min(maximum_x);
+			clip_entry.cull_maximum_y = parent_entry.cull_maximum_y.min(maximum_y);
+			if parent_entry.is_shader_clip_active {
+				let parent_rect = parent_entry.shader_clip_rect;
+				clip_entry.is_shader_clip_active = true;
+				clip_entry.shader_clip_rect = parent_rect;
+				clip_entry.shader_clip_slot = parent_entry.shader_clip_slot;
+				clip_entry.shader_clip_slot_generation = parent_entry.shader_clip_slot_generation;
+				if is_shader_clip {
+					clip_entry.shader_clip_rect = [(parent_rect[0] as f64).max(shader_minimum_x) as f32, (parent_rect[1] as f64).max(shader_minimum_y) as f32, (parent_rect[2] as f64).min(shader_maximum_x) as f32, (parent_rect[3] as f64).min(shader_maximum_y) as f32];
+					clip_entry.shader_clip_slot_generation = -1;
+				}
+			}
+		}
+		self.clip_stack.push(clip_entry);
+		self.apply_shader_clip_from_stack();
+		if is_shader_clip {
+			return;
+		}
 
+		// 클리핑 전에 쌓인 것을 먼저 그린다. (스텐실 상태가 바뀌기 전)
+		self.flush_batch();
+		let previous_stencil_clip_depth = self.stencil_clip_depth;
+		self.stencil_clip_depth += 1;
 		unsafe {
-			if previous_clip_depth == 0 {
+			if previous_stencil_clip_depth == 0 {
 				self.gl.enable(glow::STENCIL_TEST);
 			}
 
@@ -4141,7 +4549,7 @@ impl Graphic {
 		unsafe {
 			self.gl.color_mask(true, true, true, true);
 			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
-			self.gl.stencil_func(glow::EQUAL, previous_clip_depth + 1, 0xFF);
+			self.gl.stencil_func(glow::EQUAL, self.stencil_clip_depth, 0xFF);
 		}
 	}
 
@@ -4184,7 +4592,7 @@ impl Graphic {
 			}
 		};
 		if let Some(target) = &target {
-			let clip_depth = self.clip_stack.len() as i32;
+			let clip_depth = self.stencil_clip_depth;
 			unsafe {
 				self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
 				self.gl.color_mask(true, true, true, true);
@@ -4320,6 +4728,13 @@ impl Graphic {
 			}
 		};
 
+		// 셰이더 자르기는 바깥 자르기로 돌아가기만 한다. (묶음을 끊지 않는다)
+		if clip_entry.is_shader_clip {
+			self.apply_shader_clip_from_stack();
+			self.pop_state();
+			return;
+		}
+
 		// 클립 안에서 모아 둔 것을 먼저 내보낸다.
 		self.flush_batch();
 
@@ -4344,17 +4759,141 @@ impl Graphic {
 			self.gl.color_mask(true, true, true, true);
 			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
 
-			let clip_depth = self.clip_stack.len() as i32;
-			if clip_depth == 0 {
+			self.stencil_clip_depth -= 1;
+			if self.stencil_clip_depth == 0 {
 				self.gl.disable(glow::STENCIL_TEST);
 			}
 			else {
-				self.gl.stencil_func(glow::EQUAL, clip_depth, 0xFF);
+				self.gl.stencil_func(glow::EQUAL, self.stencil_clip_depth, 0xFF);
 			}
 		}
+		self.apply_shader_clip_from_stack();
 
 		// 상태 복원. (Canvas2D restore 대응)
 		self.pop_state();
+	}
+
+	//==============================================================================
+	/// 기본 프레임버퍼가 멀티샘플인지. (프레임 첫머리에 한 번 읽어 둔다, 모르면 멀티샘플로 본다)
+	/// - 멀티샘플로 보면 셰이더 자르기를 정수 경계에만 써 어느 쪽이든 스텐실과 화소가 같다.
+	//==============================================================================
+	fn is_framebuffer_multisampled(&self) -> bool {
+		self.framebuffer_sample_state != 0
+	}
+
+	//==============================================================================
+	/// 자르기 칸 맨 위의 셰이더 자르기를 지금 상태로 삼기. (begin_clip_rect, end_clip_rect 가 부른다, 원본 applyShaderClipFromStack)
+	//==============================================================================
+	fn apply_shader_clip_from_stack(&mut self) {
+		match self.clip_stack.last() {
+			Some(top_entry) if top_entry.is_shader_clip_active => {
+				self.is_shader_clip_active = true;
+				self.shader_clip_rect = top_entry.shader_clip_rect;
+				self.shader_clip_slot = top_entry.shader_clip_slot;
+				self.shader_clip_slot_generation = top_entry.shader_clip_slot_generation;
+			}
+			_ => {
+				self.is_shader_clip_active = false;
+				self.shader_clip_slot = 0;
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 묶지 않고 그리는 것에 셰이더 자르기를 가위로 걸기. (셰이더 자르기가 없으면 아무것도 하지 않는다, 원본 applyClipScissor)
+	/// - 화소 가운데가 [왼쪽, 오른쪽) x [위, 아래) 안인 화소만 남기는 것은 셰이더 자르기와 같다. (가위 칸은 화소 단위라 가운데 기준으로 올림한다)
+	/// - 그린 뒤 release_clip_scissor 로 푼다. (묶음을 그릴 때와 지우기는 가위를 쓰지 않는다)
+	//==============================================================================
+	fn apply_clip_scissor(&mut self) {
+		if !self.is_shader_clip_active {
+			return;
+		}
+		let shader_clip_rect = self.shader_clip_rect;
+		let left_x = (shader_clip_rect[0] as f64 - 0.5).ceil();
+		let top_y = (shader_clip_rect[1] as f64 - 0.5).ceil();
+		let right_x = left_x.max((shader_clip_rect[2] as f64 - 0.5).ceil());
+		let bottom_y = top_y.max((shader_clip_rect[3] as f64 - 0.5).ceil());
+		unsafe {
+			self.gl.enable(glow::SCISSOR_TEST);
+			self.gl.scissor(left_x as i32, self.applied_viewport_height - bottom_y as i32, (right_x - left_x) as i32, (bottom_y - top_y) as i32);
+		}
+		self.is_clip_scissor_enabled = true;
+	}
+
+	//==============================================================================
+	/// apply_clip_scissor 로 건 가위 풀기.
+	//==============================================================================
+	fn release_clip_scissor(&mut self) {
+		if !self.is_clip_scissor_enabled {
+			return;
+		}
+		unsafe {
+			self.gl.disable(glow::SCISSOR_TEST);
+		}
+		self.is_clip_scissor_enabled = false;
+	}
+
+	//==============================================================================
+	/// 셰이더 자르기를 스텐실에 적거나 지우기. (바깥 GL 패스가 스텐실 자르기만 알므로 run_external_pass 가 앞뒤로 부른다, 원본 writeShaderClipsToStencil)
+	/// - 걸린 셰이더 자르기 사각형을 저마다 걸 때의 변환으로 INCR(적기) 또는 DECR(지우기) 한다. 적은 동안 스텐실 비교 값은 걸린 자르기 수 모두다.
+	/// - 지울 때는 패스가 스텐실 테스트를 껐을 수 있어 다시 켜고 지운다. (꺼져 있으면 DECR 이 스텐실에 닿지 않는다)
+	///
+	/// # 인자
+	/// - `is_writing`: 적을지. (false 면 지운다)
+	///
+	/// # 돌려줌
+	/// 적거나 지운 셰이더 자르기 수.
+	//==============================================================================
+	fn write_shader_clips_to_stencil(&mut self, is_writing: bool) -> usize {
+		let shader_clip_list: Vec<(Rect, TransformMatrix)> = self.clip_stack.iter().filter(|clip_entry| clip_entry.is_shader_clip).map(|clip_entry| (clip_entry.rect, clip_entry.transform_matrix)).collect();
+		let shader_clip_count = shader_clip_list.len();
+		if shader_clip_count == 0 {
+			return 0;
+		}
+		self.flush_batch();
+		let is_shader_clip_active = self.is_shader_clip_active;
+		self.is_shader_clip_active = false;
+		self.push_state();
+		unsafe {
+			if !is_writing || self.stencil_clip_depth == 0 {
+				self.gl.enable(glow::STENCIL_TEST);
+			}
+			self.gl.color_mask(false, false, false, false);
+			self.gl.stencil_func(glow::ALWAYS, 0, 0xFF);
+			let stencil_operation = if is_writing {
+				glow::INCR
+			}
+			else {
+				glow::DECR
+			};
+			self.gl.stencil_op(glow::KEEP, glow::KEEP, stencil_operation);
+		}
+		self.batch_suspend_depth += 1;
+		for (rect, transform_matrix) in shader_clip_list {
+			self.transform_matrix = transform_matrix;
+			self.draw_rect(rect);
+		}
+		self.batch_suspend_depth -= 1;
+		self.is_color_mask_known.set(false);
+		unsafe {
+			self.gl.color_mask(true, true, true, true);
+			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
+			let stencil_depth = if is_writing {
+				self.clip_stack.len() as i32
+			}
+			else {
+				self.stencil_clip_depth
+			};
+			if stencil_depth == 0 {
+				self.gl.disable(glow::STENCIL_TEST);
+			}
+			else {
+				self.gl.stencil_func(glow::EQUAL, stencil_depth, 0xFF);
+			}
+		}
+		self.pop_state();
+		self.is_shader_clip_active = is_shader_clip_active;
+		shader_clip_count
 	}
 
 	//==============================================================================
@@ -4498,10 +5037,12 @@ impl Graphic {
 			self.gl.enable(glow::BLEND);
 			self.gl.disable(glow::DEPTH_TEST);
 			self.gl.disable(glow::CULL_FACE);
-			if !self.clip_stack.is_empty() {
+			self.gl.disable(glow::SCISSOR_TEST);
+			if self.stencil_clip_depth > 0 {
 				self.gl.enable(glow::STENCIL_TEST);
 			}
 		}
+		self.is_clip_scissor_enabled = false;
 		let blend_mode = self.get_blend_mode();
 		self.apply_blend_mode(blend_mode);
 	}
@@ -4652,6 +5193,38 @@ fn is_gl_binding_present(parameter: u32) -> bool {
 		let _ = parameter;
 		true
 	}
+}
+
+//==============================================================================
+/// 기본 프레임버퍼가 멀티샘플인지 읽기. (원본 getContextAttributes().antialias, 기본 프레임버퍼가 묶여 있지 않으면 None)
+/// - 웹은 원본처럼 컨텍스트 속성 antialias 를 본다. 데스크탑은 기본 프레임버퍼의 SAMPLES 를 읽는다. (창을 멀티샘플 4 로 짓고, 안 되면 표본 하나로 짓는다)
+//==============================================================================
+fn read_default_framebuffer_multisampled(gl: &glow::Context) -> Option<bool> {
+	#[cfg(target_arch = "wasm32")]
+	{
+		let _ = gl;
+		Some(crate::platform::is_default_framebuffer_antialiased())
+	}
+	#[cfg(not(target_arch = "wasm32"))]
+	{
+		if read_framebuffer_binding(gl).is_some() {
+			return None;
+		}
+		let sample_count = unsafe { gl.get_parameter_i32(glow::SAMPLES) };
+		Some(sample_count > 1)
+	}
+}
+
+//==============================================================================
+/// 자르기 사각형 표 짓기. (0 번 칸은 자르지 않는 칸)
+//==============================================================================
+fn create_batch_clip_rect_data() -> [f32; BATCH_CLIP_SLOT_CAPACITY * 4] {
+	let mut clip_rect_data = [0.0f32; BATCH_CLIP_SLOT_CAPACITY * 4];
+	clip_rect_data[0] = -BATCH_UNCLIPPED_EXTENT;
+	clip_rect_data[1] = -BATCH_UNCLIPPED_EXTENT;
+	clip_rect_data[2] = BATCH_UNCLIPPED_EXTENT;
+	clip_rect_data[3] = BATCH_UNCLIPPED_EXTENT;
+	clip_rect_data
 }
 
 //==============================================================================

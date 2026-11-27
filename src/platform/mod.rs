@@ -38,6 +38,8 @@ pub use desktop::is_text_field_focused;
 pub use web::is_text_field_focused;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::is_gl_binding_present;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use web::is_default_framebuffer_antialiased;
 #[cfg(target_os = "macos")]
 pub use desktop::gamepadhaptics::{release_disconnected_gamepad_haptics, vibrate_gamepads};
 // 최대 FPS 제한의 프레임 세기. (웹이 쓴다, 원본 engine.js 의 프레임 세기)
