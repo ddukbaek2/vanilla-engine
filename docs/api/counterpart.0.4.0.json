@@ -9739,18 +9739,6 @@
 			"vanilla-engine": {
 				"module": "core/graphic",
 				"class": "Graphic",
-				"name": "invalidate_render_state_cache"
-			},
-			"vanilla.js": {
-				"module": "core/graphic",
-				"class": "Graphic",
-				"name": "invalidateRenderStateCache"
-			}
-		},
-		{
-			"vanilla-engine": {
-				"module": "core/graphic",
-				"class": "Graphic",
 				"name": "clear_depth_buffer"
 			},
 			"vanilla.js": {
@@ -13322,8 +13310,8 @@
 				"name": "set_parent"
 			},
 			"vanilla.js": {
-				"module": "base/node",
-				"class": "Node",
+				"module": "core/node/transformnode",
+				"class": "TransformNode",
 				"name": "setParent"
 			}
 		},
@@ -13848,8 +13836,8 @@
 				"name": "set_active"
 			},
 			"vanilla.js": {
-				"module": "base/node",
-				"class": "Node",
+				"module": "core/node/transformnode",
+				"class": "TransformNode",
 				"name": "setActive"
 			}
 		},
@@ -23165,6 +23153,54 @@
 				"module": "graphics3d/toon/toonscreenoutline",
 				"class": "ToonScreenOutline",
 				"name": "setColor"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonscreenoutline",
+				"class": "ToonScreenOutline",
+				"name": "set_line_color"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/toon/toonscreenoutline",
+				"class": "ToonScreenOutline",
+				"name": "setLineColor"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonscreenoutline",
+				"class": "ToonScreenOutline",
+				"name": "remove_line_color"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/toon/toonscreenoutline",
+				"class": "ToonScreenOutline",
+				"name": "removeLineColor"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonscreenoutline",
+				"class": "ToonScreenOutline",
+				"name": "clear_line_colors"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/toon/toonscreenoutline",
+				"class": "ToonScreenOutline",
+				"name": "clearLineColors"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonscreenoutline",
+				"class": "ToonScreenOutline",
+				"name": "get_line_color_count"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/toon/toonscreenoutline",
+				"class": "ToonScreenOutline",
+				"name": "getLineColorCount"
 			}
 		},
 		{
