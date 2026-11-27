@@ -368,6 +368,11 @@ impl AssetLoader {
 	//==============================================================================
 	pub fn add_image(&self, path: &str) -> ImageAsset {
 		let load_handle = self.add_entry(path, AssetLoaderEntryKind::Image { is_decode_checked: false });
+		// 웹: 받은 응답의 형과 확장자가 그림이 아니어도 브라우저가 내용으로 가려 풀게 한다. (원본 img.src 와 같다, 웹에는 엔진 해독기가 없다)
+		#[cfg(target_arch = "wasm32")]
+		{
+			load_handle.request_image_decode();
+		}
 		let mut image_asset = ImageAsset::new();
 		image_asset.get_asset_base_mut().load_from_handle(load_handle);
 		image_asset

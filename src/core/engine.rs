@@ -979,8 +979,9 @@ impl Engine {
 	}
 
 	//==============================================================================
-	/// 이미지 애셋 읽기. (원본 new ImageAsset() + load(path))
+	/// 이미지 애셋 읽기. (원본 new ImageAsset() + load(path), 데스크탑은 그 자리에서 읽는다)
 	/// - "data:" 주소도 받는다. (주소의 형으로 푼다)
+	/// - 웹은 그 자리에서 읽고 풀 수 없어 늘 Err 다. (원본처럼 브라우저가 비동기로 푼다, ImageAsset::load 나 AssetLoader 를 쓴다)
 	///
 	/// # 인자
 	/// - `relative_path`: 애셋 폴더 기준 상대 경로나 "data:" 주소.
@@ -2706,11 +2707,29 @@ fn parse_capture_frame_numbers(frame_numbers_text: &str) -> Vec<u64> {
 }
 
 //==============================================================================
-/// RGBA 픽셀을 PNG 바이트로.
+/// RGBA 픽셀을 PNG 바이트로. (데스크탑은 image 크레이트)
 //==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
 fn encode_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
 	let mut png_bytes: Vec<u8> = Vec::new();
 	image::write_buffer_with_format(&mut std::io::Cursor::new(&mut png_bytes), pixels, width, height, image::ExtendedColorType::Rgba8, image::ImageFormat::Png).map_err(|error| error.to_string())?;
+	Ok(png_bytes)
+}
+
+//==============================================================================
+/// RGBA 픽셀을 PNG 바이트로. (웹, image 크레이트를 싣지 않고 그 밑의 png 크레이트로 쓴다)
+//==============================================================================
+#[cfg(target_arch = "wasm32")]
+fn encode_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+	let mut png_bytes: Vec<u8> = Vec::new();
+	{
+		let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
+		encoder.set_color(png::ColorType::Rgba);
+		encoder.set_depth(png::BitDepth::Eight);
+		let mut writer = encoder.write_header().map_err(|error| error.to_string())?;
+		writer.write_image_data(pixels).map_err(|error| error.to_string())?;
+		writer.finish().map_err(|error| error.to_string())?;
+	}
 	Ok(png_bytes)
 }
 

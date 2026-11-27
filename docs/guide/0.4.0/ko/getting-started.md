@@ -82,7 +82,7 @@ cargo run
 ```bash
 rustup target add wasm32-unknown-unknown
 cargo build --profile wasm-release --example quickstart --target wasm32-unknown-unknown
-wasm-bindgen --target web --no-typescript --out-dir web target/wasm32-unknown-unknown/wasm-release/examples/quickstart.wasm
+wasm-bindgen --target web --no-typescript --remove-name-section --remove-producers-section --out-dir web target/wasm32-unknown-unknown/wasm-release/examples/quickstart.wasm
 ```
 
 `web/index.html`:

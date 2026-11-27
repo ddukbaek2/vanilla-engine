@@ -386,6 +386,7 @@ pub fn set_title(_platform_window: Option<&PlatformWindow>, title: &str) {
 /// - 응답이 그림 형(image/...)이거나 주소가 그림 확장자(png, jpg, gif, webp, bmp, ico, svg, avif 등)면 끝내기 전에 원본처럼 브라우저가 풀게 해 손잡이에 둔다.
 ///   (ImageAsset, AssetLoader 가 그대로 쓴다) 원본 HTMLImageElement 처럼 응답의 content-type 을 그대로 형으로 넘겨, 브라우저가 SVG 는 그 형(image/svg+xml)으로,
 ///   그 밖의 그림은 내용으로 가린다. 머리가 없는 응답만 확장자의 형을 쓴다. data: 주소는 fetch 가 주소의 형을 content-type 으로 준다.
+/// - 그림으로 풀어야 하는 손잡이(ImageAsset, AssetLoader 의 그림)는 형과 확장자가 그림이 아니어도 형 없이 브라우저가 내용으로 가려 푼다. (원본 img.src 와 같다, 웹에는 엔진 해독기가 없다)
 ///
 /// # 인자
 /// - `asset_location`: 받을 주소. (엔진이 애셋 경로로 만든 것, data: 주소도 된다)
@@ -396,7 +397,8 @@ pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle,
 	wasm_bindgen_futures::spawn_local(async move {
 		let result = match fetch_bytes(&asset_location, is_no_cache).await {
 			Ok((bytes, content_type)) => {
-				if let Some(mime_type) = read_browser_image_mime_type(&asset_location, content_type.as_deref()) {
+				let browser_mime_type = read_browser_image_mime_type(&asset_location, content_type.as_deref()).or_else(|| load_handle.is_image_decode_requested().then(String::new));
+				if let Some(mime_type) = browser_mime_type {
 					if let Some(image) = decode_browser_image(&bytes, &mime_type).await {
 						load_handle.set_decoded_image(image);
 					}
@@ -460,6 +462,28 @@ fn read_image_mime_type(asset_location: &str) -> Option<&'static str> {
 			None
 		}
 	}
+}
+
+//==============================================================================
+/// 가진 바이트를 브라우저로 풀기. (원본 ImageAsset.loadFromBytes 처럼 형 없는 Blob 을 img 로 풀고, 풀면 그림을 담아 바이트로 끝내고 못 풀면 실패로 끝낸다)
+///
+/// # 인자
+/// - `bytes`: 그림 파일 바이트.
+/// - `load_handle`: 읽는 중인 손잡이. (ImageAsset::load_from_bytes 가 만든 것)
+//==============================================================================
+pub(crate) fn request_image_bytes_decode(bytes: Vec<u8>, load_handle: AssetLoadHandle) {
+	wasm_bindgen_futures::spawn_local(async move {
+		match decode_browser_image(&bytes, "").await {
+			Some(image) => {
+				load_handle.set_decoded_image(image);
+				load_handle.finish(Ok(bytes));
+			}
+			None => {
+				let error_message = format!("Load fail: {}", load_handle.get_asset_path());
+				load_handle.finish(Err(error_message));
+			}
+		}
+	});
 }
 
 //==============================================================================
@@ -1150,9 +1174,10 @@ impl WebApplication {
 		let document = window.document().ok_or_else(|| String::from("document 없음"))?;
 
 		// 이름 설정. (원본처럼 비어 있지 않으면 문서 제목에 쓴다, 데스크탑 창 제목의 기본값이면 페이지의 제목을 그대로 둔다)
-		let title = &self.engine_runner.engine.get_engine_configuration().title;
+		// 설정은 이 줄에서만 빌린다. (&...title 로 두면 빌림이 함수 끝까지 늘어나 아래 attach_graphic 이 설정을 고칠 때 이미 빌렸다고 패닉한다)
+		let title = self.engine_runner.engine.get_engine_configuration().title.clone();
 		if !title.is_empty() && title != crate::core::engine::DEFAULT_ENGINE_TITLE {
-			document.set_title(title);
+			document.set_title(&title);
 		}
 		let canvas_id = self.engine_runner.engine.get_engine_configuration().canvas_id.clone();
 		let canvas: web_sys::HtmlCanvasElement = match document.get_element_by_id(&canvas_id) {
