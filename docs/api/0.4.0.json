@@ -126976,8 +126976,8 @@
 		{
 			"name": "graphics3d/toon/toonscreenoutline",
 			"summary": {
-				"ko": "툰 화면 공간 바깥선. (vanilla.js graphics3d/toon/toonscreenoutline.js 의 ToonScreenOutline)\n- 노멀, 선 번호, 깊이를 선의 판에 그리고, 바로 이웃 사이의 경계에서 선을 잡아 점프 플러딩으로 넓힌 뒤 거리로 덮는 몫을 셈해 섞는다.\n- 선의 판: ToonRenderer 의 create_mesh 결과를 같은 행렬로 한 번 더 그려 노멀(팔면체 접기), 선 번호(14 비트), 꼴(바깥 선, 꺾임 선을 켤지)과 깊이를 쓴다.\n- 잡기: 화소와 바로 이웃 넷 사이의 경계마다 한 번 본다. 선은 화소가 아니라 화소 사이의 경계 가운데에 선다. (같은 경계를 두 번 긋지 않는다)\n  바깥 선은 빈 곳과 맞닿은 실루엣, 다른 번호와 맞닿은 곳, 같은 번호라도 가린 화소가 가려진 화소의 접평면에서 깊이 문턱과 오차 여유보다 떨어진 곳(가려진 실루엣)이다.\n  꺾임 선은 같은 번호 안에서 이웃한 두 노멀이 꺾임 각보다 더 벌어진 곳이다. 화소 하나 사이의 노멀만 보므로 둥근 면의 실루엣 둘레나 비스듬한 면에 띠가 서지 않는다.\n  깊이를 접평면 거리로 견주므로 비스듬히 보는 바닥에 가짜 선이 서지 않는다. 문턱에 잰 오차(노멀 8 비트 각 오차 x 두 자리 사이 거리, 꺾임의 화소 한 칸 x 사인, 깊이 24 비트 한 칸) x 배율을 더해 먼 것도 같은 뜻이 되고, 나란한 낮은 턱은 화소 한 칸보다 낮아도 잡힌다.\n- 넓히기: 경계 토막까지의 거리를 점프 플러딩으로 퍼뜨린다. 굵기에 상관없이 걸음 수는 log2 이고, 바깥 선과 꺾임 선은 따로 퍼뜨려 굵기를 따로 준다.\n- 섞기: 그리는 영역의 화소마다 가장 가까운 경계까지의 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 덮는다. (가장자리가 부드럽고, 선의 판을 줄여도 늘인 선이 점선이 되지 않는다)\n- 모형마다: ToonLineDrawOptions 의 has_screen_outline 이 false 면 그 모형은 선을 내지 않고 뒤의 선만 가린다. has_crease_line 이 false 면 꺾임 선만 끈다.\n- 번호마다 색: set_line_color 로 번호마다 선 색을 준다. (언리얼 Custom Stencil 꼴, 맞닿은 선은 앞쪽 번호의 색, 표에 없는 번호와 표가 빈 때는 set_color 의 색 그대로)\n- 굵기: set_width 와 set_crease 의 굵기는 선 하나의 굵기다. (경계를 가운데로 양쪽에 반씩) 단위는 ToonOutlineWidthUnit, 한 픽셀 밑으로 내리지 않는다.\n- 깊이: 투영 행렬로 직교와 원근을 가리고, 깊이를 보기 공간 자리로 풀어 견준다. (화면 사각형처럼 클립 x, y 를 옮긴 투영도 된다)\n- 값: set_resolution_scale 로 넓히기(점프 플러딩) 판을 줄인다. (폰의 가벼운 길) 선의 판과 씨앗은 그리는 영역 해상도라 줄여도 선 자리는 그대로다.\n- 사용: 매 프레임 begin_line_ids(gl, 보기, 투영) → draw_mesh / draw_mesh_instanced → end_line_ids(gl) (씨앗과 넓히기까지 셈) → 툰 몸 그리기 → draw_outline(gl).\n  begin_line_ids 는 그때의 뷰포트를 그리는 영역으로 적어 두고, 선의 판을 그 크기에 맞춰 짓는다. end_line_ids 와 draw_outline 이 프레임버퍼, 뷰포트, 상태를 돌린다.\n  ToonDrawQueue::set_screen_outline 으로 맡기면 그리기 줄이 이 차례를 스스로 한다. (엔진 2D 그리기 사이에 끼울 때, 그 전에 Graphic 의 묶음을 내보내고 끝에 restore_render_state)\n- 인스턴스마다의 번호는 ToonInstance 의 line_id 다. (원본 인스턴스 객체의 lineId, None 이면 공통 번호)",
-				"en": "Toon screen-space outline. (ToonScreenOutline of vanilla.js graphics3d/toon/toonscreenoutline.js)\n- Draws normals, line IDs and depth into the line target, picks lines at the boundaries between direct neighbors, widens them with jump flooding, then computes coverage from distance and blends.\n- Line target: draws the result of ToonRenderer's create_mesh once more with the same matrices and writes the normal (octahedral encoding), line ID (14 bits), flags (whether the silhouette line and crease line are on) and depth.\n- Picking: each boundary between a pixel and its four direct neighbors is looked at once. A line stands not on a pixel but in the middle of the boundary between pixels. (The same boundary is not drawn twice)\n  A silhouette line is where it touches empty space (the silhouette), where it touches a different ID, or where, even with the same ID, the occluding pixel is farther from the tangent plane of the occluded pixel than the depth threshold plus the error margin (occluded silhouette).\n  A crease line is where two neighboring normals within the same ID open wider than the crease angle. Since only normals one pixel apart are compared, no band appears around the silhouette of round surfaces or on slanted surfaces.\n  Depth is compared as tangent plane distance, so no false lines appear on a floor seen at a grazing angle. The measured error (angle error of the 8-bit normal x distance between the two positions, one pixel x sine at a crease, one 24-bit depth step) x the scale is added to the threshold so distant things mean the same, and a low ledge with parallel faces is caught even when it is lower than one pixel.\n- Widening: the distance to the boundary segments is spread with jump flooding. The step count is log2 regardless of thickness, and silhouette and crease lines are spread separately to give separate thicknesses.\n- Blending: each pixel of the drawing area is covered by clamp(thickness / 2 - distance + 0.5, 0, 1) from the distance to the nearest boundary. (Soft edges, and stretched lines do not become dotted even when the line target is reduced)\n- Per model: if has_screen_outline of ToonLineDrawOptions is false, that model produces no line and only hides lines behind it. If has_crease_line is false, only crease lines are turned off.\n- Per-ID color: set_line_color gives a line color per ID. (The Unreal Custom Stencil form, a line where two IDs touch takes the color of the nearer ID, and IDs not in the table or an empty table keep the set_color color)\n- Thickness: the thickness of set_width and set_crease is the thickness of one line. (Half on each side of the boundary) The unit is ToonOutlineWidthUnit, and it does not go below one pixel.\n- Depth: orthographic and perspective are told apart by the projection matrix, and depth is unpacked into view-space position for comparison. (Projections whose clip x and y were moved, like a screen rectangle, also work)\n- Cost: set_resolution_scale reduces the widening (jump flooding) target. (The light path for phones) The line target and seeds stay at drawing area resolution, so line positions do not change when reduced.\n- Use: every frame begin_line_ids(gl, view, projection) → draw_mesh / draw_mesh_instanced → end_line_ids(gl) (computes seeds and widening) → draw the toon bodies → draw_outline(gl).\n  begin_line_ids notes the current viewport as the drawing area and builds the line target to fit its size. end_line_ids and draw_outline restore the framebuffer, viewport and state.\n  If handed over with ToonDrawQueue::set_screen_outline, the draw queue does this sequence by itself. (When inserted between engine 2D drawing, flush Graphic's batch before it and call restore_render_state at the end)\n- The per-instance ID is ToonInstance's line_id. (lineId of the original instance object, the shared ID if None)"
+				"ko": "툰 화면 공간 바깥선. (vanilla.js graphics3d/toon/toonscreenoutline.js 의 ToonScreenOutline)\n- 노멀, 선 번호, 깊이를 선의 판에 그리고, 바로 이웃 사이의 경계에서 선을 잡아 가는 선은 둘레 칸을 바로 보고, 굵은 선은 점프 플러딩으로 넓힌 뒤 거리로 덮는 몫을 셈해 섞는다.\n- 선의 판: ToonRenderer 의 create_mesh 결과를 같은 행렬로 한 번 더 그려 노멀(팔면체 접기), 선 번호(14 비트), 꼴(바깥 선, 꺾임 선을 켤지)과 깊이를 쓴다.\n- 잡기: 화소와 바로 이웃 넷 사이의 경계마다 한 번 본다. 선은 화소가 아니라 화소 사이의 경계 가운데에 선다. (같은 경계를 두 번 긋지 않는다)\n  바깥 선은 빈 곳과 맞닿은 실루엣, 다른 번호와 맞닿은 곳, 같은 번호라도 가린 화소가 가려진 화소의 접평면에서 깊이 문턱과 오차 여유보다 떨어진 곳(가려진 실루엣)이다.\n  꺾임 선은 같은 번호 안에서 이웃한 두 노멀이 꺾임 각보다 더 벌어진 곳이다. 화소 하나 사이의 노멀만 보므로 둥근 면의 실루엣 둘레나 비스듬한 면에 띠가 서지 않는다.\n  깊이를 접평면 거리로 견주므로 비스듬히 보는 바닥에 가짜 선이 서지 않는다. 문턱에 잰 오차(노멀 8 비트 각 오차 x 두 자리 사이 거리, 꺾임의 화소 한 칸 x 사인, 깊이 24 비트 한 칸) x 배율을 더해 먼 것도 같은 뜻이 되고, 나란한 낮은 턱은 화소 한 칸보다 낮아도 잡힌다.\n- 가는 선(굵기 약 3.24 픽셀까지): 씨앗 고르기와 같은 차례로 화소마다 첫 경계 쪽(R8UI 한 바이트)을 고르고, 섞기가 둘레 3 x 3 화소의 씨앗을 점프 플러딩 마지막 걸음과 같은 차례로 보아 가장 가까운 것까지의 거리를 잰다.\n  화면 전체 패스가 씨앗 쪽 판 하나와 섞기 하나다. (모바일 타일 GPU 에서 패스 수와 판 대역폭이 굵은 선 길의 몇 분의 1)\n- 넓히기(굵은 선): 경계 토막까지의 거리를 점프 플러딩으로 퍼뜨린다. 굵기에 상관없이 걸음 수는 log2 이고, 바깥 선과 꺾임 선은 따로 퍼뜨려 굵기를 따로 준다.\n- 섞기: 그리는 영역의 화소마다 가장 가까운 경계까지의 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 덮는다. (가장자리가 부드럽고, 선의 판을 줄여도 늘인 선이 점선이 되지 않는다)\n- 모형마다: ToonLineDrawOptions 의 has_screen_outline 이 false 면 그 모형은 선을 내지 않고 뒤의 선만 가린다. has_crease_line 이 false 면 꺾임 선만 끈다.\n- 번호마다 색: set_line_color 로 번호마다 선 색을 준다. (언리얼 Custom Stencil 꼴, 맞닿은 선은 앞쪽 번호의 색, 표에 없는 번호와 표가 빈 때는 set_color 의 색 그대로)\n- 굵기: set_width 와 set_crease 의 굵기는 선 하나의 굵기다. (경계를 가운데로 양쪽에 반씩) 단위는 ToonOutlineWidthUnit, 한 픽셀 밑으로 내리지 않는다.\n- 깊이: 투영 행렬로 직교와 원근을 가리고, 깊이를 보기 공간 자리로 풀어 견준다. (화면 사각형처럼 클립 x, y 를 옮긴 투영도 된다)\n- 값: set_resolution_scale 로 섞기 앞의 모든 판(선의 판, 가면, 씨앗, 넓히기 판)을 줄인다. (기본 1 은 그리는 영역 그대로, 줄이면 가는 선은 선의 판 해상도에서 덮는 몫 판 하나를 셈해 쌍선형으로 한 번 읽어 섞는다)\n- 사용: 매 프레임 begin_line_ids(gl, 보기, 투영) → draw_mesh / draw_mesh_instanced → end_line_ids(gl) (씨앗과 넓히기까지 셈) → 툰 몸 그리기 → draw_outline(gl).\n  begin_line_ids 는 그때의 뷰포트를 그리는 영역으로 적어 두고, 선의 판을 그 크기에 맞춰 짓는다. end_line_ids 와 draw_outline 이 프레임버퍼, 뷰포트, 상태를 돌린다.\n  ToonDrawQueue::set_screen_outline 으로 맡기면 그리기 줄이 이 차례를 스스로 한다. (엔진 2D 그리기 사이에 끼울 때, 그 전에 Graphic 의 묶음을 내보내고 끝에 restore_render_state)\n- 인스턴스마다의 번호는 ToonInstance 의 line_id 다. (원본 인스턴스 객체의 lineId, None 이면 공통 번호)",
+				"en": "Toon screen-space outline. (ToonScreenOutline of vanilla.js graphics3d/toon/toonscreenoutline.js)\n- It draws normals, line ids and depth into the line buffer, finds lines at the boundaries between direct neighbors, then blends: thin lines look at the surrounding cells directly, thick lines are widened by jump flooding and the coverage is worked out from the distance.\n- Line buffer: draws the create_mesh result of ToonRenderer once more with the same matrices and writes the normal (octahedron folded), the line id (14 bits), the shape (whether contour and crease lines are on) and the depth.\n- Finding: looks once at every boundary between a pixel and its four direct neighbors. A line stands on the boundary between pixels, not on a pixel. (the same boundary is never drawn twice)\n  A contour line is a silhouette touching empty space, a place touching another id, or, even with the same id, a place where the occluding pixel is farther than the depth threshold and error margin from the tangent plane of the occluded pixel (an occluded silhouette).\n  A crease line is a place inside the same id where two neighboring normals differ by more than the crease angle. Only the normals one pixel apart are looked at, so no band stands around the silhouette of a round surface or on a slanted surface.\n  Depth is compared as a tangent plane distance, so no false lines stand on a floor seen at a slant. The measured error (normal 8-bit angle error x distance between the two positions, one pixel of the crease x sine, one step of 24-bit depth) x the margin is added so far things mean the same, and low parallel steps are caught even when lower than one pixel.\n- Thin line (up to a width of about 3.24 pixels): picks the first boundary side per pixel (R8UI, one byte) in the same order as the seed pick, and the blend reads the seeds of the 3 x 3 pixels around in the same order as the last jump flooding step to measure the distance to the nearest one.\n  The full-screen passes are one side buffer and one blend. (on mobile tile GPUs the pass count and buffer bandwidth are a fraction of the thick line path)\n- Widening (thick line): spreads the distance to the boundary segment by jump flooding. The step count is log2 whatever the width, and contour and crease lines are spread separately so they get separate widths.\n- Blend: for each pixel of the drawing area it covers clamp(width / 2 - distance + 0.5, 0, 1) from the distance to the nearest boundary. (soft edges, and shrinking the line buffer does not turn widened lines into dotted lines)\n- Per model: if has_screen_outline of ToonLineDrawOptions is false the model draws no line and only hides lines behind it. If has_crease_line is false only the crease line is off.\n- Color per id: set_line_color gives each id a line color. (Unreal Custom Stencil style, a touching line takes the color of the front id, ids not in the table and an empty table keep the color of set_color)\n- Width: the width of set_width and set_crease is the width of one line. (half on each side of the boundary) The unit is ToonOutlineWidthUnit, never below one pixel.\n- Depth: the projection matrix tells orthographic from perspective, and depth is unpacked to view space positions for comparing. (projections that shift clip x, y like a screen rectangle also work)\n- Scale: set_resolution_scale shrinks every buffer before the blend (line buffer, mask, seed, widening buffers). (the default 1 is the drawing area as it is, and below 1 a thin line works out one coverage buffer at the line buffer resolution and reads it bilinearly once to blend)\n- Use: every frame begin_line_ids(gl, view, projection) → draw_mesh / draw_mesh_instanced → end_line_ids(gl) (works out the seeds and widening) → toon body drawing → draw_outline(gl).\n  begin_line_ids notes the viewport of that moment as the drawing area and builds the line buffer to that size. end_line_ids and draw_outline restore the framebuffer, viewport and state.\n  Handing it to ToonDrawQueue::set_screen_outline lets the draw queue do this order by itself. (when inserting between engine 2D drawing, flush the Graphic batch before and call restore_render_state after)\n- The id per instance is line_id of ToonInstance. (lineId of the original instance object, None means the common id)"
 			},
 			"examples": [
 				{
@@ -127155,8 +127155,8 @@
 					"name": "ToonLineTarget",
 					"kind": "struct",
 					"summary": {
-						"ko": "선의 판. (그리는 영역 해상도의 노멀과 번호 RGBA8, 깊이 24, 씨앗 RGBA16UI, 넓히기 판 RGBA16UI 둘, jump_flood_index 는 넓히기를 마친 쪽)",
-						"en": "Line target. (Normal and ID RGBA8 at drawing area resolution, depth 24, seeds RGBA16UI, two widening targets RGBA16UI, jump_flood_index is the side where widening finished)"
+						"ko": "선의 판. (선의 판 해상도의 노멀과 번호 RGBA8, 깊이 24, 가는 선의 씨앗 쪽 판 R8UI, 굵은 선을 그을 때 짓는 씨앗 RGBA16UI 와 넓히기 판 RGBA16UI 둘, jump_flood_index 는 넓히기를 마친 쪽)",
+						"en": "Line buffer. (normal and id RGBA8 at the line buffer resolution, depth 24, the thin line side buffer R8UI, the seed RGBA16UI and two widening buffers RGBA16UI built when a thick line is drawn, jump_flood_index is the side where widening ended)"
 					},
 					"source": "src/graphics3d/toon/toonscreenoutline.rs",
 					"members": [
@@ -127219,8 +127219,8 @@
 						},
 						{
 							"kind": "field",
-							"name": "seed_framebuffer",
-							"signature": "pub seed_framebuffer: GlFramebuffer",
+							"name": "edge_mask_framebuffer",
+							"signature": "pub edge_mask_framebuffer: GlFramebuffer",
 							"params": [],
 							"returns": {
 								"type": "GlFramebuffer",
@@ -127230,16 +127230,16 @@
 								}
 							},
 							"description": {
-								"ko": "씨앗 판 프레임버퍼.",
-								"en": "Seed target framebuffer."
+								"ko": "가는 선의 씨앗 쪽 판 프레임버퍼.",
+								"en": "Framebuffer of the thin line side buffer."
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs"
 						},
 						{
 							"kind": "field",
-							"name": "seed_texture",
-							"signature": "pub seed_texture: GlTexture",
+							"name": "edge_mask_texture",
+							"signature": "pub edge_mask_texture: GlTexture",
 							"params": [],
 							"returns": {
 								"type": "GlTexture",
@@ -127249,8 +127249,46 @@
 								}
 							},
 							"description": {
-								"ko": "온 해상도 씨앗 텍스처. (RGBA16UI, rg 는 바깥 선, ba 는 꺾임 선)",
-								"en": "Full-resolution seed texture. (RGBA16UI, rg for silhouette lines, ba for crease lines)"
+								"ko": "가는 선의 씨앗 쪽 판. (R8UI, 아래 3 비트 바깥 선, 위 3 비트 꺾임 선의 첫 경계 쪽 0 없음, 1 오른쪽, 2 왼쪽, 3 위, 4 아래)",
+								"en": "Thin line side buffer. (R8UI, the low 3 bits are the contour line and the high 3 bits the crease line first boundary side: 0 none, 1 right, 2 left, 3 up, 4 down)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonscreenoutline.rs"
+						},
+						{
+							"kind": "field",
+							"name": "seed_framebuffer",
+							"signature": "pub seed_framebuffer: Option<GlFramebuffer>",
+							"params": [],
+							"returns": {
+								"type": "Option<GlFramebuffer>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "씨앗 판 프레임버퍼. (굵은 선을 처음 그을 때 짓는다, 그 전에는 None)",
+								"en": "Seed buffer framebuffer. (built the first time a thick line is drawn, None before)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonscreenoutline.rs"
+						},
+						{
+							"kind": "field",
+							"name": "seed_texture",
+							"signature": "pub seed_texture: Option<GlTexture>",
+							"params": [],
+							"returns": {
+								"type": "Option<GlTexture>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "씨앗 텍스처. (RGBA16UI, rg 는 바깥 선, ba 는 꺾임 선, 굵은 선을 긋기 전에는 None)",
+								"en": "Seed texture. (RGBA16UI, rg is the contour line and ba the crease line, None before a thick line is drawn)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs"
@@ -127258,18 +127296,18 @@
 						{
 							"kind": "field",
 							"name": "jump_flood_framebuffers",
-							"signature": "pub jump_flood_framebuffers: [GlFramebuffer; 2]",
+							"signature": "pub jump_flood_framebuffers: Vec<GlFramebuffer>",
 							"params": [],
 							"returns": {
-								"type": "[GlFramebuffer; 2]",
+								"type": "Vec<GlFramebuffer>",
 								"description": {
 									"ko": "",
 									"en": ""
 								}
 							},
 							"description": {
-								"ko": "넓히기 판 프레임버퍼 둘. (번갈아 쓴다)",
-								"en": "Two widening target framebuffers. (used alternately)"
+								"ko": "넓히기 판 프레임버퍼 둘. (번갈아 쓴다, 굵은 선을 긋기 전에는 빔)",
+								"en": "Two widening buffer framebuffers. (used alternately, empty before a thick line is drawn)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs"
@@ -127277,18 +127315,18 @@
 						{
 							"kind": "field",
 							"name": "jump_flood_textures",
-							"signature": "pub jump_flood_textures: [GlTexture; 2]",
+							"signature": "pub jump_flood_textures: Vec<GlTexture>",
 							"params": [],
 							"returns": {
-								"type": "[GlTexture; 2]",
+								"type": "Vec<GlTexture>",
 								"description": {
 									"ko": "",
 									"en": ""
 								}
 							},
 							"description": {
-								"ko": "넓히기 판 텍스처 둘. (RGBA16UI)",
-								"en": "Two widening target textures. (RGBA16UI)"
+								"ko": "넓히기 판 텍스처 둘. (RGBA16UI, 굵은 선을 긋기 전에는 빔)",
+								"en": "Two widening buffer textures. (RGBA16UI, empty before a thick line is drawn)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs"
@@ -127306,8 +127344,65 @@
 								}
 							},
 							"description": {
-								"ko": "넓히기를 마친 쪽. (jump_flood_textures 의 차례, 0 이나 1, 바깥 선과 꺾임 선 굵기가 둘 다 0 이라 넓히지 않았으면 None, 원본 -1)",
-								"en": "The side that finished flooding. (index into jump_flood_textures, 0 or 1, None when both outline and crease widths are 0 and nothing was flooded, the original uses -1)"
+								"ko": "넓히기를 마친 쪽. (jump_flood_textures 의 차례, 0 이나 1, 넓히지 않았으면 None, 원본 -1)",
+								"en": "Side where widening ended. (index into jump_flood_textures, 0 or 1, None when nothing was widened, -1 in the original)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonscreenoutline.rs"
+						},
+						{
+							"kind": "field",
+							"name": "coverage_framebuffer",
+							"signature": "pub coverage_framebuffer: Option<GlFramebuffer>",
+							"params": [],
+							"returns": {
+								"type": "Option<GlFramebuffer>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "줄인 선의 판의 가는 선 덮는 몫 프레임버퍼. (줄여 가는 선을 처음 그을 때 짓는다, 그 전에는 None)",
+								"en": "Framebuffer of the thin line coverage buffer of the reduced line buffer. (built the first time a reduced thin line is drawn, None before)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonscreenoutline.rs"
+						},
+						{
+							"kind": "field",
+							"name": "coverage_texture",
+							"signature": "pub coverage_texture: Option<GlTexture>",
+							"params": [],
+							"returns": {
+								"type": "Option<GlTexture>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "줄인 선의 판의 가는 선 덮는 몫 판. (RGBA8 곱한 색, 쌍선형, 줄여 가는 선을 긋기 전에는 None)",
+								"en": "Thin line coverage buffer of the reduced line buffer. (RGBA8 premultiplied color, bilinear, None before a reduced thin line is drawn)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonscreenoutline.rs"
+						},
+						{
+							"kind": "field",
+							"name": "outline_path",
+							"signature": "pub outline_path: ToonOutlinePath",
+							"params": [],
+							"returns": {
+								"type": "ToonOutlinePath",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "이번 프레임의 길. (end_line_ids 가 정한다)",
+								"en": "Path of this frame. (set by end_line_ids)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs"
@@ -127325,8 +127420,8 @@
 								}
 							},
 							"description": {
-								"ko": "선의 판 너비. (그리는 영역 픽셀)",
-								"en": "Width of the line target. (Drawing area pixels)"
+								"ko": "선의 판 너비. (그리는 영역 x set_resolution_scale 의 몫, 픽셀)",
+								"en": "Line buffer width. (drawing area x the fraction of set_resolution_scale, in pixels)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs"
@@ -127344,8 +127439,8 @@
 								}
 							},
 							"description": {
-								"ko": "선의 판 높이. (그리는 영역 픽셀)",
-								"en": "Height of the line target. (Drawing area pixels)"
+								"ko": "선의 판 높이. (그리는 영역 x set_resolution_scale 의 몫, 픽셀)",
+								"en": "Line buffer height. (drawing area x the fraction of set_resolution_scale, in pixels)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs"
@@ -127363,8 +127458,8 @@
 								}
 							},
 							"description": {
-								"ko": "넓히기 판 너비. (픽셀)",
-								"en": "Width of the widening target. (pixels)"
+								"ko": "넓히기 판 너비. (선의 판과 같다, 픽셀)",
+								"en": "Widening buffer width. (same as the line buffer, in pixels)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs"
@@ -127382,8 +127477,8 @@
 								}
 							},
 							"description": {
-								"ko": "넓히기 판 높이. (픽셀)",
-								"en": "Height of the widening target. (pixels)"
+								"ko": "넓히기 판 높이. (선의 판과 같다, 픽셀)",
+								"en": "Widening buffer height. (same as the line buffer, in pixels)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs"
@@ -127417,7 +127512,7 @@
 						{
 							"kind": "static",
 							"name": "read_program_sources",
-							"signature": "pub fn read_program_sources(color_space: ColorSpace) -> [(String, String); 5]",
+							"signature": "pub fn read_program_sources(color_space: ColorSpace) -> [(String, String); 9]",
 							"params": [
 								{
 									"name": "color_space",
@@ -127429,15 +127524,15 @@
 								}
 							],
 							"returns": {
-								"type": "[(String, String); 5]",
+								"type": "[(String, String); 9]",
 								"description": {
-									"ko": "(정점 셰이더, 조각 셰이더) 다섯. (번호, 씨앗, 모으기, 넓히기, 섞기, 번호 셰이더의 어트리뷰트 자리는 TOON_ATTRIBUTE_LOCATIONS)",
-									"en": "Five (vertex shader, fragment shader) pairs. (IDs, seeds, gathering, widening, blending, the attribute locations of the ID shader are TOON_ATTRIBUTE_LOCATIONS)"
+									"ko": "(정점 셰이더, 조각 셰이더) 아홉. (번호, 씨앗, 모으기, 넓히기, 섞기, 가는 선의 씨앗 쪽 판, 가는 선 섞기, 줄인 판의 가는 선 덮는 몫, 덮는 몫 판 섞기, 번호 셰이더의 어트리뷰트 자리는 TOON_ATTRIBUTE_LOCATIONS)",
+									"en": "Nine (vertex shader, fragment shader). (id, seed, gather, widening, blend, thin line side buffer, thin line blend, coverage of a reduced buffer thin line, coverage buffer blend, the attribute locations of the id shader are TOON_ATTRIBUTE_LOCATIONS)"
 								}
 							},
 							"description": {
-								"ko": "셰이더 소스. ((정점, 조각) 다섯 벌: 번호, 씨앗, 모으기, 넓히기, 섞기)",
-								"en": "Shader sources. (five (vertex, fragment) pairs: IDs, seeds, gathering, widening, blending)"
+								"ko": "셰이더 소스. ((정점, 조각) 아홉 벌: 번호, 씨앗, 모으기, 넓히기, 섞기, 가는 선의 씨앗 쪽 판, 가는 선 섞기, 줄인 판의 가는 선 덮는 몫, 덮는 몫 판 섞기)",
+								"en": "Shader sources. (nine (vertex, fragment) pairs: id, seed, gather, widening, blend, thin line side buffer, thin line blend, coverage of a reduced buffer thin line, coverage buffer blend)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs",
@@ -127470,8 +127565,8 @@
 								}
 							},
 							"description": {
-								"ko": "생성. (다섯 프로그램과 빈 버텍스 어레이를 짓는다, 선의 판은 첫 begin_line_ids 에서, 색 공간은 엔진의 것)",
-								"en": "Creation. (builds the five programs and the empty vertex array, the line target on the first begin_line_ids, the color space is the engine's)"
+								"ko": "생성. (아홉 프로그램과 빈 버텍스 어레이를 짓는다, 선의 판은 첫 begin_line_ids 에서, 색 공간은 엔진의 것)",
+								"en": "Creation. (builds nine programs and an empty vertex array, the line buffer is built at the first begin_line_ids, the color space is the engine's)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs",
@@ -127921,14 +128016,14 @@
 									"name": "resolution_scale",
 									"type": "f64",
 									"description": {
-										"ko": "0.25 ~ 1.",
-										"en": "0.25 ~ 1."
+										"ko": "0.25 ~ 1. (1 이면 그리는 영역 해상도 그대로)",
+										"en": "0.25 to 1. (1 is the drawing area resolution as it is)"
 									}
 								}
 							],
 							"description": {
-								"ko": "넓히기 판의 해상도 몫 설정. (그리는 영역에 대한 몫 0.25 ~ 1, 선의 판과 씨앗은 그리는 영역 해상도로 잡고 점프 플러딩만 줄인 판에서 해서, 줄여도 계단과 점선이 없다)",
-								"en": "Sets the resolution fraction of the widening target. (Fraction of the drawing area 0.25 ~ 1, the line target and seeds are at drawing area resolution and only the jump flooding runs on the reduced target, so there are no stairs or dotted lines even when reduced)"
+								"ko": "선의 판 해상도 몫 설정. (그리는 영역에 대한 몫 0.25 ~ 1, 기본 1, 폰과 태블릿의 가벼운 길은 낮춘다)\n- 이름대로 섞기 앞의 모든 판(선의 판 = 노멀과 번호와 깊이, 가면, 씨앗, 넓히기 판)을 그리는 영역 x 몫 크기로 잡는다. 선의 판은 몫만큼 작은 해상도로 한 번 더 그려지므로 값이 몫의 제곱으로 준다.\n  기본 1 은 그리는 영역과 같은 크기라 화면이 바이트까지 그대로다.\n- 몫이 1 보다 작을 때 가는 선(굵기 x 몫이 약 3.24 선의 판 픽셀 이하)은 선의 판 해상도에서 덮는 몫(진하기와 번호 색을 곱한 RGBA8)을 한 번 셈하고, 마지막 섞기가 그것을 쌍선형으로 한 번 읽는다. (읽기 9 에서 1)\n  굵은 선은 선의 판 해상도에서 점프 플러딩을 하고 섞을 때 거리를 그리는 영역 픽셀로 곱해 잰다. 어느 길이든 선 굵기는 그리는 영역 픽셀(set_width)이고 선 자리는 몫이 작을수록 가장자리가 부드러워진다.\n- get_line_target() 의 line_texture, depth_texture 해상도는 그리는 영역 x 몫이다. (굵기 0 이면 선의 판만 그리는 동작은 그대로, 해상도만 그리는 영역과 다를 수 있다)\n- CSS 화소당 1.5 화소로 맞추려면 몫 = 1.5 / (그리는 버퍼 화소 / CSS 화소) 로 준다.",
+								"en": "Sets the line buffer resolution fraction. (fraction of the drawing area 0.25 to 1, default 1, phones and tablets lower it for a light path)\n- As the name says, every buffer before the blend (line buffer = normal, id and depth, mask, seed, widening buffers) is sized to the drawing area x the fraction. The line buffer is drawn once more at the smaller resolution, so the cost drops with the square of the fraction.\n  The default 1 is the same size as the drawing area, so the picture is byte for byte the same.\n- Below 1, a thin line (width x fraction at most about 3.24 line buffer pixels) works out the coverage (RGBA8 multiplied by intensity and id color) once at the line buffer resolution, and the last blend reads it bilinearly once. (9 reads become 1)\n  A thick line runs the jump flooding at the line buffer resolution and measures the distance in drawing area pixels when blending. On either path the line width is in drawing area pixels (set_width) and the smaller the fraction, the softer the edges.\n- The line_texture and depth_texture resolution of get_line_target() is the drawing area x the fraction. (with width 0 drawing only the line buffer is unchanged, only the resolution can differ from the drawing area)\n- To match 1.5 pixels per CSS pixel, give fraction = 1.5 / (drawing buffer pixels / CSS pixels)."
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs",
@@ -127999,13 +128094,13 @@
 							"returns": {
 								"type": "Option<&ToonLineTarget>",
 								"description": {
-									"ko": "선의 판. (노멀과 번호 텍스처, 깊이 텍스처, 씨앗 텍스처, 넓히기 판 둘과 마친 쪽, 크기, 아직 짓지 않았거나 짓지 못했으면 None)",
-									"en": "Line target. (normal and ID texture, depth texture, seed texture, two widening targets and the finished side, sizes, None if not built yet or it could not be built)"
+									"ko": "선의 판. (노멀과 번호 텍스처, 깊이 텍스처, 가는 선의 씨앗 쪽 판, 굵은 선을 그었으면 씨앗과 넓히기 판 둘과 마친 쪽, 줄여 가는 선을 그었으면 덮는 몫 판, 이번 프레임의 길, 크기, 아직 짓지 않았거나 짓지 못했으면 None)",
+									"en": "Line buffer. (normal and id texture, depth texture, thin line side buffer, the seed and two widening buffers with the finished side when a thick line was drawn, the coverage buffer when a reduced thin line was drawn, the path of this frame, the size, None when not built yet or building failed)"
 								}
 							},
 							"description": {
-								"ko": "선의 판 반환. (없으면 None, 번호와 깊이와 씨앗 텍스처, 크기)",
-								"en": "Returns the line target. (None if none, the ID, depth and seed textures and the size)"
+								"ko": "선의 판 반환. (없으면 None, 번호와 깊이와 가면 텍스처, 크기)",
+								"en": "Returns the line buffer. (None when absent, the id, depth and mask textures, the size)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs",
@@ -128224,8 +128319,8 @@
 								}
 							],
 							"description": {
-								"ko": "번호 그리기 끝. (씨앗을 고르고 점프 플러딩으로 넓힌 뒤, 프레임버퍼와 뷰포트와 상태를 돌린다)",
-								"en": "Ends drawing IDs. (picks seeds and expands them with jump flooding, then restores the framebuffer, viewport and state)"
+								"ko": "번호 그리기 끝. (가는 선은 씨앗 쪽 판 하나를 고르고, 굵은 선은 씨앗을 고르고 점프 플러딩으로 넓힌 뒤, 프레임버퍼와 뷰포트와 상태를 돌린다)\n- 가는 선(굵기가 약 3.24 선의 판 픽셀 이하): 화면 전체 패스가 씨앗 쪽 판 하나다. 섞기가 둘레 3 x 3 화소의 씨앗을 본다. (씨앗, 모으기, 넓히기 없음)\n- 굵은 선: 씨앗, 모으기, 넓히기 걸음마다 한 패스. (씨앗 판과 넓히기 판은 처음 굵은 선을 그을 때 짓는다)\n- 판을 통째로 덮어쓰는 패스는 앞에 판 비우기(clear_buffer_u32_slice, clear_buffer_f32_slice)를 불러 옛 내용을 읽어 들이지 않게 한다. (타일 GPU 의 판 불러오기를 없앰, 원본과 같은 자리)",
+								"en": "Ends id drawing. (a thin line picks one side buffer, a thick line picks the seeds and widens them by jump flooding, then the framebuffer, viewport and state are restored)\n- Thin line (width at most about 3.24 line buffer pixels): the full-screen pass is one side buffer. The blend looks at the seeds of the 3 x 3 pixels around. (no seed, gather or widening)\n- Thick line: one pass per seed, gather and widening step. (the seed buffer and widening buffers are built the first time a thick line is drawn)\n- A pass that overwrites a whole buffer first clears the buffer (clear_buffer_u32_slice, clear_buffer_f32_slice) so the old contents are not loaded. (removes the buffer load of tile GPUs, at the same place as the original)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs",
@@ -128251,8 +128346,8 @@
 								}
 							],
 							"description": {
-								"ko": "바깥선 긋기. (넓힌 씨앗 판으로 begin_line_ids 때의 그리는 영역에 섞는다, 깊이는 보지도 쓰지도 않는다, 스텐실은 그대로)",
-								"en": "Draws the outline. (blends the expanded seed target into the drawing area from begin_line_ids, neither tests nor writes depth, stencil unchanged)"
+								"ko": "바깥선 긋기. (가는 선은 씨앗 쪽 판, 굵은 선은 넓힌 씨앗 판으로 begin_line_ids 때의 그리는 영역에 섞는다, 깊이는 보지도 쓰지도 않는다, 스텐실은 그대로)",
+								"en": "Draws the outline. (a thin line blends from the side buffer and a thick line from the widened seed buffer into the drawing area of begin_line_ids, depth is neither read nor written, stencil is left as it is)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs",
@@ -128278,8 +128373,8 @@
 								}
 							],
 							"description": {
-								"ko": "다 쓴 뒤 지우기. (선의 판, 버텍스 어레이, 프로그램 다섯)",
-								"en": "Delete after use. (Line target, vertex array, five programs)"
+								"ko": "다 쓴 뒤 지우기. (선의 판, 버텍스 어레이, 프로그램 아홉)",
+								"en": "Deletes after use. (the line buffer, vertex array, nine programs)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs",
@@ -128454,6 +128549,61 @@
 								"ko": "그리는 영역의 픽셀. (거리와 상관없이 같은 굵기)",
 								"en": "Drawing area pixels. (the same width regardless of distance)"
 							}
+						}
+					]
+				},
+				{
+					"name": "ToonOutlinePath",
+					"summary": {
+						"ko": "이번 프레임의 바깥선 길. (원본 outlinePath 의 \"none\", \"thin\", \"thinScaled\", \"jumpFlood\")",
+						"en": "Outline path of this frame. (\"none\", \"thin\", \"thinScaled\", \"jumpFlood\" of outlinePath in the original)"
+					},
+					"traits": [
+						"Clone",
+						"Copy",
+						"Debug",
+						"PartialEq",
+						"Eq"
+					],
+					"source": "src/graphics3d/toon/toonscreenoutline.rs",
+					"values": [
+						{
+							"name": "None",
+							"description": {
+								"ko": "긋지 않음. (굵기가 둘 다 0 이라 선의 판만 남겼거나 아직 end_line_ids 전)",
+								"en": "Not drawn. (both widths are 0 so only the line buffer is kept, or before end_line_ids)"
+							}
+						},
+						{
+							"name": "Thin",
+							"description": {
+								"ko": "가는 선. (씨앗 쪽 판 하나와 섞기 하나, 굵기가 약 3.24 선의 판 픽셀 이하)",
+								"en": "Thin line. (one side buffer and one blend, width at most about 3.24 line buffer pixels)"
+							}
+						},
+						{
+							"name": "ThinScaled",
+							"description": {
+								"ko": "줄인 선의 판의 가는 선. (선의 판 해상도에서 덮는 몫 판 하나를 셈하고 쌍선형으로 한 번 읽어 섞는다)",
+								"en": "Thin line of a reduced line buffer. (works out one coverage buffer at the line buffer resolution and blends it with one bilinear read)"
+							}
+						},
+						{
+							"name": "JumpFlood",
+							"description": {
+								"ko": "굵은 선. (씨앗, 모으기, 넓히기 걸음, 섞기)",
+								"en": "Thick line. (seed, gather, widening steps, blend)"
+							}
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "가는 선 길로 갔는지 읽기",
+								"en": "Reading whether the thin line path was taken"
+							},
+							"code": "use vanilla::{ToonOutlinePath, ToonScreenOutline};\n\nfn is_thin_path(outline: &ToonScreenOutline) -> bool {\n\tmatch outline.get_line_target() {\n\t\tSome(line_target) => matches!(line_target.outline_path, ToonOutlinePath::Thin | ToonOutlinePath::ThinScaled),\n\t\tNone => false,\n\t}\n}",
+							"language": "rust"
 						}
 					]
 				}
