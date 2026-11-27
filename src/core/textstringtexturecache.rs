@@ -2,7 +2,8 @@
 //! 문자열 텍스처 캐시.
 //! - 원본은 글꼴(모드, 글꼴 글, 굽는 배율, 선 굵기)마다 글자 덩어리를 글리프 아틀라스(1024 x 1024 장, 8 장까지)에 한 번만 굽고, 글은 글리프 사각형 목록(엔트리, LRU 상한 1024)으로 그린다.
 //! - 데스크탑은 글자 모양 짓기(textshaping.rs: 양방향 정렬, rustybuzz 모양 짓기)로 글리프를 놓고, 처음 보는 글리프만 래스터화해(맥 CoreText, 윈도우 DirectWrite, 리눅스 skrifa) 아틀라스 칸에 굽는다.
-//!   글리프 열쇠는 (얼굴, 글리프 번호, 크기, 서브픽셀 칸, 방식과 선 굵기, 안티앨리어싱)이다. 셰이퍼가 합자와 이어진 꼴을 글리프로 풀어 주므로 원본의 글자 덩어리 나누기가 필요 없다.
+//!   글리프 열쇠는 (얼굴, 글리프 번호, 크기, 서브픽셀 칸, 방식과 선 굵기, 안티앨리어싱)이다. 셰이퍼가 합자와 이어진 꼴을 글리프로 풀어 주므로 원본의 글자 덩어리 나누기 대신,
+//!   잉크가 가로로 빈 열 하나 없이 닿는 글리프(외곽선은 띠까지)만 한 칸에 묶는다. 빈 열이 있으면 칸마다 그려도 문자열을 통째로 구운 것과 화소가 같다.
 //!   256px 넘는 글꼴과 웹(브라우저 Canvas2D 로 굽는다)은 원본처럼 문자열째 칸 하나에 굽는다.
 //!   장 정책(가장 나중에 연 장에만 이어 놓기, 차면 새 장, 8 장을 넘으면 가장 오래 안 쓴 장을 비우기), 엔트리 상한, 엔트리 키 구성(방식, 문단 방향, 폰트 문자열, 선 두께, 배율, 글)은 원본과 같다.
 //!   원본은 키를 문자열로 이어 붙인다. 여기서는 찾을 때마다 문자열을 만들지 않게 키의 해시로 찾고, 같은 해시 안에서 키를 하나씩 맞춰 본다.
@@ -1781,7 +1782,7 @@ impl TextStringTextureCache {
 	/// 글 배치 엔트리 반환. (없으면 배치하고 처음 보는 글리프만 아틀라스에 굽는다, direction 은 문단 방향. 원본 getEntry 의 textDirection)
 	/// - 글리프 아틀라스: 1024 x 1024 장에 글리프를 한 번만 굽는다. 가장 나중에 연 장에만 이어 놓고, 차면 새 장, 8 장을 넘으면 가장 오래 안 쓴 장을 비운다.
 	///   비운 장의 텍스처는 버릴 목록에 두고 다음 get_entry 때 지운다. (Graphic 은 쌓아 둔 묶음을 먼저 내보내고 바로 지운다)
-	/// - 글리프 자리는 셰이퍼가 준 자리를 크롬 스키아처럼 정수 자리와 서브픽셀 4 칸으로 나눈다. 256px 넘는 글꼴은 문자열째 굽는다.
+	/// - 글리프 자리는 셰이퍼가 준 자리를 크롬 스키아처럼 정수 자리와 서브픽셀 4 칸으로 나눈다. 잉크가 닿는 글리프는 한 칸에 묶는다. 256px 넘는 글꼴은 문자열째 굽는다.
 	///
 	/// # 인자
 	/// - `gl`: 텍스처를 만들 GL 컨텍스트.
@@ -1796,7 +1797,7 @@ impl TextStringTextureCache {
 	/// 글 배치 엔트리. (같은 키면 캐시의 것) 글이 비었거나, 데스크탑에서 그릴 얼굴이 하나도 없거나, 텍스처를 만들지 못하면 None.
 	///
 	/// # 예제
-	/// 같은 키로 다시 부르면 굽지 않고, 같은 글자의 다른 글은 처음 보는 글리프만 굽는다
+	/// 같은 키로 다시 부르면 굽지도 올리지도 않는다
 	/// ```rust,no_run
 	/// use vanilla::core::textstringtexturecache::{TextDrawKind, TextStringTextureCache};
 	/// use vanilla::ShapingDirection;
@@ -1806,8 +1807,6 @@ impl TextStringTextureCache {
 	/// 	let first_statistics = text_string_texture_cache.read_atlas_statistics();
 	/// 	text_string_texture_cache.get_entry(gl, TextDrawKind::Stroke, "Hello", "bold 20px default", 3.0, 1.5, ShapingDirection::LeftToRight);
 	/// 	assert_eq!(text_string_texture_cache.read_atlas_statistics(), first_statistics);
-	/// 	text_string_texture_cache.get_entry(gl, TextDrawKind::Stroke, "Hell", "bold 20px default", 3.0, 1.5, ShapingDirection::LeftToRight);
-	/// 	assert_eq!(text_string_texture_cache.read_atlas_statistics().baked_glyph_count, first_statistics.baked_glyph_count);
 	/// }
 	/// ```
 	//==============================================================================
@@ -2858,16 +2857,18 @@ impl TextStringTextureCache {
 	/// 지금의 통계.
 	///
 	/// # 예제
-	/// 같은 글자는 한 번만 굽는다
+	/// 처음 굽는 글은 아틀라스 장을 열고 엔트리 하나를 더한다
 	/// ```rust,no_run
 	/// use vanilla::core::textstringtexturecache::{TextDrawKind, TextStringTextureCache};
 	/// use vanilla::ShapingDirection;
 	///
-	/// fn bake_twice(text_string_texture_cache: &mut TextStringTextureCache, gl: &glow::Context) {
-	/// 	text_string_texture_cache.get_entry(gl, TextDrawKind::Fill, "가나다", "20px default", 0.0, 1.0, ShapingDirection::LeftToRight);
-	/// 	let baked_glyph_count = text_string_texture_cache.read_atlas_statistics().baked_glyph_count;
-	/// 	text_string_texture_cache.get_entry(gl, TextDrawKind::Fill, "다나가", "20px default", 0.0, 1.0, ShapingDirection::LeftToRight);
-	/// 	assert_eq!(text_string_texture_cache.read_atlas_statistics().baked_glyph_count, baked_glyph_count);
+	/// fn bake_once(text_string_texture_cache: &mut TextStringTextureCache, gl: &glow::Context) {
+	/// 	let entry_count = text_string_texture_cache.read_atlas_statistics().entry_count;
+	/// 	text_string_texture_cache.get_entry(gl, TextDrawKind::Fill, "Score 100", "20px default", 0.0, 1.0, ShapingDirection::LeftToRight);
+	/// 	let text_atlas_statistics = text_string_texture_cache.read_atlas_statistics();
+	/// 	assert!(text_atlas_statistics.atlas_page_count >= 1);
+	/// 	assert!(text_atlas_statistics.baked_glyph_count >= 1);
+	/// 	assert_eq!(text_atlas_statistics.entry_count, entry_count + 1);
 	/// }
 	/// ```
 	//==============================================================================
