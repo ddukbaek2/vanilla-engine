@@ -7,6 +7,8 @@ pub mod audiobus;
 pub mod audiomanager;
 pub mod audioplayer;
 pub mod colorglyph;
+// 색 공간. (3D 빛 셈의 감마와 선형)
+pub mod colorspace;
 pub mod component;
 pub mod engine;
 pub mod globalengine;

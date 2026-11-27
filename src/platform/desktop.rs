@@ -236,7 +236,7 @@ pub(crate) fn prepare_graphic(engine: &Engine) -> Option<Graphic> {
 		match &prepared_desktop.window_state {
 			// 앞서 버린 엔진이 지은 창이 남았으면 그 컨텍스트에 그래픽만 새로 짓는다.
 			Some(window_state) => {
-				let graphic = create_graphic(&window_state.context.display(), engine.get_engine_configuration().preserve_drawing_buffer).ok()?;
+				let graphic = create_graphic(&window_state.context.display(), engine.get_engine_configuration().preserve_drawing_buffer, engine.get_color_space()).ok()?;
 				*engine.platform_window.borrow_mut() = Some(window_state.window.clone());
 				Some(graphic)
 			}
@@ -361,7 +361,7 @@ fn create_window_state(window_event_loop: WindowEventLoop<'_>, engine: &Engine, 
 	if let Err(error) = surface.set_swap_interval(&context, swap_interval) {
 		eprintln!("Engine: 수직 동기 설정 실패: {}", error);
 	}
-	let graphic = create_graphic(&gl_display, engine_configuration.preserve_drawing_buffer)?;
+	let graphic = create_graphic(&gl_display, engine_configuration.preserve_drawing_buffer, engine_configuration.color_space)?;
 	let window_state = WindowState {
 		#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 		wayland_frame_pacer,
@@ -375,7 +375,7 @@ fn create_window_state(window_event_loop: WindowEventLoop<'_>, engine: &Engine, 
 //==============================================================================
 /// 지금 컨텍스트로 그래픽 짓기. (GL 3.3 코어가 아니면 실패)
 //==============================================================================
-fn create_graphic(gl_display: &glutin::display::Display, preserve_drawing_buffer: bool) -> Result<Graphic, String> {
+fn create_graphic(gl_display: &glutin::display::Display, preserve_drawing_buffer: bool, color_space: crate::core::colorspace::ColorSpace) -> Result<Graphic, String> {
 	let gl = unsafe {
 		glow::Context::from_loader_function_cstr(|symbol_name| gl_display.get_proc_address(symbol_name) as *const _)
 	};
@@ -389,7 +389,7 @@ fn create_graphic(gl_display: &glutin::display::Display, preserve_drawing_buffer
 		let (renderer, version_text) = unsafe { (glow::HasContext::get_parameter_string(&gl, glow::RENDERER), glow::HasContext::get_parameter_string(&gl, glow::VERSION)) };
 		eprintln!("Engine: 찍기 GL 렌더러 {}, 판 {}", renderer, version_text);
 	}
-	Graphic::new(gl, preserve_drawing_buffer)
+	Graphic::new(gl, preserve_drawing_buffer, color_space)
 }
 
 //==============================================================================
@@ -934,7 +934,7 @@ impl DesktopApplication {
 				}
 				if self.engine_runner.get_graphic().is_none() {
 					let preserve_drawing_buffer = self.engine_runner.engine.get_engine_configuration().preserve_drawing_buffer;
-					let graphic = create_graphic(&window_state.context.display(), preserve_drawing_buffer)?;
+					let graphic = create_graphic(&window_state.context.display(), preserve_drawing_buffer, self.engine_runner.engine.get_color_space())?;
 					self.engine_runner.attach_graphic(graphic);
 				}
 				window_state

@@ -123,9 +123,9 @@ impl ToonShowcaseScene {
 			}
 		}
 		for (model_bytes, position, scale) in model_byte_list {
-			let mut arrays = read_glb_arrays(&model_bytes, None)?;
+			let mut arrays = read_glb_arrays(&model_bytes, None, None)?;
 			if arrays.outline_index_data.is_empty() {
-				arrays = read_glb_arrays(&model_bytes, Some(&outline_options))?;
+				arrays = read_glb_arrays(&model_bytes, Some(&outline_options), None)?;
 			}
 			if let Some(mesh) = renderer.create_mesh(gl, &arrays) {
 				self.placed_list.push(PlacedToon { mesh, arrays, position, scale, spin: 0.3 });

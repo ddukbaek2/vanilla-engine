@@ -12,6 +12,7 @@
 //!   번호는 꼴의 line_id (None 이면 담은 차례 + 1, 인스턴스는 ToonInstance 의 line_id 가 먼저), 모형마다 has_screen_outline, has_crease_line 으로 끄고 켠다.
 //!   비치는 것은 선의 판에 그리지 않는다. 화면 사각형(ToonRenderer::set_screen_rect)이 있으면 그 사각형을 선의 판의 그리는 영역으로 쓴다.
 //!   러스트 판은 바깥선을 &'a mut 로 빌려 RefCell 에 담는다. (draw(&self) 에서 고쳐 쓴다)
+//! - 모서리 어둠: set_post_process(ToonPostProcess) 를 주고 후처리에서 set_ambient_occlusion 을 켜면 선의 판 뒤, 몸 앞에 셈해 렌더러에 걸고 end_frame 뒤에 푼다. (바깥선이 없으면 선 없이 선의 판만 그린다)
 //! - 단계 콜백: add_pass(stage, callback) 의 callback(gl, renderer) 를 그 자리에서 부른다. 부른 뒤 렌더러가 프레임의 그리기 상태를 다시 건다.
 //! - 인스턴스 묶음(add_mesh_instanced)은 불투명이면 몸과 바깥선을 한 번에 그리고, 비치면 인스턴스 자리의 가운데로 한 덩어리로 정렬한다.
 //! - 그림자: draw_shadows(gl, renderer, shadow_map) 가 casts_shadow 가 true 인 불투명한 것만 그림자 깊이로 그린다. draw 보다 먼저 부른다.
@@ -35,6 +36,7 @@ use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowCache, ShadowCasterRecord,
 use crate::graphics3d::toon::toonmaterial::ToonBlendMode;
 use crate::graphics3d::toon::toonrenderer::{ToonDrawOptions, ToonInstance, ToonMesh, ToonRenderer};
 use crate::graphics3d::toon::toonscreenoutline::{ToonLineDrawOptions, ToonScreenOutline, TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID};
+use crate::graphics3d::toon::toonpostprocess::ToonPostProcess;
 
 //==============================================================================
 /// 그리기 줄의 단계. (add_pass 의 콜백을 부를 자리)
@@ -115,6 +117,8 @@ pub struct ToonDrawQueue<'a> {
 	item_list: Vec<ToonDrawItem<'a>>,
 	pass_list: RefCell<Vec<(ToonDrawStage, ToonPassCallback<'a>)>>,
 	screen_outline: RefCell<Option<&'a mut ToonScreenOutline>>,
+	/// 툰 후처리. (모서리 어둠을 몸 앞에 셈한다, 없으면 None)
+	post_process: RefCell<Option<&'a mut ToonPostProcess>>,
 	/// 정렬한 불투명한 것의 차례. (원본 opaqueItemList, 담거나 비우면 None, 처음 그릴 때 만든다)
 	opaque_index_list: RefCell<Option<Vec<usize>>>,
 }
@@ -228,7 +232,7 @@ impl<'a> ToonDrawQueue<'a> {
 	/// 빈 그리기 줄. (화면 공간 바깥선을 맡기지 않은 것)
 	//==============================================================================
 	pub fn new() -> ToonDrawQueue<'a> {
-		ToonDrawQueue { item_list: Vec::new(), pass_list: RefCell::new(Vec::new()), screen_outline: RefCell::new(None), opaque_index_list: RefCell::new(None) }
+		ToonDrawQueue { item_list: Vec::new(), pass_list: RefCell::new(Vec::new()), screen_outline: RefCell::new(None), post_process: RefCell::new(None), opaque_index_list: RefCell::new(None) }
 	}
 
 	//==============================================================================
@@ -268,6 +272,67 @@ impl<'a> ToonDrawQueue<'a> {
 	//==============================================================================
 	pub fn has_screen_outline(&self) -> bool {
 		self.screen_outline.borrow().is_some()
+	}
+
+	//==============================================================================
+	/// 툰 후처리 맡기기. (원본 setPostProcess, 모서리 어둠을 켰으면 draw 가 선의 판 뒤, 몸 앞에 셈해 렌더러에 걸고 end_frame 뒤에 푼다, None 이면 맡기지 않음)
+	/// - 화면 공간 바깥선이 있으면 그 선의 판을, 없으면 후처리의 미리 그리기(get_ambient_occlusion_prepass)로 노멀과 깊이만 그린다.
+	///
+	/// # 인자
+	/// - `post_process`: ToonPostProcess 나 None. (줄의 수명 동안 빌린다)
+	//==============================================================================
+	pub fn set_post_process(&mut self, post_process: Option<&'a mut ToonPostProcess>) {
+		self.post_process = RefCell::new(post_process);
+	}
+
+	//==============================================================================
+	/// 툰 후처리를 맡겼는지. (원본 getPostProcess 가 null 이 아닌지)
+	///
+	/// # 돌려줌
+	/// 맡겼으면 true.
+	//==============================================================================
+	pub fn has_post_process(&self) -> bool {
+		self.post_process.borrow().is_some()
+	}
+
+	//==============================================================================
+	/// 모서리 어둠 셈하고 렌더러에 걸기. (원본 drawAmbientOcclusion, 켜지 않았으면 아무것도 하지 않고 false)
+	//==============================================================================
+	fn draw_ambient_occlusion(&self, gl: &GlContext, renderer: &mut ToonRenderer, view_matrix: &Matrix4, projection_matrix: &Matrix4) -> bool {
+		let mut post_process_slot = self.post_process.borrow_mut();
+		let post_process = match post_process_slot.as_mut() {
+			Some(post_process) if post_process.is_ambient_occlusion_enabled() => {
+				post_process
+			}
+			_ => {
+				return false;
+			}
+		};
+		let screen_outline_slot = self.screen_outline.borrow();
+		let texture = match screen_outline_slot.as_ref() {
+			Some(screen_outline) => {
+				match screen_outline.get_line_target() {
+					Some(line_target) => {
+						post_process.draw_ambient_occlusion(gl, line_target, view_matrix, projection_matrix)
+					}
+					None => {
+						None
+					}
+				}
+			}
+			None => {
+				post_process.draw_ambient_occlusion_with_prepass(gl, view_matrix, projection_matrix)
+			}
+		};
+		match texture {
+			Some(texture) => {
+				renderer.set_ambient_occlusion_texture(Some(texture), post_process.get_ambient_occlusion_direct_lighting_strength());
+				true
+			}
+			None => {
+				false
+			}
+		}
 	}
 
 	//==============================================================================
@@ -519,9 +584,13 @@ impl<'a> ToonDrawQueue<'a> {
 	//==============================================================================
 	pub fn draw(&self, gl: &GlContext, renderer: &mut ToonRenderer, camera: &Camera3D) {
 		self.draw_line_ids(gl, renderer, &camera.get_view_matrix(), &camera.get_projection_matrix());
+		let is_ambient_occlusion_applied = self.draw_ambient_occlusion(gl, renderer, &camera.get_view_matrix(), &camera.get_projection_matrix());
 		renderer.begin_frame_with_camera(gl, camera);
 		self.draw_stages(gl, renderer, &|position: [f64; 3]| camera.read_view_depth(position[0], position[1], position[2]));
 		renderer.end_frame(gl);
+		if is_ambient_occlusion_applied {
+			renderer.set_ambient_occlusion_texture(None, 0.0);
+		}
 	}
 
 	//==============================================================================
@@ -535,25 +604,43 @@ impl<'a> ToonDrawQueue<'a> {
 	//==============================================================================
 	pub fn draw_with_matrices(&self, gl: &GlContext, renderer: &mut ToonRenderer, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
 		self.draw_line_ids(gl, renderer, view_matrix, projection_matrix);
+		let is_ambient_occlusion_applied = self.draw_ambient_occlusion(gl, renderer, view_matrix, projection_matrix);
 		renderer.begin_frame_with_matrices(gl, view_matrix, projection_matrix);
 		let elements = view_matrix.read_elements();
 		self.draw_stages(gl, renderer, &|position: [f64; 3]| -(elements[2] * position[0] + elements[6] * position[1] + elements[10] * position[2] + elements[14]));
 		renderer.end_frame(gl);
+		if is_ambient_occlusion_applied {
+			renderer.set_ambient_occlusion_texture(None, 0.0);
+		}
 	}
 
 	//==============================================================================
 	/// 화면 공간 바깥선의 선의 판 그리기. (맡긴 것이 없으면 아무것도 하지 않음, 불투명한 것만, 화면 사각형이 있으면 그 사각형을 그리는 영역으로)
 	//==============================================================================
 	fn draw_line_ids(&self, gl: &GlContext, renderer: &ToonRenderer, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
-		let mut screen_outline_slot = self.screen_outline.borrow_mut();
-		let screen_outline = match screen_outline_slot.as_mut() {
-			Some(screen_outline) => {
-				screen_outline
+		// 선의 판 주인. (원본 readLineSource, 화면 공간 바깥선, 없고 모서리 어둠을 켰으면 후처리의 미리 그리기, 둘 다 아니면 그리지 않는다)
+		if let Some(screen_outline) = self.screen_outline.borrow_mut().as_mut() {
+			self.draw_line_ids_into(gl, renderer, screen_outline, view_matrix, projection_matrix);
+			return;
+		}
+		if let Some(post_process) = self.post_process.borrow_mut().as_mut() {
+			if post_process.is_ambient_occlusion_enabled() {
+				match post_process.get_ambient_occlusion_prepass(gl) {
+					Ok(prepass) => {
+						self.draw_line_ids_into(gl, renderer, prepass, view_matrix, projection_matrix);
+					}
+					Err(error) => {
+						eprintln!("[ToonDrawQueue] 모서리 어둠의 미리 그리기를 짓지 못했다. {}", error);
+					}
+				}
 			}
-			None => {
-				return;
-			}
-		};
+		}
+	}
+
+	//==============================================================================
+	/// 선의 판 주인에 불투명한 것 그리기. (draw_line_ids 가 부른다)
+	//==============================================================================
+	fn draw_line_ids_into(&self, gl: &GlContext, renderer: &ToonRenderer, screen_outline: &mut ToonScreenOutline, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
 		let mut viewport = [0i32; 4];
 		unsafe {
 			crate::core::glstatecache::get_parameter_i32_slice(gl, glow::VIEWPORT, &mut viewport);

@@ -1272,6 +1272,8 @@ pub struct Graphic {
 	is_culling_enabled: bool,
 	/// 프레임이 끝난 뒤에도 그린 것을 남기는지. (원본 생성 인자 preserveDrawingBuffer, 켜면 프레임 첫머리에 색을 비우지 않는다)
 	is_drawing_buffer_preserved: bool,
+	/// 3D 색 공간. (원본 #colorSpace, 생성 때 정함, 2D 묶음은 어느 값이든 감마 공간에서 합성한다)
+	color_space: crate::core::colorspace::ColorSpace,
 }
 
 //==============================================================================
@@ -1306,11 +1308,12 @@ impl Graphic {
 	/// # 인자
 	/// - `gl`: 그릴 GL 컨텍스트. (Graphic 이 가진다)
 	/// - `preserve_drawing_buffer`: 프레임이 끝난 뒤에도 그린 것을 남길지. (켜면 프레임 첫머리에 색을 비우지 않는다)
+	/// - `color_space`: 3D 색 공간. (원본 생성 인자 colorSpace, 엔진 설정의 color_space 를 넘긴다, 2D 는 어느 값이든 감마 공간)
 	///
 	/// # 돌려줌
 	/// 만든 그래픽. 기본 셰이더의 컴파일이나 링크, GL 객체(버텍스 어레이, 버퍼, 텍스처) 만들기에 실패하면 그 오류 글을 담은 Err.
 	//==============================================================================
-	pub fn new(gl: glow::Context, preserve_drawing_buffer: bool) -> Result<Graphic, String> {
+	pub fn new(gl: glow::Context, preserve_drawing_buffer: bool, color_space: crate::core::colorspace::ColorSpace) -> Result<Graphic, String> {
 		// 그림 텍스처를 되읽는 쪽(Canvas2D 의 drawImage)도 같은 컨텍스트를 쓴다.
 		let gl = Rc::new(gl);
 		crate::core::imagetexturecache::register_pixel_read_context(&gl);
@@ -1471,6 +1474,7 @@ impl Graphic {
 			framebuffer_sample_state: -1,
 			is_culling_enabled: true,
 			is_drawing_buffer_preserved: preserve_drawing_buffer,
+			color_space,
 		})
 	}
 
@@ -5560,6 +5564,16 @@ impl Graphic {
 	}
 
 	//==============================================================================
+	/// 3D 색 공간 반환. (원본 getColorSpace, 생성 때 정한 값, 엔진 설정의 color_space)
+	///
+	/// # 돌려줌
+	/// ColorSpace::Gamma 나 ColorSpace::Linear. (2D 묶음은 어느 값이든 감마 공간에서 합성한다)
+	//==============================================================================
+	pub fn get_color_space(&self) -> crate::core::colorspace::ColorSpace {
+		self.color_space
+	}
+
+	//==============================================================================
 	/// GL 컨텍스트 반환. (원본 getWebGL2RenderingContext)
 	/// - 받은 컨텍스트(GlContext)의 상태 함수는 GL 상태 캐시를 거치므로, 받은 뒤 바꾼 상태를 엔진이 안다.
 	///   Graphic 은 묶음과 2D 상태를 따로 기억하지 않고 그리기 앞에 상태 캐시에 견주므로, 받은 쪽이 프로그램, 텍스처, 섞기 같은 것을 바꿔도 다음 2D 그리기가 다시 건다.
@@ -6305,7 +6319,7 @@ mod tests {
 		fn create_test_graphic() -> Option<Graphic> {
 			let gl = crate::core::glstatecache::tests::create_surfaceless_context()?;
 			let gl = Rc::try_unwrap(gl).ok()?;
-			let mut graphic = Graphic::new(gl, false).ok()?;
+			let mut graphic = Graphic::new(gl, false, crate::core::colorspace::ColorSpace::Gamma).ok()?;
 			unsafe {
 				let gl = graphic.get_gl();
 				let texture = gl.create_texture().unwrap();

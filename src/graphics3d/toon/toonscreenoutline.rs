@@ -53,6 +53,7 @@ use crate::core::gluniform::GlUniformF64;
 use crate::base::matrix4::Matrix4;
 use crate::core::graphic::{GlProgram, GlTexture, GlVertexArray};
 use crate::core::shaderprogram::ShaderProgram;
+use crate::core::colorspace::{add_color_space_define, read_engine_color_space, ColorSpace};
 use crate::graphics3d::toon::toonrenderer::{read_matrix_determinant, ToonInstance, ToonMesh, TOON_ATTRIBUTE_LOCATIONS, TOON_INSTANCE_FLOAT_COUNT, TOON_MAXIMUM_JOINTS};
 use crate::graphics3d::GlFramebuffer;
 
@@ -164,8 +165,8 @@ pub struct ToonLineTarget {
 	pub jump_flood_framebuffers: [GlFramebuffer; 2],
 	/// 넓히기 판 텍스처 둘. (RGBA16UI)
 	pub jump_flood_textures: [GlTexture; 2],
-	/// 넓히기를 마친 쪽. (jump_flood_textures 의 차례, 0 이나 1)
-	pub jump_flood_index: usize,
+	/// 넓히기를 마친 쪽. (jump_flood_textures 의 차례, 0 이나 1, 바깥 선과 꺾임 선 굵기가 둘 다 0 이라 넓히지 않았으면 None, 원본 -1)
+	pub jump_flood_index: Option<usize>,
 	/// 선의 판 너비. (그리는 영역 픽셀)
 	pub width: i32,
 	/// 선의 판 높이. (그리는 영역 픽셀)
@@ -257,6 +258,36 @@ pub struct ToonScreenOutline {
 	line_color_count: u32,
 	line_color_texture: Option<GlTexture>,
 	is_line_color_table_dirty: bool,
+	/// 색 공간. (원본 #colorSpace, 생성 때 정함, HDR 출력에서 선 색을 선형으로 바꾸는 곡선)
+	color_space: ColorSpace,
+}
+
+//==============================================================================
+/// 화면 공간 바깥선을 지을 때의 꼴. (원본 생성 options)
+///
+/// # 예제
+/// 선형 색 공간으로 짓기
+/// ```rust,no_run
+/// use vanilla::{ColorSpace, ToonScreenOutline, ToonScreenOutlineOptions};
+///
+/// fn create_linear_outline(gl: &vanilla::GlContext) -> Result<ToonScreenOutline, String> {
+/// 	ToonScreenOutline::new_with_options(gl, ToonScreenOutlineOptions { color_space: ColorSpace::Linear })
+/// }
+/// ```
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToonScreenOutlineOptions {
+	/// 색 공간. (원본 colorSpace, 기본은 엔진의 색 공간, ToonRenderer 와 같은 값)
+	pub color_space: ColorSpace,
+}
+
+impl Default for ToonScreenOutlineOptions {
+	//==============================================================================
+	/// 기본값. (색 공간은 엔진의 것)
+	//==============================================================================
+	fn default() -> Self {
+		ToonScreenOutlineOptions { color_space: read_engine_color_space() }
+	}
 }
 
 //==============================================================================
@@ -342,15 +373,24 @@ impl ToonScreenOutline {
 	//==============================================================================
 	/// 셰이더 소스. ((정점, 조각) 다섯 벌: 번호, 씨앗, 모으기, 넓히기, 섞기)
 	///
+	/// # 인자
+	/// - `color_space`: 색 공간. (원본 기본은 엔진의 색 공간, Linear 면 섞기 셰이더에 #define VANILLA_COLOR_SPACE_LINEAR 1 이 들어간다)
+	///
 	/// # 돌려줌
 	/// (정점 셰이더, 조각 셰이더) 다섯. (번호, 씨앗, 모으기, 넓히기, 섞기, 번호 셰이더의 어트리뷰트 자리는 TOON_ATTRIBUTE_LOCATIONS)
 	//==============================================================================
-	pub fn read_program_sources() -> [(&'static str, &'static str); 5] {
-		[(LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, SEED_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, SEED_GATHER_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, JUMP_FLOOD_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, COMPOSITE_FRAGMENT_SHADER)]
+	pub fn read_program_sources(color_space: ColorSpace) -> [(String, String); 5] {
+		[
+			(String::from(LINE_VERTEX_SHADER), String::from(LINE_FRAGMENT_SHADER)),
+			(String::from(SCREEN_TRIANGLE_VERTEX_SHADER), String::from(SEED_FRAGMENT_SHADER)),
+			(String::from(SCREEN_TRIANGLE_VERTEX_SHADER), String::from(SEED_GATHER_FRAGMENT_SHADER)),
+			(String::from(SCREEN_TRIANGLE_VERTEX_SHADER), String::from(JUMP_FLOOD_FRAGMENT_SHADER)),
+			(String::from(SCREEN_TRIANGLE_VERTEX_SHADER), add_color_space_define(COMPOSITE_FRAGMENT_SHADER, color_space)),
+		]
 	}
 
 	//==============================================================================
-	/// 생성. (다섯 프로그램과 빈 버텍스 어레이를 짓는다, 선의 판은 첫 begin_line_ids 에서)
+	/// 생성. (다섯 프로그램과 빈 버텍스 어레이를 짓는다, 선의 판은 첫 begin_line_ids 에서, 색 공간은 엔진의 것)
 	///
 	/// # 인자
 	/// - `gl`: 툰 렌더러와 같은 컨텍스트.
@@ -359,11 +399,25 @@ impl ToonScreenOutline {
 	/// 새 화면 공간 바깥선. 셰이더를 짓지 못하거나 버텍스 어레이를 못 만들면 Err(오류 글).
 	//==============================================================================
 	pub fn new(gl: &GlContext) -> Result<ToonScreenOutline, String> {
+		ToonScreenOutline::new_with_options(gl, ToonScreenOutlineOptions::default())
+	}
+
+	//==============================================================================
+	/// 꼴을 주어 생성. (원본 new ToonScreenOutline(gl, options))
+	///
+	/// # 인자
+	/// - `gl`: 툰 렌더러와 같은 컨텍스트.
+	/// - `options`: 색 공간. (ToonScreenOutlineOptions, HDR 출력에서 선 색을 선형으로 바꾸는 곡선)
+	///
+	/// # 돌려줌
+	/// 새 화면 공간 바깥선. 셰이더를 짓지 못하거나 버텍스 어레이를 못 만들면 Err(오류 글).
+	//==============================================================================
+	pub fn new_with_options(gl: &GlContext, options: ToonScreenOutlineOptions) -> Result<ToonScreenOutline, String> {
 		let line_program = ShaderProgram::create_with_attribute_locations(gl, LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER, &TOON_ATTRIBUTE_LOCATIONS)?;
 		let seed_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, SEED_FRAGMENT_SHADER)?;
 		let seed_gather_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, SEED_GATHER_FRAGMENT_SHADER)?;
 		let jump_flood_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, JUMP_FLOOD_FRAGMENT_SHADER)?;
-		let composite_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, COMPOSITE_FRAGMENT_SHADER)?;
+		let composite_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, &add_color_space_define(COMPOSITE_FRAGMENT_SHADER, options.color_space))?;
 		let empty_vertex_array = unsafe { crate::core::glstatecache::create_vertex_array(gl)? };
 		Ok(ToonScreenOutline {
 			line_program,
@@ -394,7 +448,18 @@ impl ToonScreenOutline {
 			line_color_count: 0,
 			line_color_texture: None,
 			is_line_color_table_dirty: false,
+			color_space: options.color_space,
 		})
+	}
+
+	//==============================================================================
+	/// 색 공간 반환. (원본 getColorSpace, 생성 때 정한 값, HDR 출력에서 선 색을 선형으로 바꾸는 곡선, Gamma 는 pow 2.2, Linear 는 sRGB 표준 곡선)
+	///
+	/// # 돌려줌
+	/// ColorSpace::Gamma 나 ColorSpace::Linear.
+	//==============================================================================
+	pub fn get_color_space(&self) -> ColorSpace {
+		self.color_space
 	}
 
 	//==============================================================================
@@ -815,6 +880,12 @@ impl ToonScreenOutline {
 				return;
 			}
 		};
+		// 바깥 선과 꺾임 선이 모두 0 이면 선의 판(노멀, 번호, 깊이)만 남긴다. (모서리 어둠의 미리 그리기, draw_outline 은 긋지 않는다)
+		if line_widths[0] <= 0.0 && line_widths[1] <= 0.0 {
+			line_target.jump_flood_index = None;
+			self.restore_state(gl);
+			return;
+		}
 		let seed_program = &self.seed_program;
 		let jump_flood_program = &self.jump_flood_program;
 		let projection = frame.projection_matrix.read_elements();
@@ -879,7 +950,7 @@ impl ToonScreenOutline {
 			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0);
 			crate::core::glstatecache::bind_vertex_array(gl, None);
 		}
-		line_target.jump_flood_index = seed_index;
+		line_target.jump_flood_index = Some(seed_index);
 		self.restore_state(gl);
 	}
 
@@ -890,9 +961,9 @@ impl ToonScreenOutline {
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn draw_outline(&mut self, gl: &GlContext) {
-		let (frame, seed_texture, line_texture, depth_texture, point_scale) = match (self.frame, self.line_target.as_ref()) {
-			(Some(frame), Some(line_target)) => {
-				(frame, line_target.jump_flood_textures[line_target.jump_flood_index], line_target.line_texture, line_target.depth_texture, [line_target.width as f64 / line_target.jump_flood_width as f64, line_target.height as f64 / line_target.jump_flood_height as f64])
+		let (frame, seed_texture, line_texture, depth_texture, point_scale) = match (self.frame, self.line_target.as_ref(), self.line_target.as_ref().and_then(|line_target| line_target.jump_flood_index)) {
+			(Some(frame), Some(line_target), Some(jump_flood_index)) => {
+				(frame, line_target.jump_flood_textures[jump_flood_index], line_target.line_texture, line_target.depth_texture, [line_target.width as f64 / line_target.jump_flood_width as f64, line_target.height as f64 / line_target.jump_flood_height as f64])
 			}
 			_ => {
 				return;
@@ -1089,7 +1160,7 @@ impl ToonScreenOutline {
 				seed_texture,
 				jump_flood_framebuffers: [first_jump_flood_framebuffer, second_jump_flood_framebuffer],
 				jump_flood_textures,
-				jump_flood_index: 0,
+				jump_flood_index: Some(0),
 				width,
 				height,
 				jump_flood_width,
@@ -1620,7 +1691,13 @@ void main() {
 	if (strength < 0.004) {
 		discard;
 	}
+#ifdef VANILLA_COLOR_SPACE_LINEAR
+	vec3 linearColor = max(lineColor.rgb, vec3(0.0));
+	linearColor = mix(linearColor / 12.92, pow((linearColor + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), linearColor));
+	vec3 color = hdrOutput > 0.5 ? linearColor : lineColor.rgb;
+#else
 	vec3 color = hdrOutput > 0.5 ? pow(lineColor.rgb, vec3(2.2)) : lineColor.rgb;
+#endif
 	fragmentColor = vec4(color * strength, strength);
 }
 ";
