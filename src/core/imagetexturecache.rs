@@ -350,6 +350,8 @@ pub(crate) mod fake_gl {
 		last_name: u32,
 		live_table: HashMap<FakeGlObject, Vec<u32>>,
 		remaining_success_table: HashMap<FakeGlObject, u32>,
+		/// glInvalidateFramebuffer 로 버린 첨부. (대상, 첨부 목록)
+		invalidated_attachment_list: Vec<(u32, Vec<u32>)>,
 	}
 
 	thread_local! {
@@ -383,6 +385,39 @@ pub(crate) mod fake_gl {
 	//==============================================================================
 	pub(crate) fn get_live_count(object: FakeGlObject) -> usize {
 		FAKE_GL_STATE.with(|state_cell| state_cell.borrow().live_table.get(&object).map(|name_list| name_list.len()).unwrap_or(0))
+	}
+
+	//==============================================================================
+	/// glInvalidateFramebuffer 로 버린 첨부를 꺼내기. (꺼낸 뒤 비운다)
+	//==============================================================================
+	pub(crate) fn take_invalidated_attachment_list() -> Vec<(u32, Vec<u32>)> {
+		FAKE_GL_STATE.with(|state_cell| std::mem::take(&mut state_cell.borrow_mut().invalidated_attachment_list))
+	}
+
+	//==============================================================================
+	/// 버린 첨부 적기.
+	//==============================================================================
+	extern "system" fn invalidate_framebuffer(target: u32, count: i32, attachments: *const u32) {
+		let attachment_list = unsafe { std::slice::from_raw_parts(attachments, count.max(0) as usize) }.to_vec();
+		FAKE_GL_STATE.with(|state_cell| {
+			state_cell.borrow_mut().invalidated_attachment_list.push((target, attachment_list));
+		});
+	}
+
+	//==============================================================================
+	/// 아무것도 하지 않는 블릿, 멀티샘플 저장소, 읽기 버퍼, 그리기 버퍼.
+	//==============================================================================
+	#[allow(clippy::too_many_arguments)]
+	extern "system" fn blit_framebuffer(_source_x0: i32, _source_y0: i32, _source_x1: i32, _source_y1: i32, _destination_x0: i32, _destination_y0: i32, _destination_x1: i32, _destination_y1: i32, _mask: u32, _filter: u32) {
+	}
+
+	extern "system" fn renderbuffer_storage_multisample(_target: u32, _samples: i32, _internal_format: u32, _width: i32, _height: i32) {
+	}
+
+	extern "system" fn read_buffer(_source: u32) {
+	}
+
+	extern "system" fn draw_buffers(_count: i32, _buffers: *const u32) {
 	}
 
 	//==============================================================================
@@ -437,6 +472,9 @@ pub(crate) mod fake_gl {
 	extern "system" fn get_string(name: u32) -> *const u8 {
 		if name == glow::VERSION {
 			b"2.1\0".as_ptr()
+		}
+		else if name == glow::EXTENSIONS {
+			b"GL_ARB_invalidate_subdata\0".as_ptr()
 		}
 		else {
 			b"\0".as_ptr()
@@ -659,9 +697,10 @@ pub(crate) mod fake_gl {
 	//==============================================================================
 	/// glGetIntegerv 자리. (늘 0)
 	//==============================================================================
-	extern "system" fn get_integer(_parameter: u32, value: *mut i32) {
+	extern "system" fn get_integer(parameter: u32, value: *mut i32) {
+		// 멀티샘플 렌더 타겟을 지을 수 있게 MAX_SAMPLES 만 4, 나머지는 0.
 		unsafe {
-			*value = 0;
+			*value = if parameter == glow::MAX_SAMPLES { 4 } else { 0 };
 		}
 	}
 
@@ -708,6 +747,11 @@ pub(crate) mod fake_gl {
 			b"glCompileShader" | b"glLinkProgram" | b"glGenerateMipmap" | b"glBindVertexArray" | b"glEnableVertexAttribArray" => set_name as *const c_void,
 			b"glGetIntegerv" => get_integer as *const c_void,
 			b"glReadPixels" => read_pixels as *const c_void,
+			b"glInvalidateFramebuffer" => invalidate_framebuffer as *const c_void,
+			b"glBlitFramebuffer" => blit_framebuffer as *const c_void,
+			b"glRenderbufferStorageMultisample" => renderbuffer_storage_multisample as *const c_void,
+			b"glReadBuffer" => read_buffer as *const c_void,
+			b"glDrawBuffers" => draw_buffers as *const c_void,
 			_ => std::ptr::null(),
 		}
 	}

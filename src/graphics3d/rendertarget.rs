@@ -393,13 +393,52 @@ impl RenderTarget {
 	}
 
 	//==============================================================================
-	/// 멀티샘플을 텍스처로 풀기. (멀티샘플이 아니면 아무것도 하지 않음, 컬러 어태치먼트마다와 깊이 텍스처, 묶여 있던 프레임버퍼로 돌림)
+	/// 멀티샘플을 텍스처로 풀기. (컬러 어태치먼트마다와 깊이 텍스처, 묶여 있던 프레임버퍼로 돌림, 원본 resolve())
+	/// - 그리기를 끝낸 뒤 다시 읽지 않는 첨부(멀티샘플 색과 깊이, 텍스처가 아닌 깊이 렌더버퍼)를 버린다. (invalidate_framebuffer, 모바일 타일 GPU 가 메모리에 쓰지 않는다)
+	/// - 풀고 나서 같은 판에 이어 그리려면 resolve_with_attachment_kept(gl, true).
 	///
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn resolve(&self, gl: &GlContext) {
+		self.resolve_with_attachment_kept(gl, false);
+	}
+
+	//==============================================================================
+	/// 멀티샘플을 텍스처로 풀기. (첨부를 남길지 고른다, 원본 resolve(isAttachmentKept))
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `is_attachment_kept`: true 면 첨부를 버리지 않는다. (풀고 나서 같은 판에 이어 그릴 때)
+	///
+	/// # 예제
+	/// 풀고 나서 같은 판에 이어 그리기
+	/// ```rust,no_run
+	/// use vanilla::{RenderTarget, RenderTargetOptions};
+	///
+	/// fn render_twice(gl: &vanilla::GlContext) -> Result<(), String> {
+	/// 	let options = RenderTargetOptions { sample_count: 4, ..RenderTargetOptions::default() };
+	/// 	let render_target = RenderTarget::new(gl, 128, 128, true, Some(options))?;
+	/// 	render_target.bind(gl);
+	/// 	render_target.resolve_with_attachment_kept(gl, true);
+	/// 	render_target.bind(gl);
+	/// 	render_target.resolve(gl);
+	/// 	println!("{}", render_target.get_sample_count());
+	/// 	Ok(())
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn resolve_with_attachment_kept(&self, gl: &GlContext, is_attachment_kept: bool) {
 		let Some(multisample_framebuffer) = self.multisample_framebuffer else {
+			// 멀티샘플이 아니면 텍스처가 아닌 깊이 렌더버퍼만 버린다. (색과 깊이 텍스처는 읽는다)
+			if !is_attachment_kept && self.depth_renderbuffer.is_some() {
+				let previous_framebuffer = read_framebuffer_binding(gl);
+				unsafe {
+					crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, self.framebuffer);
+					crate::core::glstatecache::invalidate_framebuffer(gl, glow::FRAMEBUFFER, &[glow::DEPTH_ATTACHMENT]);
+					crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, previous_framebuffer);
+				}
+			}
 			return;
 		};
 		let previous_framebuffer = read_framebuffer_binding(gl);
@@ -434,6 +473,14 @@ impl RenderTarget {
 			}
 			if self.depth_texture.is_some() {
 				gl.blit_framebuffer(0, 0, width, height, 0, 0, width, height, glow::DEPTH_BUFFER_BIT, glow::NEAREST);
+			}
+			// 푼 뒤 멀티샘플 색과 깊이를 버린다. (읽기 프레임버퍼가 멀티샘플 프레임버퍼다)
+			if !is_attachment_kept {
+				let mut invalidated_attachment_list: Vec<u32> = (0..self.color_attachment_count).map(|attachment_index| glow::COLOR_ATTACHMENT0 + attachment_index as u32).collect();
+				if self.multisample_depth_renderbuffer.is_some() {
+					invalidated_attachment_list.push(glow::DEPTH_ATTACHMENT);
+				}
+				crate::core::glstatecache::invalidate_framebuffer(gl, glow::READ_FRAMEBUFFER, &invalidated_attachment_list);
 			}
 			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, previous_framebuffer);
 		}
@@ -654,5 +701,30 @@ mod tests {
 		assert_eq!(read_live_counts(), [1, 1, 1]);
 		render_target.destroy(GlContext::from_context(&gl));
 		assert_eq!(read_live_counts(), [0, 0, 0]);
+	}
+
+	//==============================================================================
+	/// 풀기 뒤 다시 읽지 않는 첨부를 버린다. (멀티샘플은 색과 깊이, 아니면 텍스처가 아닌 깊이 렌더버퍼, 원본 resolve 와 같게)
+	//==============================================================================
+	#[test]
+	fn resolve_invalidates_unread_attachments() {
+		let gl = fake_gl::create_context();
+		let render_target = RenderTarget::new(GlContext::from_context(&gl), 64, 32, true, None).expect("render target");
+		render_target.resolve(GlContext::from_context(&gl));
+		assert_eq!(fake_gl::take_invalidated_attachment_list(), vec![(glow::FRAMEBUFFER, vec![glow::DEPTH_ATTACHMENT])]);
+
+		let options = RenderTargetOptions {
+			sample_count: 4,
+			..Default::default()
+		};
+		let multisample_render_target = RenderTarget::new(GlContext::from_context(&gl), 64, 32, true, Some(options)).expect("multisample render target");
+		fake_gl::take_invalidated_attachment_list();
+		multisample_render_target.resolve(GlContext::from_context(&gl));
+		assert_eq!(fake_gl::take_invalidated_attachment_list(), vec![(glow::READ_FRAMEBUFFER, vec![glow::COLOR_ATTACHMENT0, glow::DEPTH_ATTACHMENT])]);
+
+		// 남기라고 하면 버리지 않는다.
+		render_target.resolve_with_attachment_kept(GlContext::from_context(&gl), true);
+		multisample_render_target.resolve_with_attachment_kept(GlContext::from_context(&gl), true);
+		assert!(fake_gl::take_invalidated_attachment_list().is_empty());
 	}
 }

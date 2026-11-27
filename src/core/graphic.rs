@@ -6420,7 +6420,10 @@ impl Graphic {
 				return;
 			}
 		};
+		// 층 칸의 깊이와 스텐실은 다시 읽지 않으므로 판 끝에 버린다. (모바일 타일 GPU 가 메모리에 쓰지 않는다, 다음 층은 깊이와 스텐실을 비우고 쓴다)
 		unsafe {
+			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, Some(target.framebuffer));
+			crate::core::glstatecache::invalidate_framebuffer(&self.gl, glow::FRAMEBUFFER, &[glow::DEPTH_STENCIL_ATTACHMENT]);
 			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, opacity_layer.previous_framebuffer);
 		}
 
