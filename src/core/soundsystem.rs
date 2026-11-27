@@ -1,12 +1,13 @@
 //==============================================================================
 //! 소리 표로 다루는 배경음악과 효과음. (vanilla.js core/soundsystem.js 의 SoundSystem)
 //! - AudioManager 와 AudioAsset 을 쓴다. 소리를 합성하지 않고 파일만 튼다.
-//! - 소리 표의 줄마다 SoundRow { id, paths, volume, minimum_interval, is_music, maximum_voices, pitch_variation, play_seconds, fade_out_seconds }.
+//! - 소리 표의 줄마다 SoundRow { id, paths, volume, minimum_interval, is_music, maximum_voices, pitch_variation, play_seconds, fade_out_seconds, load_type }.
 //!   paths: 같은 소리를 여러 번 녹음한 무리. 낼 때마다 받아 둔 것 가운데 하나를 고르고 바로 앞과 같은 것은 고르지 않는다.
 //!   minimum_interval: 같은 소리를 다시 낼 수 있는 간격. (초, 한꺼번에 몰려 시끄럽지 않게)
 //!   maximum_voices: 같은 소리가 한꺼번에 날 수 있는 수. (넘으면 가장 오래된 것을 끊는다, None 이면 효과음 전체의 수까지, 0 이면 원본처럼 하나)
 //!   pitch_variation: 낼 때마다 음 높이를 흔드는 비. (0.05 면 ±5%)
 //!   play_seconds, fade_out_seconds: 효과음을 앞의 play_seconds 초만 틀고 fade_out_seconds 초 동안 줄여 끈다. (0 이면 끝까지)
+//!   load_type: 읽기 방식. (AudioLoadType, None 이면 배경음악은 Streaming, 효과음은 DecompressOnLoad, 효과음은 겹쳐 트므로 통째로 풀어야 난다)
 //! - 크기: 배경음악 = 음악 크기 × 음악의 비 × 소리의 크기, 효과음 = 효과음 크기 × 소리의 크기 × 부를 때의 크기.
 //!   음악과 효과음의 크기는 버스(get_music_bus, get_effect_bus 의 AudioBus)에 걸고, 바꿀 때 0.05 초를 시간 상수로 따라간다. (원본 setTargetAtTime)
 //!   버스는 첫 누름 뒤에 만든다. (그 전에는 None) 버스로 만든 플레이어(AudioBus::create_audio_player)도 설정 크기와 음소거를 따른다.
@@ -49,7 +50,7 @@ use crate::core::audioplayer::AudioPlayer;
 use crate::core::engine::{Engine, PageEvent, PageEventListener};
 use crate::platform;
 use crate::platform::audio::{self as audio_backend, GainAutomation};
-use crate::resource::audioasset::{AudioAsset, AudioLoadHandle};
+use crate::resource::audioasset::{AudioAsset, AudioLoadHandle, AudioLoadType};
 
 //==============================================================================
 /// 소리 받기 손잡이. (SoundSystem::load_sounds 가 돌려준다. 원본 loadSounds 의 Promise 자리, 걸어 둔 소리 애셋을 나눠 든다)
@@ -192,6 +193,8 @@ pub struct SoundRow {
 	pub play_seconds: f64,
 	/// play_seconds 뒤에 줄여 끄는 시간. (초, play_seconds 가 0 이면 쓰지 않는다)
 	pub fade_out_seconds: f64,
+	/// 읽기 방식. (None 이면 배경음악은 Streaming, 효과음은 DecompressOnLoad, 원본 소리 표의 loadType)
+	pub load_type: Option<AudioLoadType>,
 }
 
 impl SoundRow {
@@ -204,7 +207,7 @@ impl SoundRow {
 	/// - `volume`: 소리의 크기. (0 ~ 1)
 	///
 	/// # 돌려줌
-	/// 효과음 줄. (minimum_interval, pitch_variation, play_seconds, fade_out_seconds 는 0, maximum_voices 는 None)
+	/// 효과음 줄. (minimum_interval, pitch_variation, play_seconds, fade_out_seconds 는 0, maximum_voices 와 load_type 은 None)
 	//==============================================================================
 	pub fn create_effect(id: &str, paths: &[&str], volume: f64) -> SoundRow {
 		SoundRow {
@@ -217,6 +220,7 @@ impl SoundRow {
 			pitch_variation: 0.0,
 			play_seconds: 0.0,
 			fade_out_seconds: 0.0,
+			load_type: None,
 		}
 	}
 
@@ -872,12 +876,15 @@ impl SoundSystem {
 	//==============================================================================
 	pub fn load_sound(&mut self, engine: &Engine, sound_row: &SoundRow) {
 		let mut asset_list = Vec::new();
+		let load_type = read_sound_row_load_type(sound_row);
 		for path in sound_row.paths.iter() {
-			match engine.load_audio_asset(path) {
-				Ok(audio_asset) => {
+			let audio_asset = Rc::new(AudioAsset::new());
+			audio_asset.set_load_type(load_type);
+			match audio_asset.load_from_asset(engine, path).get_load_error() {
+				None => {
 					asset_list.push(Some(audio_asset));
 				}
-				Err(error) => {
+				Some(error) => {
 					eprintln!("[sound] 소리를 받지 못했습니다. {} ({})", path, error);
 					asset_list.push(None);
 				}
@@ -1403,7 +1410,15 @@ impl SoundSystem {
 		let context_time = self.read_context_time();
 		let stop_time = context_time + fade_seconds;
 		if playing_music.duration > 0.0 {
-			let stop_position = (playing_music.offset + stop_time - playing_music.start_time) % playing_music.duration;
+			// 웹 스트리밍은 미디어 요소의 지금 자리에서, 버퍼와 데스크탑 스트리밍은 컨텍스트 시계로 다 줄어든 때의 자리를 셈한다. (원본 fadeOutMusic)
+			let stop_position = match playing_music.audio_player.get_stream_time() {
+				Some(stream_time) => {
+					(stream_time + fade_seconds) % playing_music.duration
+				}
+				None => {
+					(playing_music.offset + stop_time - playing_music.start_time) % playing_music.duration
+				}
+			};
 			self.music_position_by_id.insert(playing_music.sound_id.clone(), stop_position);
 		}
 		// 원본: 지금 gain.value 에서 cancelScheduledValues, setValueAtTime, 줄이면 linearRampToValueAtTime(0) 아니면 setValueAtTime(0), source.stop(when).
@@ -1428,6 +1443,23 @@ impl SoundSystem {
 		self.voice_list.retain(|voice| voice.audio_player.is_playing());
 		self.releasing_voice_list.retain(|voice| voice.audio_player.is_playing());
 		self.fading_music_list.retain(|music_voice| music_voice.audio_player.is_playing());
+	}
+}
+
+//==============================================================================
+/// 소리 줄의 읽기 방식. (load_type 이 있으면 그것, 없으면 배경음악은 스트리밍, 효과음은 통째로 풀기, 원본 readSoundRowLoadType)
+//==============================================================================
+fn read_sound_row_load_type(sound_row: &SoundRow) -> AudioLoadType {
+	match sound_row.load_type {
+		Some(load_type) => {
+			load_type
+		}
+		None if sound_row.is_music => {
+			AudioLoadType::Streaming
+		}
+		None => {
+			AudioLoadType::DecompressOnLoad
+		}
 	}
 }
 
@@ -1528,6 +1560,32 @@ mod tests {
 		assert!(audio_asset.load_from_bytes(create_silent_wav((seconds * 8000.0) as u32)).get_load_error().is_none());
 		assert!(audio_asset.is_loaded());
 		audio_asset
+	}
+
+	//==============================================================================
+	/// 소리 표의 읽기 방식. (load_type 이 없으면 배경음악은 스트리밍, 효과음은 통째로 풀기, 있으면 그것, 원본 readSoundRowLoadType)
+	//==============================================================================
+	#[test]
+	fn sound_row_load_type_defaults() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let path = "tests/assets/audio/mp3_stereo.mp3";
+		let music_row = SoundRow::create_music("field", path, 1.0);
+		let effect_row = SoundRow::create_effect("hit", &[path], 1.0);
+		let mut decoded_music_row = SoundRow::create_music("title", path, 1.0);
+		decoded_music_row.load_type = Some(AudioLoadType::DecompressOnLoad);
+		let mut streamed_effect_row = SoundRow::create_effect("rain", &[path], 1.0);
+		streamed_effect_row.load_type = Some(AudioLoadType::Streaming);
+		assert_eq!(music_row.load_type, None);
+		let row_list = vec![music_row, effect_row, decoded_music_row, streamed_effect_row];
+		let mut sound_system = SoundSystem::new(&engine, row_list.clone());
+		for sound_row in row_list.iter() {
+			sound_system.load_sound(&engine, sound_row);
+		}
+		let is_streaming = |sound_id: &str| sound_system.asset_by_id[sound_id][0].as_ref().expect("asset").is_streaming();
+		assert!(is_streaming("field"));
+		assert!(!is_streaming("hit"));
+		assert!(!is_streaming("title"));
+		assert!(is_streaming("rain"));
 	}
 
 	//==============================================================================

@@ -40,7 +40,7 @@ use super::pannermath::{DistanceModel, PannerSettings, PanningModel};
 use super::{GainAutomation, ListenerParam, PannerParam};
 use crate::core::audiomanager::{resume_audio_manager_state, AudioManagerState};
 use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME};
-use crate::resource::audioasset::AudioAsset;
+use crate::resource::audioasset::{AudioAsset, AudioLoadType, AUTOMATIC_STREAMING_BYTE_THRESHOLD};
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
@@ -419,6 +419,8 @@ struct PlaybackState {
 	waiting_resume_count: u32,
 	/// 버린 플레이어의 GainNode 들. (소리가 끝나면 뗀다)
 	released_node_list: Vec<web_sys::AudioNode>,
+	/// 스트리밍 소리를 트는 미디어 요소. (처음 스트리밍으로 틀 때 만든다)
+	media_playback: Option<MediaPlayback>,
 }
 
 impl PlaybackState {
@@ -433,6 +435,16 @@ impl PlaybackState {
 			let _ = scheduled_source_node.stop();
 		}
 		self.ended_callback = None;
+		if let Some(media_playback) = self.media_playback.as_mut() {
+			media_playback.stop();
+		}
+	}
+
+	//==============================================================================
+	/// 미디어 요소로 트는 중인지.
+	//==============================================================================
+	fn is_media_playing(&self) -> bool {
+		self.media_playback.as_ref().map(|media_playback| media_playback.is_media_playing).unwrap_or(false)
 	}
 
 	//==============================================================================
@@ -562,6 +574,7 @@ impl AudioPlayerBackend {
 				is_released: false,
 				waiting_resume_count: 0,
 				released_node_list: Vec::new(),
+				media_playback: None,
 			})),
 			playback_rate: 1.0,
 		}
@@ -636,6 +649,87 @@ impl AudioPlayerBackend {
 			return;
 		}
 		start_source(&self.playback_state, &audio_context, &gain_node, audio_buffer, is_loop, time, self.playback_rate);
+	}
+
+	//==============================================================================
+	/// 스트리밍 재생 시작. (미디어 요소를 MediaElementAudioSourceNode 로 이 플레이어의 GainNode 에 잇고 time 초부터 튼다, 원본 startStreamPlayback)
+	/// - 컨텍스트가 일시 중단돼 있으면 재개한 뒤에 튼다. (깨우는 동안 stop 이나 다른 재생이 오면 틀지 않는다)
+	//==============================================================================
+	pub(crate) fn start_stream_playback(&mut self, audio_stream: &AudioStream, is_loop: bool, time: f64) {
+		let (audio_context, gain_node) = match (&self.audio_context, &self.gain_node) {
+			(Some(audio_context), Some(gain_node)) => {
+				(audio_context.clone(), gain_node.clone())
+			}
+			_ => {
+				return;
+			}
+		};
+		let stream_url = match audio_stream.get_stream_url() {
+			Some(stream_url) => {
+				stream_url
+			}
+			None => {
+				return;
+			}
+		};
+		let play_request_id = {
+			let mut playback_state = self.playback_state.borrow_mut();
+			playback_state.play_request_id += 1;
+			playback_state.play_request_id
+		};
+		let playback_rate = self.playback_rate;
+		if get_audio_context_state_name(&audio_context) == "suspended" {
+			let resume_promise = match audio_context.resume() {
+				Ok(resume_promise) => {
+					resume_promise
+				}
+				Err(_) => {
+					return;
+				}
+			};
+			let playback_state_cell = self.playback_state.clone();
+			playback_state_cell.borrow_mut().waiting_resume_count += 1;
+			spawn_local(async move {
+				let is_resumed = JsFuture::from(resume_promise).await.is_ok();
+				playback_state_cell.borrow_mut().waiting_resume_count -= 1;
+				let is_current_request = playback_state_cell.borrow().play_request_id == play_request_id;
+				if is_resumed && is_current_request {
+					start_media_source(&playback_state_cell, &audio_context, &gain_node, &stream_url, is_loop, time, playback_rate);
+				}
+				playback_state_cell.borrow_mut().disconnect_released_nodes_if_idle();
+			});
+			return;
+		}
+		start_media_source(&self.playback_state, &audio_context, &gain_node, &stream_url, is_loop, time, playback_rate);
+	}
+
+	//==============================================================================
+	/// 스트리밍 소리의 지금 자리. (미디어 요소의 currentTime, 미디어 요소로 트는 중이 아니면 None)
+	//==============================================================================
+	pub(crate) fn get_stream_time(&self) -> Option<f64> {
+		let playback_state = self.playback_state.borrow();
+		match playback_state.media_playback.as_ref() {
+			Some(media_playback) if media_playback.is_media_playing && playback_state.is_playing => {
+				let media: &web_sys::HtmlMediaElement = &media_playback.media_element;
+				Some(media.current_time())
+			}
+			_ => {
+				None
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 애셋을 바꿀 때 멈춘 미디어 요소가 받아 둔 것을 놓는다. (다른 주소면, 원본 setAudioAsset)
+	//==============================================================================
+	pub(crate) fn release_idle_stream(&mut self, stream_url: Option<&str>) {
+		let mut playback_state = self.playback_state.borrow_mut();
+		if let Some(media_playback) = playback_state.media_playback.as_mut() {
+			if !media_playback.is_media_playing && media_playback.media_url.is_some() && media_playback.media_url.as_deref() != stream_url {
+				release_media_element(&media_playback.media_element);
+				media_playback.media_url = None;
+			}
+		}
 	}
 
 	//==============================================================================
@@ -779,6 +873,14 @@ impl AudioPlayerBackend {
 	/// 그 시각에 소스를 멈춘다. (원본 source.stop(when), 아직 시작 전이면 시작할 때 건다)
 	//==============================================================================
 	pub fn stop_source_at_time(&mut self, time: f64) {
+		// 미디어 요소는 컨텍스트 시각에 맞춰 멈추게 걸 수 없어, 그 시각에 멈춘다. (원본 SoundSystem.fadeOutMusic 의 setTimeout)
+		if self.playback_state.borrow().is_media_playing() {
+			if let Some(audio_context) = &self.audio_context {
+				let play_request_id = self.playback_state.borrow().play_request_id;
+				schedule_media_stop(&self.playback_state, audio_context, time, play_request_id);
+			}
+			return;
+		}
 		let mut playback_state = self.playback_state.borrow_mut();
 		match &playback_state.audio_source {
 			Some(audio_source) => {
@@ -813,6 +915,11 @@ impl Drop for AudioPlayerBackend {
 		}
 		let mut playback_state = self.playback_state.borrow_mut();
 		playback_state.is_released = true;
+		// 미디어 요소는 버릴 때 놓는다. (트는 소리를 끝까지 울리려면 버리기 전에 기다린다, 반복 소리가 남지 않게)
+		if let Some(mut media_playback) = playback_state.media_playback.take() {
+			media_playback.stop();
+			release_media_element(&media_playback.media_element);
+		}
 		if let Some(audio_source) = playback_state.audio_source.take() {
 			release_source_until_end(&audio_source, node_list);
 			playback_state.ended_callback = None;
@@ -961,6 +1068,346 @@ fn start_source(playback_state_cell: &Rc<RefCell<PlaybackState>>, audio_context:
 }
 
 //==============================================================================
+/// 스트리밍으로 읽은 소리. (원본 AudioAsset 의 streamUrl 과 길이, 이 애셋이 만든 blob: 주소면 버릴 때 놓는다)
+//==============================================================================
+#[derive(Clone)]
+pub(crate) struct AudioStream {
+	inner: Rc<WebAudioStream>,
+}
+
+struct WebAudioStream {
+	stream_url: String,
+	duration: f64,
+	is_stream_url_owned: bool,
+}
+
+impl Drop for WebAudioStream {
+	//==============================================================================
+	/// 이 애셋이 만든 blob: 주소를 놓는다. (원본 unload)
+	//==============================================================================
+	fn drop(&mut self) {
+		if self.is_stream_url_owned {
+			let _ = web_sys::Url::revoke_object_url(&self.stream_url);
+		}
+	}
+}
+
+impl AudioStream {
+	//==============================================================================
+	/// 길이. (초, 미디어 요소의 메타데이터 길이)
+	//==============================================================================
+	pub(crate) fn get_duration(&self) -> f64 {
+		self.inner.duration
+	}
+
+	//==============================================================================
+	/// 틀 주소. (파일 주소나 blob: 주소)
+	//==============================================================================
+	pub(crate) fn get_stream_url(&self) -> Option<String> {
+		Some(self.inner.stream_url.clone())
+	}
+}
+
+//==============================================================================
+/// 스트리밍 소리를 틀 미디어 요소 만들기. (페이지에 붙이지 않는다, 원본 createStreamMediaElement)
+/// - 음 높이는 재생 빠르기를 따라 바뀐다. (AudioBufferSourceNode.playbackRate 와 같게, 미디어 요소의 기본은 음 높이를 지킨다)
+//==============================================================================
+fn create_stream_media_element() -> Option<web_sys::HtmlAudioElement> {
+	let document = web_sys::window()?.document()?;
+	let media_element = document.create_element("audio").ok()?.dyn_into::<web_sys::HtmlAudioElement>().ok()?;
+	let _ = js_sys::Reflect::set(&media_element, &JsValue::from_str("preservesPitch"), &JsValue::FALSE);
+	let _ = js_sys::Reflect::set(&media_element, &JsValue::from_str("webkitPreservesPitch"), &JsValue::FALSE);
+	Some(media_element)
+}
+
+//==============================================================================
+/// 미디어 요소에 스트리밍 주소 걸기. (원본 setStreamMediaElementUrl)
+/// - 다른 출처의 파일은 CORS 로 받는다. (MediaElementAudioSourceNode 는 CORS 없이 받은 다른 출처의 소리를 0 으로 낸다, blob: 과 data: 는 같은 출처)
+//==============================================================================
+fn set_stream_media_element_url(media_element: &web_sys::HtmlMediaElement, stream_url: &str) {
+	let is_local_url = stream_url.starts_with("blob:") || stream_url.starts_with("data:");
+	media_element.set_cross_origin(if is_local_url { None } else { Some("anonymous") });
+	media_element.set_src(stream_url);
+}
+
+//==============================================================================
+/// 미디어 요소 놓기. (멈추고 src 를 비워 받던 것과 푼 것을 놓게 한다, HTML 표준의 미디어 요소 버리기, 원본 releaseMediaElement)
+//==============================================================================
+fn release_media_element(media_element: &web_sys::HtmlMediaElement) {
+	let _ = media_element.pause();
+	let _ = media_element.remove_attribute("src");
+	media_element.load();
+}
+
+//==============================================================================
+/// 스트리밍으로 열기. (미디어 요소로 메타데이터만 읽어 길이를 안다, 원본 openStream)
+//==============================================================================
+async fn open_stream(stream_url: String, is_stream_url_owned: bool) -> Result<AudioStream, String> {
+	let media_element = create_stream_media_element().ok_or_else(|| String::from("HTMLAudioElement is not supported."))?;
+	let media: &web_sys::HtmlMediaElement = &media_element;
+	media.set_preload("metadata");
+	let metadata_promise = js_sys::Promise::new(&mut |resolve, reject| {
+		let options = web_sys::AddEventListenerOptions::new();
+		options.set_once(true);
+		let _ = media.add_event_listener_with_callback_and_add_event_listener_options("loadedmetadata", &resolve, &options);
+		let _ = media.add_event_listener_with_callback_and_add_event_listener_options("error", &reject, &options);
+		set_stream_media_element_url(media, &stream_url);
+	});
+	let metadata_result = JsFuture::from(metadata_promise).await;
+	let duration = media.duration();
+	release_media_element(media);
+	if metadata_result.is_err() {
+		let error_code = media.error().map(|media_error| media_error.code()).unwrap_or(0);
+		if is_stream_url_owned {
+			let _ = web_sys::Url::revoke_object_url(&stream_url);
+		}
+		return Err(format!("MediaError {}", error_code));
+	}
+	Ok(AudioStream {
+		inner: Rc::new(WebAudioStream {
+			stream_url,
+			duration: if duration.is_finite() { duration } else { 0.0 },
+			is_stream_url_owned,
+		}),
+	})
+}
+
+//==============================================================================
+/// 플레이어의 미디어 요소. (원본 AudioPlayer 의 mediaElement, mediaSource, 처음 스트리밍으로 틀 때 만들고 플레이어가 끝까지 쓴다)
+//==============================================================================
+struct MediaPlayback {
+	media_element: web_sys::HtmlAudioElement,
+	_media_source: web_sys::MediaElementAudioSourceNode,
+	media_url: Option<String>,
+	is_media_playing: bool,
+	ended_callback: Option<Closure<dyn FnMut()>>,
+	/// 컨텍스트가 멈추고 도는 것을 따르는 콜백. (스트리밍으로 트는 동안만 건다)
+	state_change_callback: Option<(AudioContext, Closure<dyn FnMut()>)>,
+}
+
+impl MediaPlayback {
+	//==============================================================================
+	/// 미디어 요소 끊기. (멈춰 두고 다음에 다시 쓴다, 원본 stopSource 의 미디어 쪽)
+	//==============================================================================
+	fn stop(&mut self) {
+		if self.is_media_playing {
+			self.is_media_playing = false;
+			let media: &web_sys::HtmlMediaElement = &self.media_element;
+			media.set_onended(None);
+			let _ = media.pause();
+		}
+		self.ended_callback = None;
+		self.unwatch_context_state();
+	}
+
+	//==============================================================================
+	/// 컨텍스트 상태 그만 듣기.
+	//==============================================================================
+	fn unwatch_context_state(&mut self) {
+		if let Some((audio_context, state_change_callback)) = self.state_change_callback.take() {
+			let _ = audio_context.remove_event_listener_with_callback("statechange", state_change_callback.as_ref().unchecked_ref());
+		}
+	}
+}
+
+//==============================================================================
+/// 미디어 요소 틀기. (브라우저가 거부하면 재생을 끝낸 것으로 둔다, 그 사이 다른 요청이 왔으면 건드리지 않는다, 원본 playMediaElement)
+//==============================================================================
+fn play_media_element(playback_state_cell: &Rc<RefCell<PlaybackState>>, play_request_id: u64) {
+	let play_promise = {
+		let playback_state = playback_state_cell.borrow();
+		match playback_state.media_playback.as_ref() {
+			Some(media_playback) => {
+				let media: &web_sys::HtmlMediaElement = &media_playback.media_element;
+				media.play().ok()
+			}
+			None => {
+				None
+			}
+		}
+	};
+	let play_promise = match play_promise {
+		Some(play_promise) => {
+			play_promise
+		}
+		None => {
+			return;
+		}
+	};
+	let weak_playback_state = Rc::downgrade(playback_state_cell);
+	spawn_local(async move {
+		let error = match JsFuture::from(play_promise).await {
+			Ok(_) => {
+				return;
+			}
+			Err(error) => {
+				error
+			}
+		};
+		let playback_state_cell = match weak_playback_state.upgrade() {
+			Some(playback_state_cell) => {
+				playback_state_cell
+			}
+			None => {
+				return;
+			}
+		};
+		let mut playback_state = playback_state_cell.borrow_mut();
+		let is_media_playing = playback_state.media_playback.as_ref().map(|media_playback| media_playback.is_media_playing).unwrap_or(false);
+		if playback_state.play_request_id != play_request_id || !is_media_playing {
+			return;
+		}
+		let error_name = js_sys::Reflect::get(&error, &JsValue::from_str("name")).ok().and_then(|name| name.as_string()).unwrap_or_default();
+		if error_name == "AbortError" {
+			return;
+		}
+		web_sys::console::warn_2(&JsValue::from_str("[audio] 스트리밍 소리를 틀지 못했습니다."), &error);
+		playback_state.is_playing = false;
+		if let Some(media_playback) = playback_state.media_playback.as_mut() {
+			media_playback.stop();
+		}
+	});
+}
+
+//==============================================================================
+/// 미디어 요소를 GainNode 에 잇고 그 자리부터 튼다. (원본 startStreamPlayback)
+//==============================================================================
+fn start_media_source(playback_state_cell: &Rc<RefCell<PlaybackState>>, audio_context: &AudioContext, gain_node: &web_sys::GainNode, stream_url: &str, is_loop: bool, time: f64, playback_rate: f64) {
+	let play_request_id = {
+		let mut playback_state = playback_state_cell.borrow_mut();
+		// 시작 전(컨텍스트를 깨우는 동안)에 받은 stop(when) 은 시작한 뒤에 건다. 앞의 소리가 남아 있으면 멈춘다. (한 플레이어는 소리 하나)
+		let pending_stop_time = playback_state.pending_stop_time.take();
+		playback_state.stop_source();
+		// 컨텍스트를 깨우는 동안 플레이어를 버렸으면 틀지 않는다. (미디어 요소는 버릴 때 놓았다, 반복 소리가 남지 않게)
+		if playback_state.is_released {
+			return;
+		}
+		if playback_state.media_playback.is_none() {
+			let media_element = match create_stream_media_element() {
+				Some(media_element) => {
+					media_element
+				}
+				None => {
+					return;
+				}
+			};
+			let media: &web_sys::HtmlMediaElement = &media_element;
+			media.set_preload("auto");
+			// 미디어 요소를 이을 수 없는 컨텍스트는 스트리밍 소리를 내지 않는다.
+			let media_source = match audio_context.create_media_element_source(media) {
+				Ok(media_source) => {
+					media_source
+				}
+				Err(_) => {
+					return;
+				}
+			};
+			let _ = media_source.connect_with_audio_node(gain_node);
+			playback_state.media_playback = Some(MediaPlayback {
+				media_element,
+				_media_source: media_source,
+				media_url: None,
+				is_media_playing: false,
+				ended_callback: None,
+				state_change_callback: None,
+			});
+		}
+		let play_request_id = playback_state.play_request_id;
+		let weak_playback_state = Rc::downgrade(playback_state_cell);
+		let ended_callback: Closure<dyn FnMut()> = Closure::new(move || {
+			if let Some(playback_state_cell) = weak_playback_state.upgrade() {
+				let mut playback_state = playback_state_cell.borrow_mut();
+				playback_state.is_playing = false;
+				if let Some(media_playback) = playback_state.media_playback.as_mut() {
+					media_playback.is_media_playing = false;
+					media_playback.unwatch_context_state();
+				}
+			}
+		});
+		// 컨텍스트가 돌면 멈춰 둔 미디어 요소를 이어 틀고, 멈추면 미디어 요소도 멈춘다. (원본 followContextState)
+		let weak_playback_state = Rc::downgrade(playback_state_cell);
+		let followed_audio_context = audio_context.clone();
+		let state_change_callback: Closure<dyn FnMut()> = Closure::new(move || {
+			let playback_state_cell = match weak_playback_state.upgrade() {
+				Some(playback_state_cell) => {
+					playback_state_cell
+				}
+				None => {
+					return;
+				}
+			};
+			let (is_paused, request_id) = {
+				let playback_state = playback_state_cell.borrow();
+				match playback_state.media_playback.as_ref() {
+					Some(media_playback) if media_playback.is_media_playing => {
+						let media: &web_sys::HtmlMediaElement = &media_playback.media_element;
+						(media.paused(), playback_state.play_request_id)
+					}
+					_ => {
+						return;
+					}
+				}
+			};
+			if is_context_state_running(&followed_audio_context) {
+				if is_paused {
+					play_media_element(&playback_state_cell, request_id);
+				}
+			}
+			else if !is_paused {
+				if let Some(media_playback) = playback_state_cell.borrow().media_playback.as_ref() {
+					let media: &web_sys::HtmlMediaElement = &media_playback.media_element;
+					let _ = media.pause();
+				}
+			}
+		});
+		let _ = audio_context.add_event_listener_with_callback("statechange", state_change_callback.as_ref().unchecked_ref());
+		let media_playback = match playback_state.media_playback.as_mut() {
+			Some(media_playback) => {
+				media_playback
+			}
+			None => {
+				return;
+			}
+		};
+		let media: &web_sys::HtmlMediaElement = &media_playback.media_element;
+		if media_playback.media_url.as_deref() != Some(stream_url) {
+			set_stream_media_element_url(media, stream_url);
+			media_playback.media_url = Some(String::from(stream_url));
+		}
+		media.set_loop(is_loop);
+		media.set_playback_rate(playback_rate);
+		media.set_current_time(time);
+		media.set_onended(Some(ended_callback.as_ref().unchecked_ref()));
+		media_playback.ended_callback = Some(ended_callback);
+		media_playback.state_change_callback = Some((audio_context.clone(), state_change_callback));
+		media_playback.is_media_playing = true;
+		playback_state.is_playing = true;
+		if let Some(stop_time) = pending_stop_time {
+			schedule_media_stop(playback_state_cell, audio_context, stop_time, play_request_id);
+		}
+		play_request_id
+	};
+	play_media_element(playback_state_cell, play_request_id);
+}
+
+//==============================================================================
+/// 그 컨텍스트 시각에 미디어 요소 멈추기. (미디어 요소는 컨텍스트 시각에 맞춰 멈추게 걸 수 없어 setTimeout 으로, 원본 SoundSystem.fadeOutMusic)
+//==============================================================================
+fn schedule_media_stop(playback_state_cell: &Rc<RefCell<PlaybackState>>, audio_context: &AudioContext, stop_time: f64, play_request_id: u64) {
+	let delay_seconds = (stop_time - audio_context.current_time()).max(0.0);
+	let weak_playback_state = Rc::downgrade(playback_state_cell);
+	set_timeout_seconds(delay_seconds, move || {
+		if let Some(playback_state_cell) = weak_playback_state.upgrade() {
+			let mut playback_state = playback_state_cell.borrow_mut();
+			if playback_state.play_request_id == play_request_id {
+				playback_state.stop_source();
+				playback_state.is_playing = false;
+			}
+		}
+	});
+}
+
+//==============================================================================
 /// AudioParam 에 자동화 걸기. (원본 setValueAtTime 들, 거부는 넘긴다)
 //==============================================================================
 fn apply_gain_automation_to_param(gain_parameter: &web_sys::AudioParam, automation: GainAutomation) {
@@ -1000,15 +1447,34 @@ fn describe_js_error(error: JsValue) -> String {
 //==============================================================================
 /// 파일 읽기. (fetch 와 디코딩을 걸어 두고 바로 돌아온다. 끝나면 애셋이 채워진다)
 //==============================================================================
-pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path) -> Result<(), String> {
+pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path, load_type: AudioLoadType) -> Result<(), String> {
 	let asset_url = path_to_url(asset_path);
+	let audio_asset = audio_asset.clone();
+	// 스트리밍이면 받지 않고 미디어 요소가 그 주소에서 조금씩 받는다. (원본 load)
+	if load_type == AudioLoadType::Streaming {
+		spawn_local(async move {
+			match open_stream(asset_url.clone(), false).await {
+				Ok(audio_stream) => {
+					audio_asset.set_audio_stream(audio_stream);
+				}
+				Err(error) => {
+					let load_error = format!("Error loading sound: {} ({})", asset_url, error);
+					web_sys::console::error_1(&JsValue::from_str(&load_error));
+					audio_asset.set_load_error(load_error);
+				}
+			}
+		});
+		return Ok(());
+	}
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
 	let fetch_promise = window.fetch_with_str(&asset_url);
-	let audio_asset = audio_asset.clone();
 	spawn_local(async move {
-		match fetch_audio_buffer(fetch_promise).await {
-			Ok(audio_buffer) => {
+		match fetch_audio_buffer_or_stream(fetch_promise, &asset_url, load_type == AudioLoadType::Automatic).await {
+			Ok(FetchedAudio::Buffer(audio_buffer)) => {
 				audio_asset.set_audio_buffer(audio_buffer);
+			}
+			Ok(FetchedAudio::Stream(audio_stream)) => {
+				audio_asset.set_audio_stream(audio_stream);
 			}
 			Err(error) => {
 				let load_error = format!("Error loading sound: {} ({})", asset_url, error);
@@ -1023,10 +1489,29 @@ pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path) -> Resul
 //==============================================================================
 /// 메모리에서 읽기. (디코딩을 걸어 두고 바로 돌아온다)
 //==============================================================================
-pub fn load_audio_bytes(audio_asset: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<(), String> {
+pub fn load_audio_bytes(audio_asset: &Rc<AudioAsset>, bytes: Vec<u8>, load_type: AudioLoadType) -> Result<(), String> {
 	let byte_array = js_sys::Uint8Array::from(bytes.as_slice());
 	let array_buffer = byte_array.buffer();
 	let audio_asset = audio_asset.clone();
+	// 스트리밍이거나 자동인데 문턱보다 크면 blob: 주소로 흘려 튼다. (원본 openBytes)
+	let is_streamed = load_type == AudioLoadType::Streaming || (load_type == AudioLoadType::Automatic && bytes.len() as u64 > AUTOMATIC_STREAMING_BYTE_THRESHOLD);
+	if is_streamed {
+		let blob_part_list = js_sys::Array::of1(&array_buffer);
+		let blob_url = web_sys::Blob::new_with_buffer_source_sequence(&blob_part_list).and_then(|blob| web_sys::Url::create_object_url_with_blob(&blob)).map_err(describe_js_error)?;
+		spawn_local(async move {
+			match open_stream(blob_url, true).await {
+				Ok(audio_stream) => {
+					audio_asset.set_audio_stream(audio_stream);
+				}
+				Err(error) => {
+					let load_error = format!("Error loading sound from memory ({})", error);
+					web_sys::console::error_1(&JsValue::from_str(&load_error));
+					audio_asset.set_load_error(load_error);
+				}
+			}
+		});
+		return Ok(());
+	}
 	spawn_local(async move {
 		match decode_array_buffer(&array_buffer).await {
 			Ok(audio_buffer) => {
@@ -1043,18 +1528,35 @@ pub fn load_audio_bytes(audio_asset: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<
 }
 
 //==============================================================================
-/// fetch 응답을 받아 디코딩한다.
+/// 받은 소리. (통째로 푼 버퍼나 스트리밍)
 //==============================================================================
-async fn fetch_audio_buffer(fetch_promise: js_sys::Promise) -> Result<AudioBuffer, String> {
+enum FetchedAudio {
+	Buffer(AudioBuffer),
+	Stream(AudioStream),
+}
+
+//==============================================================================
+/// fetch 응답을 받아 디코딩한다. (자동이면 머리의 Content-Length 로 먼저 가려, 문턱보다 크면 몸을 받지 않고 그 주소를 흘려 튼다, 원본 load)
+//==============================================================================
+async fn fetch_audio_buffer_or_stream(fetch_promise: js_sys::Promise, asset_url: &str, is_automatic: bool) -> Result<FetchedAudio, String> {
 	let response_value = JsFuture::from(fetch_promise).await.map_err(describe_js_error)?;
 	let response = response_value.dyn_into::<web_sys::Response>().map_err(describe_js_error)?;
 	if !response.ok() {
 		return Err(format!("HTTP {}", response.status()));
 	}
+	if is_automatic {
+		let content_length = response.headers().get("Content-Length").ok().flatten().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(0);
+		if content_length > AUTOMATIC_STREAMING_BYTE_THRESHOLD {
+			if let Some(body) = response.body() {
+				let _ = body.cancel();
+			}
+			return open_stream(String::from(asset_url), false).await.map(FetchedAudio::Stream);
+		}
+	}
 	let array_buffer_promise = response.array_buffer().map_err(describe_js_error)?;
 	let array_buffer_value = JsFuture::from(array_buffer_promise).await.map_err(describe_js_error)?;
 	let array_buffer = array_buffer_value.dyn_into::<js_sys::ArrayBuffer>().map_err(describe_js_error)?;
-	decode_array_buffer(&array_buffer).await
+	decode_array_buffer(&array_buffer).await.map(FetchedAudio::Buffer)
 }
 
 //==============================================================================
