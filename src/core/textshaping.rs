@@ -919,6 +919,36 @@ impl LoadedFont {
 	}
 
 	//==============================================================================
+	/// measureText 의 닿는 상자에 쓰는 글리프 상자. (맥 크롬처럼 윤곽 경로의 상자, 블링크 skia_text_metrics.cc 의 SkFontGetBoundsForGlyph 가 맥에서 부르는
+	/// GetPathBoundsForGlyph. 경로는 CoreText 윤곽(CTFontCreatePathForGlyph)이고 상자는 곡선 조절점까지 넣은 SkPath::getBounds 다)
+	/// - 윤곽 표(glyf, CFF, CFF2)의 점(곡선 조절점 포함)을 그 크기의 축 값으로 읽은 상자를 픽셀로 줄인다. 반올림하지 않는다.
+	/// - 윤곽을 엔진이 읽지 못하는 글꼴(색 이모지 sbix, 윤곽 표가 없는 hvgl 같은)과 윤곽이 빈 글리프는 None 이다. (크롬도 경로가 없으면 정수 상자 getBounds 다)
+	///
+	/// # 인자
+	/// - `glyph_index`: 글리프 번호.
+	/// - `pixel_size`: 글자 크기. (픽셀)
+	/// - `skew`: 가로 기울임. (x 에 y x skew 를 더한다, 가짜 기울임은 SYNTHETIC_ITALIC_SKEW, 아니면 0. 크롬처럼 경로의 점을 기울인 뒤 상자를 잰다)
+	///
+	/// # 돌려줌
+	/// (왼쪽, 아래, 오른쪽, 위). (펜 원점에서 픽셀, 위가 양수)
+	//==============================================================================
+	pub fn read_glyph_path_bounds(&self, glyph_index: u16, pixel_size: f32, skew: f32) -> Option<(f32, f32, f32, f32)> {
+		if self.is_core_text_raster || self.is_bitmap_only_font() {
+			return None;
+		}
+		let mut bounds_builder = PathBoundsBuilder {
+			bounds: None,
+			skew,
+		};
+		if !self.draw_glyph_outline(glyph_index, pixel_size, &mut bounds_builder) {
+			return None;
+		}
+		let (left_x, bottom_y, right_x, top_y) = bounds_builder.bounds?;
+		let scale = pixel_size / self.units_per_em;
+		Some((left_x * scale, bottom_y * scale, right_x * scale, top_y * scale))
+	}
+
+	//==============================================================================
 	/// 글리프 윤곽 그리기. (글꼴 단위, 그 글자 크기의 축 값(opsz 포함)을 건 윤곽. 가변 글꼴은 skrifa 로, 아니면 ttf-parser 로. 윤곽이 없으면 false)
 	/// - ttf-parser 는 글리프마다 변형이 32 개를 넘는 가변 글꼴(맥 SFNS 같은)의 윤곽을 읽지 못한다.
 	///
@@ -999,6 +1029,58 @@ impl LoadedFont {
 
 //==============================================================================
 /// skrifa 윤곽을 ttf-parser 윤곽 받개로 넘기는 펜.
+
+//==============================================================================
+/// 윤곽 점의 상자 모으기. (곡선 조절점까지 넣는다, 스키아 SkPath::getBounds 와 같은 뜻. 글꼴 단위, 위가 양수)
+//==============================================================================
+struct PathBoundsBuilder {
+	/// (왼쪽, 아래, 오른쪽, 위). 점이 없으면 None.
+	bounds: Option<(f32, f32, f32, f32)>,
+	/// 가로 기울임. (점의 x 에 y x skew 를 더한다)
+	skew: f32,
+}
+
+impl PathBoundsBuilder {
+	//==============================================================================
+	/// 점 하나를 상자에 넣기.
+	//==============================================================================
+	fn add_point(&mut self, x: f32, y: f32) {
+		let x = x + y * self.skew;
+		self.bounds = Some(match self.bounds {
+			Some((left_x, bottom_y, right_x, top_y)) => {
+				(left_x.min(x), bottom_y.min(y), right_x.max(x), top_y.max(y))
+			}
+			None => {
+				(x, y, x, y)
+			}
+		});
+	}
+}
+
+impl rustybuzz::ttf_parser::OutlineBuilder for PathBoundsBuilder {
+	fn move_to(&mut self, x: f32, y: f32) {
+		self.add_point(x, y);
+	}
+
+	fn line_to(&mut self, x: f32, y: f32) {
+		self.add_point(x, y);
+	}
+
+	fn quad_to(&mut self, control_x: f32, control_y: f32, x: f32, y: f32) {
+		self.add_point(control_x, control_y);
+		self.add_point(x, y);
+	}
+
+	fn curve_to(&mut self, first_control_x: f32, first_control_y: f32, second_control_x: f32, second_control_y: f32, x: f32, y: f32) {
+		self.add_point(first_control_x, first_control_y);
+		self.add_point(second_control_x, second_control_y);
+		self.add_point(x, y);
+	}
+
+	fn close(&mut self) {
+	}
+}
+
 //==============================================================================
 struct SkrifaOutlinePen<'builder> {
 	outline_builder: &'builder mut dyn rustybuzz::ttf_parser::OutlineBuilder,

@@ -1542,14 +1542,29 @@ impl TextStringTextureCache {
 				continue;
 			}
 			let face = &face_list[shaped_glyph.face_index];
-			let (glyph_left_x, glyph_bottom_y, glyph_width, glyph_height) = face.font.read_glyph_metrics(shaped_glyph.glyph_index, font_size);
-			if glyph_width == 0 || glyph_height == 0 {
-				continue;
+			// 맥 크롬은 윤곽 경로의 상자(반올림하지 않음), 경로가 없는 글리프와 그 밖의 운영체제는 글리프 픽셀 상자다. (블링크 SkFontGetBoundsForGlyph)
+			let path_bounds = if cfg!(target_os = "macos") {
+				face.font.read_glyph_path_bounds(shaped_glyph.glyph_index, font_size, if face.is_synthetic_italic { textshaping::SYNTHETIC_ITALIC_SKEW } else { 0.0 })
 			}
-			let mut left_x = shaped_glyph.position_x + glyph_left_x as f32;
-			let mut right_x = left_x + glyph_width as f32;
-			let mut top_y = shaped_glyph.position_y + (glyph_bottom_y + glyph_height) as f32;
-			let mut bottom_y = shaped_glyph.position_y + glyph_bottom_y as f32;
+			else {
+				None
+			};
+			let (glyph_left_x, glyph_bottom_y, glyph_right_x, glyph_top_y) = match path_bounds {
+				Some(path_bounds) => {
+					path_bounds
+				}
+				None => {
+					let (glyph_left_x, glyph_bottom_y, glyph_width, glyph_height) = face.font.read_glyph_metrics(shaped_glyph.glyph_index, font_size);
+					if glyph_width == 0 || glyph_height == 0 {
+						continue;
+					}
+					(glyph_left_x as f32, glyph_bottom_y as f32, (glyph_left_x + glyph_width) as f32, (glyph_bottom_y + glyph_height) as f32)
+				}
+			};
+			let mut left_x = shaped_glyph.position_x + glyph_left_x;
+			let mut right_x = shaped_glyph.position_x + glyph_right_x;
+			let mut top_y = shaped_glyph.position_y + glyph_top_y;
+			let mut bottom_y = shaped_glyph.position_y + glyph_bottom_y;
 			if face.is_synthetic_bold {
 				let radius = textshaping::calculate_synthetic_bold_radius(font_size);
 				left_x -= radius;
@@ -1557,7 +1572,7 @@ impl TextStringTextureCache {
 				top_y += radius;
 				bottom_y -= radius;
 			}
-			if face.is_synthetic_italic {
+			if face.is_synthetic_italic && path_bounds.is_none() {
 				right_x += top_y.max(0.0) * textshaping::SYNTHETIC_ITALIC_SKEW;
 				left_x += bottom_y.min(0.0) * textshaping::SYNTHETIC_ITALIC_SKEW;
 			}
