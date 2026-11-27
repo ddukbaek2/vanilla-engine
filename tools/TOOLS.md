@@ -48,11 +48,11 @@ cargo run -p vanilla-engine-apidoc -- <판> --gaps [--only <경로 앞>] [--excl
 - 가이드(docs/guide/<판>/ko, en)와 업데이트(docs/update/<판>.ko.md, .en.md)는 손으로 옮긴다. 업데이트 ko 는 UPDATE.md 의 그 판 절이다.
 
 ## CI (플랫폼 확인)
-GitHub Actions 의 `.github/workflows/platforms.yml` 이 dev, release, `ci-*` 브랜치에 올릴 때와 PR 에서 돈다. (공개 저장소라 무료)
-- 데스크탑 셋: 윈도우 서버(windows-latest), 우분투(ubuntu-latest, X11 은 Xvfb, 웨이랜드는 weston headless), 인텔 맥(macos-26-intel). 원본 vanilla.js 의 dev 를 옆에 받는다. (예제 애셋과 견줄 페이지)
+GitHub Actions 의 `.github/workflows/platforms.yml` 은 손으로만 돈다(workflow_dispatch). 고친 것은 먼저 로컬(맥 본디, 로제타 x86_64, 도커 리눅스, 윈도우는 교차 컴파일 검사)에서 확인하고, 문제가 없을 때 윈도우, 리눅스 마지막 확인으로 한 번 돌린다. CI 로 문제를 찾거나 고치며 되풀이해 돌리지 않는다. 맥은 로컬 기계로 확인하므로 맥 러너는 쓰지 않는다.
+- 데스크탑 둘: 윈도우 서버(windows-latest), 우분투(ubuntu-latest, X11 은 Xvfb, 웨이랜드는 weston headless). 원본 vanilla.js 의 같은 이름 갈래(없으면 dev)를 옆에 받는다. (예제 애셋과 견줄 페이지)
   - `cargo test --workspace`, `cargo build --examples`, 데스크탑 플랫폼 시험(`cargo test --test desktopplatform -- --ignored`, 같은 기계의 크롬이 찍은 `tests/assets/systemfont/chromemeasure.cjs` 값과 견준다)
   - 예제 찍기: GPU 가 없어 메사 llvmpipe 소프트웨어 GL 로 그린다. (리눅스는 Xvfb 의 GLX 와 웨이랜드 EGL, 윈도우는 llvmpipe 만 든 메사 opengl32.dll 을 예제 실행 파일 옆에 둔다)
-  - 소리: 가상 장치(LABSN/sound-ci-helpers: 리눅스 PulseAudio, 윈도우 VB-CABLE, 맥 Background Music)로 audiotone 을 돌리고, `tests/assets/*/chrome*.cjs` 로 그 기계의 크롬 기대값을 다시 찍어 `cargo test --lib matches_chrome` 으로 견준다.
+  - 소리: 가상 장치(LABSN/sound-ci-helpers: 리눅스 PulseAudio, 윈도우 VB-CABLE)로 audiotone 을 돌리고, `tests/assets/*/chrome*.cjs` 로 그 기계의 크롬 기대값을 다시 찍어 `cargo test --lib matches_chrome` 으로 견준다.
   - 원본 예제 견주기: 원본 예제 페이지를 헤드리스 크롬(WebGL 은 SwiftShader)으로 찍어 러스트 예제 그림과 화소 차이를 낸다.
   - 리눅스 라이브러리 시험이 신호로 죽으면 gdb 로 다시 돌려 죽은 스레드(시험 이름)와 백트레이스를 남긴다.
   - 결과(그림, 로그, 크롬 값)는 `platforms-<이름표>` 아티팩트로 올린다.
