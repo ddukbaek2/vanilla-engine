@@ -9,7 +9,9 @@
 //!   Individual 모드는 덩이를 넘어 지도 전체의 칸 차례로 그린다. (큰 타일이 이웃 덩이와 겹칠 때의 차례가 정확하다)
 //! - 타일 애니메이션은 tick 이 흘리는 시계 하나로 모든 칸이 같이 돈다. (Tiled 와 같다)
 //! - 충돌 모양은 물리에 기대지 않는다. read_cell_collision_shapes 가 칸마다 뒤집기, 돌리기, 오프셋을 건 지도 좌표 모양(TileCollisionShape)을 돌려준다.
-//! - 원본과 다른 점: 타일셋과 층을 값으로 가진다. (원본은 객체 참조라 여러 지도가 같은 타일셋을 나눠 쓴다, 러스트는 Tileset 을 clone 한다)
+//! - 타일셋은 원본처럼 여러 지도가 나눠 쓰는 자산이다. (Rc<Tileset>, 원본 객체 참조) 두 엔진 모두 넣은 뒤에는 타일셋을 고치지 않는다.
+//!   (TiledMapReader::attach_images 처럼 지도를 읽은 바로 뒤 아직 나눠 쓰지 않을 때만 get_tileset_mut 으로 고친다)
+//! - 원본과 다른 점: 층을 값으로 가진다. (원본은 객체 참조)
 //!   타일셋, 층 번호를 못 찾으면 None 이다. (원본은 -1, null) 애니메이션 시계는 f64 다.
 //! - 칸 크기, 육각 변 길이, 배치 셈(칸 자리, 칸을 감싸는 사각형, 칸 그리는 자리), 타일셋 격자 크기(타일 크기, 여백, 간격), 충돌 모양,
 //!   층 오프셋과 불투명도는 원본처럼 f64 이고 Tiled 값을 자르지 않는다. (16.5 는 16.5, 반 나누기는 원본 Math.trunc 처럼 0 쪽으로)
@@ -559,7 +561,7 @@ pub struct Tilemap {
 	render_mode: TilemapRenderMode,
 	column_count: u32,
 	row_count: u32,
-	tilesets: Vec<Tileset>,
+	tilesets: Vec<Rc<Tileset>>,
 	tileset_first_gids: Vec<u32>,
 	layers: Vec<TilemapLayer>,
 	animation_time: f64,
@@ -965,16 +967,35 @@ impl Tilemap {
 	}
 
 	//==============================================================================
-	/// 타일셋 넣기.
+	/// 타일셋 넣기. (원본 addTileset, 타일셋은 여러 지도가 나눠 쓴다)
+	/// - 넣은 뒤에는 타일셋을 고치지 않는다. (여러 지도가 같은 타일셋을 나눠 쓰는 자산이다, 원본도 같은 약속)
 	///
 	/// # 인자
-	/// - `tileset`: 넣을 타일셋.
+	/// - `tileset`: 넣을 타일셋. (Tileset 이나 Rc<Tileset>. 다른 지도와 나눠 쓰려면 Rc 를 clone 해 넘긴다)
 	/// - `first_gid`: 이 타일셋 0 번 타일의 gid. (0 이면 앞 타일셋 다음 번호, 첫 타일셋은 1)
 	///
 	/// # 돌려줌
 	/// 정한 첫 gid.
+	///
+	/// # 예제
+	/// 두 지도가 타일셋 하나를 나눠 쓰기
+	/// ```rust
+	/// use std::rc::Rc;
+	/// use vanilla::experimental::tilemap::{Tilemap, Tileset};
+	///
+	/// let mut tileset = Tileset::new();
+	/// tileset.set_tile_size(16.0, 16.0);
+	/// tileset.set_tile_count(4);
+	/// let shared_tileset = Rc::new(tileset);
+	/// let mut first_map = Tilemap::new();
+	/// let mut second_map = Tilemap::new();
+	/// assert_eq!(first_map.add_tileset(shared_tileset.clone(), 0), 1);
+	/// assert_eq!(second_map.add_tileset(shared_tileset.clone(), 0), 1);
+	/// assert!(Rc::ptr_eq(first_map.get_tileset(0).unwrap(), second_map.get_tileset(0).unwrap()));
+	/// ```
 	//==============================================================================
-	pub fn add_tileset(&mut self, tileset: Tileset, first_gid: u32) -> u32 {
+	pub fn add_tileset(&mut self, tileset: impl Into<Rc<Tileset>>, first_gid: u32) -> u32 {
+		let tileset: Rc<Tileset> = tileset.into();
 		let mut resolved_first_gid = first_gid;
 		if resolved_first_gid == 0 {
 			resolved_first_gid = 1;
@@ -1000,9 +1021,9 @@ impl Tilemap {
 	/// 타일셋 목록 반환.
 	///
 	/// # 돌려줌
-	/// 타일셋. (첫 gid 차례)
+	/// 타일셋. (첫 gid 차례, 나눠 쓰는 Rc)
 	//==============================================================================
-	pub fn get_tilesets(&self) -> &[Tileset] {
+	pub fn get_tilesets(&self) -> &[Rc<Tileset>] {
 		&self.tilesets
 	}
 
@@ -1013,23 +1034,24 @@ impl Tilemap {
 	/// - `tileset_index`: 타일셋 번호.
 	///
 	/// # 돌려줌
-	/// 타일셋. (없으면 None)
+	/// 타일셋. (나눠 쓰는 Rc, 없으면 None. 원본 getTileset 처럼 같은 타일셋을 가리킨다)
 	//==============================================================================
-	pub fn get_tileset(&self, tileset_index: usize) -> Option<&Tileset> {
+	pub fn get_tileset(&self, tileset_index: usize) -> Option<&Rc<Tileset>> {
 		self.tilesets.get(tileset_index)
 	}
 
 	//==============================================================================
-	/// 타일셋 반환. (변경용)
+	/// 타일셋 반환. (변경용, 이 지도만 쥔 타일셋일 때)
+	/// - 넣은 뒤에는 타일셋을 고치지 않는 것이 약속이다. 지도를 읽은 바로 뒤 그림을 거는 것(TiledMapReader::attach_images)처럼 아직 나눠 쓰지 않을 때만 쓴다.
 	///
 	/// # 인자
 	/// - `tileset_index`: 타일셋 번호.
 	///
 	/// # 돌려줌
-	/// 타일셋. (없으면 None)
+	/// 타일셋. (없거나 다른 지도와 나눠 쓰는 중이면 None)
 	//==============================================================================
 	pub fn get_tileset_mut(&mut self, tileset_index: usize) -> Option<&mut Tileset> {
-		self.tilesets.get_mut(tileset_index)
+		self.tilesets.get_mut(tileset_index).and_then(Rc::get_mut)
 	}
 
 	//==============================================================================
