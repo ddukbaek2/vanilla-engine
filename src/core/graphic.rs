@@ -7767,6 +7767,26 @@ mod tests {
 		}
 
 		/// 게임이 run_external_pass 밖에서 GlContext 로 상태를 바꿔 두고 돌아와도 다음 2D 그리기가 제 상태를 다시 거는지. (원본 db99208, externalglstatechrome)
+		/// 글 엔트리의 잉크 둘레 여백이 원본과 같다. (원본 getTextInkPadding: 채우기 2, 외곽선 ceil(max(두께 * 배율 / 2, 0.5)) + 2, 왼쪽으로 넘는 잉크가 없는 글은 펜 원점이 여백만큼 안쪽)
+		#[test]
+		fn text_entry_ink_padding_matches_original() {
+			let mut graphic = match create_test_graphic() {
+				Some(graphic) => {
+					graphic
+				}
+				None => {
+					return;
+				}
+			};
+			let system_font_description = crate::core::textstringtexturecache::parse_font_string(&format!("10px {}", crate::base::platform::SYSTEM_FONT_STRING));
+			graphic.get_text_string_texture_cache().set_system_font_chain(system_font_description.family_name_list);
+			graphic.set_font_string("16px default");
+			let fill_entry = graphic.get_text_entry(TextDrawKind::Fill, "Hamburg", 0.0, 1.0, TextDirection::Ltr).expect("fill entry");
+			assert_eq!(fill_entry.pen_offset_x, 2.0, "채우기 여백");
+			let fill_entry_twice = graphic.get_text_entry(TextDrawKind::Fill, "Hamburg", 0.0, 2.0, TextDirection::Ltr).expect("fill entry 2x");
+			assert_eq!(fill_entry_twice.pen_offset_x, 1.0, "채우기 여백 (배율 2, 논리 픽셀)");
+		}
+
 		/// 기하 캐시 시험의 칸 하나. (둥근 칸, 배경, 글)
 		struct GeometryCachePanel {
 			transform: NodeTransform,

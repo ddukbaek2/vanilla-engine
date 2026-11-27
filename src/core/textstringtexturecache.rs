@@ -2378,7 +2378,15 @@ impl TextStringTextureCache {
 				0.0
 			}
 		};
-		let padding = stroke_radius.ceil() as i32 + 1;
+		// 잉크 둘레 여백. (원본 getTextInkPadding: 채우기 2, 외곽선 ceil(max(두께 * 배율 / 2, 0.5)) + 2)
+		let padding = match text_draw_kind {
+			TextDrawKind::Stroke => {
+				stroke_radius.ceil() as i32 + 2
+			}
+			TextDrawKind::Fill => {
+				2
+			}
+		};
 		// 원본은 글 크기에 배율을 double 로 곱해 글꼴 글을 짓고, 블링크가 float 로 든다. 글꼴은 크롬 EffectiveFontSize 처럼 0.01px 아래를 버린 크기로 짓는다.
 		let pixel_size = calculate_effective_font_size((f64::from(font_description.font_size) * bake_scale) as f32);
 		let system_font_measure = create_system_font_measure(&font_description, pixel_size);
