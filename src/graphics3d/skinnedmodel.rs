@@ -79,14 +79,29 @@ const GLB_MAGIC: u32 = 0x46546c67;
 const GLB_CHUNKTYPE_JSON: u32 = 0x4e4f534a;
 const GLB_CHUNKTYPE_BINARY: u32 = 0x004e4942;
 
+/// 부호 있는 8비트 정수. (glTF componentType 5120, KHR_mesh_quantization 의 노멀 같은 것)
+pub const COMPONENT_TYPE_BYTE: u32 = 5120;
 /// 접근자 컴포넌트 타입. (원본 COMPONENT_ARRAY_TABLE 의 키)
 pub const COMPONENT_TYPE_UNSIGNED_BYTE: u32 = 5121;
+/// 부호 있는 16비트 정수. (glTF componentType 5122, KHR_mesh_quantization 의 위치, 노멀, 돌림 움직임 같은 것)
+pub const COMPONENT_TYPE_SHORT: u32 = 5122;
 /// 부호 없는 16비트 정수. (glTF componentType 5123)
 pub const COMPONENT_TYPE_UNSIGNED_SHORT: u32 = 5123;
 /// 부호 없는 32비트 정수. (glTF componentType 5125)
 pub const COMPONENT_TYPE_UNSIGNED_INT: u32 = 5125;
 /// 32비트 실수. (glTF componentType 5126)
 pub const COMPONENT_TYPE_FLOAT: u32 = 5126;
+
+/// 읽을 줄 아는 glTF 확장. (extensionsRequired 에 이 밖의 것이 있으면 읽지 않고 Err)
+/// - KHR_mesh_quantization: 꼭짓점 속성을 정수로 담은 것. (위치는 노드 변환이나 inverseBindMatrices 가, 텍스처 좌표는 KHR_texture_transform 이 되풀이를 맡는다)
+/// - KHR_texture_transform: 텍스처 좌표의 offset, rotation, scale. (재질의 바탕 텍스처 것을 텍스처 좌표에 구워 넣는다)
+const SUPPORTED_EXTENSION_LIST: [&str; 2] = ["KHR_mesh_quantization", "KHR_texture_transform"];
+
+/// 아직 읽지 못하는 필수 압축 확장의 오류 글. (확장 이름, 글)
+const UNSUPPORTED_EXTENSION_MESSAGE_TABLE: [(&str, &str); 2] = [
+	("EXT_meshopt_compression", "SkinnedModel: required extension EXT_meshopt_compression (meshopt compression) is not supported yet. (KHR_mesh_quantization without compression is supported)"),
+	("KHR_draco_mesh_compression", "SkinnedModel: required extension KHR_draco_mesh_compression (Draco compression) is not supported. (KHR_mesh_quantization without compression is supported)"),
+];
 
 /// 모프 타깃 텍스처 가로 크기. (정점 델타를 실수 텍스처에 행 단위로 적재, 버텍스 셰이더가 gl_VertexID 로 조회)
 const MORPH_TEXTURE_WIDTH: usize = 2048;
@@ -343,8 +358,12 @@ impl IndexArray {
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub enum AccessorArray {
+	/// 부호 있는 8비트. (componentType 5120)
+	Byte(Vec<i8>),
 	/// 부호 없는 8비트. (componentType 5121)
 	UnsignedByte(Vec<u8>),
+	/// 부호 있는 16비트. (componentType 5122)
+	Short(Vec<i16>),
 	/// 부호 없는 16비트. (componentType 5123)
 	UnsignedShort(Vec<u16>),
 	/// 부호 없는 32비트. (componentType 5125)
@@ -362,7 +381,13 @@ impl AccessorArray {
 	//==============================================================================
 	pub fn len(&self) -> usize {
 		match self {
+			AccessorArray::Byte(values) => {
+				values.len()
+			}
 			AccessorArray::UnsignedByte(values) => {
+				values.len()
+			}
+			AccessorArray::Short(values) => {
 				values.len()
 			}
 			AccessorArray::UnsignedShort(values) => {
@@ -388,15 +413,21 @@ impl AccessorArray {
 	}
 
 	//==============================================================================
-	/// 컴포넌트 타입. (5121 / 5123 / 5125 / 5126)
+	/// 컴포넌트 타입. (5120 / 5121 / 5122 / 5123 / 5125 / 5126)
 	///
 	/// # 돌려줌
 	/// glTF 컴포넌트 타입 번호. (COMPONENT_TYPE_UNSIGNED_BYTE 같은 상수)
 	//==============================================================================
 	pub fn get_component_type(&self) -> u32 {
 		match self {
+			AccessorArray::Byte(_) => {
+				COMPONENT_TYPE_BYTE
+			}
 			AccessorArray::UnsignedByte(_) => {
 				COMPONENT_TYPE_UNSIGNED_BYTE
+			}
+			AccessorArray::Short(_) => {
+				COMPONENT_TYPE_SHORT
 			}
 			AccessorArray::UnsignedShort(_) => {
 				COMPONENT_TYPE_UNSIGNED_SHORT
@@ -418,7 +449,13 @@ impl AccessorArray {
 	//==============================================================================
 	pub fn to_float_list(&self) -> Vec<f64> {
 		match self {
+			AccessorArray::Byte(values) => {
+				values.iter().map(|value| *value as f64).collect()
+			}
 			AccessorArray::UnsignedByte(values) => {
+				values.iter().map(|value| *value as f64).collect()
+			}
+			AccessorArray::Short(values) => {
 				values.iter().map(|value| *value as f64).collect()
 			}
 			AccessorArray::UnsignedShort(values) => {
@@ -437,11 +474,17 @@ impl AccessorArray {
 	/// 16비트 정수 목록으로. (원본 new Uint16Array(typedArray))
 	///
 	/// # 돌려줌
-	/// u16 으로 바꾼 새 목록. (u32 는 아래 16비트만 남고, 실수는 소수점 아래를 버리고 0 ~ 65535 로 자른다)
+	/// u16 으로 바꾼 새 목록. (부호 있는 정수와 u32 는 아래 16비트만 남고, 실수는 소수점 아래를 버리고 0 ~ 65535 로 자른다)
 	//==============================================================================
 	pub fn to_unsigned_short_list(&self) -> Vec<u16> {
 		match self {
+			AccessorArray::Byte(values) => {
+				values.iter().map(|value| *value as u16).collect()
+			}
 			AccessorArray::UnsignedByte(values) => {
+				values.iter().map(|value| *value as u16).collect()
+			}
+			AccessorArray::Short(values) => {
 				values.iter().map(|value| *value as u16).collect()
 			}
 			AccessorArray::UnsignedShort(values) => {
@@ -1647,6 +1690,8 @@ impl SkinnedModel {
 	/// (메시 서술 목록, 머티리얼 서술 목록). 노드나 씬이 없거나, 없는 메시를 가리키거나, 프리미티브에 POSITION 이 없거나, 스킨 메시에 JOINTS_0 이나 WEIGHTS_0 이 없거나, 접근자를 읽을 수 없으면 Err.
 	//==============================================================================
 	pub fn interpret_content(&mut self, json: &Value, binary_buffer: &[u8]) -> Result<(Vec<MeshDescription>, Vec<MaterialDescription>), String> {
+		check_required_extensions(json)?;
+
 		// 노드 구성.
 		let node_value_list = json["nodes"].as_array().ok_or_else(|| String::from("SkinnedModel: glTF has no nodes."))?;
 		let mut node_list = Vec::with_capacity(node_value_list.len());
@@ -1685,7 +1730,7 @@ impl SkinnedModel {
 				let joint_node_indices = read_index_array(&skin_value["joints"]);
 				let inverse_bind_array = match read_index(&skin_value["inverseBindMatrices"]) {
 					Some(accessor_index) => {
-						read_accessor_array(json, binary_buffer, accessor_index)?.to_float_list()
+						read_float_accessor_array(json, binary_buffer, accessor_index)?
 					}
 					None => {
 						Vec::new()
@@ -1774,24 +1819,30 @@ impl SkinnedModel {
 			for primitive_value in primitive_value_list.iter() {
 				let attributes = &primitive_value["attributes"];
 				let position_accessor_index = read_index(&attributes["POSITION"]).ok_or_else(|| String::from("SkinnedModel: primitive has no POSITION."))?;
-				let positions = read_accessor_array(json, binary_buffer, position_accessor_index)?.to_float_list();
+				let positions = read_float_accessor_array(json, binary_buffer, position_accessor_index)?;
 				let vertex_count = positions.len() / 3;
 				let normals = match read_index(&attributes["NORMAL"]) {
 					Some(accessor_index) => {
-						Some(read_accessor_array(json, binary_buffer, accessor_index)?.to_float_list())
+						Some(read_float_accessor_array(json, binary_buffer, accessor_index)?)
 					}
 					None => {
 						None
 					}
 				};
-				let texture_coordinates = match read_index(&attributes["TEXCOORD_0"]) {
+				let mut texture_coordinates = match read_index(&attributes["TEXCOORD_0"]) {
 					Some(accessor_index) => {
-						Some(read_accessor_array(json, binary_buffer, accessor_index)?.to_float_list())
+						Some(read_float_accessor_array(json, binary_buffer, accessor_index)?)
 					}
 					None => {
 						None
 					}
 				};
+				// 재질 텍스처의 KHR_texture_transform 을 굽는다. (바탕 텍스처, 없으면 노멀 텍스처, 없으면 빛남 텍스처의 것)
+				if let (Some(texture_coordinates), Some(material_index)) = (texture_coordinates.as_mut(), read_index(&primitive_value["material"])) {
+					let primitive_material = &json["materials"][material_index];
+					let transformed_texture_info = [&primitive_material["pbrMetallicRoughness"]["baseColorTexture"], &primitive_material["normalTexture"], &primitive_material["emissiveTexture"]].into_iter().find(|texture_info| !texture_info.is_null()).unwrap_or(&Value::Null);
+					apply_texture_transform(texture_coordinates, transformed_texture_info, 0.0);
+				}
 				let joints;
 				let mut weights;
 				if is_static_mesh {
@@ -1841,10 +1892,10 @@ impl SkinnedModel {
 								continue;
 							}
 						};
-						let position_deltas = read_accessor_array(json, binary_buffer, position_accessor_index)?.to_float_list();
+						let position_deltas = read_float_accessor_array(json, binary_buffer, position_accessor_index)?;
 						let normal_deltas = match read_index(&target_value["NORMAL"]) {
 							Some(accessor_index) => {
-								Some(read_accessor_array(json, binary_buffer, accessor_index)?.to_float_list())
+								Some(read_float_accessor_array(json, binary_buffer, accessor_index)?)
 							}
 							None => {
 								None
@@ -1904,8 +1955,8 @@ impl SkinnedModel {
 					let sampler_value = &animation_value["samplers"][sampler_index];
 					let input_accessor_index = read_index(&sampler_value["input"]).ok_or_else(|| String::from("SkinnedModel: animation sampler has no input."))?;
 					let output_accessor_index = read_index(&sampler_value["output"]).ok_or_else(|| String::from("SkinnedModel: animation sampler has no output."))?;
-					let times = read_accessor_array(json, binary_buffer, input_accessor_index)?.to_float_list();
-					let values = read_accessor_array(json, binary_buffer, output_accessor_index)?.to_float_list();
+					let times = read_float_accessor_array(json, binary_buffer, input_accessor_index)?;
+					let values = read_float_accessor_array(json, binary_buffer, output_accessor_index)?;
 					if let Some(last_time) = times.last() {
 						duration = duration.max(*last_time);
 					}
@@ -3576,7 +3627,7 @@ fn convert_fbx_animation_channels(scene_data: &FbxSceneData, fbx_animation: &Fbx
 /// - `accessor_index`: 접근자 인덱스.
 ///
 /// # 돌려줌
-/// 컴포넌트 타입 그대로의 배열. (정규화하지 않는다, bufferView 가 없는 접근자는 0 으로 채운다) 접근자가 없거나, 타입을 모르거나, 버퍼 밖을 가리키면 Err.
+/// 컴포넌트 타입 그대로의 배열. (정규화하지 않는다, bufferView 가 없는 접근자는 0 으로 채운다) 접근자가 없거나, 타입을 모르거나, 버퍼 밖을 가리키거나, 바이너리 덩어리(buffers[0]) 밖의 버퍼를 가리키면 Err.
 ///
 /// # 예제
 /// 실수 VEC2 접근자 하나 읽기
@@ -3605,6 +3656,10 @@ pub fn read_accessor_array(json: &Value, binary_buffer: &[u8], accessor_index: u
 
 	if let Some(buffer_view_index) = read_index(&accessor["bufferView"]) {
 		let buffer_view = json["bufferViews"].get(buffer_view_index).ok_or_else(|| format!("SkinnedModel: bufferView {} not found.", buffer_view_index))?;
+		let buffer_index = buffer_view["buffer"].as_u64().unwrap_or(0);
+		if buffer_index != 0 {
+			return Err(format!("SkinnedModel: external buffer buffers[{}] is not supported. (only the GLB binary chunk buffers[0] is read, this includes the EXT_meshopt_compression fallback buffer)", buffer_index));
+		}
 		let element_offset = read_index(&buffer_view["byteOffset"]).unwrap_or(0) + read_index(&accessor["byteOffset"]).unwrap_or(0);
 		let byte_stride = read_index(&buffer_view["byteStride"]).unwrap_or(0);
 		if byte_stride == 0 || byte_stride == tight_byte_size {
@@ -3658,8 +3713,14 @@ pub fn read_accessor_array(json: &Value, binary_buffer: &[u8], accessor_index: u
 
 	// 바이트 → 컴포넌트 타입 배열. (리틀 엔디언)
 	let accessor_array = match component_type {
+		COMPONENT_TYPE_BYTE => {
+			AccessorArray::Byte(element_bytes.iter().map(|byte| *byte as i8).collect())
+		}
 		COMPONENT_TYPE_UNSIGNED_BYTE => {
 			AccessorArray::UnsignedByte(element_bytes)
+		}
+		COMPONENT_TYPE_SHORT => {
+			AccessorArray::Short(element_bytes.as_chunks::<2>().0.iter().map(|chunk| i16::from_le_bytes(*chunk)).collect())
 		}
 		COMPONENT_TYPE_UNSIGNED_SHORT => {
 			AccessorArray::UnsignedShort(element_bytes.as_chunks::<2>().0.iter().map(|chunk| u16::from_le_bytes(*chunk)).collect())
@@ -3672,6 +3733,118 @@ pub fn read_accessor_array(json: &Value, binary_buffer: &[u8], accessor_index: u
 		}
 	};
 	Ok(accessor_array)
+}
+
+//==============================================================================
+/// 실수로 쓰는 접근자 CPU 읽기. (위치, 노멀, 텍스처 좌표, 모프 델타, 애니메이션 값, KHR_mesh_quantization 의 정수 속성을 실수로 되풀이)
+/// - 정규화(normalized) 정수는 glTF 명세의 공식으로 나눈다. (부호 없는 것은 c / 255, c / 65535, 부호 있는 것은 max(c / 127, -1), max(c / 32767, -1))
+/// - 정규화가 아닌 정수는 값 그대로 실수로 옮긴다. (위치의 크기와 자리는 노드 변환이나 inverseBindMatrices 가, 텍스처 좌표의 것은 KHR_texture_transform 이 맡는다)
+///
+/// # 인자
+/// - `json`: glTF JSON 전체.
+/// - `binary_buffer`: BIN 청크 바이트.
+/// - `accessor_index`: 접근자 인덱스.
+///
+/// # 돌려줌
+/// 32비트 실수로 반올림한 값을 f64 로 담은 새 목록. (원본 Float32Array 와 같은 값) read_accessor_array 가 Err 면 그 Err.
+///
+/// # 예제
+/// 정규화한 SHORT VEC2 접근자 읽기 (-32768 은 -1 아래라 -1 로 자른다)
+/// ```rust
+/// use serde_json::json;
+/// use vanilla::graphics3d::skinnedmodel::read_float_accessor_array;
+///
+/// let binary_buffer: Vec<u8> = [-32768i16, 32767, 0, 16384].iter().flat_map(|value| value.to_le_bytes()).collect();
+/// let json = json!({
+/// 	"accessors": [{ "bufferView": 0, "componentType": 5122, "normalized": true, "count": 2, "type": "VEC2" }],
+/// 	"bufferViews": [{ "buffer": 0, "byteOffset": 0, "byteLength": 8 }]
+/// });
+/// let values = read_float_accessor_array(&json, &binary_buffer, 0).unwrap();
+/// assert_eq!(values[..3], [-1.0, 1.0, 0.0]);
+/// assert_eq!(values[3], (16384.0f64 / 32767.0) as f32 as f64);
+/// ```
+//==============================================================================
+pub fn read_float_accessor_array(json: &Value, binary_buffer: &[u8], accessor_index: usize) -> Result<Vec<f64>, String> {
+	let source_array = read_accessor_array(json, binary_buffer, accessor_index)?;
+	let divisor = match source_array.get_component_type() {
+		COMPONENT_TYPE_BYTE => {
+			Some(127.0)
+		}
+		COMPONENT_TYPE_UNSIGNED_BYTE => {
+			Some(255.0)
+		}
+		COMPONENT_TYPE_SHORT => {
+			Some(32767.0)
+		}
+		COMPONENT_TYPE_UNSIGNED_SHORT => {
+			Some(65535.0)
+		}
+		_ => {
+			None
+		}
+	};
+	let is_normalized = json["accessors"][accessor_index]["normalized"].as_bool() == Some(true);
+	let source_values = source_array.to_float_list();
+	match divisor {
+		Some(divisor) if is_normalized => {
+			Ok(source_values.iter().map(|value| ((value / divisor).max(-1.0) as f32) as f64).collect())
+		}
+		_ => {
+			Ok(source_values.iter().map(|value| (*value as f32) as f64).collect())
+		}
+	}
+}
+
+//==============================================================================
+/// 텍스처 정보의 KHR_texture_transform 을 텍스처 좌표에 구워 넣기. (변환이 없거나 다른 좌표 묶음의 것이면 그대로 둔다)
+/// - 명세의 차례대로 크기, 돌림(시계 반대, 라디안), 자리를 건다. uv' = offset + R(rotation) x (scale x uv)
+///   R 은 명세의 GLSL mat3(cos, sin, 0, -sin, cos, 0, 0, 0, 1) 이다. (열 차례)
+/// - texture_info 는 재질의 텍스처 정보({ index, texCoord, extensions }), tex_coord_index 는 texture_coordinates 가 몇 번 텍스처 좌표(TEXCOORD_n)인지다.
+/// - 바꾼 값은 32비트 실수로 반올림해 둔다. (원본 Float32Array 와 같은 값)
+//==============================================================================
+fn apply_texture_transform(texture_coordinates: &mut [f64], texture_info: &Value, tex_coord_index: f64) {
+	let transform = &texture_info["extensions"]["KHR_texture_transform"];
+	if !transform.is_object() {
+		return;
+	}
+	let base_tex_coord = texture_info["texCoord"].as_f64().unwrap_or(0.0);
+	let transform_tex_coord = transform["texCoord"].as_f64().unwrap_or(base_tex_coord);
+	if transform_tex_coord != tex_coord_index {
+		return;
+	}
+	let offset = read_float_array(&transform["offset"]).filter(|values| values.len() >= 2).unwrap_or(vec![0.0, 0.0]);
+	let scale = read_float_array(&transform["scale"]).filter(|values| values.len() >= 2).unwrap_or(vec![1.0, 1.0]);
+	let rotation = transform["rotation"].as_f64().unwrap_or(0.0);
+	let cosine = rotation.cos();
+	let sine = rotation.sin();
+	for value_index in (0..texture_coordinates.len().saturating_sub(1)).step_by(2) {
+		let scaled_u = texture_coordinates[value_index] * scale[0];
+		let scaled_v = texture_coordinates[value_index + 1] * scale[1];
+		texture_coordinates[value_index] = ((offset[0] + cosine * scaled_u - sine * scaled_v) as f32) as f64;
+		texture_coordinates[value_index + 1] = ((offset[1] + sine * scaled_u + cosine * scaled_v) as f32) as f64;
+	}
+}
+
+//==============================================================================
+/// glTF 필수 확장 확인. (extensionsRequired 에 읽지 못하는 확장이 있으면 Err)
+//==============================================================================
+fn check_required_extensions(json: &Value) -> Result<(), String> {
+	let required_extension_list = json["extensionsRequired"].as_array().map(|extension_values| extension_values.as_slice()).unwrap_or(&[]);
+	for extension_value in required_extension_list.iter() {
+		let extension_name = extension_value.as_str().unwrap_or("");
+		if SUPPORTED_EXTENSION_LIST.contains(&extension_name) {
+			continue;
+		}
+		return match UNSUPPORTED_EXTENSION_MESSAGE_TABLE.iter().find(|(name, _)| *name == extension_name) {
+			Some((_, message)) => {
+				Err(String::from(*message))
+			}
+			None => {
+				Err(format!("SkinnedModel: required extension {} is not supported.", extension_name))
+			}
+		};
+	}
+	Ok(())
 }
 
 //==============================================================================
@@ -3728,10 +3901,10 @@ fn type_component_count(type_name: &str) -> Option<usize> {
 //==============================================================================
 fn component_type_byte_size(component_type: u32) -> Option<usize> {
 	match component_type {
-		COMPONENT_TYPE_UNSIGNED_BYTE => {
+		COMPONENT_TYPE_BYTE | COMPONENT_TYPE_UNSIGNED_BYTE => {
 			Some(1)
 		}
-		COMPONENT_TYPE_UNSIGNED_SHORT => {
+		COMPONENT_TYPE_SHORT | COMPONENT_TYPE_UNSIGNED_SHORT => {
 			Some(2)
 		}
 		COMPONENT_TYPE_UNSIGNED_INT | COMPONENT_TYPE_FLOAT => {

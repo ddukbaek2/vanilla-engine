@@ -2,6 +2,7 @@
 //! 점토 모형(GLB) 읽기와 뼈대 자세. (vanilla.js graphics3d/toon/glbmeshreader.js)
 //! - 재질 색으로 칠하는 모형을 툰 3D 의 MeshBuilder 꼭짓점 배열로 읽는다. 텍스처 좌표와 재질 텍스처가 있으면 그것도 읽는다. (외계행성 광부 키우기에서 왔다)
 //!   - 부품 하나가 노드 하나이고, 노드의 메시는 색마다 프리미티브 하나다. 꼭짓점은 위치와 노멀, 뼈대가 있으면 본 번호와 무게다.
+//!     노멀이 없는 프리미티브는 glTF 명세대로 평평한 노멀(삼각형마다 하나)을 짓는다. (꼭짓점을 삼각형마다 따로 푼다)
 //!   - 재질의 baseColorFactor 는 선형 색이라 sRGB 로 바꿔 담고, emissiveFactor 가 있으면 빛남으로 담는다. (emissiveTexture 가 있으면 빛남은 재질 범위로만 넘긴다)
 //!   - TEXCOORD_0 이 있으면 uv_data 로, TEXCOORD_1 이 있으면 uv1_data(2 번 UV, 천사 고리)로 담는다. 프리미티브마다 재질 범위(ToonMaterialRange)를 담는다. (재질 이름, extras, 텍스처 그림 차례)
 //!     부품 안에서 칸을 갈라 칠할 때(강조색 칸, 표시판) 재질 이름이나 extras 로 고르고 ToonDrawOptions 의 index_start, index_count 로 그 칸만 그린다.
@@ -11,6 +12,8 @@
 //!   - 뼈대(skin)가 있으면 본 노드와 그 거꾸로 묶는 행렬, 움직임(animations)과 그 extras 를 함께 읽는다. 자세는 write_skin_pose 가 셈한다.
 //!   - 부품을 따로 숨기거나 칠하는 모형은 read_glb_node_arrays 로 노드마다 따로 읽는다. (노드 extras 와 비치는 정도를 함께)
 //!   - 한 덩이로 읽은 뼈대 모형의 노드 extras 와 부품의 자리, 따르는 본은 read_glb_node_infos 로 따로 읽는다.
+//!   - 꼭짓점 속성을 정수로 담은 GLB(KHR_mesh_quantization)도 읽는다. 정규화 정수는 glTF 명세의 공식으로 나누고, 텍스처 좌표는 재질 텍스처의 KHR_texture_transform 을 구워 넣는다.
+//!     이름 없는 메시 노드는 이름 있는 부모 노드의 부품에 든다. (양자화 도구가 되풀이 변환을 맡기는 잎 노드) extensionsRequired 에 읽지 못하는 확장(meshopt 압축 등)이 있거나 바이너리 덩어리 밖의 버퍼를 가리키면 Err.
 //! - 엔진의 SkinnedModel(텍스처 PBR)과는 따로다. 툰 그리기에 쓸 꼭짓점 배열만 뽑는다.
 //==============================================================================
 use std::collections::{HashMap, HashSet};
@@ -31,6 +34,17 @@ const TRIANGLES_MODE: u64 = 4;
 const OUTLINE_NODE_SUFFIX: &str = ".outline";
 /// 한 번만 트는 움직임의 extras.loop. (끝 시각에 묶어 끝 자세를 둔다)
 const LOOP_ONCE: &str = "once";
+/// 실수 접근자의 수 종류.
+const FLOAT_COMPONENT_TYPE: u64 = 5126;
+/// 읽을 줄 아는 glTF 확장. (extensionsRequired 에 이 밖의 것이 있으면 읽지 않고 오류를 돌려준다)
+/// - KHR_mesh_quantization: 꼭짓점 속성을 정수로 담은 것. (위치는 노드 변환이나 inverseBindMatrices 가, 텍스처 좌표는 KHR_texture_transform 이 되풀이를 맡는다)
+/// - KHR_texture_transform: 텍스처 좌표의 offset, rotation, scale. (재질 텍스처의 것을 읽을 때 텍스처 좌표에 구워 넣는다)
+const SUPPORTED_EXTENSIONS: [&str; 2] = ["KHR_mesh_quantization", "KHR_texture_transform"];
+/// 아직 읽지 못하는 필수 압축 확장의 오류 글. (확장 이름, 글)
+const UNSUPPORTED_EXTENSION_MESSAGES: [(&str, &str); 2] = [
+	("EXT_meshopt_compression", "GLB 의 필수 확장 EXT_meshopt_compression(meshopt 압축)은 아직 읽지 못합니다. (압축 없이 양자화만 한 KHR_mesh_quantization 은 읽는다)"),
+	("KHR_draco_mesh_compression", "GLB 의 필수 확장 KHR_draco_mesh_compression(Draco 압축)은 읽지 못합니다. (압축 없이 양자화만 한 KHR_mesh_quantization 은 읽는다)"),
+];
 
 //==============================================================================
 /// 바깥선을 새로 지을 때의 설정.
@@ -377,6 +391,7 @@ fn read_glb_chunks(bytes: &[u8]) -> Result<GlbChunks, String> {
 	}
 	match (json, binary) {
 		(Some(json), Some(binary)) => {
+			check_required_extensions(&json)?;
 			Ok(GlbChunks { json, binary })
 		}
 		_ => {
@@ -386,9 +401,32 @@ fn read_glb_chunks(bytes: &[u8]) -> Result<GlbChunks, String> {
 }
 
 //==============================================================================
-/// 접근자 하나를 수 목록으로 읽기. (촘촘한 것과 byteStride 로 띄운 것, normalized 정수는 0 ~ 1 로)
+/// 필수 확장 확인. (extensionsRequired 에 읽지 못하는 확장이 있으면 Err)
 //==============================================================================
-fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f64> {
+fn check_required_extensions(json: &Value) -> Result<(), String> {
+	let required_extensions = json["extensionsRequired"].as_array().map(|extensions| extensions.as_slice()).unwrap_or(&[]);
+	for extension in required_extensions.iter() {
+		let extension_name = extension.as_str().unwrap_or("");
+		if SUPPORTED_EXTENSIONS.contains(&extension_name) {
+			continue;
+		}
+		return match UNSUPPORTED_EXTENSION_MESSAGES.iter().find(|(name, _)| *name == extension_name) {
+			Some((_, message)) => {
+				Err(String::from(*message))
+			}
+			None => {
+				Err(format!("GLB 의 필수 확장 {} 은 읽지 못합니다.", extension_name))
+			}
+		};
+	}
+	Ok(())
+}
+
+//==============================================================================
+/// 접근자 하나를 수 목록으로 읽기. (촘촘한 것과 byteStride 로 띄운 것, 정수는 담긴 값 그대로)
+/// - 바이너리 덩어리(buffers[0]) 밖의 버퍼를 가리키면 Err. (EXT_meshopt_compression 의 fallback 버퍼도 여기 든다)
+//==============================================================================
+fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Result<Vec<f64>, String> {
 	let accessor = &chunks.json["accessors"][accessor_index];
 	let component_count = match accessor["type"].as_str().unwrap_or("SCALAR") {
 		"VEC2" => {
@@ -419,9 +457,12 @@ fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f64> {
 			4
 		}
 	};
-	let is_normalized = accessor["normalized"].as_bool().unwrap_or(false);
 	let count = accessor["count"].as_u64().unwrap_or(0) as usize;
 	let buffer_view = &chunks.json["bufferViews"][accessor["bufferView"].as_u64().unwrap_or(0) as usize];
+	let buffer_index = buffer_view["buffer"].as_u64().unwrap_or(0);
+	if buffer_index != 0 {
+		return Err(format!("GLB 의 바깥 버퍼(buffers[{}])는 읽지 못합니다. (바이너리 덩어리 buffers[0] 만 읽는다, EXT_meshopt_compression 의 fallback 버퍼도 여기 든다)", buffer_index));
+	}
 	let element_offset = buffer_view["byteOffset"].as_u64().unwrap_or(0) as usize + accessor["byteOffset"].as_u64().unwrap_or(0) as usize;
 	let tight_byte_size = component_count * component_size;
 	let byte_stride = buffer_view["byteStride"].as_u64().unwrap_or(0) as usize;
@@ -441,20 +482,16 @@ fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f64> {
 			};
 			let value = match component_type {
 				5120 => {
-					let raw = bytes[0] as i8 as f64;
-					if is_normalized { (raw / 127.0).max(-1.0) } else { raw }
+					bytes[0] as i8 as f64
 				}
 				5121 => {
-					let raw = bytes[0] as f64;
-					if is_normalized { raw / 255.0 } else { raw }
+					bytes[0] as f64
 				}
 				5122 => {
-					let raw = i16::from_le_bytes([bytes[0], bytes[1]]) as f64;
-					if is_normalized { (raw / 32767.0).max(-1.0) } else { raw }
+					i16::from_le_bytes([bytes[0], bytes[1]]) as f64
 				}
 				5123 => {
-					let raw = u16::from_le_bytes([bytes[0], bytes[1]]) as f64;
-					if is_normalized { raw / 65535.0 } else { raw }
+					u16::from_le_bytes([bytes[0], bytes[1]]) as f64
 				}
 				5125 => {
 					u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
@@ -466,41 +503,148 @@ fn read_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f64> {
 			values.push(value);
 		}
 	}
-	values
+	Ok(values)
 }
 
 //==============================================================================
-/// 무게 접근자 읽기. (정수로 담겼으면 normalized 가 없어도 0 ~ 1 로)
+/// 정규화 정수(normalized 접근자)를 실수로 바꿀 때 나눌 수. (glTF 명세의 공식, 표에 없는 수 종류는 None)
 //==============================================================================
-fn read_weight_accessor(chunks: &GlbChunks, accessor_index: usize) -> Vec<f64> {
-	let values = read_accessor(chunks, accessor_index);
-	let accessor = &chunks.json["accessors"][accessor_index];
-	if accessor["normalized"].as_bool().unwrap_or(false) {
-		return values;
-	}
-	match accessor["componentType"].as_u64().unwrap_or(5126) {
+fn read_normalized_divisor(component_type: u64) -> Option<f64> {
+	match component_type {
+		5120 => {
+			Some(127.0)
+		}
 		5121 => {
-			values.iter().map(|value| value / 255.0).collect()
+			Some(255.0)
+		}
+		5122 => {
+			Some(32767.0)
 		}
 		5123 => {
-			values.iter().map(|value| value / 65535.0).collect()
+			Some(65535.0)
 		}
 		_ => {
-			values
+			None
 		}
 	}
+}
+
+//==============================================================================
+/// 실수로 쓰는 접근자 읽기. (위치, 노멀, 텍스처 좌표, 움직임 값, KHR_mesh_quantization 의 정수 속성을 실수로 되풀이)
+/// - 정규화(normalized) 정수는 glTF 명세의 공식으로 나눈다. (부호 없는 것은 c / 255, c / 65535, 부호 있는 것은 max(c / 127, -1), max(c / 32767, -1))
+/// - 정규화가 아닌 정수는 값 그대로 실수로 옮긴다. (위치의 크기와 자리는 노드 변환이, 텍스처 좌표의 것은 KHR_texture_transform 이 맡는다)
+/// - 정수 접근자의 값은 32비트 실수로 반올림해 둔다. (원본의 Float32Array 와 같은 값)
+/// - is_always_normalized 가 true 면 정수는 normalized 표시가 없어도 정규화로 읽는다. (명세가 늘 정규화로 정한 무게)
+//==============================================================================
+fn read_float_accessor(chunks: &GlbChunks, accessor_index: usize, is_always_normalized: bool) -> Result<Vec<f64>, String> {
+	let accessor = &chunks.json["accessors"][accessor_index];
+	let values = read_accessor(chunks, accessor_index)?;
+	let component_type = accessor["componentType"].as_u64().unwrap_or(FLOAT_COMPONENT_TYPE);
+	if component_type == FLOAT_COMPONENT_TYPE {
+		return Ok(values);
+	}
+	let is_normalized = accessor["normalized"].as_bool() == Some(true) || is_always_normalized;
+	match read_normalized_divisor(component_type) {
+		Some(divisor) if is_normalized => {
+			Ok(values.iter().map(|value| ((value / divisor).max(-1.0) as f32) as f64).collect())
+		}
+		_ => {
+			Ok(values.iter().map(|value| (*value as f32) as f64).collect())
+		}
+	}
+}
+
+//==============================================================================
+/// 무게 접근자 읽기. (정수로 담겼으면 normalized 가 없어도 0 ~ 1 로, glTF 명세가 무게의 정수는 늘 정규화로 정했다)
+//==============================================================================
+fn read_weight_accessor(chunks: &GlbChunks, accessor_index: usize) -> Result<Vec<f64>, String> {
+	read_float_accessor(chunks, accessor_index, true)
+}
+
+//==============================================================================
+/// 재질 텍스처의 KHR_texture_transform 을 텍스처 좌표에 구워 넣기. (변환이 없으면 받은 좌표 그대로)
+/// - 명세의 차례대로 크기, 돌림(시계 반대, 라디안), 자리를 건다. uv' = offset + R(rotation) x (scale x uv)
+///   R 은 명세의 GLSL mat3(cos, sin, 0, -sin, cos, 0, 0, 0, 1) 이다. (열 차례)
+/// - 프리미티브의 텍스처 좌표는 재질의 모든 텍스처가 함께 쓰므로, 바탕 텍스처(없으면 빛남 텍스처)의 변환을 건다. (gltfpack 같은 양자화 도구는 한 재질의 텍스처에 같은 변환을 준다)
+/// - texture_info 는 재질의 텍스처 정보({ index, texCoord, extensions }), tex_coord_index 는 uvs 가 몇 번 텍스처 좌표(TEXCOORD_n)인지다.
+/// - 변환을 건 값은 32비트 실수로 반올림해 둔다. (원본의 Float32Array 와 같은 값) 변환이 없거나 다른 좌표 묶음의 것이면 받은 uvs 그대로.
+//==============================================================================
+fn apply_texture_transform(uvs: Option<Vec<f64>>, texture_info: &Value, tex_coord_index: f64) -> Option<Vec<f64>> {
+	let uvs = uvs?;
+	let transform = &texture_info["extensions"]["KHR_texture_transform"];
+	if transform.is_null() {
+		return Some(uvs);
+	}
+	let base_tex_coord = texture_info["texCoord"].as_f64().unwrap_or(0.0);
+	let transform_tex_coord = transform["texCoord"].as_f64().unwrap_or(base_tex_coord);
+	if transform_tex_coord != tex_coord_index {
+		return Some(uvs);
+	}
+	let offset = read_float_array(&transform["offset"], [0.0, 0.0]);
+	let scale = read_float_array(&transform["scale"], [1.0, 1.0]);
+	let rotation = transform["rotation"].as_f64().unwrap_or(0.0);
+	let cosine = rotation.cos();
+	let sine = rotation.sin();
+	let mut result = vec![0.0; uvs.len()];
+	for value_index in (0..uvs.len().saturating_sub(1)).step_by(2) {
+		let scaled_u = uvs[value_index] * scale[0];
+		let scaled_v = uvs[value_index + 1] * scale[1];
+		result[value_index] = ((offset[0] + cosine * scaled_u - sine * scaled_v) as f32) as f64;
+		result[value_index + 1] = ((offset[1] + sine * scaled_u + cosine * scaled_v) as f32) as f64;
+	}
+	Some(result)
+}
+
+//==============================================================================
+/// 꼭짓점 속성을 삼각형 꼭짓점마다 따로 풀기. (번호 차례대로 component_count 씩 옮긴다, 범위 밖 번호는 0)
+//==============================================================================
+fn unweld_attribute(values: &[f64], indices: &[u32], component_count: usize) -> Vec<f64> {
+	let mut result = Vec::with_capacity(indices.len() * component_count);
+	for index in indices.iter() {
+		for component_index in 0..component_count {
+			result.push(values.get(*index as usize * component_count + component_index).copied().unwrap_or(0.0));
+		}
+	}
+	result
+}
+
+//==============================================================================
+/// 노멀이 없는 프리미티브의 평평한 노멀 짓기. (glTF 2.0 명세: 노멀이 없으면 삼각형마다 노멀 하나인 평평한 노멀이다)
+/// - 꼭짓점을 삼각형마다 따로 풀고(번호는 0 부터 차례로), 삼각형마다 (p1 - p0) x (p2 - p0) 을 길이 1 로 줄여 세 꼭짓점에 준다. (넓이가 0 인 삼각형은 0)
+/// - 돌려주는 것은 (위치, 노멀, 번호, 뼈대 번호, 무게, 텍스처 좌표, 2 번 텍스처 좌표)다. 없던 속성은 None 그대로.
+//==============================================================================
+#[allow(clippy::type_complexity)]
+fn create_flat_normals(positions: &[f64], indices: &[u32], joints: Option<Vec<f64>>, weights: Option<Vec<f64>>, uvs: Option<Vec<f64>>, uvs1: Option<Vec<f64>>) -> (Vec<f64>, Vec<f64>, Vec<u32>, Option<Vec<f64>>, Option<Vec<f64>>, Option<Vec<f64>>, Option<Vec<f64>>) {
+	let flat_positions = unweld_attribute(positions, indices, 3);
+	let mut flat_normals = vec![0.0; flat_positions.len()];
+	for (triangle_index, triangle) in flat_positions.chunks_exact(9).enumerate() {
+		let first_edge = [triangle[3] - triangle[0], triangle[4] - triangle[1], triangle[5] - triangle[2]];
+		let second_edge = [triangle[6] - triangle[0], triangle[7] - triangle[1], triangle[8] - triangle[2]];
+		let cross = [first_edge[1] * second_edge[2] - first_edge[2] * second_edge[1], first_edge[2] * second_edge[0] - first_edge[0] * second_edge[2], first_edge[0] * second_edge[1] - first_edge[1] * second_edge[0]];
+		let length = (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+		if length <= 0.0 {
+			continue;
+		}
+		for corner_index in 0..3 {
+			for axis in 0..3 {
+				flat_normals[triangle_index * 9 + corner_index * 3 + axis] = cross[axis] / length;
+			}
+		}
+	}
+	let flat_indices = (0..indices.len() as u32).collect();
+	(flat_positions, flat_normals, flat_indices, joints.map(|joints| unweld_attribute(&joints, indices, 4)), weights.map(|weights| unweld_attribute(&weights, indices, 4)), uvs.map(|uvs| unweld_attribute(&uvs, indices, 2)), uvs1.map(|uvs1| unweld_attribute(&uvs1, indices, 2)))
 }
 
 //==============================================================================
 /// 꼭짓점 번호 읽기. (번호 접근자가 없으면 0 부터 차례로)
 //==============================================================================
-fn read_indices(chunks: &GlbChunks, primitive: &Value, point_count: usize) -> Vec<u32> {
+fn read_indices(chunks: &GlbChunks, primitive: &Value, point_count: usize) -> Result<Vec<u32>, String> {
 	match primitive["indices"].as_u64() {
 		Some(indices_accessor) => {
-			read_accessor(chunks, indices_accessor as usize).iter().map(|value| *value as u32).collect()
+			Ok(read_accessor(chunks, indices_accessor as usize)?.iter().map(|value| *value as u32).collect())
 		}
 		None => {
-			(0..point_count as u32).collect()
+			Ok((0..point_count as u32).collect())
 		}
 	}
 }
@@ -565,8 +709,10 @@ fn read_material<'a>(chunks: &'a GlbChunks, primitive: &Value) -> &'a Value {
 //==============================================================================
 /// 프리미티브 하나 담기. (바깥선 껍데기는 바깥선 배열에, 나머지는 색과 빛남과 함께)
 /// - 뼈대로 움직이는 프리미티브는 노드 행렬을 쓰지 않는다. (glTF 의 약속, 자리는 본이 정한다)
+/// - part_node 는 재질 범위의 node_name 으로 쓸 부품 노드다. (visit_mesh_nodes 가 넘긴 것)
+/// - 바이너리 덩어리 밖의 버퍼를 가리키는 접근자가 있으면 Err.
 //==============================================================================
-fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, primitive: &Value, matrix: &Matrix4, is_outline_rebuilt: bool) {
+fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, primitive: &Value, matrix: &Matrix4, is_outline_rebuilt: bool, part_node: &Value) -> Result<(), String> {
 	let mode = primitive["mode"].as_u64().unwrap_or(TRIANGLES_MODE);
 	let attributes = &primitive["attributes"];
 	let position_accessor = match attributes["POSITION"].as_u64() {
@@ -574,34 +720,60 @@ fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, pr
 			position_accessor as usize
 		}
 		_ => {
-			return;
+			return Ok(());
 		}
 	};
-	let positions = read_accessor(chunks, position_accessor);
-	let indices = read_indices(chunks, primitive, positions.len() / 3);
+	let positions = read_float_accessor(chunks, position_accessor, false)?;
+	let indices = read_indices(chunks, primitive, positions.len() / 3)?;
 	let is_skinned = !node["skin"].is_null() && attributes["JOINTS_0"].is_u64() && attributes["WEIGHTS_0"].is_u64();
 	let identity_matrix = Matrix4::default();
 	let part_matrix = if is_skinned { &identity_matrix } else { matrix };
-	let joints = if is_skinned { Some(read_accessor(chunks, attributes["JOINTS_0"].as_u64().unwrap_or(0) as usize)) } else { None };
-	let weights = if is_skinned { Some(read_weight_accessor(chunks, attributes["WEIGHTS_0"].as_u64().unwrap_or(0) as usize)) } else { None };
+	let joints = if is_skinned { Some(read_accessor(chunks, attributes["JOINTS_0"].as_u64().unwrap_or(0) as usize)?) } else { None };
+	let weights = if is_skinned { Some(read_weight_accessor(chunks, attributes["WEIGHTS_0"].as_u64().unwrap_or(0) as usize)?) } else { None };
 	let material = read_material(chunks, primitive);
 	if material["extras"]["outline"].as_bool() == Some(true) {
 		if !is_outline_rebuilt {
 			builder.add_outline_triangles(&positions, &indices, part_matrix, joints.as_deref(), weights.as_deref());
 		}
-		return;
+		return Ok(());
 	}
-	let normal_accessor = match attributes["NORMAL"].as_u64() {
+	let normals = match attributes["NORMAL"].as_u64() {
 		Some(normal_accessor) => {
-			normal_accessor as usize
+			Some(read_float_accessor(chunks, normal_accessor as usize, false)?)
 		}
 		None => {
-			return;
+			None
 		}
 	};
-	let normals = read_accessor(chunks, normal_accessor);
-	let uvs = attributes["TEXCOORD_0"].as_u64().map(|uv_accessor| read_accessor(chunks, uv_accessor as usize));
-	let uvs1 = attributes["TEXCOORD_1"].as_u64().map(|uv_accessor| read_accessor(chunks, uv_accessor as usize));
+	let base_color_texture = &material["pbrMetallicRoughness"]["baseColorTexture"];
+	let transformed_texture_info = if base_color_texture.is_null() { &material["emissiveTexture"] } else { base_color_texture };
+	let source_uvs = match attributes["TEXCOORD_0"].as_u64() {
+		Some(uv_accessor) => {
+			Some(read_float_accessor(chunks, uv_accessor as usize, false)?)
+		}
+		None => {
+			None
+		}
+	};
+	let source_uvs1 = match attributes["TEXCOORD_1"].as_u64() {
+		Some(uv_accessor) => {
+			Some(read_float_accessor(chunks, uv_accessor as usize, false)?)
+		}
+		None => {
+			None
+		}
+	};
+	let uvs = apply_texture_transform(source_uvs, transformed_texture_info, 0.0);
+	let uvs1 = apply_texture_transform(source_uvs1, transformed_texture_info, 1.0);
+	// 노멀이 없으면 명세대로 평평한 노멀을 짓는다. (꼭짓점을 삼각형마다 따로 푼다)
+	let (positions, normals, indices, joints, weights, uvs, uvs1) = match normals {
+		Some(normals) => {
+			(positions, normals, indices, joints, weights, uvs, uvs1)
+		}
+		None => {
+			create_flat_normals(&positions, &indices, joints, weights, uvs, uvs1)
+		}
+	};
 	let base_color = read_float_array(&material["pbrMetallicRoughness"]["baseColorFactor"], [1.0; 4]);
 	let color = [base_color[0].max(0.0).powf(1.0 / 2.2), base_color[1].max(0.0).powf(1.0 / 2.2), base_color[2].max(0.0).powf(1.0 / 2.2)];
 	// 빛남은 바탕색에 곱하는 세기로 담는다. (셰이더는 바탕색 x 세기를 더한다)
@@ -619,7 +791,7 @@ fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, pr
 	builder.add_material_range(ToonMaterialRange {
 		name: String::from(material["name"].as_str().unwrap_or("")),
 		material_index: primitive["material"].as_u64().map(|material_index| material_index as usize),
-		node_name: read_node_name(node),
+		node_name: read_node_name(part_node),
 		index_start,
 		index_count: builder.get_index_count() - index_start,
 		extras: if material["extras"].is_object() { material["extras"].clone() } else { Value::Object(serde_json::Map::new()) },
@@ -631,6 +803,7 @@ fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, pr
 		emissive_image,
 		has_uv: uvs.is_some(),
 	});
+	Ok(())
 }
 
 //==============================================================================
@@ -733,21 +906,82 @@ fn read_rebuilt_outline_width(node: &Value, node_names: &HashSet<String>, outlin
 }
 
 //==============================================================================
-/// 노드의 몸으로 바깥선 껍데기 짓기. (색마다 나뉜 프리미티브를 이어 붙여 한 번에 넘긴다, 바깥선 재질과 노멀이 없는 것은 뺀다)
+/// 뼈대 메시의 쉬는 자세 크기. (본마다 본의 쉬는 월드 행렬 x inverseBindMatrices 의 균일 크기, 그 가운데값, 셀 수 없으면 1)
+/// - 정수 위치(KHR_mesh_quantization)의 뼈대 메시는 되풀이 크기가 inverseBindMatrices 에 들어 있어, 메시 좌표 1 이 모형 좌표로 이만큼이다.
+/// - 쉬는 자세가 묶은 자세와 같은 보통 모형에서 실수 위치면 1 에 가깝다.
 //==============================================================================
-fn add_rebuilt_outline(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, matrix: &Matrix4, outline_width: f64) {
+fn read_skin_bind_scale(chunks: &GlbChunks, skin: &Value) -> Result<f64, String> {
+	let nodes = chunks.json["nodes"].as_array().map(|nodes| nodes.as_slice()).unwrap_or(&[]);
+	let mut parent_indices: Vec<Option<usize>> = vec![None; nodes.len()];
+	for (node_index, node) in nodes.iter().enumerate() {
+		if let Some(children) = node["children"].as_array() {
+			for child in children {
+				if let Some(child_index) = child.as_u64() {
+					if (child_index as usize) < parent_indices.len() {
+						parent_indices[child_index as usize] = Some(node_index);
+					}
+				}
+			}
+		}
+	}
+	let inverse_bind_matrices = match skin["inverseBindMatrices"].as_u64() {
+		Some(accessor_index) => {
+			Some(read_float_accessor(chunks, accessor_index as usize, false)?)
+		}
+		None => {
+			None
+		}
+	};
+	let mut scales = Vec::new();
+	let joints = skin["joints"].as_array().map(|joints| joints.as_slice()).unwrap_or(&[]);
+	for (joint_index, joint) in joints.iter().enumerate() {
+		let mut world_matrix = Matrix4::default();
+		let mut node_index = joint.as_u64().map(|joint| joint as usize);
+		while let Some(current_index) = node_index {
+			let mut parent_matrix = read_node_matrix(&chunks.json["nodes"][current_index]);
+			parent_matrix.multiply(&world_matrix);
+			world_matrix = parent_matrix;
+			node_index = parent_indices.get(current_index).copied().flatten();
+		}
+		if let Some(inverse_bind_values) = inverse_bind_matrices.as_ref().and_then(|values| values.get(joint_index * 16..joint_index * 16 + 16)) {
+			let mut inverse_bind_matrix = Matrix4::default();
+			for (element_index, value) in inverse_bind_values.iter().enumerate() {
+				inverse_bind_matrix.elements[element_index] = *value as f32;
+			}
+			world_matrix.multiply(&inverse_bind_matrix);
+		}
+		let elements = world_matrix.elements.map(|value| value as f64);
+		let determinant = elements[0] * (elements[5] * elements[10] - elements[6] * elements[9]) - elements[4] * (elements[1] * elements[10] - elements[2] * elements[9]) + elements[8] * (elements[1] * elements[6] - elements[2] * elements[5]);
+		let scale = determinant.abs().cbrt();
+		if scale > 0.0 && scale.is_finite() {
+			scales.push(scale);
+		}
+	}
+	if scales.is_empty() {
+		return Ok(1.0);
+	}
+	scales.sort_by(|first, second| first.partial_cmp(second).unwrap_or(std::cmp::Ordering::Equal));
+	Ok(scales[scales.len() / 2])
+}
+
+//==============================================================================
+/// 노드의 몸으로 바깥선 껍데기 짓기. (색마다 나뉜 프리미티브를 이어 붙여 한 번에 넘긴다, 바깥선 재질은 빼고 노멀이 없는 것은 평평한 노멀로)
+/// - outline_width 는 모형 좌표의 굵기다. 정수 위치 뼈대 메시는 read_skin_bind_scale 로 나눠 메시 좌표로 바꾼다.
+//==============================================================================
+fn add_rebuilt_outline(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, matrix: &Matrix4, outline_width: f64) -> Result<(), String> {
 	let mut positions = Vec::new();
 	let mut normals = Vec::new();
 	let mut indices = Vec::new();
 	let is_skinned = !node["skin"].is_null();
 	let mut joints = Vec::new();
 	let mut weights = Vec::new();
+	let mut has_integer_positions = false;
 	let mesh_index = node["mesh"].as_u64().unwrap_or(0) as usize;
 	let primitives = chunks.json["meshes"][mesh_index]["primitives"].as_array().cloned().unwrap_or_default();
 	for primitive in primitives.iter() {
 		let mode = primitive["mode"].as_u64().unwrap_or(TRIANGLES_MODE);
 		let attributes = &primitive["attributes"];
-		if mode != TRIANGLES_MODE || !attributes["POSITION"].is_u64() || !attributes["NORMAL"].is_u64() {
+		if mode != TRIANGLES_MODE || !attributes["POSITION"].is_u64() {
 			continue;
 		}
 		let material = read_material(chunks, primitive);
@@ -756,28 +990,51 @@ fn add_rebuilt_outline(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Val
 			continue;
 		}
 		let start_index = (positions.len() / 3) as u32;
-		let primitive_positions = read_accessor(chunks, attributes["POSITION"].as_u64().unwrap_or(0) as usize);
-		let primitive_normals = read_accessor(chunks, attributes["NORMAL"].as_u64().unwrap_or(0) as usize);
-		let primitive_indices = read_indices(chunks, primitive, primitive_positions.len() / 3);
+		let position_accessor = attributes["POSITION"].as_u64().unwrap_or(0) as usize;
+		has_integer_positions = has_integer_positions || chunks.json["accessors"][position_accessor]["componentType"].as_u64().unwrap_or(FLOAT_COMPONENT_TYPE) != FLOAT_COMPONENT_TYPE;
+		let primitive_positions = read_float_accessor(chunks, position_accessor, false)?;
+		let primitive_normals = match attributes["NORMAL"].as_u64() {
+			Some(normal_accessor) => {
+				Some(read_float_accessor(chunks, normal_accessor as usize, false)?)
+			}
+			None => {
+				None
+			}
+		};
+		let primitive_indices = read_indices(chunks, primitive, primitive_positions.len() / 3)?;
+		let primitive_joints = if is_skinned { Some(read_accessor(chunks, attributes["JOINTS_0"].as_u64().unwrap_or(0) as usize)?) } else { None };
+		let primitive_weights = if is_skinned { Some(read_weight_accessor(chunks, attributes["WEIGHTS_0"].as_u64().unwrap_or(0) as usize)?) } else { None };
+		// 노멀이 없으면 몸과 같이 평평한 노멀로 짓는다. (껍데기는 같은 자리 점을 함께 밀어 이어진다)
+		let (primitive_positions, primitive_normals, primitive_indices, primitive_joints, primitive_weights, _, _) = match primitive_normals {
+			Some(primitive_normals) => {
+				(primitive_positions, primitive_normals, primitive_indices, primitive_joints, primitive_weights, None, None)
+			}
+			None => {
+				create_flat_normals(&primitive_positions, &primitive_indices, primitive_joints, primitive_weights, None, None)
+			}
+		};
 		positions.extend_from_slice(&primitive_positions);
 		normals.extend_from_slice(&primitive_normals);
 		indices.extend(primitive_indices.iter().map(|index| start_index + index));
-		if is_skinned {
-			joints.extend(read_accessor(chunks, attributes["JOINTS_0"].as_u64().unwrap_or(0) as usize));
-			weights.extend(read_weight_accessor(chunks, attributes["WEIGHTS_0"].as_u64().unwrap_or(0) as usize));
+		if let (Some(primitive_joints), Some(primitive_weights)) = (primitive_joints, primitive_weights) {
+			joints.extend(primitive_joints);
+			weights.extend(primitive_weights);
 		}
 	}
 	if indices.is_empty() {
-		return;
+		return Ok(());
 	}
 	let identity_matrix = Matrix4::default();
 	let part_matrix = if is_skinned { &identity_matrix } else { matrix };
 	if is_skinned {
-		builder.add_triangle_shell(&positions, &normals, &indices, part_matrix, outline_width, Some(&joints), Some(&weights));
+		// 정수 위치 뼈대 메시는 메시 좌표가 양자화 칸이라, 굵기를 쉬는 자세의 모형 좌표로 맞춘다. (실수 위치는 메시 좌표 그대로)
+		let shell_width = if has_integer_positions { outline_width / read_skin_bind_scale(chunks, &chunks.json["skins"][node["skin"].as_u64().unwrap_or(0) as usize])? } else { outline_width };
+		builder.add_triangle_shell(&positions, &normals, &indices, part_matrix, shell_width, Some(&joints), Some(&weights));
 	}
 	else {
 		builder.add_triangle_shell(&positions, &normals, &indices, part_matrix, outline_width, None, None);
 	}
+	Ok(())
 }
 
 //==============================================================================
@@ -790,9 +1047,23 @@ fn read_node_names(chunks: &GlbChunks) -> HashSet<String> {
 //==============================================================================
 /// 뼈대와 움직임 읽기. (없으면 None, 첫 skin 만)
 //==============================================================================
-fn read_skeleton(chunks: &GlbChunks) -> Option<ToonSkeleton> {
-	let skin = chunks.json["skins"].as_array()?.first()?;
-	let source_nodes = chunks.json["nodes"].as_array()?;
+fn read_skeleton(chunks: &GlbChunks) -> Result<Option<ToonSkeleton>, String> {
+	let skin = match chunks.json["skins"].as_array().and_then(|skins| skins.first()) {
+		Some(skin) => {
+			skin
+		}
+		None => {
+			return Ok(None);
+		}
+	};
+	let source_nodes = match chunks.json["nodes"].as_array() {
+		Some(source_nodes) => {
+			source_nodes
+		}
+		None => {
+			return Ok(None);
+		}
+	};
 	let mut parent_indices: Vec<Option<usize>> = vec![None; source_nodes.len()];
 	for (node_index, node) in source_nodes.iter().enumerate() {
 		if let Some(children) = node["children"].as_array() {
@@ -815,10 +1086,17 @@ fn read_skeleton(chunks: &GlbChunks) -> Option<ToonSkeleton> {
 			matrix: if node["matrix"].is_array() { Some(read_float_array(&node["matrix"], Matrix4::default().read_elements())) } else { None },
 		}
 	}).collect();
-	let joints: Vec<usize> = skin["joints"].as_array()?.iter().filter_map(|joint| joint.as_u64().map(|joint| joint as usize)).collect();
+	let joints: Vec<usize> = match skin["joints"].as_array() {
+		Some(joints) => {
+			joints.iter().filter_map(|joint| joint.as_u64().map(|joint| joint as usize)).collect()
+		}
+		None => {
+			return Ok(None);
+		}
+	};
 	let inverse_bind_matrices = match skin["inverseBindMatrices"].as_u64() {
 		Some(accessor_index) => {
-			read_accessor(chunks, accessor_index as usize).iter().map(|value| *value as f32).collect()
+			read_float_accessor(chunks, accessor_index as usize, false)?.iter().map(|value| *value as f32).collect()
 		}
 		None => {
 			joints.iter().flat_map(|_| Matrix4::default().elements).collect()
@@ -830,8 +1108,8 @@ fn read_skeleton(chunks: &GlbChunks) -> Option<ToonSkeleton> {
 		let mut duration = 0.0f64;
 		for channel in animation["channels"].as_array().cloned().unwrap_or_default() {
 			let sampler = &animation["samplers"][channel["sampler"].as_u64().unwrap_or(0) as usize];
-			let times = read_accessor(chunks, sampler["input"].as_u64().unwrap_or(0) as usize);
-			let values = read_accessor(chunks, sampler["output"].as_u64().unwrap_or(0) as usize);
+			let times = read_float_accessor(chunks, sampler["input"].as_u64().unwrap_or(0) as usize, false)?;
+			let values = read_float_accessor(chunks, sampler["output"].as_u64().unwrap_or(0) as usize, false)?;
 			if let Some(last_time) = times.last() {
 				duration = duration.max(*last_time);
 			}
@@ -860,13 +1138,16 @@ fn read_skeleton(chunks: &GlbChunks) -> Option<ToonSkeleton> {
 		let extras = if animation["extras"].is_object() { animation["extras"].clone() } else { Value::Object(serde_json::Map::new()) };
 		animations.insert(String::from(animation["name"].as_str().unwrap_or("")), ToonAnimation { duration, channels, extras });
 	}
-	Some(ToonSkeleton { joints, inverse_bind_matrices, nodes, animations })
+	Ok(Some(ToonSkeleton { joints, inverse_bind_matrices, nodes, animations }))
 }
 
 //==============================================================================
-/// 장면의 메시 노드를 차례로 돌기. (노드마다 부모까지 곱한 행렬과 함께 visit_event 를 부른다)
+/// 장면의 메시 노드를 차례로 돌기. (노드마다 부모까지 곱한 행렬, 부품 노드와 함께 visit_event(node, matrix, part_node) 를 부른다)
+/// - 부품 노드는 자신부터 위로 올라가 처음 만나는 이름 있는 노드다. (이름 있는 조상이 없으면 메시 노드 자신)
+///   이름 없는 메시 노드는 이름 있는 부모 노드의 부품에 든다. (KHR_mesh_quantization 의 되풀이 변환을 맡는 잎 노드처럼)
+/// - visit_event 가 Err 를 돌려주면 거기서 멈추고 그 Err 를 돌려준다.
 //==============================================================================
-fn visit_mesh_nodes(chunks: &GlbChunks, visit_event: &mut dyn FnMut(&Value, &Matrix4)) {
+fn visit_mesh_nodes(chunks: &GlbChunks, visit_event: &mut dyn FnMut(&Value, &Matrix4, &Value) -> Result<(), String>) -> Result<(), String> {
 	let node_count = chunks.json["nodes"].as_array().map(|nodes| nodes.len()).unwrap_or(0);
 	let scene_index = chunks.json["scene"].as_u64().unwrap_or(0) as usize;
 	let root_nodes: Vec<usize> = match chunks.json["scenes"][scene_index]["nodes"].as_array() {
@@ -878,27 +1159,31 @@ fn visit_mesh_nodes(chunks: &GlbChunks, visit_event: &mut dyn FnMut(&Value, &Mat
 		}
 	};
 	//==============================================================================
-	// 노드 하나 돌기. (부모 행렬에 자기 행렬을 곱하고, 메시가 있으면 visit_event, 그다음 자식으로)
+	// 노드 하나 돌기. (부모 행렬에 자기 행렬을 곱하고, 메시가 있으면 visit_event, 그다음 자식으로, parent_part_node 는 위의 이름 있는 노드)
 	//==============================================================================
-	fn visit(chunks: &GlbChunks, node_index: usize, parent_matrix: &Matrix4, visit_event: &mut dyn FnMut(&Value, &Matrix4)) {
+	fn visit<'a>(chunks: &'a GlbChunks, node_index: usize, parent_matrix: &Matrix4, parent_part_node: Option<&'a Value>, visit_event: &mut dyn FnMut(&Value, &Matrix4, &Value) -> Result<(), String>) -> Result<(), String> {
 		let node = &chunks.json["nodes"][node_index];
 		let mut matrix = *parent_matrix;
 		let node_matrix = read_node_matrix(node);
 		matrix.multiply(&node_matrix);
+		let is_named = node["name"].as_str().is_some_and(|name| !name.is_empty());
+		let named_node = if is_named { Some(node) } else { parent_part_node };
 		if node["mesh"].is_u64() {
-			visit_event(node, &matrix);
+			visit_event(node, &matrix, named_node.unwrap_or(node))?;
 		}
 		if let Some(children) = node["children"].as_array() {
 			for child in children {
 				if let Some(child_index) = child.as_u64() {
-					visit(chunks, child_index as usize, &matrix, visit_event);
+					visit(chunks, child_index as usize, &matrix, named_node, visit_event)?;
 				}
 			}
 		}
+		Ok(())
 	}
 	for node_index in root_nodes {
-		visit(chunks, node_index, &Matrix4::default(), visit_event);
+		visit(chunks, node_index, &Matrix4::default(), None, visit_event)?;
 	}
+	Ok(())
 }
 
 //==============================================================================
@@ -928,18 +1213,18 @@ pub fn read_glb_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOptions
 	let options = outline_options.unwrap_or(&empty_options);
 	let mut inner_nodes: Vec<(Value, Matrix4)> = Vec::new();
 	let mut inner_body_ranges: Vec<(usize, usize)> = Vec::new();
-	visit_mesh_nodes(&chunks, &mut |node: &Value, matrix: &Matrix4| {
+	visit_mesh_nodes(&chunks, &mut |node: &Value, matrix: &Matrix4, part_node: &Value| {
 		let body_start = builder.get_index_count();
 		for primitive in read_primitives(&chunks, node).iter() {
-			add_primitive(&mut builder, &chunks, node, primitive, matrix, is_outline_rebuilt);
+			add_primitive(&mut builder, &chunks, node, primitive, matrix, is_outline_rebuilt, part_node)?;
 		}
 		if !is_outline_rebuilt {
-			return;
+			return Ok(());
 		}
-		if let Some(outline_width) = read_rebuilt_outline_width(node, &node_names, options) {
-			add_rebuilt_outline(&mut builder, &chunks, node, matrix, outline_width);
+		if let Some(outline_width) = read_rebuilt_outline_width(part_node, &node_names, options) {
+			add_rebuilt_outline(&mut builder, &chunks, node, matrix, outline_width)?;
 		}
-		let node_name = read_node_name(node);
+		let node_name = read_node_name(part_node);
 		if options.inner_parts.contains(&node_name) {
 			inner_nodes.push((node.clone(), *matrix));
 		}
@@ -948,12 +1233,13 @@ pub fn read_glb_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOptions
 		if is_inner_body && body_count > 0 {
 			inner_body_ranges.push((body_start, body_count));
 		}
-	});
+		Ok(())
+	})?;
 	let mut inner_outline_ranges = Vec::new();
 	if options.inner_width > 0.0 {
 		for (inner_node, inner_matrix) in inner_nodes.iter() {
 			let inner_start = builder.get_outline_index_count();
-			add_rebuilt_outline(&mut builder, &chunks, inner_node, inner_matrix, options.inner_width);
+			add_rebuilt_outline(&mut builder, &chunks, inner_node, inner_matrix, options.inner_width)?;
 			let inner_count = builder.get_outline_index_count() - inner_start;
 			if inner_count > 0 {
 				inner_outline_ranges.push((inner_start, inner_count));
@@ -961,7 +1247,7 @@ pub fn read_glb_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOptions
 		}
 	}
 	let mut arrays = builder.read_arrays();
-	arrays.skeleton = read_skeleton(&chunks);
+	arrays.skeleton = read_skeleton(&chunks)?;
 	arrays.inner_outline_ranges = inner_outline_ranges;
 	arrays.inner_body_ranges = if inner_nodes.is_empty() { Vec::new() } else { inner_body_ranges };
 	Ok(arrays)
@@ -986,15 +1272,15 @@ pub fn read_glb_node_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOp
 	let mut part_alphas: HashMap<String, f64> = HashMap::new();
 	let is_outline_rebuilt = outline_options.is_some();
 	let node_names = read_node_names(&chunks);
-	visit_mesh_nodes(&chunks, &mut |node: &Value, matrix: &Matrix4| {
-		let node_name = read_node_name(node);
+	visit_mesh_nodes(&chunks, &mut |node: &Value, matrix: &Matrix4, part_node: &Value| {
+		let node_name = read_node_name(part_node);
 		let part_name = String::from(node_name.strip_suffix(OUTLINE_NODE_SUFFIX).unwrap_or(&node_name));
 		let builder = builders.entry(part_name.clone()).or_default();
-		if part_name == node_name && node["extras"].is_object() {
-			part_extras.insert(part_name.clone(), node["extras"].clone());
+		if part_name == node_name && part_node["extras"].is_object() {
+			part_extras.insert(part_name.clone(), part_node["extras"].clone());
 		}
 		for primitive in read_primitives(&chunks, node).iter() {
-			add_primitive(builder, &chunks, node, primitive, matrix, is_outline_rebuilt);
+			add_primitive(builder, &chunks, node, primitive, matrix, is_outline_rebuilt, part_node)?;
 			let material = read_material(&chunks, primitive);
 			if material["alphaMode"].as_str() == Some("BLEND") {
 				let base_color = read_float_array(&material["pbrMetallicRoughness"]["baseColorFactor"], [1.0; 4]);
@@ -1003,11 +1289,12 @@ pub fn read_glb_node_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOp
 			}
 		}
 		if let Some(outline_options) = outline_options {
-			if let Some(outline_width) = read_rebuilt_outline_width(node, &node_names, outline_options) {
-				add_rebuilt_outline(builder, &chunks, node, matrix, outline_width);
+			if let Some(outline_width) = read_rebuilt_outline_width(part_node, &node_names, outline_options) {
+				add_rebuilt_outline(builder, &chunks, node, matrix, outline_width)?;
 			}
 		}
-	});
+		Ok(())
+	})?;
 	let mut part_arrays = HashMap::new();
 	for (part_name, builder) in builders.into_iter() {
 		let extras = part_extras.remove(&part_name).unwrap_or_else(|| Value::Object(serde_json::Map::new()));
@@ -1018,7 +1305,7 @@ pub fn read_glb_node_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOp
 }
 
 //==============================================================================
-/// GLB 의 메시 노드마다의 extras, 가운데, 따르는 본. (이름 끝이 ".outline" 인 노드와 바깥선 재질은 뺀다)
+/// GLB 의 메시 노드마다의 extras, 가운데, 따르는 본. (이름 끝이 ".outline" 인 노드와 바깥선 재질은 뺀다, 이름 없는 메시 노드는 이름 있는 부모 부품에 모은다)
 /// - center 는 꼭짓점이 놓인 범위의 가운데다. (모형 좌표, 뼈대로 움직이는 노드는 쉬는 자세의 자리, 꼭짓점이 없으면 원점)
 /// - joint_index 는 그 노드의 꼭짓점이 가장 무겁게 딸린 본의 skin 안 차례다. (write_skin_pose 가 쓴 본 행렬의 차례)
 ///
@@ -1030,15 +1317,14 @@ pub fn read_glb_node_arrays(bytes: &[u8], outline_options: Option<&ToonOutlineOp
 //==============================================================================
 pub fn read_glb_node_infos(bytes: &[u8]) -> Result<HashMap<String, ToonNodeInfo>, String> {
 	let chunks = read_glb_chunks(bytes)?;
-	let mut node_infos = HashMap::new();
-	visit_mesh_nodes(&chunks, &mut |node: &Value, matrix: &Matrix4| {
-		let node_name = read_node_name(node);
+	// 부품 이름마다 (부품 노드, 가장 작은 자리, 가장 큰 자리, 본마다의 무게 합).
+	let mut part_bounds: HashMap<String, (Value, [f64; 3], [f64; 3], HashMap<usize, f64>)> = HashMap::new();
+	visit_mesh_nodes(&chunks, &mut |node: &Value, matrix: &Matrix4, part_node: &Value| {
+		let node_name = read_node_name(part_node);
 		if node_name.ends_with(OUTLINE_NODE_SUFFIX) {
-			return;
+			return Ok(());
 		}
-		let mut minimum = [f64::MAX; 3];
-		let mut maximum = [f64::MIN; 3];
-		let mut joint_weights: HashMap<usize, f64> = HashMap::new();
+		let (_, minimum, maximum, joint_weights) = part_bounds.entry(node_name).or_insert_with(|| (part_node.clone(), [f64::MAX; 3], [f64::MIN; 3], HashMap::new()));
 		for primitive in read_primitives(&chunks, node).iter() {
 			let attributes = &primitive["attributes"];
 			let position_accessor = match attributes["POSITION"].as_u64() {
@@ -1053,7 +1339,7 @@ pub fn read_glb_node_infos(bytes: &[u8]) -> Result<HashMap<String, ToonNodeInfo>
 				continue;
 			}
 			let is_skinned = !node["skin"].is_null() && attributes["JOINTS_0"].is_u64() && attributes["WEIGHTS_0"].is_u64();
-			let positions = read_accessor(&chunks, position_accessor);
+			let positions = read_float_accessor(&chunks, position_accessor, false)?;
 			for point in positions.chunks(3) {
 				let mut point_value = [point[0], point[1], point[2]];
 				if !is_skinned {
@@ -1066,18 +1352,22 @@ pub fn read_glb_node_infos(bytes: &[u8]) -> Result<HashMap<String, ToonNodeInfo>
 				}
 			}
 			if is_skinned {
-				let joints = read_accessor(&chunks, attributes["JOINTS_0"].as_u64().unwrap_or(0) as usize);
-				let weights = read_weight_accessor(&chunks, attributes["WEIGHTS_0"].as_u64().unwrap_or(0) as usize);
+				let joints = read_accessor(&chunks, attributes["JOINTS_0"].as_u64().unwrap_or(0) as usize)?;
+				let weights = read_weight_accessor(&chunks, attributes["WEIGHTS_0"].as_u64().unwrap_or(0) as usize)?;
 				for (joint, weight) in joints.iter().zip(weights.iter()) {
 					*joint_weights.entry(*joint as usize).or_insert(0.0) += *weight;
 				}
 			}
 		}
+		Ok(())
+	})?;
+	let mut node_infos = HashMap::new();
+	for (node_name, (part_node, minimum, maximum, joint_weights)) in part_bounds.into_iter() {
 		let center = if minimum[0] <= maximum[0] { [(minimum[0] + maximum[0]) / 2.0, (minimum[1] + maximum[1]) / 2.0, (minimum[2] + maximum[2]) / 2.0] } else { [0.0; 3] };
 		let joint_index = joint_weights.iter().filter(|(_, weight)| **weight > 0.0).max_by(|first, second| first.1.partial_cmp(second.1).unwrap_or(std::cmp::Ordering::Equal)).map(|(joint_index, _)| *joint_index);
-		let extras = if node["extras"].is_object() { node["extras"].clone() } else { Value::Object(serde_json::Map::new()) };
+		let extras = if part_node["extras"].is_object() { part_node["extras"].clone() } else { Value::Object(serde_json::Map::new()) };
 		node_infos.insert(node_name, ToonNodeInfo { extras, center, joint_index });
-	});
+	}
 	Ok(node_infos)
 }
 
