@@ -13883,6 +13883,18 @@
 			"vanilla-engine": {
 				"module": "core/node/worldnode",
 				"class": "WorldNode",
+				"name": "copy_content_size_to"
+			},
+			"vanilla.js": {
+				"module": "core/node/worldnode",
+				"class": "WorldNode",
+				"name": "copyContentSizeTo"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/node/worldnode",
+				"class": "WorldNode",
 				"name": "set_local_position_xy"
 			},
 			"vanilla.js": {
@@ -14653,6 +14665,18 @@
 				"module": "core/graphic/shaderprogram",
 				"class": "ShaderProgram",
 				"name": "constructor"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/shaderprogram",
+				"class": "ShaderProgram",
+				"name": "use_program"
+			},
+			"vanilla.js": {
+				"module": "core/graphic/shaderprogram",
+				"class": "ShaderProgram",
+				"name": "useProgram"
 			}
 		},
 		{
@@ -19525,6 +19549,18 @@
 				"module": "graphics3d/shadowmap",
 				"class": "ShadowAtlas",
 				"name": "getLights"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "get_light_count"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "getLightCount"
 			}
 		},
 		{

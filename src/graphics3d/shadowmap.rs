@@ -536,6 +536,25 @@ impl ShadowAtlas {
 	}
 
 	//==============================================================================
+	/// 그림자를 받는 빛 개수 반환. (원본 getLightCount, get_lights 의 길이)
+	///
+	/// # 돌려줌
+	/// 마지막 update_lights 가 고른 빛 개수. (0 ~ SHADOW_ATLAS_MAXIMUM_LIGHTS)
+	///
+	/// # 예제
+	/// ```rust
+	/// use vanilla::ShadowAtlas;
+	///
+	/// fn has_shadow_lights(shadow_atlas: &ShadowAtlas) -> bool {
+	/// 	shadow_atlas.get_light_count() > 0
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn get_light_count(&self) -> usize {
+		self.light_list.len()
+	}
+
+	//==============================================================================
 	/// 칸마다 바라는 한 변 반환. (픽셀, 생성 때 준 값)
 	///
 	/// # 돌려줌

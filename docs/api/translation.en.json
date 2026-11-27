@@ -14736,5 +14736,9 @@
 	"3D 만 반 해상도로 그리기": "Drawing only the 3D at half resolution",
 	"렌더 스케일 반환.": "Returns the render scale.",
 	"배율. (1 이면 화면에 바로 그린다)": "Scale. (1 draws directly to the screen)",
-	"(렌더러, 카메라, 화면 사각형, GL, 출력) 를 받는 함수. (None 이면 그리지 않음)\n화면 사각형은 지금 프레임 버퍼에서 그릴 사각형(픽셀, 왼쪽 위 원점), 출력은 지금 묶인 프레임 버퍼와 그 안의 GL 뷰포트(왼쪽 아래 원점)다.": "Function that receives (renderer, camera, screen rectangle, GL, output). (Draws nothing if None)\nThe screen rectangle is the rectangle to draw in the current framebuffer (pixels, top-left origin), and the output is the framebuffer bound now and the GL viewport inside it (bottom-left origin)."
+	"(렌더러, 카메라, 화면 사각형, GL, 출력) 를 받는 함수. (None 이면 그리지 않음)\n화면 사각형은 지금 프레임 버퍼에서 그릴 사각형(픽셀, 왼쪽 위 원점), 출력은 지금 묶인 프레임 버퍼와 그 안의 GL 뷰포트(왼쪽 아래 원점)다.": "Function that receives (renderer, camera, screen rectangle, GL, output). (Draws nothing if None)\nThe screen rectangle is the rectangle to draw in the current framebuffer (pixels, top-left origin), and the output is the framebuffer bound now and the GL viewport inside it (bottom-left origin).",
+	"내용 크기를 target 에 적는다. (원본 copyContentSizeTo, 새 값을 만들지 않고 받을 자리에 적는다)": "Writes the content size into target. (the original copyContentSizeTo, writes into the given place without making a new value)",
+	"내용 크기를 받을 벡터. (노드 좌표, 배율을 걸기 전)": "Vector that receives the content size. (node coordinates, before scale)",
+	"그림자를 받는 빛 개수 반환. (원본 getLightCount, get_lights 의 길이)": "Returns the number of shadow-casting lights. (the original getLightCount, the length of get_lights)",
+	"마지막 update_lights 가 고른 빛 개수. (0 ~ SHADOW_ATLAS_MAXIMUM_LIGHTS)": "Number of lights the last update_lights picked. (0 ~ SHADOW_ATLAS_MAXIMUM_LIGHTS)"
 }
