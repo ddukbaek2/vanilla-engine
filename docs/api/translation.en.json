@@ -15194,5 +15194,8 @@
 	"바뀐 변수를 받는 함수. None 이면 지운다.": "Function that receives the changed variable. None clears it.",
 	"값이 바뀔 때 알기": "Notice when the value changes",
 	"값이 바뀔 때 부를 함수 반환. (원본 getValueChangedEvent)": "Returns the function called when the value changes. (original getValueChangedEvent)",
-	"건 함수. 없으면 None.": "The set function. None if there is none."
+	"건 함수. 없으면 None.": "The set function. None if there is none.",
+	"하위 트리가 보이는 사각형(화면과 걸린 자르기) 안에 다 든 노드를 그리는 중인지. (원본 Graphic.isInsideVisibleBounds)\n- 참이면 그 노드의 자손은 화면 밖 견주기 없이 그려도 된다. 그 아래에서 자르기를 새로 걸면 그 자르기 안에서는 거짓이다(다시 견준다).\n- 화면 밖 거르기나 하위 트리 거르기가 꺼졌거나 기즈모를 모두 그리면 거짓.": "Whether a node whose subtree lies fully inside the visible rect (the screen and the applied clip) is being drawn. (original Graphic.isInsideVisibleBounds)\n- When true, the descendants of that node may be drawn without the off screen check. Under a clip begun below it, it is false inside that clip (checked again).\n- False when off screen culling or subtree culling is off, or when all gizmos are drawn.",
+	"다 안이면 true.": "true when fully inside.",
+	"그리는 컴포넌트에서 '다 안' 인지 보기": "Checking whether a drawing component is fully inside"
 }
