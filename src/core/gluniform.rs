@@ -23,30 +23,45 @@ pub(crate) trait GlUniformF64 {
 }
 
 impl GlUniformF64 for glow::Context {
+	//==============================================================================
+	/// float 유니폼 하나. (f64 를 f32 로 줄여 glow uniform_1_f32 에)
+	//==============================================================================
 	unsafe fn uniform_1_f64(&self, location: Option<&glow::UniformLocation>, x: f64) {
 		unsafe {
 			self.uniform_1_f32(location, x as f32);
 		}
 	}
 
+	//==============================================================================
+	/// vec2 유니폼. (f64 를 f32 로 줄여 glow uniform_2_f32 에)
+	//==============================================================================
 	unsafe fn uniform_2_f64(&self, location: Option<&glow::UniformLocation>, x: f64, y: f64) {
 		unsafe {
 			self.uniform_2_f32(location, x as f32, y as f32);
 		}
 	}
 
+	//==============================================================================
+	/// vec3 유니폼. (f64 를 f32 로 줄여 glow uniform_3_f32 에)
+	//==============================================================================
 	unsafe fn uniform_3_f64(&self, location: Option<&glow::UniformLocation>, x: f64, y: f64, z: f64) {
 		unsafe {
 			self.uniform_3_f32(location, x as f32, y as f32, z as f32);
 		}
 	}
 
+	//==============================================================================
+	/// vec4 유니폼. (f64 를 f32 로 줄여 glow uniform_4_f32 에)
+	//==============================================================================
 	unsafe fn uniform_4_f64(&self, location: Option<&glow::UniformLocation>, x: f64, y: f64, z: f64, w: f64) {
 		unsafe {
 			self.uniform_4_f32(location, x as f32, y as f32, z as f32, w as f32);
 		}
 	}
 
+	//==============================================================================
+	/// 정점 속성의 고정 값. (f64 를 f32 로 줄여 glow vertex_attrib_4_f32 에)
+	//==============================================================================
 	unsafe fn vertex_attrib_4_f64(&self, index: u32, x: f64, y: f64, z: f64, w: f64) {
 		unsafe {
 			self.vertex_attrib_4_f32(index, x as f32, y as f32, z as f32, w as f32);
