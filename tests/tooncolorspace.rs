@@ -107,8 +107,8 @@ fn main() {
 	let gamma_data_encoding = read_encoding(gl, gamma_renderer.create_texture(gl, 1, 1, &pixel, ToonTextureOptions { is_color_data: false, ..not_mipmapped }).unwrap());
 	let linear_color_encoding = read_encoding(gl, linear_renderer.create_texture(gl, 1, 1, &pixel, ToonTextureOptions::default()).unwrap());
 	let linear_data_encoding = read_encoding(gl, linear_renderer.create_texture(gl, 1, 1, &pixel, ToonTextureOptions { is_color_data: false, ..ToonTextureOptions::default() }).unwrap());
-	let gamma_sources = compose_toon_program_sources(None, None, false, ColorSpace::Gamma);
-	let linear_sources = compose_toon_program_sources(None, None, false, ColorSpace::Linear);
+	let gamma_sources = compose_toon_program_sources(None, None, false, ColorSpace::Gamma, &[]);
+	let linear_sources = compose_toon_program_sources(None, None, false, ColorSpace::Linear, &[]);
 	let read_list = |sources: &vanilla::ToonProgramSources| -> Vec<String> {
 		vec![sources.solid_vertex_shader.clone(), sources.solid_fragment_shader.clone(), sources.outline_vertex_shader.clone(), sources.outline_fragment_shader.clone(), sources.depth_vertex_shader.clone(), sources.depth_fragment_shader.clone()]
 	};
@@ -120,7 +120,7 @@ fn main() {
 	let linear_post_process = ToonPostProcess::new_with_options(gl, 64, 64, ToonPostProcessOptions { color_space: ColorSpace::Linear, ..ToonPostProcessOptions::default() }).expect("선형 후처리");
 	let gamma_post_process = ToonPostProcess::new_with_options(gl, 64, 64, ToonPostProcessOptions { color_space: ColorSpace::Gamma, ..ToonPostProcessOptions::default() }).expect("감마 후처리");
 	let linear_screen_outline = ToonScreenOutline::new_with_options(gl, ToonScreenOutlineOptions { color_space: ColorSpace::Linear }).expect("선형 화면 바깥선");
-	let linear_ambient_occlusion_sources = compose_toon_program_sources(None, None, true, ColorSpace::Linear);
+	let linear_ambient_occlusion_sources = compose_toon_program_sources(None, None, true, ColorSpace::Linear, &[]);
 	let gamma_mixed = read_mixed_pixels(gl, &mut gamma_renderer);
 	let linear_mixed = read_mixed_pixels(gl, &mut linear_renderer);
 	let center = (32 * 64 + 32) * 4;

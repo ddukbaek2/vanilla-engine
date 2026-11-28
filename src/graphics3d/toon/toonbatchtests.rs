@@ -4,7 +4,7 @@
 //! - 화면 해시는 TOON_BATCH_HASH 가 있으면 줄마다 `해시 이름 값` 으로 찍는다. (고치기 전 코드와 견주기)
 //==============================================================================
 use super::toondrawqueue::{ToonDrawQueue, ToonDrawStage};
-use super::toonrenderer::{ToonDrawOptions, ToonMesh, ToonRenderer, UPLOAD_COUNTS};
+use super::toonrenderer::{ToonDrawOptions, ToonMesh, ToonRenderer, BUILT_FEATURE_VARIANTS, DISABLE_FEATURE_VARIANTS, UPLOAD_COUNTS};
 use super::toonscreenoutline::ToonScreenOutline;
 use crate::base::matrix4::Matrix4;
 use crate::core::glcontext::GlContext;
@@ -444,4 +444,39 @@ fn shader_build_failure_is_reported_once_and_not_remembered_while_context_lost()
 	assert!(!renderer.prepare_material(gl, Some(&lost_material), None));
 	assert_eq!(received_list.borrow().len(), 2);
 	renderer.destroy(gl);
+}
+
+//==============================================================================
+/// 몸 셰이더 기능 변형: 쓰지 않는 갈래를 뺀 몸 프로그램은 그리기 꼴마다 하나만 짓고, 화면은 모든 갈래를 켠 기본 프로그램과 바이트까지 같다.
+/// - 기본 장면(텍스처 없음, 그림자 받음, 기본 빛)은 변형 하나, 그림자 받지 않는 그리기는 다른 변형 하나, 같은 조합은 다시 짓지 않는다.
+//==============================================================================
+#[test]
+fn body_feature_variant_keeps_pixels() {
+	let Some(glow_context) = crate::core::glstatecache::tests::create_surfaceless_context() else {
+		panic!("창 없는 GL 컨텍스트를 짓지 못함");
+	};
+	let _ = crate::core::glstatecache::attach(&glow_context);
+	let gl: &GlContext = GlContext::from_context(&glow_context);
+	let target = create_target(gl);
+	let mut renderer = ToonRenderer::new(gl).expect("툰 렌더러");
+	let box_mesh = create_mesh(gl, &mut renderer, &create_box_geometry(0.8, 0.8, 0.8), "#c08060");
+	let sphere_mesh = create_mesh(gl, &mut renderer, &create_sphere_geometry(0.4, 12, 8, std::f64::consts::PI), "#6080c0");
+	let mut shadow_map = ShadowMap::new(gl, 256).expect("그림자 판");
+	shadow_map.set_update_mode(ShadowUpdateMode::EveryFrame, 1);
+	shadow_map.update_light_matrix(Vector3::create(0.0, 0.0, 0.0), Vector3::create(-0.5, -1.0, -0.4), 6.0, 0.1, 20.0);
+	DISABLE_FEATURE_VARIANTS.with(|flag| flag.set(true));
+	let (base_pixels, _, _, _) = draw_scene(gl, &mut renderer, &target, &box_mesh, &sphere_mesh, Some(&shadow_map), false, None);
+	assert_eq!(BUILT_FEATURE_VARIANTS.with(|count| count.get()), 0, "변형을 끄면 짓지 않는다");
+	DISABLE_FEATURE_VARIANTS.with(|flag| flag.set(false));
+	let (variant_pixels, _, _, _) = draw_scene(gl, &mut renderer, &target, &box_mesh, &sphere_mesh, Some(&shadow_map), false, None);
+	let built_once = BUILT_FEATURE_VARIANTS.with(|count| count.get());
+	let (again_pixels, _, _, _) = draw_scene(gl, &mut renderer, &target, &box_mesh, &sphere_mesh, Some(&shadow_map), false, None);
+	eprintln!("몸 기능 변형: 지은 변형 {} 다시 그린 뒤 {}", built_once, BUILT_FEATURE_VARIANTS.with(|count| count.get()));
+	print_hash("bodyvariant", &variant_pixels);
+	assert_eq!(unsafe { glow_context_error(&glow_context) }, 0, "GL 오류");
+	assert_eq!(built_once, 1, "쓰지 않는 갈래를 뺀 몸 프로그램 하나를 짓는다");
+	assert_eq!(BUILT_FEATURE_VARIANTS.with(|count| count.get()), built_once, "같은 조합은 다시 짓지 않는다");
+	assert!(base_pixels.chunks(4).any(|pixel| pixel[0] != 26), "무엇인가 그려졌다");
+	assert!(base_pixels == variant_pixels, "변형 프로그램 화면이 기본 프로그램과 바이트까지 같다");
+	assert!(variant_pixels == again_pixels, "다시 그려도 같은 화면");
 }
