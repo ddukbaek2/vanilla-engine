@@ -398,3 +398,48 @@ fn destroy_outline(gl: &GlContext, mut first: ToonScreenOutline, mut second: Too
 	first.destroy(gl);
 	second.destroy(gl);
 }
+
+//==============================================================================
+/// 셰이더 짓기 실패 알림. (원본 tests/graphics3d/toonshaderbuilderrorchrome.test.mjs 와 같은 검사)
+/// 일부러 틀린 머티리얼 조각은 그래픽 오류 리스너에 한 번 알리고 기억해 다시 알리지 않는다. 컨텍스트를 잃은 동안의 실패는 알리지도 기억하지도 않아 되살린 뒤 다시 짓는다.
+//==============================================================================
+#[test]
+fn shader_build_failure_is_reported_once_and_not_remembered_while_context_lost() {
+	use crate::core::engine::{Engine, EngineConfiguration, GraphicError, GraphicErrorKind, GraphicErrorListener};
+	use crate::ToonMaterialChunks;
+	use std::cell::RefCell;
+	use std::rc::Rc;
+	let Some(glow_context) = crate::core::glstatecache::tests::create_surfaceless_context() else {
+		panic!("창 없는 GL 컨텍스트를 짓지 못함");
+	};
+	let _ = crate::core::glstatecache::attach(&glow_context);
+	let gl: &GlContext = GlContext::from_context(&glow_context);
+	let engine = Engine::new(EngineConfiguration::new());
+	let received_list: Rc<RefCell<Vec<GraphicError>>> = Rc::new(RefCell::new(Vec::new()));
+	let listener_received_list = received_list.clone();
+	let graphic_error_listener: GraphicErrorListener = Rc::new(RefCell::new(move |graphic_error: &GraphicError| {
+		listener_received_list.borrow_mut().push(graphic_error.clone());
+	}));
+	engine.add_graphic_error_listener(&graphic_error_listener);
+	let mut renderer = ToonRenderer::new(gl).expect("툰 렌더러");
+	let bad_material = renderer.create_material(ToonMaterialChunks { name: String::from("badMaterial"), surface_chunk: String::from("void applySurface(inout ToonSurface surface) { this is not glsl }"), ..Default::default() });
+	let good_material = renderer.create_material(ToonMaterialChunks { name: String::from("goodMaterial"), surface_chunk: String::from("void applySurface(inout ToonSurface surface) { surface.baseColor *= 0.5; }"), ..Default::default() });
+	assert!(!renderer.prepare_material(gl, Some(&bad_material), None));
+	assert!(!renderer.prepare_material(gl, Some(&bad_material), None));
+	assert!(renderer.prepare_material(gl, Some(&good_material), None));
+	assert_eq!(received_list.borrow().len(), 1);
+	assert_eq!(received_list.borrow()[0].kind, GraphicErrorKind::ShaderBuildFailed);
+	assert_eq!(received_list.borrow()[0].name, "ToonRenderer.badMaterial");
+	assert!(!received_list.borrow()[0].error.is_empty());
+	// 컨텍스트를 잃은 동안의 실패. (다른 틀린 머티리얼, 알리지도 기억하지도 않는다)
+	let lost_material = renderer.create_material(ToonMaterialChunks { name: String::from("lostMaterial"), surface_chunk: String::from("void applySurface(inout ToonSurface surface) { this is not glsl }"), ..Default::default() });
+	GlContext::set_context_lost(true);
+	assert!(!renderer.prepare_material(gl, Some(&lost_material), None));
+	assert_eq!(received_list.borrow().len(), 1);
+	GlContext::set_context_lost(false);
+	assert!(!renderer.prepare_material(gl, Some(&lost_material), None));
+	assert_eq!(received_list.borrow().len(), 2, "잃은 동안의 실패를 기억하지 않아 되살린 뒤 다시 지어 한 번 알린다");
+	assert!(!renderer.prepare_material(gl, Some(&lost_material), None));
+	assert_eq!(received_list.borrow().len(), 2);
+	renderer.destroy(gl);
+}

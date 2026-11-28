@@ -108,7 +108,7 @@ pub use vanilla_engine_macros::reflect;
 pub use crate::core::engine::{Engine, EngineConfiguration, GpuThroughput};
 pub use crate::core::colorspace::ColorSpace;
 pub use crate::core::globalengine::EngineAccessError;
-pub use crate::core::engine::{PageEvent, PageEventListener};
+pub use crate::core::engine::{PageEvent, PageEventListener, GraphicContextEvent, GraphicContextEventListener, GraphicError, GraphicErrorKind, GraphicErrorListener};
 pub use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind, ModalDialogResult};
 pub use crate::core::frame::Frame;
 pub use crate::core::shaderprogram::ShaderProgram;

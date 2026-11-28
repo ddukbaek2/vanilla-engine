@@ -17,6 +17,11 @@ use std::rc::Rc;
 
 mod generated;
 
+thread_local! {
+	/// WebGL 컨텍스트를 잃은 동안 참. (웹 플랫폼이 webglcontextlost 에서 세우고 되살려 자원을 다시 지은 뒤 내린다. 데스크탑은 늘 거짓)
+	static IS_CONTEXT_LOST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 //==============================================================================
 /// 엔진 GL 컨텍스트. (원본 WebGL2RenderingContext, Graphic::get_gl 이 준다, 상태 함수가 상태 캐시를 거친다)
 /// - glow 의 HasContext 메서드 모두를 같은 이름, 같은 꼴로 둔다. 상태 함수(묶기, 켜고 끄기, 뷰포트, 가위, 섞기, 깊이, 면, 프로그램, 버텍스 어레이, 버퍼 묶기, 텍스처, 비우기 색, 픽셀 저장)는
@@ -50,6 +55,38 @@ pub struct GlContext {
 }
 
 impl GlContext {
+	//==============================================================================
+	/// 컨텍스트를 잃은 상태인지. (원본 WebGL2RenderingContext.isContextLost, 웹은 webglcontextlost 에서 참이 되고 엔진이 자원을 다시 지은 뒤 거짓이 된다)
+	/// - 잃은 동안 셰이더를 짓거나 그리는 호출은 GL 이 무시하므로 실패해도 셰이더 탓이 아니다. 데스크탑은 컨텍스트를 잃지 않아 늘 거짓이다.
+	///
+	/// # 돌려줌
+	/// 잃은 동안 true.
+	///
+	/// # 예제
+	/// 잃은 동안 게임이 하던 그리기 건너뛰기
+	/// ```rust,no_run
+	/// use vanilla::Graphic;
+	///
+	/// fn draw(graphic: &mut Graphic) {
+	/// 	if graphic.get_gl().is_context_lost() {
+	/// 		return;
+	/// 	}
+	/// 	graphic.reset_gl_state_cache();
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn is_context_lost(&self) -> bool {
+		IS_CONTEXT_LOST.with(|is_context_lost| is_context_lost.get())
+	}
+
+	//==============================================================================
+	/// 컨텍스트를 잃었다고 적기. (웹 플랫폼과 시험이 부른다)
+	//==============================================================================
+	#[cfg(any(target_arch = "wasm32", test))]
+	pub(crate) fn set_context_lost(is_context_lost: bool) {
+		IS_CONTEXT_LOST.with(|cell| cell.set(is_context_lost));
+	}
+
 	//==============================================================================
 	/// glow 컨텍스트를 엔진 컨텍스트로 보기. (같은 자리를 가리킨다, 상태 캐시는 Graphic::new 가 건다)
 	//==============================================================================

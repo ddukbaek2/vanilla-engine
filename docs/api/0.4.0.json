@@ -30064,6 +30064,102 @@
 					"members": []
 				},
 				{
+					"name": "GraphicContextEventListener",
+					"kind": "type",
+					"summary": {
+						"ko": "그래픽 컨텍스트 이벤트 리스너. (엔진은 약한 참조로 들어, 리스너를 버리면 더 부르지 않는다)",
+						"en": "Graphic context event listener. (The engine holds it by a weak reference, dropping the listener stops further calls)"
+					},
+					"signature": "pub type GraphicContextEventListener = Rc<RefCell<dyn FnMut(GraphicContextEvent)>>",
+					"source": "src/core/engine.rs",
+					"members": []
+				},
+				{
+					"name": "GraphicError",
+					"kind": "struct",
+					"summary": {
+						"ko": "그래픽 오류. (원본의 { kind, name, error })",
+						"en": "Graphic error. (The original's { kind, name, error })"
+					},
+					"traits": [
+						"Clone",
+						"Debug",
+						"PartialEq",
+						"Eq"
+					],
+					"source": "src/core/engine.rs",
+					"members": [
+						{
+							"kind": "field",
+							"name": "kind",
+							"signature": "pub kind: GraphicErrorKind",
+							"params": [],
+							"returns": {
+								"type": "GraphicErrorKind",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "오류 갈래.",
+								"en": "Error kind."
+							},
+							"since": "0.4.0",
+							"source": "src/core/engine.rs"
+						},
+						{
+							"kind": "field",
+							"name": "name",
+							"signature": "pub name: String",
+							"params": [],
+							"returns": {
+								"type": "String",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "짓지 못한 것의 이름. (툰 렌더러는 \"ToonRenderer.머티리얼 이름\", 화면 효과는 \"ScreenEffect.패스 이름\")",
+								"en": "Name of what could not be built. (\"ToonRenderer.material name\" for the toon renderer, \"ScreenEffect.pass name\" for screen effects)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/engine.rs"
+						},
+						{
+							"kind": "field",
+							"name": "error",
+							"signature": "pub error: String",
+							"params": [],
+							"returns": {
+								"type": "String",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "실패한 까닭. (셰이더 정보 로그)",
+								"en": "Why it failed. (the shader info log)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/engine.rs"
+						}
+					]
+				},
+				{
+					"name": "GraphicErrorListener",
+					"kind": "type",
+					"summary": {
+						"ko": "그래픽 오류 리스너. (엔진은 약한 참조로 들어, 리스너를 버리면 더 부르지 않는다)",
+						"en": "Graphic error listener. (The engine holds it by a weak reference, dropping the listener stops further calls)"
+					},
+					"signature": "pub type GraphicErrorListener = Rc<RefCell<dyn FnMut(&GraphicError)>>",
+					"source": "src/core/engine.rs",
+					"members": []
+				},
+				{
 					"name": "FrameCaptureHandler",
 					"kind": "type",
 					"summary": {
@@ -32235,6 +32331,208 @@
 						},
 						{
 							"kind": "method",
+							"name": "add_graphic_context_event_listener",
+							"signature": "pub fn add_graphic_context_event_listener(&self, graphic_context_event_listener: &GraphicContextEventListener)",
+							"params": [
+								{
+									"name": "graphic_context_event_listener",
+									"type": "&GraphicContextEventListener",
+									"description": {
+										"ko": "더할 리스너. (엔진은 약한 참조로 든다, 부른 쪽이 살려 둔다)",
+										"en": "Listener to add. (the engine holds it by weak reference, the caller keeps it alive)"
+									}
+								}
+							],
+							"description": {
+								"ko": "그래픽 컨텍스트 이벤트 리스너 더하기. (원본 addGraphicContextEventListener, 리스너를 버리면 더 부르지 않는다)\n- 컨텍스트를 잃으면 Lost, 되살아나 엔진이 기본 자원을 다시 지으면 Restored 를 넘긴다. 잃은 동안 엔진은 그리지 않고 씬 갱신만 한다.",
+								"en": "Adds a graphic context event listener. (The original's addGraphicContextEventListener, dropping the listener stops further calls)\n- Passes Lost when the context is lost, and Restored once it is back and the engine has rebuilt its base resources. While lost, the engine does not draw and only updates scenes."
+							},
+							"since": "0.4.0",
+							"source": "src/core/engine.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/engine",
+								"class": "Engine",
+								"name": "addGraphicContextEventListener"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "컨텍스트를 되살리면 게임의 GL 객체 다시 짓기",
+										"en": "Rebuilding the game's GL objects when the context is restored"
+									},
+									"code": "use std::cell::RefCell;\nuse std::rc::Rc;\nuse vanilla::{Engine, EngineConfiguration, GraphicContextEvent, GraphicContextEventListener};\n\nlet engine = Engine::new(EngineConfiguration::new());\nlet received_list: Rc<RefCell<Vec<GraphicContextEvent>>> = Rc::new(RefCell::new(Vec::new()));\nlet listener_received_list = received_list.clone();\nlet graphic_context_event_listener: GraphicContextEventListener = Rc::new(RefCell::new(move |graphic_context_event: GraphicContextEvent| {\n\tlistener_received_list.borrow_mut().push(graphic_context_event);\n}));\nengine.add_graphic_context_event_listener(&graphic_context_event_listener);\nengine.dispatch_graphic_context_event(GraphicContextEvent::Lost);\nengine.dispatch_graphic_context_event(GraphicContextEvent::Restored);\nassert_eq!(*received_list.borrow(), vec![GraphicContextEvent::Lost, GraphicContextEvent::Restored]);",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "remove_graphic_context_event_listener",
+							"signature": "pub fn remove_graphic_context_event_listener(&self, graphic_context_event_listener: &GraphicContextEventListener)",
+							"params": [
+								{
+									"name": "graphic_context_event_listener",
+									"type": "&GraphicContextEventListener",
+									"description": {
+										"ko": "뺄 리스너. (add_graphic_context_event_listener 에 넘긴 것)",
+										"en": "The listener to remove. (the one passed to add_graphic_context_event_listener)"
+									}
+								}
+							],
+							"description": {
+								"ko": "그래픽 컨텍스트 이벤트 리스너 빼기. (원본 removeGraphicContextEventListener, 버린 리스너도 빠진다)",
+								"en": "Removes a graphic context event listener. (The original's removeGraphicContextEventListener, a dropped listener is removed too)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/engine.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/engine",
+								"class": "Engine",
+								"name": "removeGraphicContextEventListener"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "더한 리스너 빼기",
+										"en": "Removing an added listener"
+									},
+									"code": "use std::cell::RefCell;\nuse std::rc::Rc;\nuse vanilla::{Engine, EngineConfiguration, GraphicContextEvent, GraphicContextEventListener};\n\nlet engine = Engine::new(EngineConfiguration::new());\nlet count = Rc::new(RefCell::new(0));\nlet listener_count = count.clone();\nlet graphic_context_event_listener: GraphicContextEventListener = Rc::new(RefCell::new(move |_graphic_context_event: GraphicContextEvent| {\n\t*listener_count.borrow_mut() += 1;\n}));\nengine.add_graphic_context_event_listener(&graphic_context_event_listener);\nengine.remove_graphic_context_event_listener(&graphic_context_event_listener);\nengine.dispatch_graphic_context_event(GraphicContextEvent::Lost);\nassert_eq!(*count.borrow(), 0);",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "dispatch_graphic_context_event",
+							"signature": "pub fn dispatch_graphic_context_event(&self, graphic_context_event: GraphicContextEvent)",
+							"params": [
+								{
+									"name": "graphic_context_event",
+									"type": "GraphicContextEvent",
+									"description": {
+										"ko": "알릴 이벤트.",
+										"en": "The event to notify."
+									}
+								}
+							],
+							"description": {
+								"ko": "그래픽 컨텍스트 이벤트 알리기. (플랫폼이 부른다, 살아 있는 리스너에 그 자리에서 넘긴다)\n- 리스너가 다른 일로 빌려져 있으면 그 리스너는 이번 이벤트를 건너뛴다.",
+								"en": "Notifies a graphic context event. (Called by the platform, passed on the spot to the live listeners)\n- A listener that is borrowed for something else skips this event."
+							},
+							"since": "0.4.0",
+							"source": "src/core/engine.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/engine",
+								"class": "Engine",
+								"name": "dispatchGraphicContextEvent"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "add_graphic_error_listener",
+							"signature": "pub fn add_graphic_error_listener(&self, graphic_error_listener: &GraphicErrorListener)",
+							"params": [
+								{
+									"name": "graphic_error_listener",
+									"type": "&GraphicErrorListener",
+									"description": {
+										"ko": "더할 리스너. (엔진은 약한 참조로 든다, 부른 쪽이 살려 둔다)",
+										"en": "Listener to add. (the engine holds it by weak reference, the caller keeps it alive)"
+									}
+								}
+							],
+							"description": {
+								"ko": "그래픽 오류 리스너 더하기. (원본 addGraphicErrorListener, 리스너를 버리면 더 부르지 않는다)\n- 엔진이 셰이더 프로그램을 짓지 못했을 때(툰 렌더러의 머티리얼, 화면 효과의 패스, resolve_shader_program 의 프로그램) 한 번 알린다.\n  짓지 못한 프로그램은 다시 짓지 않고 건너뛰어 그리므로, 게임은 이 알림으로 대체 그리기나 오류 보고를 정한다.\n  컨텍스트를 잃은 탓의 실패는 셰이더 탓이 아니라 알리지 않고, 기억하지도 않는다.",
+								"en": "Adds a graphic error listener. (The original's addGraphicErrorListener, dropping the listener stops further calls)\n- Reports once when the engine cannot build a shader program (a toon renderer material, a screen effect pass, a resolve_shader_program program).\n  A program that failed to build is not rebuilt and is skipped when drawing, so the game uses this notification to decide a fallback drawing or an error report.\n  A failure caused by losing the context is not the shader's fault, so it is neither reported nor remembered."
+							},
+							"since": "0.4.0",
+							"source": "src/core/engine.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/engine",
+								"class": "Engine",
+								"name": "addGraphicErrorListener"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "셰이더 짓기 실패를 받아 기록하기",
+										"en": "Recording shader build failures"
+									},
+									"code": "use std::cell::RefCell;\nuse std::rc::Rc;\nuse vanilla::{Engine, EngineConfiguration, GraphicError, GraphicErrorKind, GraphicErrorListener};\n\nlet engine = Engine::new(EngineConfiguration::new());\nlet failed_name_list: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));\nlet listener_failed_name_list = failed_name_list.clone();\nlet graphic_error_listener: GraphicErrorListener = Rc::new(RefCell::new(move |graphic_error: &GraphicError| {\n\tif graphic_error.kind == GraphicErrorKind::ShaderBuildFailed {\n\t\tlistener_failed_name_list.borrow_mut().push(graphic_error.name.clone());\n\t}\n}));\nengine.add_graphic_error_listener(&graphic_error_listener);\nengine.dispatch_graphic_error(&GraphicError { kind: GraphicErrorKind::ShaderBuildFailed, name: String::from(\"stripe\"), error: String::from(\"compile failed\") });\nassert_eq!(*failed_name_list.borrow(), vec![String::from(\"stripe\")]);",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "remove_graphic_error_listener",
+							"signature": "pub fn remove_graphic_error_listener(&self, graphic_error_listener: &GraphicErrorListener)",
+							"params": [
+								{
+									"name": "graphic_error_listener",
+									"type": "&GraphicErrorListener",
+									"description": {
+										"ko": "뺄 리스너. (add_graphic_error_listener 에 넘긴 것)",
+										"en": "The listener to remove. (the one passed to add_graphic_error_listener)"
+									}
+								}
+							],
+							"description": {
+								"ko": "그래픽 오류 리스너 빼기. (원본 removeGraphicErrorListener, 버린 리스너도 빠진다)",
+								"en": "Removes a graphic error listener. (The original's removeGraphicErrorListener, a dropped listener is removed too)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/engine.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/engine",
+								"class": "Engine",
+								"name": "removeGraphicErrorListener"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "더한 오류 리스너 빼기",
+										"en": "Removing an added error listener"
+									},
+									"code": "use std::cell::RefCell;\nuse std::rc::Rc;\nuse vanilla::{Engine, EngineConfiguration, GraphicError, GraphicErrorKind, GraphicErrorListener};\n\nlet engine = Engine::new(EngineConfiguration::new());\nlet count = Rc::new(RefCell::new(0));\nlet listener_count = count.clone();\nlet graphic_error_listener: GraphicErrorListener = Rc::new(RefCell::new(move |_graphic_error: &GraphicError| {\n\t*listener_count.borrow_mut() += 1;\n}));\nengine.add_graphic_error_listener(&graphic_error_listener);\nengine.remove_graphic_error_listener(&graphic_error_listener);\nengine.dispatch_graphic_error(&GraphicError { kind: GraphicErrorKind::ShaderBuildFailed, name: String::from(\"stripe\"), error: String::new() });\nassert_eq!(*count.borrow(), 0);",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "dispatch_graphic_error",
+							"signature": "pub fn dispatch_graphic_error(&self, graphic_error: &GraphicError)",
+							"params": [
+								{
+									"name": "graphic_error",
+									"type": "&GraphicError",
+									"description": {
+										"ko": "알릴 오류. (kind, name, error)",
+										"en": "The error to notify. (kind, name, error)"
+									}
+								}
+							],
+							"description": {
+								"ko": "그래픽 오류 알리기. (엔진이 부른다, 살아 있는 리스너에 그 자리에서 넘긴다)\n- 리스너가 다른 일로 빌려져 있으면 그 리스너는 이번 오류를 건너뛴다.",
+								"en": "Notifies a graphic error. (Called by the engine, passed on the spot to the live listeners)\n- A listener that is borrowed for something else skips this error."
+							},
+							"since": "0.4.0",
+							"source": "src/core/engine.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/engine",
+								"class": "Engine",
+								"name": "dispatchGraphicError"
+							}
+						},
+						{
+							"kind": "method",
 							"name": "get_frame_number",
 							"signature": "pub fn get_frame_number(&self) -> u64",
 							"params": [],
@@ -32594,6 +32892,71 @@
 							"description": {
 								"ko": "창을 누름. (pointerdown, 포커스를 알리지 않아도 누르면 창은 포커스를 가진 것이다)",
 								"en": "The window was pressed. (pointerdown, once pressed the window has focus even without a focus notification)"
+							}
+						}
+					]
+				},
+				{
+					"name": "GraphicContextEvent",
+					"summary": {
+						"ko": "그래픽 컨텍스트 이벤트. (원본 GraphicContextEvent, 엔진이 리스너에 그 자리에서 넘긴다)",
+						"en": "Graphic context event. (The original's GraphicContextEvent, passed by the engine to listeners on the spot)"
+					},
+					"traits": [
+						"Clone",
+						"Copy",
+						"Debug",
+						"PartialEq",
+						"Eq"
+					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "core/engine",
+						"class": "GraphicContextEvent"
+					},
+					"source": "src/core/engine.rs",
+					"values": [
+						{
+							"name": "Lost",
+							"description": {
+								"ko": "GL 컨텍스트를 잃음. (GPU 메모리 부족, 드라이버 재설정, 백그라운드 회수. 잃은 동안 엔진은 그리지 않고 씬 갱신만 한다)",
+								"en": "The GL context was lost. (Out of GPU memory, driver reset, or reclaimed in the background. While lost, the engine does not draw and only updates scenes)"
+							}
+						},
+						{
+							"name": "Restored",
+							"description": {
+								"ko": "컨텍스트가 되살아나 엔진이 기본 자원을 다시 지음. (게임이 지은 GL 객체와 3D 렌더러, 렌더 타겟은 죽었으니 이때 다시 짓는다)",
+								"en": "The context was restored and the engine rebuilt its base resources. (GL objects the game made, 3D renderers and render targets are dead, rebuild them now)"
+							}
+						}
+					]
+				},
+				{
+					"name": "GraphicErrorKind",
+					"summary": {
+						"ko": "그래픽 오류 갈래. (원본 GraphicErrorKind, GraphicError 의 kind)",
+						"en": "Graphic error kinds. (The original's GraphicErrorKind, the kind of GraphicError)"
+					},
+					"traits": [
+						"Clone",
+						"Copy",
+						"Debug",
+						"PartialEq",
+						"Eq"
+					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "core/engine",
+						"class": "GraphicErrorKind"
+					},
+					"source": "src/core/engine.rs",
+					"values": [
+						{
+							"name": "ShaderBuildFailed",
+							"description": {
+								"ko": "셰이더 프로그램을 짓지 못함. (컴파일이나 링크 실패, 같은 프로그램은 다시 알리지 않고 짓지도 않는다. 컨텍스트를 잃은 탓의 실패는 알리지 않는다)",
+								"en": "A shader program could not be built. (A compile or link failure, the same program is neither reported again nor rebuilt. A failure caused by losing the context is not reported)"
 							}
 						}
 					]
@@ -46922,6 +47285,41 @@
 								"class": "Graphic",
 								"name": "resetGLStateCache"
 							}
+						},
+						{
+							"kind": "method",
+							"name": "is_context_lost",
+							"signature": "pub fn is_context_lost(&self) -> bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "잃은 동안 true.",
+									"en": "true while lost."
+								}
+							},
+							"description": {
+								"ko": "WebGL 컨텍스트를 잃은 상태인지. (원본 isContextLost, 웹이 webglcontextlost 에서 참이 되고 엔진이 기본 자원을 다시 지은 뒤 거짓이 된다)\n- 잃은 동안 엔진은 그리지 않고 씬 갱신만 한다. 데스크탑은 컨텍스트를 잃지 않아 늘 false 다.",
+								"en": "Whether the WebGL context is lost. (The original's isContextLost, true after webglcontextlost on the web and false again once the engine has rebuilt its base resources)\n- While lost, the engine does not draw and only updates scenes. Desktop never loses the context, so this is always false."
+							},
+							"since": "0.4.0",
+							"source": "src/core/graphic.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic",
+								"class": "Graphic",
+								"name": "isContextLost"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "잃은 동안 게임이 하던 그리기 건너뛰기",
+										"en": "Skipping the game's drawing while the context is lost"
+									},
+									"code": "use vanilla::{Colors, Graphic, Rect};\n\nfn draw(graphic: &mut Graphic) {\n\tif graphic.is_context_lost() {\n\t\treturn;\n\t}\n\tgraphic.set_fill_color(Colors::WHITE);\n\tgraphic.draw_rect(Rect::create(8.0, 8.0, 32.0, 32.0));\n}",
+									"language": "rust"
+								}
+							]
 						},
 						{
 							"kind": "method",
@@ -64087,6 +64485,35 @@
 							},
 							"since": "0.4.0",
 							"source": "src/core/glcontext/generated.rs"
+						},
+						{
+							"kind": "method",
+							"name": "is_context_lost",
+							"signature": "pub fn is_context_lost(&self) -> bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "잃은 동안 true.",
+									"en": "true while lost."
+								}
+							},
+							"description": {
+								"ko": "컨텍스트를 잃은 상태인지. (원본 WebGL2RenderingContext.isContextLost, 웹은 webglcontextlost 에서 참이 되고 엔진이 자원을 다시 지은 뒤 거짓이 된다)\n- 잃은 동안 셰이더를 짓거나 그리는 호출은 GL 이 무시하므로 실패해도 셰이더 탓이 아니다. 데스크탑은 컨텍스트를 잃지 않아 늘 거짓이다.",
+								"en": "Whether the context is lost. (The original's WebGL2RenderingContext.isContextLost, true after webglcontextlost on the web and false once the engine has rebuilt its resources)\n- While lost, GL ignores shader building and drawing calls, so a failure then is not the shader's fault. Desktop never loses the context, so this is always false."
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs",
+							"examples": [
+								{
+									"title": {
+										"ko": "잃은 동안 게임이 하던 그리기 건너뛰기",
+										"en": "Skipping the game's drawing while the context is lost"
+									},
+									"code": "use vanilla::Graphic;\n\nfn draw(graphic: &mut Graphic) {\n\tif graphic.get_gl().is_context_lost() {\n\t\treturn;\n\t}\n\tgraphic.reset_gl_state_cache();\n}",
+									"language": "rust"
+								}
+							]
 						},
 						{
 							"kind": "method",

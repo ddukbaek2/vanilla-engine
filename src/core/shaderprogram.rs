@@ -219,6 +219,29 @@ pub(crate) fn convert_to_desktop_source(source: &str) -> String {
 }
 
 //==============================================================================
+/// 셰이더 짓기 실패 알리기. (엔진이 짓는 프로그램이 실패해 건너뛰기로 할 때 부른다, 원본 reportShaderBuildFailure)
+/// - 컨텍스트를 이미 잃은 뒤의 실패는 셰이더 탓이 아니다. 알리지 않고 false 를 돌려, 부른 쪽이 실패를 기억하지 않고 되살린 뒤 다시 짓게 한다.
+/// - 그 밖의 실패는 엔진의 그래픽 오류 리스너(add_graphic_error_listener)에 { kind, name, error } 를 한 번 알리고 true 를 돌려 기억하게 한다.
+///
+/// # 인자
+/// - `gl`: 프로그램을 짓던 컨텍스트.
+/// - `name`: 짓지 못한 것의 이름.
+/// - `error`: 실패한 까닭.
+///
+/// # 돌려줌
+/// 셰이더 탓이라 실패를 기억해도 되면 true. (컨텍스트를 잃은 탓이면 false)
+//==============================================================================
+pub(crate) fn report_shader_build_failure(gl: &GlContext, name: &str, error: &str) -> bool {
+	if gl.is_context_lost() {
+		return false;
+	}
+	if let Ok(engine) = crate::core::globalengine::get_global_engine() {
+		engine.dispatch_graphic_error(&crate::core::engine::GraphicError { kind: crate::core::engine::GraphicErrorKind::ShaderBuildFailed, name: String::from(name), error: String::from(error) });
+	}
+	true
+}
+
+//==============================================================================
 /// 셰이더 하나 컴파일.
 //==============================================================================
 unsafe fn compile_shader(gl: &GlContext, shader_type: u32, source: &str) -> Result<crate::core::graphic::GlShader, String> {
@@ -237,6 +260,32 @@ unsafe fn compile_shader(gl: &GlContext, shader_type: u32, source: &str) -> Resu
 mod tests {
 	use super::*;
 	use crate::core::imagetexturecache::fake_gl::{self, FakeGlObject};
+
+	//==============================================================================
+	/// 셰이더 짓기 실패는 그래픽 오류 리스너에 한 번 알리고 기억하게 하고, 컨텍스트를 잃은 뒤의 실패는 알리지도 기억하게 하지도 않는다. (가짜 GL)
+	//==============================================================================
+	#[test]
+	fn reports_shader_build_failure_unless_context_lost() {
+		use crate::core::engine::{Engine, EngineConfiguration, GraphicError, GraphicErrorKind, GraphicErrorListener};
+		use std::rc::Rc;
+		let engine = Engine::new(EngineConfiguration::new());
+		let received_list: Rc<RefCell<Vec<GraphicError>>> = Rc::new(RefCell::new(Vec::new()));
+		let listener_received_list = received_list.clone();
+		let graphic_error_listener: GraphicErrorListener = Rc::new(RefCell::new(move |graphic_error: &GraphicError| {
+			listener_received_list.borrow_mut().push(graphic_error.clone());
+		}));
+		engine.add_graphic_error_listener(&graphic_error_listener);
+		let gl = fake_gl::create_context();
+		let gl_context = GlContext::from_context(&gl);
+		assert!(report_shader_build_failure(gl_context, "stripe", "compile failed"));
+		assert_eq!(*received_list.borrow(), vec![GraphicError { kind: GraphicErrorKind::ShaderBuildFailed, name: String::from("stripe"), error: String::from("compile failed") }]);
+		GlContext::set_context_lost(true);
+		assert!(gl_context.is_context_lost());
+		assert!(!report_shader_build_failure(gl_context, "stripe", "lost"));
+		assert_eq!(received_list.borrow().len(), 1);
+		GlContext::set_context_lost(false);
+		assert!(!gl_context.is_context_lost());
+	}
 
 	//==============================================================================
 	/// 프래그먼트 셰이더나 프로그램을 못 지으면 먼저 지은 셰이더를 지운다. (가짜 GL)
