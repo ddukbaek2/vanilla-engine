@@ -278,7 +278,7 @@ impl Component for UISpinner {
 		spinner_node.set_anchor(Pivot::TOP_LEFT);
 		spinner_node.set_content_size(Vector2::create(center * 2.0, center * 2.0));
 		for dot_index in 0..options.dot_count {
-			// 원본처럼 f64 로 셈한다.
+			// 원본처럼 f64 로 셈한다. (cos, sin 은 V8 과 끝자리까지 같게 libm 크레이트로, 시스템 libm 은 리눅스에서 어긋난다)
 			let angle = (dot_index as f64 / options.dot_count as f64) * std::f64::consts::PI * 2.0;
 			let dot_name = format!("SpinnerDot{}", dot_index);
 			let dot_id = node_tree.create_child(node_id, &dot_name);
@@ -286,8 +286,8 @@ impl Component for UISpinner {
 			dot_node.set_pivot(Pivot::MIDDLE_CENTER);
 			dot_node.set_anchor(Pivot::TOP_LEFT);
 			dot_node.set_content_size(Vector2::create(options.dot_radius * 2.0, options.dot_radius * 2.0));
-			let dot_x = center + angle.cos() * options.radius;
-			let dot_y = center + angle.sin() * options.radius;
+			let dot_x = center + libm::cos(angle) * options.radius;
+			let dot_y = center + libm::sin(angle) * options.radius;
 			dot_node.set_local_position(Vector2::create(dot_x, dot_y));
 			let paint = dot_node.add_component(Paint::create_with_color(self.dot_color));
 			paint.set_round_size(options.dot_radius);

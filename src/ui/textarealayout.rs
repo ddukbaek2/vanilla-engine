@@ -206,10 +206,10 @@ fn find_line_break_list(paragraph: &str) -> Vec<usize> {
 }
 
 //==============================================================================
-/// 줄 끝 공백을 뺀 글. (pre-wrap 의 매달리는 공백)
+/// 줄 끝 공백과 탭을 뺀 글. (pre-wrap 의 매달리는 공백, 탭도 크롬이 매단다)
 //==============================================================================
 fn trim_hanging_spaces(text: &str) -> &str {
-	text.trim_end_matches([' ', '\u{3000}'])
+	text.trim_end_matches([' ', '\t', '\u{3000}'])
 }
 
 //==============================================================================
@@ -547,6 +547,16 @@ mod tests {
 		assert_eq!(measure_with_tabs("abcd\tb", 0.0, 40.0, &measure_fixed), 90.0);
 		let layout = build_text_area_layout("\tx", 0.0, 20.0, 40.0, &measure_fixed);
 		assert_eq!(layout.line_list[0].offsets, vec![0.0, 40.0, 50.0]);
+	}
+
+	//==============================================================================
+	/// 줄 끝 탭도 공백처럼 매달린다. (원본 inputfieldmultilinechrome 시험의 "60px tab\there": 크롬 [0,4], 탭 폭 80)
+	//==============================================================================
+	#[test]
+	fn hanging_tab_at_line_end() {
+		let layout = build_text_area_layout("tab\there", 60.0, 20.0, 80.0, &measure_fixed);
+		let start_list: Vec<usize> = layout.line_list.iter().map(|line| line.start).collect();
+		assert_eq!(start_list, vec![0, 4]);
 	}
 
 	//==============================================================================
