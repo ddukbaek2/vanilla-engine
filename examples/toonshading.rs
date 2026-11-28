@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use vanilla::{
 	BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, GlContext, Graphic, Material, Matrix4, MouseButton, Quaternion, Rect, RenderTarget, RenderTargetOptions, Scene, SceneBase, ShaderProgram, ShadowMap, SkinnedModel, SkinnedModelRenderer,
-	TextAlign, TextBaseline, Vector2, Vector3, MORPH_GLSL,
+	TextAlign, TextBaseline, Vector2, Vector3, JOINT_BLOCK_GLSL, MORPH_GLSL,
 };
 
 //==============================================================================
@@ -752,7 +752,7 @@ impl ToonShadingScene {
 			std::fs::read(asset_directory.join(file_name)).map_err(|error| format!("{} 읽기 실패: {}", file_name, error))
 		};
 		let morph_glsl = MORPH_GLSL;
-		let build_source = |source: &str| -> String { source.replace("${SHADING_COMMON_GLSL}", SHADING_COMMON_GLSL).replace("${MORPH_GLSL}", morph_glsl).trim().to_string() };
+		let build_source = |source: &str| -> String { source.replace("${SHADING_COMMON_GLSL}", SHADING_COMMON_GLSL).replace("${MORPH_GLSL}", morph_glsl).replace("${JOINT_BLOCK_GLSL}", JOINT_BLOCK_GLSL).trim().to_string() };
 
 		let renderer = SkinnedModelRenderer::new(gl, Some(&build_source(TOON_FRAGMENTSHADER_SOURCE)), None)?;
 		let outline_program = ShaderProgram::new(gl, &build_source(OUTLINE_VERTEXSHADER_SOURCE), &build_source(OUTLINE_FRAGMENTSHADER_SOURCE))?;
@@ -1364,15 +1364,12 @@ impl ToonShadingScene {
 				gl.uniform_matrix_4_f32_slice(depth_program.get_uniform_location(gl, "viewProjectionMatrix").as_ref(), false, &view_projection_elements);
 				gl.uniform_matrix_4_f32_slice(depth_program.get_uniform_location(gl, "modelMatrix").as_ref(), false, &model_elements);
 			}
-			let joint_matrices_location = depth_program.get_uniform_location(gl, "jointMatrices[0]");
 			for info in resources.drawable_info_list.iter() {
 				if !info.is_hair {
 					continue;
 				}
 				let drawable = &resources.model.get_drawable_list()[info.drawable_index];
-				unsafe {
-					gl.uniform_matrix_4_f32_slice(joint_matrices_location.as_ref(), false, &resources.model.get_skin_list()[drawable.skin_index].joint_matrix_array);
-				}
+				resources.renderer.upload_joint_matrices(gl, &resources.model.get_skin_list()[drawable.skin_index].joint_matrix_array);
 				resources.renderer.apply_morph_uniforms(gl, depth_program, drawable);
 				ToonShadingScene::draw_drawable(gl, drawable);
 				draw_call_count += 1;
@@ -2216,7 +2213,6 @@ impl ToonShadingScene {
 			gl.uniform_1_i32(location("isSeeThrough").as_ref(), i32::from(is_see_through_pass));
 			gl.uniform_1_f32(location("seeThroughAlpha").as_ref(), see_through_alpha);
 		}
-		let joint_matrices_location = location("jointMatrices[0]");
 		let material_type_location = location("materialType");
 		let shade_color_location = location("shadeColor");
 		let use_alpha_test_location = location("useAlphaTest");
@@ -2225,9 +2221,7 @@ impl ToonShadingScene {
 				continue;
 			}
 			let drawable = &resources.model.get_drawable_list()[info.drawable_index];
-			unsafe {
-				gl.uniform_matrix_4_f32_slice(joint_matrices_location.as_ref(), false, &resources.model.get_skin_list()[drawable.skin_index].joint_matrix_array);
-			}
+			resources.renderer.upload_joint_matrices(gl, &resources.model.get_skin_list()[drawable.skin_index].joint_matrix_array);
 			resources.renderer.apply_morph_uniforms(gl, &shader_program, drawable);
 			drawable.material.apply(gl);
 			unsafe {
@@ -2259,7 +2253,6 @@ impl ToonShadingScene {
 			gl.uniform_1_f32(program.get_uniform_location(gl, "outlineTint").as_ref(), settings.slider("outline_tint") as f32);
 			gl.uniform_1_f32(program.get_uniform_location(gl, "outlineBrightness").as_ref(), settings.slider("outline_brightness") as f32);
 		}
-		let joint_matrices_location = program.get_uniform_location(gl, "jointMatrices[0]");
 		let outline_width_location = program.get_uniform_location(gl, "outlineWidth");
 		let use_outline_mask_location = program.get_uniform_location(gl, "useOutlineMask");
 		let outline_color_location = program.get_uniform_location(gl, "outlineColorFactor");
@@ -2268,9 +2261,7 @@ impl ToonShadingScene {
 				continue;
 			}
 			let drawable = &resources.model.get_drawable_list()[info.drawable_index];
-			unsafe {
-				gl.uniform_matrix_4_f32_slice(joint_matrices_location.as_ref(), false, &resources.model.get_skin_list()[drawable.skin_index].joint_matrix_array);
-			}
+			resources.renderer.upload_joint_matrices(gl, &resources.model.get_skin_list()[drawable.skin_index].joint_matrix_array);
 			resources.renderer.apply_morph_uniforms(gl, program, drawable);
 			for (uniform_name, texture_unit, texture) in drawable.material.get_texture_bindings().iter() {
 				let uniform_location = program.get_uniform_location(gl, uniform_name);
@@ -3132,7 +3123,7 @@ const HAIR_MASK_VERTEXSHADER_SOURCE: &str = r####"#version 300 es
 	layout(location = 4) in vec4 vertexWeights;
 	uniform mat4 modelMatrix;
 	uniform mat4 viewProjectionMatrix;
-	uniform mat4 jointMatrices[96];
+	${JOINT_BLOCK_GLSL}
 	${MORPH_GLSL}
 	void main() {
 		vec3 morphedPosition = vertexPosition;
@@ -3162,7 +3153,7 @@ const OUTLINE_VERTEXSHADER_SOURCE: &str = r####"#version 300 es
 	layout(location = 4) in vec4 vertexWeights;
 	uniform mat4 modelMatrix;
 	uniform mat4 viewProjectionMatrix;
-	uniform mat4 jointMatrices[96];
+	${JOINT_BLOCK_GLSL}
 	uniform sampler2D outlineMaskTexture;
 	uniform int useOutlineMask;
 	uniform float outlineWidth;
