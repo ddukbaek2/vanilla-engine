@@ -825,6 +825,7 @@ struct OldFaceScene {
 	thumbnail_pixel_list: RefCell<Vec<(String, Vec<u8>)>>,
 	pending_menu_action: Rc<Cell<Option<usize>>>,
 	menu_row_label_ids: Vec<(NodeId, NodeId)>,
+	menu_row_band_ids: Vec<NodeId>,
 	frame_start_instant: web_time::Instant,
 	last_tick_instant: Option<web_time::Instant>,
 	menu_test_frame: u32,
@@ -901,7 +902,10 @@ fn create_pill_button(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, s
 	let fill_id = create_box_node(node_tree, button_id, "fill", fill_size);
 	node_tree[fill_id].set_local_position(Vector2::create(1.0, 1.0));
 	// 뒤 흐림이 먼저(CSS backdrop-filter: blur(8px)), 바탕색이 그 위에.
-	node_tree.add_component(fill_id, UIView::new()).expect("view").set_backdrop_blur(8.0);
+	// 둥근 모서리는 바탕과 같은 반지름(CSS border-radius, 알약은 높이의 반까지)으로 흐림도 같은 모양에 깐다.
+	let fill_view = node_tree.add_component(fill_id, UIView::new()).expect("view");
+	fill_view.set_backdrop_blur(8.0);
+	fill_view.set_backdrop_corner_radius((round_size - 1.0).min(fill_size.x.min(fill_size.y) * 0.5));
 	let fill_paint = node_tree[fill_id].add_component(Paint::create_with_color(fill_color));
 	fill_paint.set_round_size(round_size - 1.0);
 	let label_id = create_spaced_label_node(node_tree, fill_id, "text", fill_size, text, font_size, text_color, TextAlign::Center, letter_spacing);
@@ -961,7 +965,9 @@ impl OldFaceScene {
 		node_tree[options_id].add_component(Paint::create_with_color(create_color(60.0, 57.0, 59.0, 1.0))).set_round_size(12.0);
 		let options_fill_id = create_box_node(node_tree, options_id, "fill", Vector2::create(120.0, 32.0));
 		node_tree[options_fill_id].set_local_position(Vector2::create(1.0, 1.0));
-		node_tree.add_component(options_fill_id, UIView::new()).expect("view").set_backdrop_blur(10.0);
+		let options_fill_view = node_tree.add_component(options_fill_id, UIView::new()).expect("view");
+		options_fill_view.set_backdrop_blur(10.0);
+		options_fill_view.set_backdrop_corner_radius(11.0);
 		node_tree[options_fill_id].add_component(Paint::create_with_color(create_color(30.0, 28.0, 30.0, 0.9))).set_round_size(11.0);
 		let options_title_id = create_spaced_label_node(node_tree, options_fill_id, "text", Vector2::create(120.0, 32.0), "OPTIONS", 10.0, gold, TextAlign::Center, 0.32 * 10.0);
 		let options_divider_id = create_box_node(node_tree, options_fill_id, "titleDivider", Vector2::create(370.0, 1.0));
@@ -1084,7 +1090,9 @@ impl OldFaceScene {
 			}
 			let menu_fill_id = create_box_node(node_tree, panel_id, "menuFill", Vector2::create(CONTEXT_MENU_WIDTH - 2.0, CONTEXT_MENU_HEIGHT - 2.0));
 			node_tree[menu_fill_id].set_local_position(Vector2::create(1.0, 1.0));
-			node_tree.add_component(menu_fill_id, UIView::new()).expect("view").set_backdrop_blur(10.0);
+			let menu_fill_view = node_tree.add_component(menu_fill_id, UIView::new()).expect("view");
+			menu_fill_view.set_backdrop_blur(10.0);
+			menu_fill_view.set_backdrop_corner_radius(9.0);
 			node_tree[menu_fill_id].add_component(Paint::create_with_color(create_color(14.0, 12.0, 14.0, 0.72))).set_round_size(9.0);
 		}
 		// 로딩 화면. (원본 #loadingOverlay, 막대 260 x 2, 글자 11px 간격 0.6em, 상세 줄 9px 간격 0.3em, 맨 위)
@@ -1492,6 +1500,7 @@ impl OldFaceScene {
 			thumbnail_pixel_list: RefCell::new(Vec::new()),
 			pending_menu_action: Rc::new(Cell::new(None)),
 			menu_row_label_ids: Vec::new(),
+			menu_row_band_ids: Vec::new(),
 			frame_start_instant: web_time::Instant::now(),
 			last_tick_instant: None,
 			menu_test_frame: 0,
@@ -2390,6 +2399,7 @@ impl OldFaceScene {
 			})));
 		}
 		let mut row_label_ids = Vec::new();
+		let mut row_band_ids: Vec<NodeId> = Vec::new();
 		self.scene_base.get_node_tree_mut().with_component_mut::<UIContextMenu, _>(menu_id, |context_menu, tree| {
 			context_menu.show(tree, position, item_list);
 			// 엔진 메뉴를 원본 css 꼴로 다듬는다. 판 높이 98, 행은 테두리와 위 여백 안쪽에 판 너비로 깔고, 글자는 왼쪽 여백 16px 에 글자 간격 0.16em.
@@ -2408,20 +2418,31 @@ impl OldFaceScene {
 				if let Some(button) = tree[row_id].get_component_mut::<UIButton>() {
 					button.set_hover_tint_color(create_color(212.0, 176.0, 106.0, 0.16));
 				}
+				// 마우스를 올린 행의 금색 바탕 띠. (원본 .contextItem:hover background rgba(212, 176, 106, 0.16), 행 바탕 Paint 는 투명이라 틴트가 알파를 못 올려서 띠 노드를 따로 둔다)
+				let band_id = create_box_node(tree, row_id, "hoverBand", Vector2::create(CONTEXT_MENU_WIDTH - 2.0, CONTEXT_MENU_ITEM_HEIGHT));
+				tree[band_id].add_component(Paint::create_with_color(create_color(212.0, 176.0, 106.0, 0.16)));
+				tree[band_id].set_visible(false);
+				row_band_ids.push(band_id);
 				let label_id = create_spaced_label_node(tree, row_id, "itemText", Vector2::create(CONTEXT_MENU_WIDTH - 2.0 - 16.0, CONTEXT_MENU_ITEM_HEIGHT), CONTEXT_MENU_LABELS[item_index], 10.0, create_color(242.0, 236.0, 226.0, 0.86), TextAlign::Left, 0.16 * 10.0);
 				tree[label_id].set_local_position(Vector2::create(16.0, 0.0));
 				row_label_ids.push((row_id, label_id));
 			}
 		});
 		self.menu_row_label_ids = row_label_ids;
+		self.menu_row_band_ids = row_band_ids;
 	}
 
 	fn handle_menu_action(&mut self) {
 		// 마우스를 올린 행의 글자는 금색. (원본 .contextItem:hover color rgba(232, 201, 138, 1))
 		if self.is_context_menu_showing() {
 			let node_tree = self.scene_base.get_node_tree_mut();
-			for (row_id, label_id) in self.menu_row_label_ids.iter() {
+			for (row_index, (row_id, label_id)) in self.menu_row_label_ids.iter().enumerate() {
 				let is_hover = node_tree.get_node(*row_id).is_some() && node_tree[*row_id].get_component::<UIButton>().map(|button| button.get_button_state() == ButtonState::Hover).unwrap_or(false);
+				if let Some(band_id) = self.menu_row_band_ids.get(row_index) {
+					if node_tree.get_node(*band_id).is_some() {
+						node_tree[*band_id].set_visible(is_hover);
+					}
+				}
 				if let Some(label) = node_tree.get_node_mut(*label_id).and_then(|node| node.get_component_mut::<UILabel>()) {
 					label.set_text_color(if is_hover { create_color(232.0, 201.0, 138.0, 1.0) } else { create_color(242.0, 236.0, 226.0, 0.86) });
 				}

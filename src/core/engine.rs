@@ -2473,7 +2473,7 @@ struct GpuThroughputMeasurement {
 //==============================================================================
 /// 화면 저장 요청. (검증용, 데스크탑은 환경 변수, 웹은 원본처럼 주소 쿼리로 켠다)
 /// - VANILLA_CAPTURE_PATH:   저장 경로. "{frame}" 은 프레임 번호로 바뀐다. 예: shots/shot_{frame}.png
-/// - VANILLA_CAPTURE_FRAMES: 저장할 프레임 번호, 쉼표로 여럿. (기본 120)
+/// - VANILLA_CAPTURE_FRAMES: 저장할 프레임 번호, 쉼표로 여럿. (기본 120, 프레임 번호는 1 에서 시작하고 0 은 첫 프레임으로 본다)
 /// - VANILLA_CAPTURE_EXIT:   1 이면 마지막 저장 뒤 끝낸다.
 /// - VANILLA_CAPTURE_SHOW_WINDOW: 1 이면 창을 보인다. (찍기 모드의 데스크탑 창은 기본으로 숨긴다)
 /// - 찍기 모드는 표준 오류에 프레임마다 "Engine: 찍기 진행 프레임 <번호> / <마지막 번호>, <지난 초> 초" 를, 데스크탑은 처음에 GL 렌더러와 판을 남긴다.
@@ -3317,7 +3317,9 @@ fn read_capture_seconds_since_startup(frame_number: u64) -> f64 {
 fn parse_capture_frame_numbers(frame_numbers_text: &str) -> Vec<u64> {
 	let mut frame_numbers: Vec<u64> = Vec::new();
 	for part in frame_numbers_text.split(',') {
-		if let Ok(frame_number) = part.trim().parse::<u64>() {
+		if let Ok(parsed_frame_number) = part.trim().parse::<u64>() {
+			// 프레임 번호는 1 에서 시작해 0 은 오지 않는다. (0 을 주면 첫 프레임으로 본다. 안 그러면 영영 안 찍고 끝나지 않는다)
+			let frame_number = parsed_frame_number.max(1);
 			if !frame_numbers.contains(&frame_number) {
 				frame_numbers.push(frame_number);
 			}
@@ -3908,6 +3910,8 @@ mod tests {
 		assert!(engine.frame_capture_handler_map.borrow().contains_key(&9));
 		assert_eq!(parse_capture_frame_numbers("240, 120,240,x"), vec![120, 240]);
 		assert_eq!(parse_capture_frame_numbers(""), vec![120]);
+		assert_eq!(parse_capture_frame_numbers("0"), vec![1]);
+		assert_eq!(parse_capture_frame_numbers("0,1,240"), vec![1, 240]);
 		let png_bytes = encode_png(&[255, 0, 0, 255], 1, 1).expect("png");
 		assert_eq!(&png_bytes[1..4], b"PNG");
 	}

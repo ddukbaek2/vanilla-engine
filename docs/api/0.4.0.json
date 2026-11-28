@@ -1,7 +1,7 @@
 {
 	"engine": "vanilla-engine",
 	"version": "0.4.0",
-	"date": "2026-11-26",
+	"date": "2026-11-28",
 	"modules": [
 		{
 			"name": "animation",
@@ -30290,7 +30290,7 @@
 						{
 							"title": {
 								"ko": "그래픽 오류를 만들어 갈래와 이름 읽기",
-								"en": ""
+								"en": "Creating a graphics error and reading its kind and name"
 							},
 							"code": "use vanilla::{GraphicError, GraphicErrorKind};\n\nlet error = GraphicError {\n\tkind: GraphicErrorKind::ShaderBuildFailed,\n\tname: String::from(\"ScreenEffect.blur\"),\n\terror: String::from(\"link failed\"),\n};\nassert_eq!(error.kind, GraphicErrorKind::ShaderBuildFailed);\nassert_eq!(error.name, \"ScreenEffect.blur\");",
 							"language": "rust"
@@ -33154,7 +33154,7 @@
 						{
 							"title": {
 								"ko": "덩이 시간의 합과 프레임 수로 프레임당 시간 맞춰 보기",
-								"en": ""
+								"en": "Checking the time per frame from the sum of chunk times and the frame count"
 							},
 							"code": "use vanilla::GpuThroughput;\n\nlet throughput = GpuThroughput {\n\tframe_count: 4,\n\tchunk_frame_count: 2,\n\tmilliseconds_per_frame: 1.5,\n\tchunk_milliseconds_per_frame: vec![1.0, 2.0],\n};\nlet chunk_total: f64 = throughput.chunk_milliseconds_per_frame.iter().map(|value| value * throughput.chunk_frame_count as f64).sum();\nassert_eq!(chunk_total / throughput.frame_count as f64, throughput.milliseconds_per_frame);",
 							"language": "rust"
@@ -33318,7 +33318,7 @@
 				{
 					"title": {
 						"ko": "만든 직후부터 어디서나 같은 엔진을 꺼낸다",
-						"en": ""
+						"en": "Take out the same engine anywhere right after it is created"
 					},
 					"code": "use vanilla::{Engine, EngineConfiguration};\n\nlet engine = Engine::new(EngineConfiguration::new());\nlet global_engine = Engine::get_engine().unwrap();\nassert!(std::ptr::eq(engine, global_engine));",
 					"language": "rust"
@@ -43450,7 +43450,7 @@
 						{
 							"title": {
 								"ko": "수와 참거짓을 적어 지난번과 같은지 보기",
-								"en": ""
+								"en": "Recording counts and booleans to compare with the last time"
 							},
 							"code": "use vanilla::GeometryKey;\n\nlet mut geometry_key = GeometryKey::new();\ngeometry_key.begin();\ngeometry_key.add(1.5_f64);\ngeometry_key.add(true);\ngeometry_key.end();\ngeometry_key.begin();\ngeometry_key.add(1.5_f64);\ngeometry_key.add(true);\nassert!(geometry_key.end());",
 							"language": "rust"
@@ -66722,7 +66722,7 @@
 				{
 					"title": {
 						"ko": "추적을 켜고 쓰는 GPU 메모리 합 읽기",
-						"en": ""
+						"en": "Reading the GPU memory total with tracking turned on"
 					},
 					"code": "use vanilla::{Engine, EngineConfiguration};\n\nlet engine = Engine::new(EngineConfiguration::new());\nengine.enable_gpu_memory_tracking();\nif let Some(usage) = engine.read_gpu_memory_usage() {\n\tassert!(usage.total_bytes >= usage.canvas_bytes);\n}",
 					"language": "rust"
@@ -66789,7 +66789,7 @@
 						{
 							"title": {
 								"ko": "종류 칸의 기본값은 0 개 0 바이트",
-								"en": ""
+								"en": "The default of the kind slot is 0 items and 0 bytes"
 							},
 							"code": "use vanilla::GpuMemoryKindUsage;\n\nlet usage = GpuMemoryKindUsage::default();\nassert_eq!(usage.count, 0);\nassert_eq!(usage.bytes, 0);",
 							"language": "rust"
@@ -66892,7 +66892,7 @@
 						{
 							"title": {
 								"ko": "주인 칸 하나 만들기",
-								"en": ""
+								"en": "Creating one owner slot"
 							},
 							"code": "use vanilla::{GpuMemoryKind, GpuMemoryOwnerUsage};\n\nlet usage = GpuMemoryOwnerUsage {\n\towner: String::from(\"Graphic::new\"),\n\tkind: GpuMemoryKind::Texture,\n\tcount: 2,\n\tbytes: 4096,\n};\nassert_eq!(usage.kind, GpuMemoryKind::Texture);\nassert_eq!(usage.bytes, 4096);",
 							"language": "rust"
@@ -66995,7 +66995,7 @@
 						{
 							"title": {
 								"ko": "엔진이 그래픽을 가졌으면 합을 읽는다",
-								"en": ""
+								"en": "Read the total if the engine has graphics"
 							},
 							"code": "use vanilla::{Engine, EngineConfiguration};\n\nlet engine = Engine::new(EngineConfiguration::new());\nif let Some(usage) = engine.read_gpu_memory_usage() {\n\tassert!(usage.total_bytes >= usage.canvas_bytes);\n}",
 							"language": "rust"
@@ -81847,7 +81847,7 @@
 								"type": "bool",
 								"description": {
 									"ko": "맡긴 짓기가 아직 안 끝났으면 true.",
-									"en": ""
+									"en": "True if the building handed off is not finished yet."
 								}
 							},
 							"description": {
@@ -86936,6 +86936,80 @@
 							},
 							"code": "use vanilla::core::textstringtexturecache::TextStringTextureCache;\nuse vanilla::platform::find_fallback_font_file;\n\nlet mut text_string_texture_cache = TextStringTextureCache::new();\nassert!(!text_string_texture_cache.has_system_font());\nif let Some(source) = find_fallback_font_file(\"A\", 400, false, false) {\n\tassert!(source.path.exists());\n\ttext_string_texture_cache.add_system_font_candidate(\"GameSans\", 400, false, source);\n\tassert!(text_string_texture_cache.has_system_font());\n}",
 							"language": "rust"
+						}
+					]
+				},
+				{
+					"name": "FamilyFontFace",
+					"kind": "struct",
+					"summary": {
+						"ko": "시스템 글꼴 이름이 가진 얼굴 하나. (운영체제가 알려 주는 굵기와 기울임, 얼굴을 고르는 CSS 굵기 규칙의 후보)",
+						"en": "One face of a system font name. (the weight and slant the operating system reports, a candidate for the CSS font-weight matching rule that picks a face)"
+					},
+					"traits": [
+						"Clone",
+						"Debug",
+						"PartialEq",
+						"Eq"
+					],
+					"source": "src/core/textstringtexturecache.rs",
+					"members": [
+						{
+							"kind": "field",
+							"name": "source",
+							"signature": "pub source: FontFileSource",
+							"params": [],
+							"returns": {
+								"type": "FontFileSource",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "글꼴 파일과 얼굴.",
+								"en": "Font file and face."
+							},
+							"since": "0.4.0",
+							"source": "src/core/textstringtexturecache.rs"
+						},
+						{
+							"kind": "field",
+							"name": "weight",
+							"signature": "pub weight: u16",
+							"params": [],
+							"returns": {
+								"type": "u16",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "얼굴의 CSS 굵기. (100 ~ 900)",
+								"en": "CSS weight of the face. (100 to 900)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/textstringtexturecache.rs"
+						},
+						{
+							"kind": "field",
+							"name": "is_italic",
+							"signature": "pub is_italic: bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "기울인 얼굴이면 true.",
+								"en": "True if the face is slanted."
+							},
+							"since": "0.4.0",
+							"source": "src/core/textstringtexturecache.rs"
 						}
 					]
 				},
@@ -115192,7 +115266,7 @@
 						{
 							"title": {
 								"ko": "자료의 루트 노드 수 읽기 (자료는 SkinnedModel::upload_meshes_and_materials 가 채운다)",
-								"en": ""
+								"en": "Reading the root node count of the data (the data is filled by SkinnedModel::upload_meshes_and_materials)"
 							},
 							"code": "use vanilla::SkinnedModelAssetContent;\n\nfn read_root_count(content: &SkinnedModelAssetContent) -> usize {\n\tcontent.root_node_indices.len()\n}\nlet _ = read_root_count;",
 							"language": "rust"
@@ -123029,7 +123103,7 @@
 						{
 							"title": {
 								"ko": "경계 값 만들기",
-								"en": ""
+								"en": "Creating a bounds value"
 							},
 							"code": "use vanilla::ToonInstanceBounds;\n\nlet bounds = ToonInstanceBounds { center: [0.0, 1.0, 0.0], radius: 5.0, scale: 2.0 };\nassert_eq!(bounds.radius, 5.0);",
 							"language": "rust"
@@ -128801,7 +128875,7 @@
 						{
 							"title": {
 								"ko": "기본 프레임 버퍼에 그리는 출력",
-								"en": ""
+								"en": "Output drawn to the default framebuffer"
 							},
 							"code": "use vanilla::ToonViewOutput;\n\nlet output = ToonViewOutput { output_framebuffer: None, output_viewport: [0, 0, 960, 540] };\nassert!(output.output_framebuffer.is_none());\nassert_eq!(output.output_viewport[2], 960);",
 							"language": "rust"
@@ -161719,6 +161793,44 @@
 				},
 				{
 					"kind": "method",
+					"name": "list_family_font_faces",
+					"signature": "pub fn list_family_font_faces(family_name: &str) -> Vec<FamilyFontFace>",
+					"params": [
+						{
+							"name": "family_name",
+							"type": "&str",
+							"description": {
+								"ko": "글꼴 이름 하나. (find_family_font_file 과 같다)",
+								"en": "One font name. (same as find_family_font_file)"
+							}
+						}
+					],
+					"returns": {
+						"type": "Vec<FamilyFontFace>",
+						"description": {
+							"ko": "얼굴 목록. 이름의 글꼴이 없거나 얼굴을 나열하지 못하는 이름(맥 system-ui)이면 빈 목록.",
+							"en": "Face list. Empty if the named font does not exist or the name cannot list faces (Mac system-ui)."
+						}
+					},
+					"description": {
+						"ko": "글꼴 이름의 모든 굵기, 기울기 얼굴 나열. (CSS 굵기 규칙으로 얼굴을 고르는 후보, 맥 CoreText 의 가족 얼굴, 윈도우 DirectWrite 의 가족 글꼴, 리눅스 fontconfig 의 굵기)",
+						"en": "Lists every weight and slant face of a font name. (candidates for picking a face with the CSS weight rule: the family faces of Mac CoreText, the family fonts of Windows DirectWrite, the weights of Linux fontconfig)"
+					},
+					"since": "0.4.0",
+					"source": "src/platform/desktop/systemfont.rs",
+					"examples": [
+						{
+							"title": {
+								"ko": "굵기와 기울기 얼굴",
+								"en": "Weight and slant faces"
+							},
+							"code": "use vanilla::platform::list_family_font_faces;\n\nfor face in list_family_font_faces(\"Helvetica Neue\") {\n\tassert!((100..=900).contains(&face.weight));\n\tassert!(face.source.path.exists());\n}\nassert!(list_family_font_faces(\"NoSuchFamily\").is_empty());",
+							"language": "rust"
+						}
+					]
+				},
+				{
+					"kind": "method",
 					"name": "find_fallback_font_file",
 					"signature": "pub fn find_fallback_font_file(text: &str, weight: u16, is_italic: bool, is_color_wanted: bool) -> Option<FontFileSource>",
 					"params": [
@@ -162326,7 +162438,7 @@
 				{
 					"title": {
 						"ko": "윈도우에서만 쓰는 모듈이라 다른 운영체제에서는 건너뛴다",
-						"en": ""
+						"en": "This module is used only on Windows, so it is skipped on other operating systems"
 					},
 					"code": "#[cfg(windows)]\n{\n\tuse vanilla::platform::desktop::directwriteglyph::DirectWriteGlyphMask;\n\tlet _ = std::mem::size_of::<DirectWriteGlyphMask>();\n}",
 					"language": "rust"
@@ -162442,7 +162554,7 @@
 						{
 							"title": {
 								"ko": "마스크의 한 줄 바이트 수는 너비 (윈도우 전용)",
-								"en": ""
+								"en": "The bytes per mask row equal the width (Windows only)"
 							},
 							"code": "#[cfg(windows)]\nfn read_row_length(mask: &vanilla::platform::desktop::directwriteglyph::DirectWriteGlyphMask) -> usize {\n\tmask.width as usize\n}\nlet _ = 0;",
 							"language": "rust"
