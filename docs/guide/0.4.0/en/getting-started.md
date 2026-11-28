@@ -127,6 +127,7 @@ cargo run --release --example modelviewer
 | `engineextras` | Outlines, progress ring, soft shade, mouse cursor, camera gestures, mouse buttons and finger input |
 | `devtoolsshowcase` | Developer tools (F2): hierarchy, inspector, statistics, local storage, settings |
 | `toonshowcase` | Toon 3D: basic shapes and outlines, skeletal animation of a GLB model, cel shading, instancing and off-screen culling, shadows, HDR bloom |
+| `toonshading` | Cel shading of a VRM 1.0 character: ramp, spherical face normals, bangs shadow and see-through, rim light, bloom, FXAA, expression buttons, animation retargeting, node constraints, orbit camera |
 | `toonview` | Toon inside a node rectangle (`ToonView3D`), 2D placed on 3D points with `Camera3D` |
 | `toonfx` | Toon screen-space outlines and GPU effects |
 | `toonpost` | Three variants of toon HDR finishing |
@@ -144,7 +145,7 @@ cargo run --release --example modelviewer
 | `textshaping` | Right-to-left text, synthetic italic and bold, CJK word wrapping, `DynamicFont` |
 | `scenedocument` | Reads a scene file in the vanilla.js visual editor format (`.scene.json`) into a node tree, exports it again and compares |
 
-- `modelviewer`, `toonshowcase`, `timelineshowcase`, `loadingshowcase` and `scenedocument` use example assets from vanilla.js. Clone the vanilla.js repository next to the engine repository. (The `vanilla.js` and `vanilla-engine` folders side by side)
+- `modelviewer`, `toonshowcase`, `toonshading`, `timelineshowcase`, `loadingshowcase` and `scenedocument` use example assets from vanilla.js. Clone the vanilla.js repository next to the engine repository. (The `vanilla.js` and `vanilla-engine` folders side by side)
 - The examples write asset paths relative to the repository root, so run them from the repository root.
 - Run heavy 3D examples with `--release`. (Cargo's dev build does not optimize)
 

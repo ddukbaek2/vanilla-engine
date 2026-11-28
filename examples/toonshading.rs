@@ -185,6 +185,38 @@ fn quaternion_from_matrix_elements(elements: &[f32; 16]) -> Quaternion {
 	Quaternion { x, y, z, w }.normalize()
 }
 
+fn normalize_vector(vector: [f64; 3]) -> [f64; 3] {
+	let length = (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).sqrt();
+	if length < 1e-12 {
+		return [0.0, 0.0, 0.0];
+	}
+	[vector[0] / length, vector[1] / length, vector[2] / length]
+}
+
+fn rotate_vector(quaternion: Quaternion, vector: [f64; 3]) -> [f64; 3] {
+	let q = [quaternion.x, quaternion.y, quaternion.z];
+	let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+	let once = cross(q, vector);
+	let once = [once[0] + vector[0] * quaternion.w, once[1] + vector[1] * quaternion.w, once[2] + vector[2] * quaternion.w];
+	let twice = cross(q, once);
+	[vector[0] + twice[0] * 2.0, vector[1] + twice[1] * 2.0, vector[2] + twice[2] * 2.0]
+}
+
+// 최단 회전. (단위 벡터 from → to)
+fn quaternion_from_to(from: [f64; 3], to: [f64; 3]) -> Quaternion {
+	let cosine = from[0] * to[0] + from[1] * to[1] + from[2] * to[2];
+	if cosine < -0.999999 {
+		let mut orthogonal = [0.0, -from[2], from[1]];
+		if orthogonal[1] * orthogonal[1] + orthogonal[2] * orthogonal[2] < 1e-8 {
+			orthogonal = [from[2], 0.0, -from[0]];
+		}
+		let axis = normalize_vector(orthogonal);
+		return Quaternion { x: axis[0], y: axis[1], z: axis[2], w: 0.0 };
+	}
+	let axis = [from[1] * to[2] - from[2] * to[1], from[2] * to[0] - from[0] * to[2], from[0] * to[1] - from[1] * to[0]];
+	Quaternion { x: axis[0], y: axis[1], z: axis[2], w: 1.0 + cosine }.normalize()
+}
+
 fn clamp_value(value: f64, minimum_value: f64, maximum_value: f64) -> f64 {
 	value.max(minimum_value).min(maximum_value)
 }
@@ -222,6 +254,17 @@ struct RetargetEntry {
 }
 
 //==============================================================================
+// 노드 제약. (VRMC_node_constraint, roll 은 원본 노드의 축 성분 회전을 복사, aim 은 축이 원본 노드를 향하게)
+//==============================================================================
+struct NodeConstraint {
+	is_roll: bool,
+	node_index: usize,
+	source_index: usize,
+	axis: [f64; 3],
+	weight: f64,
+}
+
+//==============================================================================
 // 단추. (표정 줄, 동작 줄)
 //==============================================================================
 struct ButtonLayout {
@@ -244,6 +287,7 @@ struct Resources {
 	retarget_entry_list: Vec<RetargetEntry>,
 	node_name_list: Vec<String>,
 	animation_node_name_list: Vec<String>,
+	constraint_list: Vec<NodeConstraint>,
 	hips_source_index: Option<usize>,
 	source_hips_rest_position: [f64; 3],
 	hips_height_scale: f64,
@@ -553,6 +597,29 @@ impl ToonShadingScene {
 			}
 		}
 
+		// 노드 제약.
+		let mut constraint_list: Vec<NodeConstraint> = Vec::new();
+		if let Some(node_array) = vrm_document["nodes"].as_array() {
+			for (node_index, node_description) in node_array.iter().enumerate() {
+				let constraint = &node_description["extensions"]["VRMC_node_constraint"]["constraint"];
+				if constraint.is_null() {
+					continue;
+				}
+				if !constraint["roll"].is_null() {
+					let axis_name = constraint["roll"]["rollAxis"].as_str().unwrap_or("X");
+					let axis = [if axis_name == "X" { 1.0 } else { 0.0 }, if axis_name == "Y" { 1.0 } else { 0.0 }, if axis_name == "Z" { 1.0 } else { 0.0 }];
+					constraint_list.push(NodeConstraint { is_roll: true, node_index, source_index: constraint["roll"]["source"].as_u64().unwrap_or(0) as usize, axis, weight: constraint["roll"]["weight"].as_f64().unwrap_or(1.0) });
+				}
+				else if !constraint["aim"].is_null() {
+					let axis_name = constraint["aim"]["aimAxis"].as_str().unwrap_or("PositiveX");
+					let sign = if axis_name.starts_with("Negative") { -1.0 } else { 1.0 };
+					let letter = &axis_name[axis_name.len() - 1..];
+					let axis = [if letter == "X" { sign } else { 0.0 }, if letter == "Y" { sign } else { 0.0 }, if letter == "Z" { sign } else { 0.0 }];
+					constraint_list.push(NodeConstraint { is_roll: false, node_index, source_index: constraint["aim"]["source"].as_u64().unwrap_or(0) as usize, axis, weight: constraint["aim"]["weight"].as_f64().unwrap_or(1.0) });
+				}
+			}
+		}
+
 		let mut resources = Resources {
 			renderer,
 			model,
@@ -563,6 +630,7 @@ impl ToonShadingScene {
 			retarget_entry_list,
 			node_name_list,
 			animation_node_name_list,
+			constraint_list,
 			hips_source_index,
 			source_hips_rest_position,
 			hips_height_scale,
@@ -1201,6 +1269,50 @@ impl ToonShadingScene {
 	}
 
 	//==============================================================================
+	// 노드 제약 갱신. (직전 프레임 월드 기준)
+	//==============================================================================
+	fn update_constraints(&mut self) {
+		let resources = match self.resources.as_mut() {
+			Some(resources) => resources,
+			None => {
+				return;
+			}
+		};
+		let mut offset_list: Vec<(usize, Quaternion)> = Vec::new();
+		for constraint in resources.constraint_list.iter() {
+			let node = &resources.model.get_node_list()[constraint.node_index];
+			let source_node = &resources.model.get_node_list()[constraint.source_index];
+			if constraint.is_roll {
+				let source_delta = quaternion_conjugate(source_node.base_rotation).multiply(source_node.current_rotation);
+				let projection = source_delta.x * constraint.axis[0] + source_delta.y * constraint.axis[1] + source_delta.z * constraint.axis[2];
+				let twist = Quaternion { x: constraint.axis[0] * projection, y: constraint.axis[1] * projection, z: constraint.axis[2] * projection, w: source_delta.w };
+				let twist_length = (twist.x * twist.x + twist.y * twist.y + twist.z * twist.z + twist.w * twist.w).sqrt();
+				let twist = if twist_length < 0.000001 { Quaternion::identity() } else { twist.normalize() };
+				offset_list.push((constraint.node_index, Quaternion::slerp(Quaternion::identity(), twist, constraint.weight)));
+			}
+			else {
+				let parent_rotation = match resources.parent_index_list[constraint.node_index] {
+					Some(parent_index) => quaternion_from_matrix_elements(&resources.model.get_node_list()[parent_index].world_matrix.elements),
+					None => Quaternion::identity(),
+				};
+				let rest_world_rotation = parent_rotation.multiply(node.base_rotation);
+				let from_direction = rotate_vector(rest_world_rotation, constraint.axis);
+				let node_elements = &node.world_matrix.elements;
+				let source_elements = &source_node.world_matrix.elements;
+				let to_direction = normalize_vector([(source_elements[12] - node_elements[12]) as f64, (source_elements[13] - node_elements[13]) as f64, (source_elements[14] - node_elements[14]) as f64]);
+				let aim_rotation = quaternion_from_to(normalize_vector(from_direction), to_direction);
+				let weighted = Quaternion::slerp(Quaternion::identity(), aim_rotation, constraint.weight);
+				let new_local = quaternion_conjugate(parent_rotation).multiply(weighted).multiply(parent_rotation).multiply(node.base_rotation);
+				offset_list.push((constraint.node_index, quaternion_conjugate(node.base_rotation).multiply(new_local)));
+			}
+		}
+		for (node_index, offset) in offset_list.iter() {
+			let node_name = resources.node_name_list[*node_index].clone();
+			resources.model.set_joint_rotation_offset(&node_name, *offset);
+		}
+	}
+
+	//==============================================================================
 	// 신체 동작 갱신. (원본 골격 재생 → 뼈마다 T 포즈 대비 월드 회전 변화를 VRM 뼈에 그대로, 부모부터 처리)
 	//==============================================================================
 	fn apply_body_animation(&mut self, delta_time: f64) {
@@ -1299,6 +1411,7 @@ impl Scene for ToonShadingScene {
 		camera_state.focus_height += (camera_state.target_focus_height - camera_state.focus_height) * camera_approach;
 		self.update_expressions(delta_time);
 		self.apply_body_animation(delta_time);
+		self.update_constraints();
 		if let Some(resources) = self.resources.as_mut() {
 			resources.model.update(delta_time);
 			if let Some(head_index) = resources.head_node_index {
