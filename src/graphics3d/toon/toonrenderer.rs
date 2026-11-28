@@ -35,7 +35,8 @@
 //!   껍데기 색은 빛 묶음의 outline 빛 색 쓰기가 켜져 있으면(기본) 해의 색을 곱한다. (세기가 1 이상이면 세기로 나눈 색, 유니티 툰 셰이더 바깥선과 같다)
 //! - 뼈대: write_skin_pose 가 셈한 본 행렬을 draw_mesh 에 넘긴다. (TOON_MAXIMUM_JOINTS 까지, 엔진 SkinnedModelRenderer 와 같은 96)
 //! - GPU 인스턴싱: draw_mesh_instanced 로 같은 모형 여럿을 인스턴스마다 행렬과 틴트로 한 번에 그린다. (몸과 바깥선 모두, 그릴 때마다 걸러서 올림)
-//!   오래 두는 인스턴스는 create_instance_layout 과 create_instance_buffer 로 영구 버퍼를 짓고 draw_mesh_instance_buffer 로 그린다. (거르지 않음, 머티리얼 정점 조각이 사용자 어트리뷰트를 읽음)
+//!   오래 두는 인스턴스는 create_instance_layout 과 create_instance_buffer 로 영구 버퍼를 짓고 draw_mesh_instance_buffer 로 그린다. (버퍼 전체의 경계로 통째 거름, 머티리얼 정점 조각이 사용자 어트리뷰트를 읽음)
+//!   고칠 때는 update_instance_buffer(전체) 나 update_instance_buffer_range(일부, bufferSubData). 몸, 바깥선 껍데기, 그림자, 화면 공간 바깥선의 선의 판이 같은 GPU 버퍼를 같이 쓴다.
 //! - 화면 밖 거르기: 모형의 경계 구를 보기와 투영의 절두체에 대어 밖이면 그리지 않는다. (인스턴스는 하나씩 걸러 남은 것만 올린다)
 //! - 그림자: 엔진 ShadowMap 에 begin_shadow_pass 와 draw_mesh 로 드리우고, set_shadow 로 받는다. (3x3 PCF, 치우침은 ShadowMap::set_bias 의 텍셀 단위 값에 텍셀 크기와 기울기를 곱한다)
 //!   점광과 스포트라이트 그림자는 ShadowAtlas 에 begin_shadow_atlas_pass, 칸마다 set_shadow_atlas_tile 과 draw_mesh 로 드리우고, set_local_shadows 로 받는다. (점광은 큐브 여섯 칸, 스포트라이트는 원근 한 칸)
@@ -1298,6 +1299,99 @@ pub struct ToonInstanceBuffer {
 	usage: u32,
 	float_count: Cell<usize>,
 	vertex_array_list: RefCell<Vec<(u64, GlVertexArray, Option<GlVertexArray>)>>,
+	id: u64,
+	generation: Cell<u64>,
+	bounds: Cell<Option<ToonInstanceBounds>>,
+	data: RefCell<Option<Vec<f32>>>,
+}
+
+// 인스턴스 버퍼마다 다른 번호를 주는 셈. (그림자 캐시가 버퍼를 알아본다, 지우고 다시 지은 것이 같은 주소에 와도 다르게 본다)
+static NEXT_INSTANCE_BUFFER_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+//==============================================================================
+/// 인스턴스 버퍼 전체의 경계. (꼴에 행렬이 있을 때만, 자리들의 상자 가운데와 가장 먼 자리까지의 거리, 가장 큰 크기, 원본 bounds)
+/// - 어느 모형으로 그려도 쓰도록 모형의 경계 구는 그릴 때 더한다. (read_instance_buffer_sphere)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToonInstanceBounds {
+	/// 자리들의 상자 가운데.
+	pub center: [f64; 3],
+	/// 가운데에서 가장 먼 자리까지의 거리.
+	pub radius: f64,
+	/// 인스턴스 행렬의 가장 큰 크기.
+	pub scale: f64,
+}
+
+//==============================================================================
+/// 인스턴스 버퍼 전체의 경계 셈. (원본 readInstanceBounds)
+///
+/// # 인자
+/// - `instance_layout`: 버퍼의 인스턴스 꼴.
+/// - `data`: 꼴의 수 개수씩 인스턴스를 이어 담은 수.
+///
+/// # 돌려줌
+/// 경계. 행렬이 없거나 인스턴스가 없으면 None.
+//==============================================================================
+fn read_instance_bounds(instance_layout: &ToonInstanceLayout, data: &[f32]) -> Option<ToonInstanceBounds> {
+	if !instance_layout.has_matrix() {
+		return None;
+	}
+	let float_count = instance_layout.get_float_count();
+	let instance_count = data.len() / float_count.max(1);
+	if instance_count == 0 {
+		return None;
+	}
+	let matrix_offset = instance_layout.get_attributes().iter().find(|attribute| attribute.name == TOON_INSTANCE_MATRIX_NAME).map(|attribute| attribute.offset).unwrap_or(0);
+	let mut minimum = [f64::INFINITY; 3];
+	let mut maximum = [f64::NEG_INFINITY; 3];
+	let mut scale = 0.0f64;
+	for instance_index in 0..instance_count {
+		let offset = instance_index * float_count + matrix_offset;
+		for axis in 0..3 {
+			let value = data[offset + 12 + axis] as f64;
+			minimum[axis] = minimum[axis].min(value);
+			maximum[axis] = maximum[axis].max(value);
+		}
+		scale = scale.max(read_maximum_scale_of(&data[offset..offset + 16]));
+	}
+	let center = [(minimum[0] + maximum[0]) * 0.5, (minimum[1] + maximum[1]) * 0.5, (minimum[2] + maximum[2]) * 0.5];
+	let mut radius = 0.0f64;
+	for instance_index in 0..instance_count {
+		let offset = instance_index * float_count + matrix_offset;
+		radius = radius.max(crate::base::trigonometry::hypot_list(&[data[offset + 12] as f64 - center[0], data[offset + 13] as f64 - center[1], data[offset + 14] as f64 - center[2]]));
+	}
+	Some(ToonInstanceBounds { center, radius, scale })
+}
+
+//==============================================================================
+/// 모형을 인스턴스 버퍼로 그릴 때의 월드 경계 구. (버퍼의 경계에 모형의 경계 구를 가장 큰 크기로 더한 것, 걸러도 빠지는 화소가 없다, 원본 readInstanceBufferSphere)
+///
+/// # 인자
+/// - `mesh`: ToonRenderer::create_mesh 의 결과.
+/// - `instance_buffer`: create_instance_buffer 의 결과.
+///
+/// # 돌려줌
+/// [x, y, z, 반지름]. 꼴에 행렬이 없어 경계를 모르면 None.
+//==============================================================================
+pub fn read_instance_buffer_sphere(mesh: &ToonMesh, instance_buffer: &ToonInstanceBuffer) -> Option<[f64; 4]> {
+	let bounds = instance_buffer.bounds.get()?;
+	let (center, bounding_radius) = mesh.get_bounding_sphere();
+	let mesh_reach = crate::base::trigonometry::hypot_list(&center) + bounding_radius;
+	Some([bounds.center[0], bounds.center[1], bounds.center[2], bounds.radius + bounds.scale * mesh_reach])
+}
+
+//==============================================================================
+/// 구가 절두체 안에 드는지. (extract_frustum_planes 의 면 여섯, 원본 isSphereInFrustum)
+///
+/// # 인자
+/// - `frustum_planes`: extract_frustum_planes 의 결과.
+/// - `sphere`: [x, y, z, 반지름].
+///
+/// # 돌려줌
+/// 절두체 안에 들거나 걸치면 true.
+//==============================================================================
+pub fn is_sphere_in_frustum(frustum_planes: &[[f64; 4]; 6], sphere: &[f64; 4]) -> bool {
+	frustum_planes.iter().all(|plane| plane[0] * sphere[0] + plane[1] * sphere[1] + plane[2] * sphere[2] + plane[3] >= -sphere[3])
 }
 
 impl ToonInstanceBuffer {
@@ -1329,6 +1423,82 @@ impl ToonInstanceBuffer {
 	//==============================================================================
 	pub fn get_instance_count(&self) -> usize {
 		self.float_count.get() / self.layout.get_float_count().max(1)
+	}
+
+	//==============================================================================
+	/// 버퍼 번호. (버퍼마다 다르다, 그림자 캐시가 버퍼를 알아본다)
+	///
+	/// # 돌려줌
+	/// 버퍼 번호.
+	//==============================================================================
+	pub fn get_id(&self) -> u64 {
+		self.id
+	}
+
+	//==============================================================================
+	/// 고친 횟수. (update_instance_buffer 와 update_instance_buffer_range 마다 1 씩 는다, 그림자 캐시가 버퍼 바뀜을 안다)
+	///
+	/// # 돌려줌
+	/// 고친 횟수.
+	//==============================================================================
+	pub fn get_generation(&self) -> u64 {
+		self.generation.get()
+	}
+
+	//==============================================================================
+	/// 버퍼 전체의 경계. (꼴에 행렬이 있을 때만)
+	///
+	/// # 돌려줌
+	/// 경계. 행렬이 없거나 인스턴스가 없으면 None.
+	//==============================================================================
+	pub fn get_bounds(&self) -> Option<ToonInstanceBounds> {
+		self.bounds.get()
+	}
+
+	//==============================================================================
+	/// 경계를 다시 셀 사본. (꼴에 행렬이 있을 때만, 고치지 않는다)
+	///
+	/// # 돌려줌
+	/// 수 사본. 행렬이 없으면 None.
+	//==============================================================================
+	pub fn get_data(&self) -> Option<std::cell::Ref<'_, [f32]>> {
+		std::cell::Ref::filter_map(self.data.borrow(), |data| data.as_deref()).ok()
+	}
+
+	//==============================================================================
+	/// 모형과 함께 묶은 버텍스 어레이. (몸, 바깥선, 처음 부를 때 지어 담아 둔다, 그리는 길이 모두 이것을 같이 쓰고 다시 올리지 않는다)
+	//==============================================================================
+	pub(crate) fn read_vertex_arrays(&self, gl: &crate::GlContext, mesh: &ToonMesh) -> Option<(GlVertexArray, Option<GlVertexArray>)> {
+		if let Some((_, body_vertex_array, outline_vertex_array)) = self.vertex_array_list.borrow().iter().find(|entry| entry.0 == mesh.mesh_id) {
+			return Some((*body_vertex_array, *outline_vertex_array));
+		}
+		unsafe {
+			let body_vertex_array = crate::core::glstatecache::create_vertex_array(gl).ok()?;
+			crate::core::glstatecache::bind_vertex_array(gl, Some(body_vertex_array));
+			ToonRenderer::attach_body_attributes(gl, mesh);
+			ToonRenderer::attach_layout_attributes(gl, &self.layout, self.buffer);
+			let mut outline_vertex_array = None;
+			if mesh.outline_vertex_array.is_some() {
+				// 바깥선 쪽을 짓지 못하면 먼저 지은 몸 쪽을 지운다.
+				let vertex_array = match crate::core::glstatecache::create_vertex_array(gl) {
+					Ok(vertex_array) => {
+						vertex_array
+					}
+					Err(_) => {
+						crate::core::glstatecache::bind_vertex_array(gl, None);
+						crate::core::glstatecache::delete_vertex_array(gl, body_vertex_array);
+						return None;
+					}
+				};
+				crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
+				ToonRenderer::attach_outline_attributes(gl, mesh);
+				ToonRenderer::attach_layout_attributes(gl, &self.layout, self.buffer);
+				outline_vertex_array = Some(vertex_array);
+			}
+			crate::core::glstatecache::bind_vertex_array(gl, None);
+			self.vertex_array_list.borrow_mut().push((mesh.mesh_id, body_vertex_array, outline_vertex_array));
+			Some((body_vertex_array, outline_vertex_array))
+		}
 	}
 }
 
@@ -1757,6 +1927,17 @@ fn read_block_hash(bits: &[u32]) -> u32 {
 #[cfg(test)]
 thread_local! {
 	pub(crate) static UPLOAD_COUNTS: Cell<[u32; 5]> = const { Cell::new([0; 5]) };
+}
+
+// 시험이 세는 인스턴스 올림. (인스턴스 배열을 걸러 올린 것, 인스턴스 버퍼를 고친 것)
+#[cfg(test)]
+thread_local! {
+	pub(crate) static INSTANCE_UPLOAD_COUNT: Cell<u32> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn count_instance_upload() {
+	INSTANCE_UPLOAD_COUNT.with(|count| count.set(count.get() + 1));
 }
 
 // 시험이 기능 갈래 변형을 끄고(true) 기본 몸 프로그램으로만 그려 변형 쪽 화면과 견줄 때, 시험이 지은 변형 수를 셀 때.
@@ -2420,7 +2601,14 @@ pub fn create_reflection_matrix(plane_point: [f64; 3], plane_normal: [f64; 3]) -
 /// 행렬의 가장 큰 크기. (세 축 길이 가운데 큰 것, 원본 readMaximumScale 의 Math.hypot 과 같은 hypot_list)
 //==============================================================================
 fn read_maximum_scale(matrix: &Matrix4) -> f64 {
-	let elements = matrix.read_elements();
+	read_maximum_scale_of(&matrix.elements)
+}
+
+//==============================================================================
+/// 행렬 수 16 개의 가장 큰 크기. (원본 readMaximumScale)
+//==============================================================================
+fn read_maximum_scale_of(elements: &[f32]) -> f64 {
+	let elements: Vec<f64> = elements[..16].iter().map(|&element| element as f64).collect();
 	let scale_x = crate::base::trigonometry::hypot_list(&[elements[0], elements[1], elements[2]]);
 	let scale_y = crate::base::trigonometry::hypot_list(&[elements[4], elements[5], elements[6]]);
 	let scale_z = crate::base::trigonometry::hypot_list(&[elements[8], elements[9], elements[10]]);
@@ -2954,7 +3142,7 @@ impl ToonRenderer {
 			let buffer = crate::core::glstatecache::create_buffer(gl)?;
 			crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(buffer));
 			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(data), gl_usage);
-			Ok(ToonInstanceBuffer { layout: instance_layout.clone(), buffer, usage: gl_usage, float_count: Cell::new(data.len()), vertex_array_list: RefCell::new(Vec::new()) })
+			Ok(ToonInstanceBuffer { layout: instance_layout.clone(), buffer, usage: gl_usage, float_count: Cell::new(data.len()), vertex_array_list: RefCell::new(Vec::new()), id: NEXT_INSTANCE_BUFFER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed), generation: Cell::new(0), bounds: Cell::new(read_instance_bounds(instance_layout, data)), data: RefCell::new(if instance_layout.has_matrix() { Some(data.to_vec()) } else { None }) })
 		}
 	}
 
@@ -2972,6 +3160,77 @@ impl ToonRenderer {
 			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(data), instance_buffer.usage);
 		}
 		instance_buffer.float_count.set(data.len());
+		*instance_buffer.data.borrow_mut() = if instance_buffer.layout.has_matrix() { Some(data.to_vec()) } else { None };
+		instance_buffer.bounds.set(read_instance_bounds(&instance_buffer.layout, data));
+		instance_buffer.generation.set(instance_buffer.generation.get() + 1);
+		#[cfg(test)]
+		count_instance_upload();
+	}
+
+	//==============================================================================
+	/// 인스턴스 버퍼의 일부 고치기. (first_instance 번째부터 data 의 인스턴스 수만큼만 올림, bufferSubData)
+	///
+	/// # 인자
+	/// - `gl`: 버퍼를 지은 GL 컨텍스트.
+	/// - `instance_buffer`: create_instance_buffer 의 결과.
+	/// - `first_instance`: 고칠 첫 인스턴스 번호. (0 부터)
+	/// - `data`: 꼴의 수 개수씩 고칠 인스턴스를 이어 담은 수. (버퍼에 든 인스턴스 수를 넘으면 Err, 늘리려면 update_instance_buffer)
+	///
+	/// # 돌려줌
+	/// 고쳤으면 Ok. 자리가 맞지 않으면 Err(까닭 글).
+	///
+	/// # 예제
+	/// 바위 하나만 옮기고 다시 올리지 않고 그리기
+	/// ```rust,no_run
+	/// use vanilla::{create_octahedron_geometry, Matrix4, MeshBuilder, ToonBufferUsage, ToonDrawOptions, ToonPartOptions, ToonRenderer, Vector3};
+	///
+	/// fn move_one_rock(gl: &vanilla::GlContext) -> Result<(), String> {
+	/// 	let mut renderer = ToonRenderer::new(gl)?;
+	/// 	let mut builder = MeshBuilder::new();
+	/// 	builder.add_part(&create_octahedron_geometry(0.3), &Matrix4::create_identity(), "#909098", ToonPartOptions { has_outline: true, ..ToonPartOptions::default() });
+	/// 	let rock_mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("mesh failed")?;
+	/// 	let instance_layout = renderer.create_instance_layout(&[("instanceMatrix", 16), ("instanceTint", 4)])?;
+	/// 	let mut data: Vec<f32> = Vec::new();
+	/// 	for index in 0..3 {
+	/// 		data.extend_from_slice(Matrix4::create_translation(index as f64 - 1.0, 0.0, 0.0).get_elements());
+	/// 		data.extend_from_slice(&[1.0, 1.0, 1.0, 1.0]);
+	/// 	}
+	/// 	let instance_buffer = renderer.create_instance_buffer(gl, &instance_layout, &data, ToonBufferUsage::Dynamic)?;
+	/// 	let mut moved: Vec<f32> = Vec::new();
+	/// 	moved.extend_from_slice(Matrix4::create_translation(0.0, 0.5, 0.0).get_elements());
+	/// 	moved.extend_from_slice(&[1.0, 0.6, 0.6, 1.0]);
+	/// 	renderer.update_instance_buffer_range(gl, &instance_buffer, 1, &moved)?;
+	/// 	let view_matrix = Matrix4::create_look_at(Vector3::create(0.0, 2.0, 4.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
+	/// 	renderer.begin_frame_with_matrices(gl, &view_matrix, &Matrix4::create_perspective(0.8, 1.0, 0.1, 30.0));
+	/// 	renderer.draw_mesh_instance_buffer(gl, &rock_mesh, &instance_buffer, 3, ToonDrawOptions::default());
+	/// 	renderer.end_frame(gl);
+	/// 	assert_eq!(instance_buffer.get_generation(), 1);
+	/// 	Ok(())
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn update_instance_buffer_range(&self, gl: &crate::GlContext, instance_buffer: &ToonInstanceBuffer, first_instance: usize, data: &[f32]) -> Result<(), String> {
+		let layout_float_count = instance_buffer.layout.get_float_count();
+		let float_offset = first_instance * layout_float_count;
+		if data.len() % layout_float_count != 0 || float_offset + data.len() > instance_buffer.float_count.get() {
+			return Err(format!("인스턴스 버퍼의 고칠 자리가 맞지 않는다: {} 번부터 수 {} 개 (버퍼의 수 {} 개)", first_instance, data.len(), instance_buffer.float_count.get()));
+		}
+		if data.is_empty() {
+			return Ok(());
+		}
+		unsafe {
+			crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(instance_buffer.buffer));
+			gl.buffer_sub_data_u8_slice(glow::ARRAY_BUFFER, (float_offset * 4) as i32, float_slice_to_bytes(data));
+		}
+		let mut copy = instance_buffer.data.borrow_mut();
+		if let Some(copy) = copy.as_mut() {
+			copy[float_offset..float_offset + data.len()].copy_from_slice(data);
+			instance_buffer.bounds.set(read_instance_bounds(&instance_buffer.layout, copy));
+		}
+		instance_buffer.generation.set(instance_buffer.generation.get() + 1);
+		#[cfg(test)]
+		count_instance_upload();
+		Ok(())
 	}
 
 	//==============================================================================
@@ -3353,36 +3612,7 @@ impl ToonRenderer {
 	/// 모형과 인스턴스 버퍼를 함께 묶은 버텍스 어레이. (처음 그릴 때 짓고 인스턴스 버퍼에 담아 둔다, (몸, 바깥선))
 	//==============================================================================
 	fn read_instance_vertex_arrays(&self, gl: &crate::GlContext, mesh: &ToonMesh, instance_buffer: &ToonInstanceBuffer) -> Option<(GlVertexArray, Option<GlVertexArray>)> {
-		if let Some((_, body_vertex_array, outline_vertex_array)) = instance_buffer.vertex_array_list.borrow().iter().find(|entry| entry.0 == mesh.mesh_id) {
-			return Some((*body_vertex_array, *outline_vertex_array));
-		}
-		unsafe {
-			let body_vertex_array = crate::core::glstatecache::create_vertex_array(gl).ok()?;
-			crate::core::glstatecache::bind_vertex_array(gl, Some(body_vertex_array));
-			ToonRenderer::attach_body_attributes(gl, mesh);
-			ToonRenderer::attach_layout_attributes(gl, &instance_buffer.layout, instance_buffer.buffer);
-			let mut outline_vertex_array = None;
-			if mesh.outline_vertex_array.is_some() {
-				// 바깥선 쪽을 짓지 못하면 먼저 지은 몸 쪽을 지운다.
-				let vertex_array = match crate::core::glstatecache::create_vertex_array(gl) {
-					Ok(vertex_array) => {
-						vertex_array
-					}
-					Err(_) => {
-						crate::core::glstatecache::bind_vertex_array(gl, None);
-						crate::core::glstatecache::delete_vertex_array(gl, body_vertex_array);
-						return None;
-					}
-				};
-				crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
-				ToonRenderer::attach_outline_attributes(gl, mesh);
-				ToonRenderer::attach_layout_attributes(gl, &instance_buffer.layout, instance_buffer.buffer);
-				outline_vertex_array = Some(vertex_array);
-			}
-			crate::core::glstatecache::bind_vertex_array(gl, None);
-			instance_buffer.vertex_array_list.borrow_mut().push((mesh.mesh_id, body_vertex_array, outline_vertex_array));
-			Some((body_vertex_array, outline_vertex_array))
-		}
+		instance_buffer.read_vertex_arrays(gl, mesh)
 	}
 
 	//==============================================================================
@@ -3844,25 +4074,35 @@ impl ToonRenderer {
 				crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(mesh.instance_buffer));
 				gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&instance_data), glow::DYNAMIC_DRAW);
 			}
+			#[cfg(test)]
+			count_instance_upload();
 			self.draw_with_count(gl, mesh, &first_matrix, instance_count as i32, options, None, DRAW_PART_ALL, None);
 		}
 		self.instance_data = instance_data;
 	}
 
 	//==============================================================================
-	/// 영구 인스턴스 버퍼로 그리기. (거르지 않음, instance_count 개, 꼴에 행렬이 없으면 정점 조각이 자리를 정한다)
+	/// 영구 인스턴스 버퍼로 그리기. (버퍼 전체의 경계로 통째 거른다, instance_count 개, 꼴에 행렬이 없으면 정점 조각이 자리를 정하고 거르지 않는다)
 	///
 	/// # 인자
 	/// - `gl`: GL 컨텍스트.
 	/// - `mesh`: create_mesh 의 결과.
 	/// - `instance_buffer`: create_instance_buffer 의 결과.
 	/// - `instance_count`: 그릴 인스턴스 수. (버퍼에 든 수를 넘으면 자른다)
-	/// - `options`: draw_mesh 와 같다. (material 의 정점 조각이 사용자 어트리뷰트를 읽는다)
+	/// - `options`: draw_mesh 와 같다. (material 의 정점 조각이 사용자 어트리뷰트를 읽는다, is_culled 가 false 면 거르지 않는다)
 	//==============================================================================
 	pub fn draw_mesh_instance_buffer(&mut self, gl: &crate::GlContext, mesh: &ToonMesh, instance_buffer: &ToonInstanceBuffer, instance_count: usize, options: ToonDrawOptions) {
 		let count = instance_count.min(instance_buffer.get_instance_count());
 		if count == 0 {
 			return;
+		}
+		if options.is_culled {
+			if let Some(sphere) = read_instance_buffer_sphere(mesh, instance_buffer) {
+				if !is_sphere_in_frustum(&self.frustum_planes, &sphere) {
+					self.frame_statistics.culled_object_count += count as u32;
+					return;
+				}
+			}
 		}
 		self.frame_statistics.drawn_object_count += count as u32;
 		self.draw_with_count(gl, mesh, &Matrix4::create_identity(), count as i32, options, Some(instance_buffer), DRAW_PART_ALL, None);

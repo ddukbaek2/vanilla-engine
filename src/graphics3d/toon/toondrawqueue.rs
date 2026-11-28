@@ -9,16 +9,18 @@
 //!   is_depth_prepassed 가 묶음 안에 하나라도 있으면 그 덩어리는 깊이만 먼저 그린 뒤 같은 깊이(LEQUAL)인 화소에만 색을 칠한다.
 //!   여러 부품이 겹친 홀로그램이 두 겹으로 밝지 않고 한 덩어리로 비친다. 덩어리끼리는 먼 것부터라 서로 비친다.
 //! - 화면 공간 바깥선: set_screen_outline(ToonScreenOutline) 을 주면 draw 가 몸 앞에 불투명한 것을 선의 판에 그리고, 바깥선 껍데기 뒤에 섞는다.
-//!   번호는 꼴의 line_id (None 이면 담은 차례 + 1, 인스턴스는 ToonInstance 의 line_id 가 먼저), 모형마다 has_screen_outline, has_crease_line 으로 끄고 켠다.
+//!   번호는 꼴의 line_id (None 이면 담은 차례 + 1, 인스턴스는 ToonInstance 의 line_id, 인스턴스 버퍼는 꼴의 instanceLineId 칸이 먼저), 모형마다 has_screen_outline, has_crease_line 으로 끄고 켠다.
 //!   비치는 것은 선의 판에 그리지 않는다. 화면 사각형(ToonRenderer::set_screen_rect)이 있으면 그 사각형을 선의 판의 그리는 영역으로 쓴다.
 //!   러스트 판은 바깥선을 &'a mut 로 빌려 RefCell 에 담는다. (draw(&self) 에서 고쳐 쓴다)
 //! - 모서리 어둠: set_post_process(ToonPostProcess) 를 주고 후처리에서 set_ambient_occlusion 을 켜면 선의 판 뒤, 몸 앞에 셈해 렌더러에 걸고 end_frame 뒤에 푼다. (바깥선이 없으면 선 없이 선의 판만 그린다)
 //! - 단계 콜백: add_pass(stage, callback) 의 callback(gl, renderer) 를 그 자리에서 부른다. 부른 뒤 렌더러가 프레임의 그리기 상태를 다시 건다.
 //! - 인스턴스 묶음(add_mesh_instanced)은 불투명이면 몸과 바깥선을 한 번에 그리고, 비치면 인스턴스 자리의 가운데로 한 덩어리로 정렬한다.
+//!   인스턴스마다 걸러 그릴 때마다 올린다. (몸, 그림자, 선의 판이 같은 배열을 따로 올림) 오래 두는 것은 add_mesh_instance_buffer 로 한 번 올린 버퍼를 같이 쓴다.
+//! - 인스턴스 버퍼(add_mesh_instance_buffer)는 유니티 Graphics.RenderMeshInstanced 와 GraphicsBuffer, 고도 MultiMesh 꼴이다. 버퍼 전체의 경계로 통째 거르고 다시 올리지 않는다.
 //! - 그림자: draw_shadows(gl, renderer, shadow_map) 가 casts_shadow 가 true 인 불투명한 것만 그림자 깊이로 그린다. draw 보다 먼저 부른다.
 //!   점광과 스포트라이트 그림자는 draw_local_shadows(gl, renderer, shadow_atlas) 가 아틀라스의 칸마다 같은 것을 그린다. (렌더러에 set_local_shadows 로 건다)
 //!   그림자 판의 set_update_mode(ShadowUpdateMode) 를 따른다. 기본 OnChange 는 빛과 드리우개가 그대로면 다시 그리지 않고, 오래 그대로인 것은 구워 두고 움직이는 것만 덧그린다. (화면은 매 프레임 그린 것과 같다)
-//! - 사용: 매 프레임 clear() → add_mesh / add_mesh_instanced / add_pass → (draw_shadows) → draw(gl, renderer, camera) 나 draw_with_matrices(gl, renderer, 보기 행렬, 투영 행렬)
+//! - 사용: 매 프레임 clear() → add_mesh / add_mesh_instanced / add_mesh_instance_buffer / add_pass → (draw_shadows) → draw(gl, renderer, camera) 나 draw_with_matrices(gl, renderer, 보기 행렬, 투영 행렬)
 //!   draw 는 renderer.begin_frame_with_camera 와 end_frame 을 스스로 부른다. draw_with_matrices 는 begin_frame_with_matrices 를 부른다. (직교 원 행렬 카메라)
 //!   화면 사각형(ToonRenderer::set_screen_rect)은 그 전에 건다. clear 는 담은 모형과 단계 콜백을 모두 비운다. (화면 공간 바깥선은 그대로 둔다)
 //! - 원본은 담은 것을 객체 참조로 든다. 러스트 판은 모형과 인스턴스 목록, 단계 콜백을 빌려 담으므로 줄이 그 수명 'a 를 갖는다. (프레임마다 새로 짓거나 clear 뒤 다시 담는다)
@@ -34,7 +36,7 @@ use crate::core::graphic::GlTexture;
 use crate::graphics3d::camera3d::Camera3D;
 use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowCache, ShadowCasterRecord, ShadowMap, ShadowRenderTarget, ShadowUpdateMode};
 use crate::graphics3d::toon::toonmaterial::ToonBlendMode;
-use crate::graphics3d::toon::toonrenderer::{is_same_batch_state, read_matrix_determinant, ToonDrawOptions, ToonInstance, ToonMesh, ToonRenderer, DRAW_PART_BODY, DRAW_PART_OUTLINE, DRAW_PART_ALL};
+use crate::graphics3d::toon::toonrenderer::{is_same_batch_state, read_instance_buffer_sphere, read_matrix_determinant, ToonDrawOptions, ToonInstance, ToonInstanceBuffer, ToonMesh, ToonRenderer, DRAW_PART_BODY, DRAW_PART_OUTLINE, DRAW_PART_ALL};
 use crate::graphics3d::toon::toonscreenoutline::{ToonLineDrawOptions, ToonScreenOutline, TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID};
 use crate::graphics3d::toon::toonpostprocess::ToonPostProcess;
 
@@ -69,6 +71,9 @@ struct ToonDrawItem<'a> {
 	mesh: &'a ToonMesh,
 	model_matrix: Matrix4,
 	instance_list: Option<&'a [ToonInstance]>,
+	/// 영구 인스턴스 버퍼. (add_mesh_instance_buffer 로 담은 것만 Some, 그릴 수는 instance_count)
+	instance_buffer: Option<&'a ToonInstanceBuffer>,
+	instance_count: usize,
 	options: ToonDrawOptions<'a>,
 	is_transparent: bool,
 	depth_position: [f64; 3],
@@ -76,6 +81,16 @@ struct ToonDrawItem<'a> {
 	material_block: Cell<u64>,
 	/// 감기. (원본 mirrorSign, 0 이나 1)
 	mirror_sign: Cell<u8>,
+}
+
+//==============================================================================
+impl ToonDrawItem<'_> {
+	//==============================================================================
+	/// 인스턴스로 담은 것인지. (인스턴스 목록이거나 인스턴스 버퍼, 자동 인스턴싱으로 묶지 않는다)
+	//==============================================================================
+	fn is_instanced(&self) -> bool {
+		self.instance_list.is_some() || self.instance_buffer.is_some()
+	}
 }
 
 //==============================================================================
@@ -190,13 +205,14 @@ const SHADOW_STATIC_FRAME_COUNT: u32 = 30;
 /// 드리우개 기록 쓰기. (원본 writeCasterRecord, 그림자 깊이에 닿는 값을 기록과 견주고 새 값으로 바꾼다, 다르면 true)
 /// - 모형, 재질, 모형 행렬이나 인스턴스 행렬, 관절 행렬, 번호 버퍼의 범위, 화면 밖 거르기, 뒤집기. (틴트, 색, 바깥선 같은 것은 깊이에 닿지 않는다)
 /// - 원본은 모형과 재질을 참조로 견준다. 러스트 판은 모형 번호와 재질 번호로 견준다. (지우고 다시 지은 것이 같은 주소에 와도 다르게 본다)
-/// - 원본의 인스턴스 버퍼(addMeshInstanceBuffer 와 버퍼의 generation)는 러스트 ToonDrawQueue 에 아직 담는 길이 없어 견주지 않는다.
+/// - 인스턴스 버퍼로 담은 것(add_mesh_instance_buffer)은 행렬 대신 그릴 수 하나를 값으로 두고, 버퍼 번호와 고친 횟수(generation)를 기록과 견준다. (원본 writeCasterRecord)
 //==============================================================================
 fn write_caster_record(record: &mut ShadowCasterRecord, item: &ToonDrawItem) -> bool {
 	let options = &item.options;
-	let matrix_count = item.instance_list.map_or(1, |instance_list| instance_list.len());
+	let instance_buffer = item.instance_buffer.map(|instance_buffer| (instance_buffer.get_id(), instance_buffer.get_generation()));
+	let matrix_count = if item.instance_buffer.is_some() { 0 } else { item.instance_list.map_or(1, |instance_list| instance_list.len()) };
 	let joint_count = options.joint_matrices.map_or(0, |joint_matrices| joint_matrices.len());
-	let value_count = matrix_count * 16 + joint_count;
+	let value_count = matrix_count * 16 + item.instance_buffer.is_some() as usize + joint_count;
 	let mesh_id = Some(item.mesh.get_mesh_id());
 	let material_id = options.material.map(|material| material.get_id());
 	let mirrored_value = match options.is_mirrored {
@@ -211,7 +227,8 @@ fn write_caster_record(record: &mut ShadowCasterRecord, item: &ToonDrawItem) -> 
 		}
 	};
 	let header = [matrix_count as i64, options.index_start as i64, options.index_count as i64, options.is_culled as i64, mirrored_value, options.joint_matrices.map_or(-1, |joint_matrices| joint_matrices.len() as i64)];
-	let mut is_changed = record.mesh_id != mesh_id || record.material_id != material_id || record.header != header;
+	let mut is_changed = record.mesh_id != mesh_id || record.material_id != material_id || record.header != header || record.instance_buffer != instance_buffer;
+	record.instance_buffer = instance_buffer;
 	record.mesh_id = mesh_id;
 	record.material_id = material_id;
 	record.header = header;
@@ -228,7 +245,11 @@ fn write_caster_record(record: &mut ShadowCasterRecord, item: &ToonDrawItem) -> 
 		}
 		value_index += 1;
 	};
+	if item.instance_buffer.is_some() {
+		write(item.instance_count as f32);
+	}
 	match item.instance_list {
+		_ if item.instance_buffer.is_some() => {}
 		Some(instance_list) => {
 			for instance in instance_list {
 				for &element in instance.model_matrix.elements.iter() {
@@ -391,7 +412,7 @@ impl<'a> ToonDrawQueue<'a> {
 		let (center, _) = mesh.get_bounding_sphere();
 		let depth_point = model_matrix.transform_point(center[0], center[1], center[2]);
 		*self.opaque_index_list.get_mut() = None;
-		self.item_list.push(ToonDrawItem { mesh, model_matrix: *model_matrix, instance_list: None, options, is_transparent: is_transparent_options(&options), depth_position: [depth_point.x, depth_point.y, depth_point.z], material_block: Cell::new(0), mirror_sign: Cell::new(0) });
+		self.item_list.push(ToonDrawItem { mesh, model_matrix: *model_matrix, instance_list: None, instance_buffer: None, instance_count: 0, options, is_transparent: is_transparent_options(&options), depth_position: [depth_point.x, depth_point.y, depth_point.z], material_block: Cell::new(0), mirror_sign: Cell::new(0) });
 	}
 
 	//==============================================================================
@@ -416,7 +437,69 @@ impl<'a> ToonDrawQueue<'a> {
 			*value /= instance_list.len() as f64;
 		}
 		*self.opaque_index_list.get_mut() = None;
-		self.item_list.push(ToonDrawItem { mesh, model_matrix: Matrix4::create_identity(), instance_list: Some(instance_list), options, is_transparent: is_transparent_options(&options), depth_position, material_block: Cell::new(0), mirror_sign: Cell::new(0) });
+		self.item_list.push(ToonDrawItem { mesh, model_matrix: Matrix4::create_identity(), instance_list: Some(instance_list), instance_buffer: None, instance_count: 0, options, is_transparent: is_transparent_options(&options), depth_position, material_block: Cell::new(0), mirror_sign: Cell::new(0) });
+	}
+
+	//==============================================================================
+	/// 영구 인스턴스 버퍼로 같은 모형 여럿 담기. (몸, 바깥선 껍데기, 그림자, 선의 판이 한 GPU 버퍼를 같이 쓰고 다시 올리지 않는다, 원본 addMeshInstanceBuffer)
+	/// - 버퍼는 ToonRenderer::create_instance_buffer 로 짓고 update_instance_buffer, update_instance_buffer_range 로 고친다. 버퍼 전체의 경계로 통째 거른다.
+	/// - 인스턴스마다 선 번호는 꼴의 instanceLineId 칸, 없으면 options.line_id (None 이면 담은 차례 + 1).
+	/// - 그림자 캐시(ShadowUpdateMode::OnChange)는 버퍼의 get_generation 으로 고친 것을 안다.
+	///
+	/// # 인자
+	/// - `mesh`: ToonRenderer::create_mesh 의 결과.
+	/// - `instance_buffer`: ToonRenderer::create_instance_buffer 의 결과. (줄의 수명 동안 빌린다)
+	/// - `instance_count`: 그릴 인스턴스 수. (버퍼에 든 수를 넘으면 자른다, 0 이면 담지 않는다)
+	/// - `options`: add_mesh 와 같다.
+	///
+	/// # 예제
+	/// 광부의 바위 밭을 한 번 올린 버퍼로 그리고 하나만 고치기
+	/// ```rust,no_run
+	/// use vanilla::{create_octahedron_geometry, Camera3D, Matrix4, MeshBuilder, ToonBufferUsage, ToonDrawOptions, ToonDrawQueue, ToonPartOptions, ToonRenderer, ToonScreenOutline, Vector3};
+	///
+	/// fn draw_rocks(gl: &vanilla::GlContext) -> Result<(), String> {
+	/// 	let mut renderer = ToonRenderer::new(gl)?;
+	/// 	let mut builder = MeshBuilder::new();
+	/// 	builder.add_part(&create_octahedron_geometry(0.3), &Matrix4::create_identity(), "#a89880", ToonPartOptions { has_outline: true, ..ToonPartOptions::default() });
+	/// 	let rock_mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("mesh failed")?;
+	/// 	let instance_layout = renderer.create_instance_layout(&[("instanceMatrix", 16), ("instanceTint", 4), ("instanceLineId", 1)])?;
+	/// 	let float_count = instance_layout.get_float_count();
+	/// 	let mut data: Vec<f32> = Vec::new();
+	/// 	for index in 0..25 {
+	/// 		data.extend_from_slice(Matrix4::create_translation((index % 5) as f64 - 2.0, 0.0, (index / 5) as f64 - 2.0).get_elements());
+	/// 		data.extend_from_slice(&[1.0, 1.0, 1.0, 1.0, 1.0 + index as f32]);
+	/// 	}
+	/// 	let instance_buffer = renderer.create_instance_buffer(gl, &instance_layout, &data, ToonBufferUsage::Dynamic)?;
+	/// 	let mut camera = Camera3D::new();
+	/// 	camera.set_perspective(0.8, 0.1, 50.0);
+	/// 	camera.look_at(Vector3::create(0.0, 5.0, 6.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
+	/// 	let mut outline = ToonScreenOutline::new(gl)?;
+	/// 	let mut queue = ToonDrawQueue::new();
+	/// 	queue.set_screen_outline(Some(&mut outline));
+	/// 	queue.add_mesh_instance_buffer(&rock_mesh, &instance_buffer, 25, ToonDrawOptions::default());
+	/// 	queue.draw(gl, &mut renderer, &camera);
+	/// 	let mut broken_rock = data[12 * float_count..13 * float_count].to_vec();
+	/// 	broken_rock[16..20].copy_from_slice(&[0.5, 0.5, 0.5, 1.0]);
+	/// 	renderer.update_instance_buffer_range(gl, &instance_buffer, 12, &broken_rock)?;
+	/// 	queue.draw(gl, &mut renderer, &camera);
+	/// 	Ok(())
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn add_mesh_instance_buffer(&mut self, mesh: &'a ToonMesh, instance_buffer: &'a ToonInstanceBuffer, instance_count: usize, options: ToonDrawOptions<'a>) {
+		if instance_count == 0 {
+			return;
+		}
+		let depth_position = match read_instance_buffer_sphere(mesh, instance_buffer) {
+			Some(sphere) => {
+				[sphere[0], sphere[1], sphere[2]]
+			}
+			None => {
+				[0.0; 3]
+			}
+		};
+		*self.opaque_index_list.get_mut() = None;
+		self.item_list.push(ToonDrawItem { mesh, model_matrix: Matrix4::create_identity(), instance_list: None, instance_buffer: Some(instance_buffer), instance_count, options, is_transparent: is_transparent_options(&options), depth_position, material_block: Cell::new(0), mirror_sign: Cell::new(0) });
 	}
 
 	//==============================================================================
@@ -705,6 +788,11 @@ impl<'a> ToonDrawQueue<'a> {
 					has_screen_outline: item.options.has_screen_outline,
 					has_crease_line: item.options.has_crease_line,
 				};
+				if let Some(instance_buffer) = item.instance_buffer {
+					self.flush_line_groups(gl, screen_outline, &mut line_batch);
+					screen_outline.draw_mesh_instance_buffer(gl, item.mesh, instance_buffer, item.instance_count, line_id, line_options);
+					continue;
+				}
 				if let Some(instance_list) = item.instance_list {
 					self.flush_line_groups(gl, screen_outline, &mut line_batch);
 					screen_outline.draw_mesh_instanced(gl, item.mesh, instance_list, line_id, line_options);
@@ -796,7 +884,7 @@ impl<'a> ToonDrawQueue<'a> {
 		if self.opaque_index_list.borrow().is_none() {
 			// 자동 인스턴싱의 열쇠. (보통 모형 하나씩인 불투명한 것만, 재질 블록과 감기)
 			for item in self.item_list.iter() {
-				if item.is_transparent || item.instance_list.is_some() {
+				if item.is_transparent || item.is_instanced() {
 					continue;
 				}
 				item.material_block.set(renderer.read_material_block(gl, &item.options));
@@ -835,7 +923,7 @@ impl<'a> ToonDrawQueue<'a> {
 				let first_item_index = opaque_index_list[position];
 				let item = &self.item_list[first_item_index];
 				position += 1;
-				if item.instance_list.is_some() || (item.options.is_culled && !renderer.is_visible(item.mesh, &item.model_matrix)) {
+				if item.is_instanced() || (item.options.is_culled && !renderer.is_visible(item.mesh, &item.model_matrix)) {
 					ToonDrawQueue::draw_item(gl, renderer, item, item.options);
 					continue;
 				}
@@ -938,7 +1026,7 @@ impl<'a> ToonDrawQueue<'a> {
 	/// 자동 인스턴싱으로 묶을 수 있는지. (원본 isBatchableItem, 같은 모형, 같은 재질 블록, 같은 감기, 선 번호와 묶음 말고 푼 칸이 모두 같은 보통 모형 하나씩)
 	//==============================================================================
 	fn is_batchable_item(item: &ToonDrawItem, other: &ToonDrawItem) -> bool {
-		std::ptr::eq(other.mesh, item.mesh) && other.instance_list.is_none() && other.material_block.get() == item.material_block.get() && other.mirror_sign.get() == item.mirror_sign.get() && is_same_batch_state(&item.options, &other.options)
+		std::ptr::eq(other.mesh, item.mesh) && !other.is_instanced() && other.material_block.get() == item.material_block.get() && other.mirror_sign.get() == item.mirror_sign.get() && is_same_batch_state(&item.options, &other.options)
 	}
 
 	//==============================================================================
@@ -976,7 +1064,7 @@ impl<'a> ToonDrawQueue<'a> {
 		while position < caster_index_list.len() {
 			let item = &self.item_list[caster_index_list[position]];
 			position += 1;
-			if item.instance_list.is_some() || (item.options.is_culled && !renderer.is_visible(item.mesh, &item.model_matrix)) {
+			if item.is_instanced() || (item.options.is_culled && !renderer.is_visible(item.mesh, &item.model_matrix)) {
 				ToonDrawQueue::draw_item(gl, renderer, item, item.options);
 				continue;
 			}
@@ -995,9 +1083,13 @@ impl<'a> ToonDrawQueue<'a> {
 	}
 
 	//==============================================================================
-	/// 하나 그리기. (모형 하나는 draw_mesh, 인스턴스 묶음은 draw_mesh_instanced)
+	/// 하나 그리기. (모형 하나는 draw_mesh, 인스턴스 묶음은 draw_mesh_instanced, 인스턴스 버퍼는 draw_mesh_instance_buffer)
 	//==============================================================================
 	fn draw_item(gl: &GlContext, renderer: &mut ToonRenderer, item: &ToonDrawItem, options: ToonDrawOptions) {
+		if let Some(instance_buffer) = item.instance_buffer {
+			renderer.draw_mesh_instance_buffer(gl, item.mesh, instance_buffer, item.instance_count, options);
+			return;
+		}
 		match item.instance_list {
 			Some(instance_list) => {
 				renderer.draw_mesh_instanced(gl, item.mesh, instance_list, options);

@@ -57,7 +57,8 @@ use crate::base::matrix4::Matrix4;
 use crate::core::graphic::{GlBuffer, GlProgram, GlTexture, GlVertexArray};
 use crate::core::shaderprogram::ShaderProgram;
 use crate::core::colorspace::{add_color_space_define, read_engine_color_space, ColorSpace};
-use crate::graphics3d::toon::toonrenderer::{create_mesh_instance_vertex_array, read_matrix_determinant, ToonInstance, ToonMesh, TOON_ATTRIBUTE_LOCATIONS, TOON_INSTANCE_FLOAT_COUNT, TOON_MAXIMUM_JOINTS};
+use crate::graphics3d::toon::toonmaterial::{TOON_INSTANCE_LINE_ID_LOCATION, TOON_INSTANCE_MATRIX_NAME};
+use crate::graphics3d::toon::toonrenderer::{create_mesh_instance_vertex_array, is_sphere_in_frustum, read_instance_buffer_sphere, read_matrix_determinant, ToonInstance, ToonInstanceBuffer, ToonMesh, TOON_ATTRIBUTE_LOCATIONS, TOON_INSTANCE_FLOAT_COUNT, TOON_MAXIMUM_JOINTS};
 use crate::graphics3d::GlFramebuffer;
 
 /// 선 번호의 상한. (선의 판에 14 비트로 쓴다, 0 은 빈 곳)
@@ -515,7 +516,7 @@ impl ToonScreenOutline {
 	/// 새 화면 공간 바깥선. 셰이더를 짓지 못하거나 버텍스 어레이를 못 만들면 Err(오류 글).
 	//==============================================================================
 	pub fn new_with_options(gl: &GlContext, options: ToonScreenOutlineOptions) -> Result<ToonScreenOutline, String> {
-		let line_program = ShaderProgram::create_with_attribute_locations(gl, LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER, &TOON_ATTRIBUTE_LOCATIONS)?;
+		let line_program = ShaderProgram::create_with_attribute_locations(gl, LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER, &read_line_attribute_locations())?;
 		let seed_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, SEED_FRAGMENT_SHADER)?;
 		let seed_gather_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, SEED_GATHER_FRAGMENT_SHADER)?;
 		let jump_flood_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, JUMP_FLOOD_FRAGMENT_SHADER)?;
@@ -957,7 +958,7 @@ impl ToonScreenOutline {
 		self.add_drawn_distance(mesh, model_matrix);
 		let is_mirrored = options.is_mirrored.unwrap_or_else(|| read_matrix_determinant(model_matrix) < 0.0);
 		let (body_vertex_array, _) = mesh.get_body();
-		self.draw_with_count(gl, mesh, model_matrix, 0, line_id, false, is_mirrored, options, body_vertex_array);
+		self.draw_with_count(gl, mesh, model_matrix, 0, line_id, 0, is_mirrored, options, body_vertex_array);
 	}
 
 	//==============================================================================
@@ -993,7 +994,7 @@ impl ToonScreenOutline {
 		let count = model_matrices.len();
 		let (body_vertex_array, _) = mesh.get_body();
 		if count == 1 {
-			self.draw_with_count(gl, mesh, &model_matrices[0], 0, line_ids[0], false, is_mirrored, options, body_vertex_array);
+			self.draw_with_count(gl, mesh, &model_matrices[0], 0, line_ids[0], 0, is_mirrored, options, body_vertex_array);
 			return;
 		}
 		let float_count = count * TOON_INSTANCE_FLOAT_COUNT;
@@ -1046,7 +1047,7 @@ impl ToonScreenOutline {
 			}
 		};
 		self.instance_data = instance_data;
-		self.draw_with_count(gl, mesh, &Matrix4::create_identity(), count as i32, line_ids[0], true, is_mirrored, options, vertex_array);
+		self.draw_with_count(gl, mesh, &Matrix4::create_identity(), count as i32, line_ids[0], 1, is_mirrored, options, vertex_array);
 	}
 
 	//==============================================================================
@@ -1082,17 +1083,104 @@ impl ToonScreenOutline {
 				crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(mesh.get_instance_buffer()));
 				gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&instance_data), glow::DYNAMIC_DRAW);
 			}
+			#[cfg(test)]
+			crate::graphics3d::toon::toonrenderer::count_instance_upload();
 			let (body_vertex_array, _) = mesh.get_body();
-			self.draw_with_count(gl, mesh, &Matrix4::create_identity(), instance_count as i32, line_id, true, options.is_mirrored == Some(true), options, body_vertex_array);
+			self.draw_with_count(gl, mesh, &Matrix4::create_identity(), instance_count as i32, line_id, 1, options.is_mirrored == Some(true), options, body_vertex_array);
 		}
 		self.instance_data = instance_data;
+	}
+
+	//==============================================================================
+	/// 영구 인스턴스 버퍼로 번호 그리기. (몸과 같은 GPU 버퍼를 쓰고 다시 올리지 않는다, 버퍼 전체의 경계로 통째 거른다, 원본 drawMeshInstanceBuffer)
+	/// - 인스턴스마다 번호는 꼴의 instanceLineId 칸, 없으면 공통 번호. 꼴에 행렬이 없으면 자리를 몰라 그리지 않는다. (정점 조각은 선의 판에서 돌지 않는다)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `mesh`: ToonRenderer::create_mesh 의 결과.
+	/// - `instance_buffer`: ToonRenderer::create_instance_buffer 의 결과. (몸과 같은 모형과 버퍼의 버텍스 어레이를 같이 쓴다)
+	/// - `instance_count`: 그릴 인스턴스 수. (버퍼에 든 수를 넘으면 자른다)
+	/// - `line_id`: 공통 번호. (꼴에 instanceLineId 가 없을 때)
+	/// - `options`: draw_mesh 와 같다. (꼴은 모든 인스턴스에 같다, is_mirrored 가 None 이면 뒤집지 않는다)
+	///
+	/// # 예제
+	/// 돌 버퍼 하나로 몸과 선의 판을 같이 그리기
+	/// ```rust,no_run
+	/// use vanilla::{create_octahedron_geometry, Matrix4, MeshBuilder, ToonBufferUsage, ToonDrawOptions, ToonLineDrawOptions, ToonPartOptions, ToonRenderer, ToonScreenOutline, Vector3};
+	///
+	/// fn draw_rocks(gl: &vanilla::GlContext) -> Result<(), String> {
+	/// 	let mut renderer = ToonRenderer::new(gl)?;
+	/// 	let mut outline = ToonScreenOutline::new(gl)?;
+	/// 	let mut builder = MeshBuilder::new();
+	/// 	builder.add_part(&create_octahedron_geometry(0.3), &Matrix4::create_identity(), "#a89880", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
+	/// 	let rock_mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("mesh failed")?;
+	/// 	let instance_layout = renderer.create_instance_layout(&[("instanceMatrix", 16), ("instanceTint", 4), ("instanceLineId", 1)])?;
+	/// 	let mut data: Vec<f32> = Vec::new();
+	/// 	for index in 0..3 {
+	/// 		data.extend_from_slice(Matrix4::create_translation(index as f64 * 0.5, 0.0, 0.0).get_elements());
+	/// 		data.extend_from_slice(&[1.0, 1.0, 1.0, 1.0, 10.0 + index as f32]);
+	/// 	}
+	/// 	let instance_buffer = renderer.create_instance_buffer(gl, &instance_layout, &data, ToonBufferUsage::Static)?;
+	/// 	let view_matrix = Matrix4::create_look_at(Vector3::create(0.5, 2.0, 3.0), Vector3::create(0.5, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
+	/// 	let projection_matrix = Matrix4::create_perspective(std::f64::consts::PI / 4.0, 1.0, 0.1, 100.0);
+	/// 	if outline.begin_line_ids(gl, &view_matrix, &projection_matrix) {
+	/// 		outline.draw_mesh_instance_buffer(gl, &rock_mesh, &instance_buffer, 3, 10, ToonLineDrawOptions::default());
+	/// 		outline.end_line_ids(gl);
+	/// 	}
+	/// 	renderer.begin_frame_with_matrices(gl, &view_matrix, &projection_matrix);
+	/// 	renderer.draw_mesh_instance_buffer(gl, &rock_mesh, &instance_buffer, 3, ToonDrawOptions::default());
+	/// 	renderer.end_frame(gl);
+	/// 	outline.draw_outline(gl);
+	/// 	Ok(())
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn draw_mesh_instance_buffer(&mut self, gl: &GlContext, mesh: &ToonMesh, instance_buffer: &ToonInstanceBuffer, instance_count: usize, line_id: u32, options: ToonLineDrawOptions) {
+		if !self.is_drawing_line_ids {
+			return;
+		}
+		let instance_layout = instance_buffer.get_layout();
+		if !instance_layout.has_matrix() {
+			return;
+		}
+		let count = instance_count.min(instance_buffer.get_instance_count());
+		if count == 0 {
+			return;
+		}
+		if options.is_culled {
+			if let (Some(sphere), Some(frame)) = (read_instance_buffer_sphere(mesh, instance_buffer), self.frame.as_ref()) {
+				if !is_sphere_in_frustum(&frame.frustum_planes, &sphere) {
+					return;
+				}
+			}
+		}
+		// 초점 거리를 모형 거리로 셀 때만 인스턴스마다의 거리를 더한다. (draw_mesh_instanced 와 같은 굵기)
+		let is_perspective = self.frame.as_ref().map(|frame| frame.is_perspective).unwrap_or(false);
+		if self.width_unit == ToonOutlineWidthUnit::World && self.focus_distance <= 0.0 && is_perspective {
+			if let Some(data) = instance_buffer.get_data() {
+				let layout_float_count = instance_layout.get_float_count();
+				let matrix_offset = instance_layout.get_attributes().iter().find(|attribute| attribute.name == TOON_INSTANCE_MATRIX_NAME).map(|attribute| attribute.offset).unwrap_or(0);
+				for instance_index in 0..count {
+					let offset = instance_index * layout_float_count + matrix_offset;
+					let mut model_matrix = Matrix4::create_identity();
+					model_matrix.elements.copy_from_slice(&data[offset..offset + 16]);
+					if !options.is_culled || self.is_visible(mesh, &model_matrix) {
+						self.add_drawn_distance(mesh, &model_matrix);
+					}
+				}
+			}
+		}
+		let Some((body_vertex_array, _)) = instance_buffer.read_vertex_arrays(gl, mesh) else {
+			return;
+		};
+		self.draw_with_count(gl, mesh, &Matrix4::create_identity(), count as i32, line_id, if instance_layout.has_line_id() { 2 } else { 0 }, options.is_mirrored == Some(true), options, body_vertex_array);
 	}
 
 	//==============================================================================
 	/// 번호 그리기 본체. (instance_count 가 0 이면 보통 그리기)
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
-	fn draw_with_count(&self, gl: &GlContext, mesh: &ToonMesh, model_matrix: &Matrix4, instance_count: i32, line_id: u32, is_instance_line_id: bool, is_mirrored: bool, options: ToonLineDrawOptions, vertex_array: GlVertexArray) {
+	fn draw_with_count(&self, gl: &GlContext, mesh: &ToonMesh, model_matrix: &Matrix4, instance_count: i32, line_id: u32, line_id_source: u32, is_mirrored: bool, options: ToonLineDrawOptions, vertex_array: GlVertexArray) {
 		let line_program = &self.line_program;
 		let is_skinned = mesh.is_skinned() && options.joint_matrices.is_some();
 		let (_, body_index_count) = mesh.get_body();
@@ -1105,7 +1193,7 @@ impl ToonScreenOutline {
 			// 그리기마다 거의 같은 넷은 바뀔 때만 올린다. (begin_line_ids 가 잊는다)
 			let mut line_uniform_values = self.line_uniform_values.get();
 			let instanced_value = if instance_count > 0 { 1.0 } else { 0.0 };
-			let line_id_source_value = if is_instance_line_id { 1.0 } else { 0.0 };
+			let line_id_source_value = line_id_source as f32;
 			let skinned_value = if is_skinned { 1.0 } else { 0.0 };
 			if line_uniform_values[0] != instanced_value {
 				line_uniform_values[0] = instanced_value;
@@ -1953,6 +2041,13 @@ mod tests {
 	}
 }
 
+// 번호 셰이더의 어트리뷰트 자리. (툰 몸 어트리뷰트 자리에 인스턴스 버퍼의 선 번호 자리를 더한 것)
+fn read_line_attribute_locations() -> Vec<(&'static str, u32)> {
+	let mut locations: Vec<(&'static str, u32)> = TOON_ATTRIBUTE_LOCATIONS.to_vec();
+	locations.push(("instanceLineId", TOON_INSTANCE_LINE_ID_LOCATION));
+	locations
+}
+
 // @shaders-begin
 const LINE_VERTEX_SHADER: &str = "#version 300 es
 in vec3 vertexPosition;
@@ -1964,6 +2059,7 @@ in vec4 instanceMatrix1;
 in vec4 instanceMatrix2;
 in vec4 instanceMatrix3;
 in vec4 instanceTint;
+in float instanceLineId;
 uniform mat4 jointMatrices[96];
 uniform float skinned;
 uniform float instanced;
@@ -1983,7 +2079,7 @@ void main() {
 	mat4 skinMatrix = readSkinMatrix();
 	mat4 objectMatrix = instanced > 0.5 ? mat4(vec4(instanceMatrix0.xyz, 0.0), vec4(instanceMatrix1.xyz, 0.0), vec4(instanceMatrix2.xyz, 0.0), vec4(instanceMatrix3.xyz, 1.0)) : modelMatrix;
 	worldNormal = transpose(inverse(mat3(objectMatrix) * mat3(skinMatrix))) * vertexNormal;
-	surfaceLineId = instanced > 0.5 && instanceLineIds > 0.5 ? instanceTint.x : lineId;
+	surfaceLineId = instanced < 0.5 || instanceLineIds < 0.5 ? lineId : (instanceLineIds < 1.5 ? instanceTint.x : instanceLineId);
 	gl_Position = viewProjectionMatrix * objectMatrix * skinMatrix * vec4(vertexPosition, 1.0);
 }
 ";
