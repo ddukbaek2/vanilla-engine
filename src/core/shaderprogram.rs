@@ -53,6 +53,8 @@ pub struct ShaderProgram {
 	attribute_location_table: RefCell<HashMap<String, Option<u32>>>,
 	/// 짓기를 맡긴 채 아직 끝내지 않은 셰이더. (맡기지 않았거나 끝냈으면 None, 원본 pendingVertexShader, pendingFragmentShader)
 	pending_shader_list: RefCell<Option<(crate::core::graphic::GlShader, crate::core::graphic::GlShader)>>,
+	/// 맡긴 짓기가 끝났다고 한 번 확인했는지. (끝남은 되돌지 않으니 다시 묻지 않는다, 원본 isBuildCompleted)
+	is_build_completed: std::cell::Cell<bool>,
 }
 
 // 시험이 지은 프로그램 수를 셀 때. (그리기 프레임이 프로그램을 짓는지 보는 시험)
@@ -139,6 +141,7 @@ impl ShaderProgram {
 				uniform_location_table: RefCell::new(HashMap::new()),
 				attribute_location_table: RefCell::new(HashMap::new()),
 				pending_shader_list: RefCell::new(None),
+				is_build_completed: std::cell::Cell::new(false),
 			})
 		}
 	}
@@ -229,6 +232,7 @@ impl ShaderProgram {
 				uniform_location_table: RefCell::new(HashMap::new()),
 				attribute_location_table: RefCell::new(HashMap::new()),
 				pending_shader_list: RefCell::new(Some((vertex_shader, fragment_shader))),
+				is_build_completed: std::cell::Cell::new(false),
 			})
 		}
 	}
@@ -269,9 +273,13 @@ impl ShaderProgram {
 		if !ShaderProgram::is_parallel_compile_supported(gl) {
 			return true;
 		}
-		unsafe {
-			gl.get_program_parameter_i32(self.program, COMPLETION_STATUS) != 0
+		if self.is_build_completed.get() {
+			return true;
 		}
+		// 끝남을 묻는 일은 GPU 와 오가는 일이라 끝난 것은 다시 묻지 않는다.
+		let is_complete = unsafe { gl.get_program_parameter_i32(self.program, COMPLETION_STATUS) != 0 };
+		self.is_build_completed.set(is_complete);
+		is_complete
 	}
 
 	//==============================================================================

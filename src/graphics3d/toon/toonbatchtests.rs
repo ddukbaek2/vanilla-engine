@@ -724,3 +724,63 @@ fn prewarm_options_and_async_program_build_keep_pixels() {
 	renderer.destroy(gl);
 	assert_eq!(unsafe { glow_context_error(&glow_context) }, 0, "GL 오류");
 }
+
+//==============================================================================
+/// 미리 짓기가 맡긴 뒤와 그리지 않는 프레임마다 명령을 GPU 로 보내고(gl.flush), 그리지 않고 프레임만 넘긴 뒤 그려도 화소가 나온다. (원본 크롬 시험 toonprogramprewarmwaitchrome)
+/// - 이 기계(맥 GL)는 병렬 컴파일 확장이 없어 FORCE_DEFERRED_PREWARM 으로 맡기는 길을 강제한다.
+/// - 조합 32 개를 줘서 한 걸음에 끝내는 수(PREWARM_FINISH_PER_STEP)보다 많게 하고, 그리지 않고 step 만 부른다.
+//==============================================================================
+#[test]
+fn prewarm_flushes_while_not_drawing_and_pixels_remain() {
+	use super::toonrenderer::PREWARM_FLUSH_COUNT as FLUSH_COUNT;
+	use crate::ToonMaterialChunks;
+	let Some(glow_context) = crate::core::glstatecache::tests::create_surfaceless_context() else {
+		panic!("창 없는 GL 컨텍스트를 짓지 못함");
+	};
+	let _ = crate::core::glstatecache::attach(&glow_context);
+	let gl: &GlContext = GlContext::from_context(&glow_context);
+	let target = create_target(gl);
+	let camera = create_camera();
+	let name_list = ["rampTexture", "shadeStops", "rim", "shadeRim", "intensityLimit"];
+	let mut feature_name_list: Vec<Vec<&str>> = Vec::new();
+	for bits in 0..32u32 {
+		feature_name_list.push(name_list.iter().enumerate().filter(|(index, _)| bits & (1 << index) != 0).map(|(_, name)| *name).collect());
+	}
+	let feature_list: Vec<&[&str]> = feature_name_list.iter().map(|list| list.as_slice()).collect();
+	FORCE_DEFERRED_PREWARM.with(|flag| flag.set(true));
+	for wait_frame_count in [0usize, 1, 2, 45] {
+		let mut renderer = ToonRenderer::new(gl).expect("툰 렌더러");
+		let mesh = create_mesh(gl, &mut renderer, &create_sphere_geometry(0.4, 12, 8, std::f64::consts::PI), "#c8b090");
+		let material = renderer.create_material(ToonMaterialChunks { name: String::from("tint"), surface_chunk: String::from("void applySurface(inout ToonSurface surface) { surface.baseColor *= 0.8; }"), ..Default::default() });
+		let mut queue = ToonDrawQueue::new();
+		queue.add_mesh(&mesh, &Matrix4::create_translation(-1.2, 0.5, 0.0), ToonDrawOptions { casts_shadow: false, ..ToonDrawOptions::default() });
+		queue.add_mesh(&mesh, &Matrix4::create_translation(1.2, 0.5, 0.0), ToonDrawOptions { casts_shadow: false, material: Some(&material), ..ToonDrawOptions::default() });
+		let options = crate::ToonProgramPrewarmOptions { light_feature_list: &feature_list, ..crate::ToonProgramPrewarmOptions::default() };
+		let flush_before = FLUSH_COUNT.with(|count| count.get());
+		let mut prewarm = renderer.prewarm_draw_queue_with_options(gl, &queue, &options).expect("미리 짓기");
+		let flush_after_start = FLUSH_COUNT.with(|count| count.get()) - flush_before;
+		assert!(flush_after_start >= 1, "맡긴 뒤 flush 로 명령을 보낸다 ({})", flush_after_start);
+		assert!(!prewarm.is_ready(), "조합이 한 걸음에 끝내는 수보다 많아 맡긴 채 돌아온다");
+		// 그리지 않는 프레임: step 만 부른다. 남은 동안 걸음마다 flush 가 한 번 더 나간다.
+		let mut frame_count = 0usize;
+		while !prewarm.is_ready() && frame_count < 300 {
+			let flush_step_before = FLUSH_COUNT.with(|count| count.get());
+			let is_ready = prewarm.step(gl, &mut renderer);
+			let flush_step = FLUSH_COUNT.with(|count| count.get()) - flush_step_before;
+			assert_eq!(flush_step, if is_ready { 0 } else { 1 }, "남은 걸음마다 flush 한 번");
+			frame_count += 1;
+		}
+		assert!(prewarm.is_ready(), "그리지 않는 프레임 300 개 안에 끝남");
+		for _ in frame_count..wait_frame_count {
+			prewarm.step(gl, &mut renderer);
+		}
+		target.clear();
+		queue.draw(gl, &mut renderer, &camera);
+		let pixels = target.read_pixels();
+		let drawn_count = pixels.chunks(4).filter(|pixel| pixel[0] as u32 + pixel[1] as u32 + pixel[2] as u32 > 0).count();
+		assert!(drawn_count > 200, "미리 짓고 그리지 않고 {} 프레임 기다린 뒤 그려도 화소가 나온다 ({})", wait_frame_count, drawn_count);
+		renderer.destroy(gl);
+	}
+	FORCE_DEFERRED_PREWARM.with(|flag| flag.set(false));
+	assert_eq!(unsafe { glow_context_error(&glow_context) }, 0, "GL 오류");
+}
