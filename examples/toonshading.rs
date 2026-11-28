@@ -1896,9 +1896,11 @@ impl ToonShadingScene {
 		let content_height: f64 = row_list.last().map(|row| row.1 + row.2).unwrap_or(0.0);
 		let panel_rect = self.compute_panel_rect(native_size, scale);
 		self.panel_rect = panel_rect;
-		let view_height = (panel_rect.size.y / scale - PANEL_TITLE_HEIGHT - 2.0).max(0.0);
-		let maximum_scroll = (content_height - view_height).max(0.0);
-		self.panel_scroll = clamp_value(self.panel_scroll, 0.0, maximum_scroll);
+		// 패널 전체(제목 포함)가 스크롤한다.
+		let view_height = (panel_rect.size.y / scale - 2.0).max(0.0);
+		let maximum_scroll = (PANEL_TITLE_HEIGHT + content_height - view_height).max(0.0);
+		self.panel_scroll = if self.is_panel_collapsed { 0.0 } else { clamp_value(self.panel_scroll, 0.0, maximum_scroll) };
+		let title_offset = -self.panel_scroll * scale;
 		graphic.set_fill_color(Color::create(0.055, 0.047, 0.055, 0.5));
 		graphic.draw_round_rect(panel_rect, 12.0 * scale);
 		graphic.set_stroke_color(Color::create(0.949, 0.925, 0.886, 0.14));
@@ -1907,15 +1909,16 @@ impl ToonShadingScene {
 		// 제목.
 		graphic.set_font_string(&format!("600 {}px sans-serif", 10.0 * scale));
 		graphic.set_fill_color(Color::create(0.91, 0.788, 0.541, 0.95));
-		ToonShadingScene::draw_spaced_text(graphic, "OPTIONS", panel_rect.position.x + 16.0 * scale, panel_rect.position.y + (PANEL_TITLE_HEIGHT - 1.0) * 0.5 * scale, 3.2 * scale, false);
 		if self.is_panel_collapsed {
+			ToonShadingScene::draw_spaced_text(graphic, "OPTIONS", panel_rect.position.x + 16.0 * scale, panel_rect.position.y + (PANEL_TITLE_HEIGHT - 1.0) * 0.5 * scale, 3.2 * scale, false);
 			return;
 		}
+		let clip_rect = Rect::create(panel_rect.position.x, panel_rect.position.y, panel_rect.size.x, panel_rect.size.y);
+		graphic.begin_clip_rect(clip_rect, 12.0 * scale);
+		ToonShadingScene::draw_spaced_text(graphic, "OPTIONS", panel_rect.position.x + 16.0 * scale, panel_rect.position.y + (PANEL_TITLE_HEIGHT - 1.0) * 0.5 * scale + title_offset, 3.2 * scale, false);
 		graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.1));
-		graphic.draw_rect(Rect::create(panel_rect.position.x + scale, panel_rect.position.y + (PANEL_TITLE_HEIGHT - 1.0) * scale, panel_rect.size.x - 2.0 * scale, scale.max(1.0)));
-		let clip_rect = Rect::create(panel_rect.position.x, panel_rect.position.y + PANEL_TITLE_HEIGHT * scale, panel_rect.size.x, panel_rect.size.y - PANEL_TITLE_HEIGHT * scale);
-		graphic.begin_clip_rect(clip_rect, 0.0);
-		let content_top = clip_rect.position.y - self.panel_scroll * scale;
+		graphic.draw_rect(Rect::create(panel_rect.position.x + scale, panel_rect.position.y + (PANEL_TITLE_HEIGHT - 1.0) * scale + title_offset, panel_rect.size.x - 2.0 * scale, scale.max(1.0)));
+		let content_top = panel_rect.position.y + PANEL_TITLE_HEIGHT * scale + title_offset;
 		let left = panel_rect.position.x;
 		for (kind, row_y, row_height) in row_list.iter() {
 			let top = content_top + row_y * scale;
@@ -2770,11 +2773,11 @@ impl Scene for ToonShadingScene {
 		}
 		// 옵션 패널.
 		if rect_contains(self.panel_rect, native_position) {
-			if native_position.y < self.panel_rect.position.y + PANEL_TITLE_HEIGHT * scale {
+			if (native_position.y - self.panel_rect.position.y) / scale + self.panel_scroll < PANEL_TITLE_HEIGHT {
 				self.is_panel_collapsed = !self.is_panel_collapsed;
 			}
 			else if !self.is_panel_collapsed {
-				let content_y = (native_position.y - self.panel_rect.position.y - PANEL_TITLE_HEIGHT * scale) / scale + self.panel_scroll;
+				let content_y = (native_position.y - self.panel_rect.position.y) / scale + self.panel_scroll - PANEL_TITLE_HEIGHT;
 				for (kind, row_y, row_height) in build_panel_rows().iter() {
 					if content_y >= *row_y && content_y < row_y + row_height {
 						match *kind {
