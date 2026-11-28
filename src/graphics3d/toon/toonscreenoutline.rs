@@ -975,7 +975,7 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	/// 같은 모형과 꼴의 여럿의 번호를 인스턴스 그리기 한 번으로. (원본 drawMeshBatch, 그리기 줄의 자동 인스턴싱, accept_mesh 로 고른 것, 감기는 뒤집지 않은 것만)
+	/// 같은 모형과 꼴의 여럿의 번호를 인스턴스 그리기 한 번으로. (원본 drawMeshBatch, 그리기 줄의 자동 인스턴싱, accept_mesh 로 고른 것, 감기를 뒤집는 것은 뒤집는 것끼리)
 	/// - 번호는 인스턴스마다 틴트 칸의 x 로. (draw_mesh_instanced 와 같은 길, 하나면 보통 그리기)
 	/// - 묶음 자리(slot_index)의 값이 앞 프레임과 같으면 다시 올리지 않는다. (멈춘 장면은 올림 없음, 몸 묶음 자리와 같은 꼴)
 	///
@@ -984,15 +984,16 @@ impl ToonScreenOutline {
 	/// - `line_ids`: 번호 목록. (행렬과 같은 자리)
 	/// - `options`: 모두에 같은 그리기 꼴.
 	/// - `slot_index`: 묶음 자리 번호. (그리기 줄이 프레임마다 같은 차례로 준다)
+	/// - `is_mirrored`: 감기를 뒤집어 그릴지. (모두에 같다)
 	//==============================================================================
-	pub(crate) fn draw_mesh_batch(&mut self, gl: &GlContext, mesh: &ToonMesh, model_matrices: &[Matrix4], line_ids: &[u32], options: ToonLineDrawOptions, slot_index: usize) {
+	pub(crate) fn draw_mesh_batch(&mut self, gl: &GlContext, mesh: &ToonMesh, model_matrices: &[Matrix4], line_ids: &[u32], options: ToonLineDrawOptions, slot_index: usize, is_mirrored: bool) {
 		if !self.is_drawing_line_ids || model_matrices.is_empty() {
 			return;
 		}
 		let count = model_matrices.len();
 		let (body_vertex_array, _) = mesh.get_body();
 		if count == 1 {
-			self.draw_with_count(gl, mesh, &model_matrices[0], 0, line_ids[0], false, false, options, body_vertex_array);
+			self.draw_with_count(gl, mesh, &model_matrices[0], 0, line_ids[0], false, is_mirrored, options, body_vertex_array);
 			return;
 		}
 		let float_count = count * TOON_INSTANCE_FLOAT_COUNT;
@@ -1045,7 +1046,7 @@ impl ToonScreenOutline {
 			}
 		};
 		self.instance_data = instance_data;
-		self.draw_with_count(gl, mesh, &Matrix4::create_identity(), count as i32, line_ids[0], true, false, options, vertex_array);
+		self.draw_with_count(gl, mesh, &Matrix4::create_identity(), count as i32, line_ids[0], true, is_mirrored, options, vertex_array);
 	}
 
 	//==============================================================================

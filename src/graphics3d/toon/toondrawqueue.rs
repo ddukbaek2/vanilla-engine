@@ -83,6 +83,8 @@ struct ToonDrawItem<'a> {
 //==============================================================================
 struct LineGroup {
 	item_index: usize,
+	/// 감기를 뒤집는 묶음인지. (뒤집는 것은 뒤집는 것끼리만 묶는다)
+	is_mirrored: bool,
 	position_list: Vec<usize>,
 }
 
@@ -94,7 +96,7 @@ struct LineBatch {
 	matrix_list: Vec<Matrix4>,
 	id_list: Vec<u32>,
 	group_list: Vec<LineGroup>,
-	group_table: HashMap<(usize, u8, usize, usize), usize>,
+	group_table: HashMap<(usize, u8, bool, usize, usize), usize>,
 	/// 이 프레임 선의 판에서 지금까지 쓴 묶음 자리 수. (프레임마다 같은 차례로 자리를 준다)
 	slot_count: usize,
 }
@@ -687,7 +689,7 @@ impl<'a> ToonDrawQueue<'a> {
 		if screen_outline.begin_line_ids(gl, view_matrix, projection_matrix) {
 			// 자동 인스턴싱: 보통 모형은 담은 차례로 거르고 초점 거리에 더한 뒤(accept_mesh), 같은 모형과 선 꼴인 것을 모아 인스턴스 그리기 한 번으로.
 			// (번호는 인스턴스마다, 깊이가 같은 곳이 아니면 그리는 차례와 상관없이 같은 판)
-			// 묶지 않는 것(인스턴스 묶음, 뒤집은 감기, 뼈대)을 만나면 모은 것을 먼저 그려 그것과의 차례는 담은 차례 그대로 둔다. (선의 판은 LEQUAL)
+			// 감기를 뒤집는 것(행렬식이 음수, 거울에 비친 모습)은 뒤집는 것끼리 묶는다. 묶지 않는 것(인스턴스 묶음, 뼈대)을 만나면 모은 것을 먼저 그려 그것과의 차례는 담은 차례 그대로 둔다. (선의 판은 LEQUAL)
 			let mut line_batch = LineBatch::default();
 			for (item_index, item) in self.item_list.iter().enumerate() {
 				if item.is_transparent {
@@ -709,7 +711,7 @@ impl<'a> ToonDrawQueue<'a> {
 					continue;
 				}
 				let is_mirrored = item.options.is_mirrored.unwrap_or_else(|| read_matrix_determinant(&item.model_matrix) < 0.0);
-				if is_mirrored || item.options.joint_matrices.is_some() {
+				if item.options.joint_matrices.is_some() {
 					self.flush_line_groups(gl, screen_outline, &mut line_batch);
 					screen_outline.draw_mesh(gl, item.mesh, &item.model_matrix, line_id, line_options);
 					continue;
@@ -718,9 +720,9 @@ impl<'a> ToonDrawQueue<'a> {
 					continue;
 				}
 				let line_flags = item.options.has_crease_line as u8 + 2 * item.options.has_screen_outline as u8;
-				let group_key = (item.mesh as *const ToonMesh as usize, line_flags, item.options.index_start, item.options.index_count);
+				let group_key = (item.mesh as *const ToonMesh as usize, line_flags, is_mirrored, item.options.index_start, item.options.index_count);
 				let group_index = *line_batch.group_table.entry(group_key).or_insert_with(|| {
-					line_batch.group_list.push(LineGroup { item_index, position_list: Vec::new() });
+					line_batch.group_list.push(LineGroup { item_index, is_mirrored, position_list: Vec::new() });
 					line_batch.group_list.len() - 1
 				});
 				line_batch.group_list[group_index].position_list.push(line_batch.matrix_list.len());
@@ -759,7 +761,7 @@ impl<'a> ToonDrawQueue<'a> {
 				has_screen_outline: item.options.has_screen_outline,
 				has_crease_line: item.options.has_crease_line,
 			};
-			screen_outline.draw_mesh_batch(gl, item.mesh, &ordered_matrices, &ordered_ids, line_options, line_batch.slot_count);
+			screen_outline.draw_mesh_batch(gl, item.mesh, &ordered_matrices, &ordered_ids, line_options, line_batch.slot_count, group.is_mirrored);
 			line_batch.slot_count += 1;
 		}
 		line_batch.group_list.clear();

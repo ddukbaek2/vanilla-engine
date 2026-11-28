@@ -358,11 +358,92 @@ void main() {
 }
 ";
 
+/// 몸 조각 셰이더의 기능 갈래. (원본 SOLID_FEATURE_CHUNK, 정의가 없으면 예전과 같은 유니폼 갈래이고, TOON_NO_* 를 정의하면 그 갈래의 글이 프로그램에서 빠진다)
+/// - 쓰지 않는 갈래의 글은 건너뛰어도 프로그램 크기와 레지스터 몫을 차지해 화소마다 비용이 든다.
+macro_rules! solid_feature_chunk {
+	() => {
+		"#ifdef TOON_NO_BASE_TEXTURE
+#define TOON_USES_BASE_TEXTURE false
+#else
+#define TOON_USES_BASE_TEXTURE (textureEnabled.x > 0.5)
+#endif
+#ifdef TOON_NO_EMISSIVE_TEXTURE
+#define TOON_USES_EMISSIVE_TEXTURE false
+#else
+#define TOON_USES_EMISSIVE_TEXTURE (textureEnabled.y > 0.5)
+#endif
+#ifdef TOON_NO_DECAL_TEXTURE
+#define TOON_USES_DECAL_TEXTURE false
+#else
+#define TOON_USES_DECAL_TEXTURE (textureEnabled.z > 0.5)
+#endif
+#ifdef TOON_NO_MATCAP
+#define TOON_USES_MATCAP false
+#else
+#define TOON_USES_MATCAP (matcapSettings.x > 0.5)
+#endif
+#ifdef TOON_NO_ANGEL_RING
+#define TOON_USES_ANGEL_RING false
+#else
+#define TOON_USES_ANGEL_RING (angelRingSettings.x > 0.5)
+#endif
+#ifdef TOON_NO_RAMP_TEXTURE
+#define TOON_USES_RAMP_TEXTURE false
+#else
+#define TOON_USES_RAMP_TEXTURE (rampTextureEnabled > 0.5)
+#endif
+#ifdef TOON_NO_SHADE_STOPS
+#define TOON_USES_SHADE_STOPS false
+#else
+#define TOON_USES_SHADE_STOPS (shadeStopCount >= 2)
+#endif
+#ifdef TOON_NO_SHADOW
+#define TOON_USES_SHADOW false
+#else
+#define TOON_USES_SHADOW (receivesShadow > 0.5)
+#endif
+#ifdef TOON_NO_INTENSITY_LIMIT
+#define TOON_USES_INTENSITY_LIMIT false
+#else
+#define TOON_USES_INTENSITY_LIMIT (lightIntensityLimit > 0.5)
+#endif
+#ifdef TOON_NO_RIM
+#define TOON_USES_RIM false
+#else
+#define TOON_USES_RIM (rimLight.a > 0.0)
+#endif
+#ifdef TOON_NO_SHADE_RIM
+#define TOON_USES_SHADE_RIM false
+#else
+#define TOON_USES_SHADE_RIM (shadeRimLight.a > 0.0)
+#endif
+"
+	};
+}
+
+/// 몸 조각 셰이더의 기능 갈래 이름. (원본 TOON_FEATURE_DEFINE_LIST, 순서가 기능 비트 자리다)
+const TOON_FEATURE_DEFINE_LIST: [&str; 11] = ["baseTexture", "emissiveTexture", "decalTexture", "matcap", "angelRing", "rampTexture", "shadeStops", "rim", "shadeRim", "shadow", "intensityLimit"];
+/// 기능 갈래 이름이 정의하는 이름. (원본 TOON_FEATURE_DEFINE_TABLE)
+const TOON_FEATURE_DEFINE_TABLE: [(&str, &str); 11] = [("baseTexture", "TOON_NO_BASE_TEXTURE"), ("emissiveTexture", "TOON_NO_EMISSIVE_TEXTURE"), ("decalTexture", "TOON_NO_DECAL_TEXTURE"), ("matcap", "TOON_NO_MATCAP"), ("angelRing", "TOON_NO_ANGEL_RING"), ("rampTexture", "TOON_NO_RAMP_TEXTURE"), ("shadeStops", "TOON_NO_SHADE_STOPS"), ("rim", "TOON_NO_RIM"), ("shadeRim", "TOON_NO_SHADE_RIM"), ("shadow", "TOON_NO_SHADOW"), ("intensityLimit", "TOON_NO_INTENSITY_LIMIT")];
+const TOON_FEATURE_BASE_TEXTURE: u32 = 1;
+const TOON_FEATURE_EMISSIVE_TEXTURE: u32 = 2;
+const TOON_FEATURE_DECAL_TEXTURE: u32 = 4;
+const TOON_FEATURE_MATCAP: u32 = 8;
+const TOON_FEATURE_ANGEL_RING: u32 = 16;
+const TOON_FEATURE_RAMP_TEXTURE: u32 = 32;
+const TOON_FEATURE_SHADE_STOPS: u32 = 64;
+const TOON_FEATURE_RIM: u32 = 128;
+const TOON_FEATURE_SHADE_RIM: u32 = 256;
+const TOON_FEATURE_SHADOW: u32 = 512;
+const TOON_FEATURE_INTENSITY_LIMIT: u32 = 1024;
+/// 모든 갈래를 쓰는 비트. (기본 몸 프로그램)
+const TOON_FEATURE_ALL: u32 = 2047;
+
 /// 몸을 그리는 조각 셰이더의 머리. (유니폼, 표면과 빛 구조, 공용 함수)
 const SOLID_FRAGMENT_HEAD: &str = concat!("#version 300 es
 precision highp float;
 precision highp sampler2DShadow;
-", frame_block_chunk!(), "in vec3 worldPosition;
+", solid_feature_chunk!(), frame_block_chunk!(), "in vec3 worldPosition;
 in vec3 localPosition;
 in vec3 worldNormal;
 in vec3 surfaceColor;
@@ -495,11 +576,11 @@ float readLightIntensity(vec3 color) {
 }
 vec3 readLimitedDirectionalColor(vec3 color) {
 	float energyScale = energyNormalized > 0.5 ? RECIPROCAL_PI : 1.0;
-	return lightIntensityLimit > 0.5 ? clamp(color * energyScale, 0.0, 1.0) / energyScale : color;
+	return TOON_USES_INTENSITY_LIMIT ? clamp(color * energyScale, 0.0, 1.0) / energyScale : color;
 }
 vec3 readLimitedLocalColor(vec3 color) {
 	float energyScale = energyNormalized > 0.5 ? RECIPROCAL_PI : 1.0;
-	return lightIntensityLimit > 0.5 ? color * min(1.0, 1.0 / max(0.001, readLightIntensity(color * energyScale))) : color;
+	return TOON_USES_INTENSITY_LIMIT ? color * min(1.0, 1.0 / max(0.001, readLightIntensity(color * energyScale))) : color;
 }
 float readShadow() {
 	if (shadowEnabled < 0.5) {
@@ -582,14 +663,14 @@ float readToonCoordinate(float cosine, float offset) {
 	return (shadeHalfLambert > 0.5 ? cosine * 0.5 + 0.5 : max(cosine, 0.0)) + offset;
 }
 vec3 readShadeRamp(float coordinate) {
-	if (rampTextureEnabled > 0.5) {
+	if (TOON_USES_RAMP_TEXTURE) {
 #ifdef VANILLA_COLOR_SPACE_LINEAR
 		return textureLod(rampTexture, vec2(clamp(coordinate, 0.0, 1.0), 0.5), 0.0).rgb;
 #else
 		return toLinear(textureLod(rampTexture, vec2(clamp(coordinate, 0.0, 1.0), 0.5), 0.0).rgb);
 #endif
 	}
-	if (shadeStopCount < 2) {
+	if (!TOON_USES_SHADE_STOPS) {
 		return vec3(clamp(coordinate, 0.0, 1.0));
 	}
 	float edgeWidth = max(fwidth(coordinate), 0.0001);
@@ -604,14 +685,14 @@ vec3 readShadeRamp(float coordinate) {
 	return color;
 }
 vec3 readShadeRampWithWidth(float coordinate, float edgeWidth) {
-	if (rampTextureEnabled > 0.5) {
+	if (TOON_USES_RAMP_TEXTURE) {
 #ifdef VANILLA_COLOR_SPACE_LINEAR
 		return textureLod(rampTexture, vec2(clamp(coordinate, 0.0, 1.0), 0.5), 0.0).rgb;
 #else
 		return toLinear(textureLod(rampTexture, vec2(clamp(coordinate, 0.0, 1.0), 0.5), 0.0).rgb);
 #endif
 	}
-	if (shadeStopCount < 2) {
+	if (!TOON_USES_SHADE_STOPS) {
 		return vec3(clamp(coordinate, 0.0, 1.0));
 	}
 	vec3 color = shadeStopColors[0];
@@ -627,7 +708,7 @@ vec3 readShadeRampWithWidth(float coordinate, float edgeWidth) {
 float readShadeLevel(vec3 rampColor, float cosine) {
 	float bottom;
 	float top;
-	if (rampTextureEnabled > 0.5) {
+	if (TOON_USES_RAMP_TEXTURE) {
 #ifdef VANILLA_COLOR_SPACE_LINEAR
 		bottom = readLuminance(textureLod(rampTexture, vec2(0.0, 0.5), 0.0).rgb);
 		top = readLuminance(textureLod(rampTexture, vec2(1.0, 0.5), 0.0).rgb);
@@ -636,7 +717,7 @@ float readShadeLevel(vec3 rampColor, float cosine) {
 		top = readLuminance(toLinear(textureLod(rampTexture, vec2(1.0, 0.5), 0.0).rgb));
 #endif
 	}
-	else if (shadeStopCount < 2) {
+	else if (!TOON_USES_SHADE_STOPS) {
 		return clamp(cosine, 0.0, 1.0);
 	}
 	else {
@@ -690,27 +771,27 @@ const SOLID_FRAGMENT_BODY: &str = "ToonSurface readSurface() {
 #endif
 	float opacity = alpha * tintColor.a * surfaceTint.a;
 	vec2 uv = surfaceUv * uvTransform.zw + uvTransform.xy;
-	if (textureEnabled.x > 0.5) {
+	if (TOON_USES_BASE_TEXTURE) {
 		vec4 texel = texture(baseColorTexture, uv);
 		color *= texel.rgb;
 		opacity *= texel.a;
 	}
 	vec3 emission = toLinear(emissiveColor.rgb) * emissiveColor.a;
 #ifdef VANILLA_COLOR_SPACE_LINEAR
-	if (textureEnabled.y > 0.5) {
+	if (TOON_USES_EMISSIVE_TEXTURE) {
 		emission *= texture(emissiveTexture, uv).rgb;
 	}
-	if (textureEnabled.z > 0.5) {
+	if (TOON_USES_DECAL_TEXTURE) {
 		vec4 decal = texture(decalTexture, surfaceUv * decalUvTransform.zw + decalUvTransform.xy);
 		vec3 decalTint = decal.rgb * toLinear(decalColor.rgb);
 		color = mix(color, decalTint, decal.a);
 		emission += decalTint * decal.a * decalColor.a;
 	}
 #else
-	if (textureEnabled.y > 0.5) {
+	if (TOON_USES_EMISSIVE_TEXTURE) {
 		emission *= toLinear(texture(emissiveTexture, uv).rgb);
 	}
-	if (textureEnabled.z > 0.5) {
+	if (TOON_USES_DECAL_TEXTURE) {
 		vec4 decal = texture(decalTexture, surfaceUv * decalUvTransform.zw + decalUvTransform.xy);
 		vec3 decalTint = decal.rgb * decalColor.rgb;
 		color = mix(color, decalTint, decal.a);
@@ -738,7 +819,7 @@ ToonLighting readLighting(ToonSurface surface) {
 	ToonLighting lighting;
 	vec3 normal = surface.normal;
 	vec3 viewDirection = surface.viewDirection;
-	float shadow = receivesShadow > 0.5 ? readShadow() : 1.0;
+	float shadow = TOON_USES_SHADOW ? readShadow() : 1.0;
 	float specularNormalization = energyNormalized > 0.5 ? (specularLight.y + 8.0) * RECIPROCAL_PI / 8.0 : 1.0;
 	bool hasSpecular = specularLight.x > 0.0;
 	vec3 specularSum = vec3(0.0);
@@ -777,7 +858,7 @@ ToonLighting readLighting(ToonSurface surface) {
 		vec3 shape = pointLightShapes[index];
 		float lightShadow = 1.0;
 		int shadowSlot = int(pointLightShadowSlots[index] + 0.5) - 1;
-		if (shadowSlot >= 0 && receivesShadow > 0.5) {
+		if (shadowSlot >= 0 && TOON_USES_SHADOW) {
 			lightShadow = readLocalShadow(shadowSlot, surface.worldPosition, normal);
 		}
 		float cosine = (dot(normal, lightDirection) + shape.z) / (1.0 + shape.z);
@@ -816,13 +897,13 @@ ToonLighting readLighting(ToonSurface surface) {
 	lighting.irradiance = irradiance;
 	lighting.specular = hasSpecular ? specularSum * specularColor * specularLight.x * specularNormalization : vec3(0.0);
 	lighting.rim = vec3(0.0);
-	if (rimLight.a > 0.0) {
+	if (TOON_USES_RIM) {
 		float rimTerm = pow(1.0 - clamp(dot(normal, viewDirection), 0.0, 1.0), rimLight.a);
 		float edgeWidth = max(fwidth(rimTerm), 0.0001);
 		float rim = mix(smoothstep(0.5 - edgeWidth, 0.5 + edgeWidth, rimTerm), rimTerm, rimShape.x);
 		lighting.rim = rimLight.rgb * mix(vec3(1.0), sunLightColor, lightColorUsage.w) * rim * mix(1.0, sunLevel, rimShape.y);
 	}
-	if (shadeRimLight.a > 0.0) {
+	if (TOON_USES_SHADE_RIM) {
 		float shadeRimTerm = pow(1.0 - clamp(dot(normal, viewDirection), 0.0, 1.0), shadeRimLight.a);
 		float edgeWidth = max(fwidth(shadeRimTerm), 0.0001);
 		float shadeRim = mix(smoothstep(0.5 - edgeWidth, 0.5 + edgeWidth, shadeRimTerm), shadeRimTerm, rimShape.x);
@@ -856,9 +937,10 @@ void main() {
 		float diffuseScale = energyNormalized > 0.5 ? RECIPROCAL_PI : 1.0;
 		color = albedo * lighting.irradiance * diffuseScale + lighting.specular * surface.specularMask + lighting.rim * surface.rimMask + emission;
 	}
-	vec3 viewNormal = normalize(viewRotation * surface.normal);
-	vec3 sunLightColor = readLimitedDirectionalColor(sunColor);
-	if (matcapSettings.x > 0.5) {
+	// 보기 노멀과 해 빛색은 매캡과 천사 고리가 켜진 때만 쓰니 그 갈래 안에서 셈한다. (끄면 모든 화소가 셈하던 노멀 정규화와 빛 제한을 건너뜀, 값은 같다)
+	if (TOON_USES_MATCAP) {
+		vec3 viewNormal = normalize(viewRotation * surface.normal);
+		vec3 sunLightColor = readLimitedDirectionalColor(sunColor);
 #ifdef VANILLA_COLOR_SPACE_LINEAR
 		vec3 matcap = texture(matcapTexture, vec2(viewNormal.x * 0.5 + 0.5, 0.5 - viewNormal.y * 0.5)).rgb * mix(vec3(1.0), sunLightColor, lightColorUsageExtra.y);
 #else
@@ -866,7 +948,9 @@ void main() {
 #endif
 		color = matcapSettings.z > 0.5 ? color + matcap * matcapSettings.y : color * mix(vec3(1.0), matcap, matcapSettings.y);
 	}
-	if (angelRingSettings.x > 0.5) {
+	if (TOON_USES_ANGEL_RING) {
+		vec3 viewNormal = normalize(viewRotation * surface.normal);
+		vec3 sunLightColor = readLimitedDirectionalColor(sunColor);
 		vec2 ringOffset = mix(viewNormal, vec3(0.0, 0.0, 1.0), angelRingSettings.y).xy * 0.5;
 		vec2 ringNormal = vec2(ringOffset.x * cameraRoll.x + ringOffset.y * cameraRoll.y, ringOffset.y * cameraRoll.x - ringOffset.x * cameraRoll.y) + 0.5;
 		vec2 ringUv = vec2(ringNormal.x, 1.0 - mix(1.0 - surface.uv1.y, ringNormal.y, angelRingSettings.z));
@@ -981,9 +1065,9 @@ void main() {
 /// 	..ToonMaterialChunks::default()
 /// });
 /// let instance_layout = ToonInstanceLayout::new(&[("instanceOffset", 3)]).unwrap();
-/// let sources = compose_toon_program_sources(Some(&material), Some(&instance_layout), false, ColorSpace::Gamma);
+/// let sources = compose_toon_program_sources(Some(&material), Some(&instance_layout), false, ColorSpace::Gamma, &[]);
 /// assert!(sources.solid_fragment_shader.contains("uniform float pulse;"));
-/// let linear_sources = compose_toon_program_sources(Some(&material), Some(&instance_layout), true, ColorSpace::Linear);
+/// let linear_sources = compose_toon_program_sources(Some(&material), Some(&instance_layout), true, ColorSpace::Linear, &[]);
 /// assert!(linear_sources.solid_fragment_shader.starts_with("#version 300 es\n#define VANILLA_COLOR_SPACE_LINEAR 1\n#define TOON_AMBIENT_OCCLUSION\n"));
 /// assert!(sources.solid_vertex_shader.contains("in vec3 instanceOffset;"));
 /// assert!(sources.attribute_locations.iter().any(|(name, _)| name == "instanceOffset"));
@@ -1015,11 +1099,22 @@ pub struct ToonProgramSources {
 /// - `instance_layout`: 사용자 어트리뷰트를 선언할 인스턴스 꼴. (None 이면 없음)
 /// - `is_ambient_occlusion`: 몸 조각 셰이더에 TOON_AMBIENT_OCCLUSION 을 정의해 모서리 어둠 텍스처를 바탕빛에 곱할지. (원본 기본 false)
 /// - `color_space`: 색 공간. (원본 기본은 엔진의 색 공간, Linear 면 소스마다 #define VANILLA_COLOR_SPACE_LINEAR 1 이 들어간다)
+/// - `disabled_features`: 몸 조각 셰이더에서 컴파일 때 지울 기능 갈래. (baseTexture, emissiveTexture, decalTexture, matcap, angelRing, rampTexture, shadeStops, rim, shadeRim, shadow, intensityLimit 가운데, 원본 기본은 없음, 지운 갈래를 그리기 때 켜면 그 갈래는 그려지지 않는다. 렌더러는 그리기가 쓰지 않는 갈래를 스스로 알아 넘긴다)
 ///
 /// # 돌려줌
 /// 세 프로그램의 소스와 어트리뷰트 자리. (ToonProgramSources)
+///
+/// # Panics
+/// disabled_features 에 모르는 이름이 있으면 패닉한다. (원본은 던진다)
 //==============================================================================
-pub fn compose_toon_program_sources(material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, is_ambient_occlusion: bool, color_space: ColorSpace) -> ToonProgramSources {
+pub fn compose_toon_program_sources(material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, is_ambient_occlusion: bool, color_space: ColorSpace, disabled_features: &[&str]) -> ToonProgramSources {
+	let mut fragment_defines = String::from(if is_ambient_occlusion { "#define TOON_AMBIENT_OCCLUSION\n" } else { "" });
+	for feature in disabled_features {
+		let Some((_, define_name)) = TOON_FEATURE_DEFINE_TABLE.iter().find(|(name, _)| name == feature) else {
+			panic!("unknown toon shader feature: {}", feature);
+		};
+		fragment_defines.push_str(&format!("#define {}\n", define_name));
+	}
 	let pick = |chunk: Option<&str>, fallback: &'static str| -> String {
 		match chunk {
 			Some(chunk) if !chunk.is_empty() => {
@@ -1044,7 +1139,7 @@ pub fn compose_toon_program_sources(material: Option<&ToonMaterial>, instance_la
 			}
 		}
 	}
-	let solid_fragment_head = if is_ambient_occlusion { SOLID_FRAGMENT_HEAD.replacen("#version 300 es\n", "#version 300 es\n#define TOON_AMBIENT_OCCLUSION\n", 1) } else { String::from(SOLID_FRAGMENT_HEAD) };
+	let solid_fragment_head = if !fragment_defines.is_empty() { SOLID_FRAGMENT_HEAD.replacen("#version 300 es\n", &format!("#version 300 es\n{}", fragment_defines), 1) } else { String::from(SOLID_FRAGMENT_HEAD) };
 	ToonProgramSources {
 		solid_vertex_shader: add_color_space_define(&format!("{}{}", vertex_head, SOLID_VERTEX_BODY), color_space),
 		solid_fragment_shader: add_color_space_define(&format!("{}{}{}{}{}", solid_fragment_head, uniform_chunk, surface_chunk, light_chunk, SOLID_FRAGMENT_BODY), color_space),
@@ -1664,6 +1759,13 @@ thread_local! {
 	pub(crate) static UPLOAD_COUNTS: Cell<[u32; 5]> = const { Cell::new([0; 5]) };
 }
 
+// 시험이 기능 갈래 변형을 끄고(true) 기본 몸 프로그램으로만 그려 변형 쪽 화면과 견줄 때, 시험이 지은 변형 수를 셀 때.
+#[cfg(test)]
+thread_local! {
+	pub(crate) static DISABLE_FEATURE_VARIANTS: Cell<bool> = const { Cell::new(false) };
+	pub(crate) static BUILT_FEATURE_VARIANTS: Cell<u32> = const { Cell::new(0) };
+}
+
 // 시험이 세는 올림 하나 더하기.
 #[cfg(test)]
 pub(crate) fn count_upload(kind: usize) {
@@ -1977,6 +2079,10 @@ pub struct ToonRenderer {
 	ambient_occlusion_input: Option<ToonAmbientOcclusionInput>,
 	/// (머티리얼 번호, 인스턴스 꼴 번호) → 모서리 어둠 몸 프로그램. (원본 열쇠 "번호/번호/ao" 의 칸, 바깥선과 그림자 깊이는 기본 칸 것을 같이 쓴다, 짓지 못했으면 None 이라 기본 칸으로 그린다)
 	ambient_occlusion_program_table: HashMap<(u32, u32), Option<ToonProgramEntry>>,
+	/// (머티리얼 번호, 인스턴스 꼴 번호, 모서리 어둠인지, 기능 비트) → 쓰는 기능 갈래만 남긴 몸 프로그램. (원본 programSet.variants, 짓지 못했으면 None 이고 기본 몸 칸으로 그린다)
+	solid_variant_table: HashMap<(u32, u32, bool, u32), Option<ToonProgramEntry>>,
+	/// 기능 비트를 셈한 빛 묶음 번호와 판 번호와 빛 묶음 쪽 비트. (원본 #featureLightSet, #featureLightVersion, #featureLightMask)
+	feature_light_cache: Cell<(u32, u64, u32)>,
 }
 
 //==============================================================================
@@ -2411,7 +2517,7 @@ impl ToonRenderer {
 	/// (정점, 조각) 소스 세 벌. (몸, 바깥선, 그림자 깊이)
 	//==============================================================================
 	pub fn read_material_program_sources(material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, is_ambient_occlusion: bool, color_space: ColorSpace) -> [(String, String); 3] {
-		let sources = compose_toon_program_sources(material, instance_layout, is_ambient_occlusion, color_space);
+		let sources = compose_toon_program_sources(material, instance_layout, is_ambient_occlusion, color_space, &[]);
 		[(sources.solid_vertex_shader, sources.solid_fragment_shader), (sources.outline_vertex_shader, sources.outline_fragment_shader), (sources.depth_vertex_shader, sources.depth_fragment_shader)]
 	}
 
@@ -2487,6 +2593,8 @@ impl ToonRenderer {
 			color_space,
 			ambient_occlusion_input: None,
 			ambient_occlusion_program_table: HashMap::new(),
+			solid_variant_table: HashMap::new(),
+			feature_light_cache: Cell::new((0, u64::MAX, 0)),
 		})
 	}
 
@@ -2494,7 +2602,7 @@ impl ToonRenderer {
 	/// 세 프로그램 짓기. (짓지 못하면 Err, 몸 프로그램의 텍스처 유닛을 정해 둔다)
 	//==============================================================================
 	fn create_program_set(gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, color_space: ColorSpace) -> Result<ToonProgramSet, String> {
-		let sources = compose_toon_program_sources(material, instance_layout, false, color_space);
+		let sources = compose_toon_program_sources(material, instance_layout, false, color_space, &[]);
 		let attribute_locations: Vec<(&str, u32)> = sources.attribute_locations.iter().map(|(name, location)| (name.as_str(), *location)).collect();
 		let solid_program = ShaderProgram::create_with_attribute_locations(gl, &sources.solid_vertex_shader, &sources.solid_fragment_shader, &attribute_locations)?;
 		let outline_program = match ShaderProgram::create_with_attribute_locations(gl, &sources.outline_vertex_shader, &sources.outline_fragment_shader, &attribute_locations) {
@@ -2561,16 +2669,19 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
-	/// 모서리 어둠 몸 프로그램 짓기. (원본 createProgramSet 의 baseProgramSet 이 있는 길, 몸만 짓고 텍스처 유닛과 모서리 어둠 유닛을 정해 둔다)
+	/// 몸 프로그램 하나 짓기. (원본 createProgramSet 의 baseProgramSet 이 있는 길과 prepareSolidProgram, 몸만 짓고 텍스처 유닛과 모서리 어둠 유닛을 정해 둔다, 모서리 어둠 몸이나 기능 갈래를 뺀 몸)
 	//==============================================================================
-	fn create_ambient_occlusion_solid_entry(gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, color_space: ColorSpace) -> Result<ToonProgramEntry, String> {
-		let sources = compose_toon_program_sources(material, instance_layout, true, color_space);
+	fn create_solid_entry(gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, is_ambient_occlusion: bool, color_space: ColorSpace, disabled_features: &[&str]) -> Result<ToonProgramEntry, String> {
+		let sources = compose_toon_program_sources(material, instance_layout, is_ambient_occlusion, color_space, disabled_features);
 		let attribute_locations: Vec<(&str, u32)> = sources.attribute_locations.iter().map(|(name, location)| (name.as_str(), *location)).collect();
 		let solid_program = ShaderProgram::create_with_attribute_locations(gl, &sources.solid_vertex_shader, &sources.solid_fragment_shader, &attribute_locations)?;
 		unsafe {
 			let previous_program = crate::graphics3d::read_program_binding(gl);
 			solid_program.use_program(gl);
 			for (name, unit) in [("shadowTexture", SHADOW_TEXTURE_UNIT), ("baseColorTexture", BASE_COLOR_TEXTURE_UNIT), ("emissiveTexture", EMISSIVE_TEXTURE_UNIT), ("decalTexture", DECAL_TEXTURE_UNIT), ("rampTexture", RAMP_TEXTURE_UNIT), ("matcapTexture", MATCAP_TEXTURE_UNIT), ("localShadowTexture", LOCAL_SHADOW_TEXTURE_UNIT), ("angelRingTexture", ANGEL_RING_TEXTURE_UNIT), ("ambientOcclusionTexture", AMBIENT_OCCLUSION_TEXTURE_UNIT)] {
+				if !is_ambient_occlusion && name == "ambientOcclusionTexture" {
+					continue;
+				}
 				gl.uniform_1_i32(solid_program.get_uniform_location(gl, name).as_ref(), unit as i32);
 			}
 			ToonRenderer::bind_frame_block(gl, &solid_program);
@@ -2588,7 +2699,7 @@ impl ToonRenderer {
 		if self.ambient_occlusion_program_table.contains_key(&key) {
 			return;
 		}
-		let entry = match ToonRenderer::create_ambient_occlusion_solid_entry(gl, material, instance_layout, self.color_space) {
+		let entry = match ToonRenderer::create_solid_entry(gl, material, instance_layout, true, self.color_space, &[]) {
 			Ok(entry) => {
 				Some(entry)
 			}
@@ -2603,6 +2714,71 @@ impl ToonRenderer {
 			}
 		};
 		self.ambient_occlusion_program_table.insert(key, entry);
+	}
+
+	//==============================================================================
+	/// 그리기가 쓰는 몸 기능 갈래 비트. (원본 readFeatureMask, 그리기 꼴의 텍스처 다섯과 그림자 받기에 빛 묶음의 갈래를 더한다)
+	/// - 그림자 입력이 없을 때 그림자 갈래를 빼면 원본 맥 크롬에서 툰 예제 하나(toonview)가 8 화소 1 단계 달라져(컴파일러가 식을 다르게 접음) 비트에 넣지 않는다. 그리기 꼴의 receives_shadow false 만 뺀다.
+	///
+	/// # 돌려줌
+	/// 기능 비트. (TOON_FEATURE_ALL 이면 전부 쓰는 기본 프로그램)
+	//==============================================================================
+	fn read_feature_mask(&self, options: &ToonDrawOptions, light_set: &ToonLightSet) -> u32 {
+		#[cfg(test)]
+		if DISABLE_FEATURE_VARIANTS.with(|flag| flag.get()) {
+			return TOON_FEATURE_ALL;
+		}
+		let (cached_id, cached_version, cached_mask) = self.feature_light_cache.get();
+		let light_mask = if cached_id == light_set.get_id() && cached_version == light_set.get_version() {
+			cached_mask
+		}
+		else {
+			let mask = (if light_set.get_ramp_texture().is_some() { TOON_FEATURE_RAMP_TEXTURE } else { 0 })
+				| (if light_set.get_shade_ramp().positions.len() >= 2 { TOON_FEATURE_SHADE_STOPS } else { 0 })
+				| (if light_set.get_rim_light().power > 0.0 { TOON_FEATURE_RIM } else { 0 })
+				| (if light_set.get_shade_rim_light().power > 0.0 { TOON_FEATURE_SHADE_RIM } else { 0 })
+				| (if light_set.is_light_intensity_limited() { TOON_FEATURE_INTENSITY_LIMIT } else { 0 });
+			self.feature_light_cache.set((light_set.get_id(), light_set.get_version(), mask));
+			mask
+		};
+		light_mask
+			| (if options.base_color_texture.is_some() { TOON_FEATURE_BASE_TEXTURE } else { 0 })
+			| (if options.emissive_texture.is_some() { TOON_FEATURE_EMISSIVE_TEXTURE } else { 0 })
+			| (if options.decal_texture.is_some() { TOON_FEATURE_DECAL_TEXTURE } else { 0 })
+			| (if options.matcap_texture.is_some() { TOON_FEATURE_MATCAP } else { 0 })
+			| (if options.angel_ring_texture.is_some() { TOON_FEATURE_ANGEL_RING } else { 0 })
+			| (if options.receives_shadow { TOON_FEATURE_SHADOW } else { 0 })
+	}
+
+	//==============================================================================
+	/// 쓰는 기능 갈래만 남긴 몸 프로그램이 있게 하기. (원본 readSolidVariant, 없으면 짓고, 짓지 못하면 알리고 None 을 기억해 기본 몸 칸으로 그린다)
+	//==============================================================================
+	fn ensure_solid_variant(&mut self, gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, is_ambient_occlusion: bool, feature_mask: u32) {
+		if feature_mask == TOON_FEATURE_ALL {
+			return;
+		}
+		let key = (material.map(|material| material.get_id()).unwrap_or(0), instance_layout.map(|instance_layout| instance_layout.get_id()).unwrap_or(0), is_ambient_occlusion, feature_mask);
+		if self.solid_variant_table.contains_key(&key) {
+			return;
+		}
+		let disabled_features: Vec<&str> = TOON_FEATURE_DEFINE_LIST.iter().enumerate().filter(|(index, _)| feature_mask & (1 << index) == 0).map(|(_, name)| *name).collect();
+		let entry = match ToonRenderer::create_solid_entry(gl, material, instance_layout, is_ambient_occlusion, self.color_space, &disabled_features) {
+			Ok(entry) => {
+				Some(entry)
+			}
+			Err(error) => {
+				let name = material.map(|material| String::from(material.get_name())).filter(|name| !name.is_empty()).unwrap_or_else(|| format!("{}/{}", key.0, key.1));
+				eprintln!("[ToonRenderer] 기능 갈래 {} 의 몸 셰이더를 짓지 못해 기본 몸 셰이더로 그린다. ({}) {}", feature_mask, name, error);
+				// 컨텍스트를 잃은 탓이면 알리지도 기억하지도 않는다. (되살린 뒤 다시 짓는다)
+				if !crate::core::shaderprogram::report_shader_build_failure(gl, &format!("ToonRenderer.{}/features{}", name, feature_mask), &error) {
+					return;
+				}
+				None
+			}
+		};
+		#[cfg(test)]
+		BUILT_FEATURE_VARIANTS.with(|count| count.set(count.get() + 1));
+		self.solid_variant_table.insert(key, entry);
 	}
 
 	//==============================================================================
@@ -2678,6 +2854,15 @@ impl ToonRenderer {
 				let uniform_slot_table = self.uniform_slot_table.get_mut();
 				for program in [&program_set.solid.program, &program_set.outline.program, &program_set.depth.program] {
 					uniform_slot_table.remove(&program.get_program());
+				}
+			}
+			let variant_key_list: Vec<(u32, u32, bool, u32)> = self.solid_variant_table.keys().filter(|variant_key| variant_key.0 == key.0 && variant_key.1 == key.1).copied().collect();
+			for variant_key in variant_key_list {
+				if let Some(Some(entry)) = self.solid_variant_table.remove(&variant_key) {
+					unsafe {
+						crate::core::glstatecache::delete_program(gl, entry.program.get_program());
+					}
+					self.uniform_slot_table.get_mut().remove(&entry.program.get_program());
 				}
 			}
 			// 모서리 어둠 칸은 몸만 제 것이다. (바깥선과 그림자 깊이는 기본 칸이 지운다)
@@ -2876,7 +3061,7 @@ impl ToonRenderer {
 		for program_set in self.program_set_table.values().flatten() {
 			ToonRenderer::delete_program_set(gl, program_set);
 		}
-		for entry in self.ambient_occlusion_program_table.values().flatten() {
+		for entry in self.ambient_occlusion_program_table.values().flatten().chain(self.solid_variant_table.values().flatten()) {
 			unsafe {
 				crate::core::glstatecache::delete_program(gl, entry.program.get_program());
 			}
@@ -4405,6 +4590,14 @@ impl ToonRenderer {
 		if self.ambient_occlusion_input.is_some() && !self.is_shadow_pass {
 			self.ensure_ambient_occlusion_program(gl, options.material, instance_layout);
 		}
+		// 몸은 쓰는 기능 갈래만 남긴 프로그램으로. (비트는 그리기 꼴와 빛 묶음이 정한다)
+		let mut feature_mask = TOON_FEATURE_ALL;
+		if !self.is_shadow_pass && parts & DRAW_PART_BODY != 0 && options.is_body_drawn {
+			feature_mask = self.read_feature_mask(&options, options.light_set.unwrap_or(&self.light_set));
+			let variant_key = (options.material.map(|material| material.get_id()).unwrap_or(0), instance_layout.map(|instance_layout| instance_layout.get_id()).unwrap_or(0));
+			let is_ambient_occlusion = self.ambient_occlusion_input.is_some() && matches!(self.ambient_occlusion_program_table.get(&variant_key), Some(Some(_)));
+			self.ensure_solid_variant(gl, options.material, instance_layout, is_ambient_occlusion, feature_mask);
+		}
 		let is_skinned = mesh.is_skinned && options.joint_matrices.is_some();
 		let is_instanced = instance_count > 0;
 		let (body_vertex_array, outline_vertex_array, instanced_mode) = match instance_buffer {
@@ -4550,12 +4743,25 @@ impl ToonRenderer {
 		}
 
 		// 몸. (모서리 어둠을 걸었으면 모서리 어둠 몸 프로그램, 짓지 못했으면 기본 칸)
+		fn read_variant<'a>(variant_table: &'a HashMap<(u32, u32, bool, u32), Option<ToonProgramEntry>>, variant_key: (u32, u32, bool, u32), base_entry: &'a ToonProgramEntry) -> &'a ToonProgramEntry {
+			match variant_table.get(&variant_key) {
+				Some(Some(entry)) => {
+					entry
+				}
+				_ => {
+					base_entry
+				}
+			}
+		}
 		let solid_entry = match (self.ambient_occlusion_input.is_some(), self.ambient_occlusion_program_table.get(&key)) {
 			(true, Some(Some(entry))) => {
-				entry
+				read_variant(&self.solid_variant_table, (key.0, key.1, true, feature_mask), entry)
+			}
+			(true, _) => {
+				&program_set.solid
 			}
 			_ => {
-				&program_set.solid
+				read_variant(&self.solid_variant_table, (key.0, key.1, false, feature_mask), &program_set.solid)
 			}
 		};
 		let solid_program = &solid_entry.program;
@@ -5201,23 +5407,62 @@ mod tests {
 	fn material_sources_insert_chunks_and_instance_attributes() {
 		let material = ToonMaterial::new(ToonMaterialChunks { name: String::from("test"), uniform_chunk: String::from("uniform float markValue;\n"), surface_chunk: String::from("void applySurface(inout ToonSurface surface) {\n\tsurface.alpha *= markValue;\n}\n"), ..ToonMaterialChunks::default() });
 		let instance_layout = ToonInstanceLayout::new(&[("instanceOffset", 3)]).unwrap();
-		let sources = compose_toon_program_sources(Some(&material), Some(&instance_layout), false, ColorSpace::Gamma);
+		let sources = compose_toon_program_sources(Some(&material), Some(&instance_layout), false, ColorSpace::Gamma, &[]);
 		assert!(sources.solid_fragment_shader.contains("uniform float markValue;"));
 		assert!(sources.solid_fragment_shader.contains("surface.alpha *= markValue;"));
 		assert!(sources.solid_fragment_shader.contains(DEFAULT_LIGHT_CHUNK));
 		assert!(sources.solid_vertex_shader.contains("in vec3 instanceOffset;"));
 		assert!(sources.depth_vertex_shader.contains(DEFAULT_VERTEX_CHUNK));
 		assert!(sources.attribute_locations.contains(&(String::from("instanceOffset"), 13)));
-		let default_sources = compose_toon_program_sources(None, None, false, ColorSpace::Gamma);
+		let default_sources = compose_toon_program_sources(None, None, false, ColorSpace::Gamma, &[]);
 		assert!(default_sources.solid_fragment_shader.contains(DEFAULT_SURFACE_CHUNK));
 		assert_eq!(default_sources.attribute_locations.len(), TOON_ATTRIBUTE_LOCATIONS.len());
 	}
+	//==============================================================================
+	/// 기능 갈래를 지운 소스는 TOON_NO_* 정의가 머리에 붙고, 갈래를 지우지 않으면 기본 소스와 같고, 모르는 이름은 패닉하고, 기능 갈래 글과 이름 목록은 원본과 글자까지 같다.
+	//==============================================================================
+	#[test]
+	fn disabled_features_define_toon_no_and_match_original() {
+		let default_sources = compose_toon_program_sources(None, None, false, ColorSpace::Gamma, &[]);
+		assert!(!default_sources.solid_fragment_shader.contains("#define TOON_NO_"));
+		assert!(default_sources.solid_fragment_shader.contains("#define TOON_USES_BASE_TEXTURE (textureEnabled.x > 0.5)"));
+		let reduced_sources = compose_toon_program_sources(None, None, true, ColorSpace::Linear, &["matcap", "shadow"]);
+		assert!(reduced_sources.solid_fragment_shader.starts_with("#version 300 es\n#define VANILLA_COLOR_SPACE_LINEAR 1\n#define TOON_AMBIENT_OCCLUSION\n#define TOON_NO_MATCAP\n#define TOON_NO_SHADOW\n"));
+		assert_eq!(reduced_sources.solid_vertex_shader, compose_toon_program_sources(None, None, true, ColorSpace::Linear, &[]).solid_vertex_shader);
+		let path = std::env::var("VANILLA_JS_PATH").unwrap_or_else(|_| format!("{}/../vanilla.js", env!("CARGO_MANIFEST_DIR")));
+		let Ok(original) = std::fs::read_to_string(format!("{}/src/graphics3d/toon/toonrenderer.js", path)) else {
+			println!("(원본 저장소가 없어 기능 갈래 글자 견주기는 건너뜀)");
+			return;
+		};
+		let start = original.find("const SOLID_FEATURE_CHUNK = `").expect("원본 기능 갈래 글") + "const SOLID_FEATURE_CHUNK = `".len();
+		let chunk = &original[start..start + original[start..].find("`;").expect("원본 기능 갈래 글 끝")];
+		assert_eq!(chunk, solid_feature_chunk!());
+		let list_start = original.find("const TOON_FEATURE_DEFINE_LIST = [").expect("원본 이름 목록") + "const TOON_FEATURE_DEFINE_LIST = [".len();
+		let list_text = &original[list_start..list_start + original[list_start..].find("];").expect("원본 이름 목록 끝")];
+		let original_names: Vec<String> = list_text.split(',').map(|name| name.trim().trim_matches('"').to_string()).collect();
+		assert_eq!(original_names, TOON_FEATURE_DEFINE_LIST.iter().map(|name| name.to_string()).collect::<Vec<String>>());
+		let table_start = original.find("const TOON_FEATURE_DEFINE_TABLE = { ").expect("원본 정의 표") + "const TOON_FEATURE_DEFINE_TABLE = { ".len();
+		let table_text = &original[table_start..table_start + original[table_start..].find(" };").expect("원본 정의 표 끝")];
+		let rust_table: Vec<String> = TOON_FEATURE_DEFINE_TABLE.iter().map(|(name, define)| format!("{}: \"{}\"", name, define)).collect();
+		assert_eq!(table_text, rust_table.join(", "));
+		assert_eq!(TOON_FEATURE_ALL, (1 << TOON_FEATURE_DEFINE_LIST.len()) - 1);
+	}
+
+	//==============================================================================
+	/// 모르는 기능 갈래 이름은 패닉한다. (원본은 던진다)
+	//==============================================================================
+	#[test]
+	#[should_panic(expected = "unknown toon shader feature")]
+	fn unknown_disabled_feature_panics() {
+		compose_toon_program_sources(None, None, false, ColorSpace::Gamma, &["noSuchFeature"]);
+	}
+
 	//==============================================================================
 	/// 프레임 값은 프레임 블록 ToonFrame(std140, 172 float)으로만 올린다. 세 프로그램의 정점 셰이더와 몸, 바깥선 조각 셰이더가 같은 선언을 쓰고, 선언은 원본과 글자까지 같다. (원본 jsubo 의 FRAME_BLOCK_CHUNK)
 	//==============================================================================
 	#[test]
 	fn frame_values_are_declared_in_frame_block_like_original() {
-		let sources = compose_toon_program_sources(None, None, false, ColorSpace::Gamma);
+		let sources = compose_toon_program_sources(None, None, false, ColorSpace::Gamma, &[]);
 		let block_head = "layout(std140) uniform ToonFrame {\n\tmat4 viewProjectionMatrix;\n\tmat4 lightViewProjectionMatrix;\n";
 		for source in [&sources.solid_vertex_shader, &sources.solid_fragment_shader, &sources.outline_vertex_shader, &sources.outline_fragment_shader, &sources.depth_vertex_shader] {
 			assert!(source.contains(block_head));
@@ -5228,7 +5473,7 @@ mod tests {
 				assert!(!source.lines().any(|line| line.starts_with("uniform ") && line.contains(&format!(" {}", name)) && line.trim_end().ends_with(&format!("{};", name)) ), "{} 는 블록 밖 유니폼이면 안 됨", name);
 			}
 		}
-		let ambient_sources = compose_toon_program_sources(None, None, true, ColorSpace::Gamma);
+		let ambient_sources = compose_toon_program_sources(None, None, true, ColorSpace::Gamma, &[]);
 		assert!(!ambient_sources.solid_fragment_shader.contains("uniform vec2 ambientOcclusionOrigin;"));
 		let path = std::env::var("VANILLA_JS_PATH").unwrap_or_else(|_| format!("{}/../vanilla.js", env!("CARGO_MANIFEST_DIR")));
 		let Ok(original) = std::fs::read_to_string(format!("{}/src/graphics3d/toon/toonrenderer.js", path)) else {

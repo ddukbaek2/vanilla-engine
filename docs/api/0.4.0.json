@@ -121642,7 +121642,7 @@
 								"ko": "머티리얼 조각과 사용자 인스턴스 어트리뷰트가 든 소스 짓기",
 								"en": "Building sources with material chunks and user instance attributes"
 							},
-							"code": "use vanilla::{compose_toon_program_sources, ColorSpace, ToonInstanceLayout, ToonMaterial, ToonMaterialChunks};\n\nlet material = ToonMaterial::new(ToonMaterialChunks {\n\tname: String::from(\"pulse\"),\n\tuniform_chunk: String::from(\"uniform float pulse;\\n\"),\n\tsurface_chunk: String::from(\"void applySurface(inout ToonSurface surface) {\\n\\tsurface.emission += vec3(pulse);\\n}\\n\"),\n\t..ToonMaterialChunks::default()\n});\nlet instance_layout = ToonInstanceLayout::new(&[(\"instanceOffset\", 3)]).unwrap();\nlet sources = compose_toon_program_sources(Some(&material), Some(&instance_layout), false, ColorSpace::Gamma);\nassert!(sources.solid_fragment_shader.contains(\"uniform float pulse;\"));\nlet linear_sources = compose_toon_program_sources(Some(&material), Some(&instance_layout), true, ColorSpace::Linear);\nassert!(linear_sources.solid_fragment_shader.starts_with(\"#version 300 es\\n#define VANILLA_COLOR_SPACE_LINEAR 1\\n#define TOON_AMBIENT_OCCLUSION\\n\"));\nassert!(sources.solid_vertex_shader.contains(\"in vec3 instanceOffset;\"));\nassert!(sources.attribute_locations.iter().any(|(name, _)| name == \"instanceOffset\"));",
+							"code": "use vanilla::{compose_toon_program_sources, ColorSpace, ToonInstanceLayout, ToonMaterial, ToonMaterialChunks};\n\nlet material = ToonMaterial::new(ToonMaterialChunks {\n\tname: String::from(\"pulse\"),\n\tuniform_chunk: String::from(\"uniform float pulse;\\n\"),\n\tsurface_chunk: String::from(\"void applySurface(inout ToonSurface surface) {\\n\\tsurface.emission += vec3(pulse);\\n}\\n\"),\n\t..ToonMaterialChunks::default()\n});\nlet instance_layout = ToonInstanceLayout::new(&[(\"instanceOffset\", 3)]).unwrap();\nlet sources = compose_toon_program_sources(Some(&material), Some(&instance_layout), false, ColorSpace::Gamma, &[]);\nassert!(sources.solid_fragment_shader.contains(\"uniform float pulse;\"));\nlet linear_sources = compose_toon_program_sources(Some(&material), Some(&instance_layout), true, ColorSpace::Linear, &[]);\nassert!(linear_sources.solid_fragment_shader.starts_with(\"#version 300 es\\n#define VANILLA_COLOR_SPACE_LINEAR 1\\n#define TOON_AMBIENT_OCCLUSION\\n\"));\nassert!(sources.solid_vertex_shader.contains(\"in vec3 instanceOffset;\"));\nassert!(sources.attribute_locations.iter().any(|(name, _)| name == \"instanceOffset\"));",
 							"language": "rust"
 						}
 					]
@@ -125951,7 +125951,7 @@
 				{
 					"kind": "method",
 					"name": "compose_toon_program_sources",
-					"signature": "pub fn compose_toon_program_sources(material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, is_ambient_occlusion: bool, color_space: ColorSpace) -> ToonProgramSources",
+					"signature": "pub fn compose_toon_program_sources(material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, is_ambient_occlusion: bool, color_space: ColorSpace, disabled_features: &[&str]) -> ToonProgramSources",
 					"params": [
 						{
 							"name": "material",
@@ -125984,6 +125984,14 @@
 								"ko": "색 공간. (원본 기본은 엔진의 색 공간, Linear 면 소스마다 #define VANILLA_COLOR_SPACE_LINEAR 1 이 들어간다)",
 								"en": "Color space. (original default is the engine's color space; with Linear every source gets #define VANILLA_COLOR_SPACE_LINEAR 1)"
 							}
+						},
+						{
+							"name": "disabled_features",
+							"type": "&[&str]",
+							"description": {
+								"ko": "몸 조각 셰이더에서 컴파일 때 지울 기능 갈래. (baseTexture, emissiveTexture, decalTexture, matcap, angelRing, rampTexture, shadeStops, rim, shadeRim, shadow, intensityLimit 가운데, 원본 기본은 없음, 지운 갈래를 그리기 때 켜면 그 갈래는 그려지지 않는다. 렌더러는 그리기가 쓰지 않는 갈래를 스스로 알아 넘긴다)",
+								"en": "Feature branches to remove from the body fragment shader at compile time. (any of baseTexture, emissiveTexture, decalTexture, matcap, angelRing, rampTexture, shadeStops, rim, shadeRim, shadow, intensityLimit; none by default in the original; a removed branch is not drawn if a draw turns it on. The renderer finds the branches a draw does not use and passes them itself)"
+							}
 						}
 					],
 					"returns": {
@@ -125994,8 +126002,8 @@
 						}
 					},
 					"description": {
-						"ko": "머티리얼과 인스턴스 꼴로 세 프로그램의 소스 짓기. (둘 다 None 이면 기본 프로그램)",
-						"en": "Builds the sources of the three programs from a material and instance layout. (default programs if both are None)"
+						"ko": "머티리얼과 인스턴스 꼴로 세 프로그램의 소스 짓기. (둘 다 None 이면 기본 프로그램)\n\n# Panics\ndisabled_features 에 모르는 이름이 있으면 패닉한다. (원본은 던진다)",
+						"en": "Builds the sources of the three programs from a material and instance layout. (the default program if both are None)\n\n# Panics\nPanics if disabled_features has an unknown name. (the original throws)"
 					},
 					"since": "0.4.0",
 					"source": "src/graphics3d/toon/toonrenderer.rs",
