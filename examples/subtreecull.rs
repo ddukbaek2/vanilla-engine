@@ -520,7 +520,7 @@ impl Scene for SubtreeCullScene {
 		let engine = Engine::get_engine().unwrap();
 		self.drawn_frame_count += 1;
 		let frame_number = self.drawn_frame_count;
-		if frame_number > LAST_FRAME + 1 {
+		if frame_number > LAST_FRAME + 1 && !cfg!(target_arch = "wasm32") {
 			self.write_output();
 			engine.exit_application();
 			return;

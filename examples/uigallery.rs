@@ -462,7 +462,7 @@ impl Scene for UIGalleryScene {
 		let engine = Engine::get_engine().unwrap();
 		self.frame_count += 1;
 		self.elapsed_seconds += time_delta;
-		if self.frame_count >= EXIT_FRAME_COUNT {
+		if self.frame_count >= EXIT_FRAME_COUNT && !cfg!(target_arch = "wasm32") {
 			engine.exit_application();
 			return;
 		}

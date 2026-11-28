@@ -405,7 +405,7 @@ impl Scene for InputGalleryScene {
 		let engine = Engine::get_engine().unwrap();
 		self.frame_count += 1;
 		let connected_gamepad_count = engine.get_input_manager().get_gamepad_manager().get_connected_gamepad_count();
-		if self.frame_count >= EXIT_FRAME_COUNT && connected_gamepad_count == 0 {
+		if self.frame_count >= EXIT_FRAME_COUNT && connected_gamepad_count == 0 && !cfg!(target_arch = "wasm32") {
 			engine.exit_application();
 			return;
 		}

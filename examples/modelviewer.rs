@@ -358,7 +358,7 @@ impl Scene for ModelViewerScene {
 		let engine = Engine::get_engine().unwrap();
 		let delta_time = FIXED_TIME_STEP;
 		self.elapsed_time += delta_time;
-		if self.elapsed_time >= EXIT_SECONDS {
+		if self.elapsed_time >= EXIT_SECONDS && !cfg!(target_arch = "wasm32") {
 			engine.exit_application();
 		}
 		let resources = match &mut self.resources {

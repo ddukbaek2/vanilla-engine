@@ -253,7 +253,7 @@ impl Scene for BatchClipScene {
 	fn draw(&mut self, graphic: &mut Graphic) {
 		let engine = Engine::get_engine().unwrap();
 		if let Some(capture_frame_number) = self.capture_frame_number {
-			if engine.get_frame_number() > capture_frame_number {
+			if engine.get_frame_number() > capture_frame_number && !cfg!(target_arch = "wasm32") {
 				println!("drawCalls={:?}", self.draw_call_count_list);
 				println!("culledNodes={:?}", self.culled_node_count_list);
 				engine.exit_application();
