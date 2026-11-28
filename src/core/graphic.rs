@@ -2314,6 +2314,25 @@ impl Graphic {
 	}
 
 	//==============================================================================
+	/// 그래픽을 쓰는 바깥 패스 돌리기. (run_external_pass 와 같은 앞뒤 일을 하고, 패스가 GL 컨텍스트 대신 이 Graphic 을 받는다. ScreenEffect 처럼 Graphic 을 받는 패스가 쓴다)
+	///
+	/// # 인자
+	/// - `is_depth_cleared`: 패스 앞에서 깊이를 비울지.
+	/// - `pass`: 돌릴 패스. (Graphic 을 받는다)
+	//==============================================================================
+	pub(crate) fn run_external_graphic_pass<R>(&mut self, is_depth_cleared: bool, pass: impl FnOnce(&mut Graphic) -> R) -> R {
+		self.break_geometry_record();
+		self.flush_batch();
+		if is_depth_cleared {
+			self.clear_depth_buffer();
+		}
+		let shader_clip_count = self.write_shader_clips_to_stencil(true);
+		self.release_color_mask();
+		let guard = ExternalPassGuard { graphic: self, shader_clip_count };
+		pass(&mut *guard.graphic)
+	}
+
+	//==============================================================================
 	/// 이미지 스무딩 활성화 여부 설정.
 	/// - 도트(픽셀) 스프라이트 게임은 false 로 설정해 선명하게 렌더링.
 	///

@@ -14,6 +14,8 @@ use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{GeometryKey, Graphic};
+use crate::effect::screeneffect::{ScreenEffect, ScreenEffectType};
+use std::cell::RefCell;
 use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
 
@@ -41,6 +43,10 @@ pub struct UIView {
 	component_base: ComponentBase,
 	content_id: Option<NodeId>,
 	background_color: Color,
+	/// 뒤 화면 흐림 반지름. (픽셀, 0 이면 끔)
+	backdrop_blur_radius: f64,
+	/// 뒤 화면을 흐릴 화면 효과. (처음 흐릴 때 만든다, 그리기는 &self 라 RefCell)
+	backdrop_screen_effect: RefCell<Option<ScreenEffect>>,
 }
 
 #[crate::reflect]
@@ -56,6 +62,8 @@ impl UIView {
 			component_base: ComponentBase::new(),
 			content_id: None,
 			background_color: Color::create(1.0, 1.0, 1.0, 0.0),
+			backdrop_blur_radius: 0.0,
+			backdrop_screen_effect: RefCell::new(None),
 		}
 	}
 
@@ -123,6 +131,100 @@ impl UIView {
 	}
 
 	//==============================================================================
+	/// 뒤 화면 흐림 설정. (CSS backdrop-filter: blur(), 언리얼 UMG BackgroundBlur 와 같은 뜻, 원본 setBackdropBlur)
+	/// - 켜면 이 뷰가 그려질 때, 그보다 먼저 그려진 화면을 이 뷰의 내용 영역만 흐리고 그 위에 배경색(반투명)을 얹는다.
+	/// - 흐림은 ScreenEffect 의 blur 와 같은 가우스 근사다. 반지름은 그 blur 의 반지름(기기 픽셀)이다.
+	/// - 화면에 그릴 때만 된다. (렌더 타겟에 그리는 중이면 흐리지 않는다) 켜진 동안은 기하 캐시를 쓰지 않는다. (매 그리기마다 화면을 읽는다)
+	///
+	/// # 인자
+	/// - `blur_radius`: 흐림 반지름. (기기 픽셀, 0 이하면 끈다, 기본 0)
+	///
+	/// # 예제
+	/// 반투명 패널 뒤를 흐리기
+	/// ```rust
+	/// use vanilla::{Color, UIView};
+	///
+	/// let mut view = UIView::new();
+	/// view.set_background_color(Color::create(1.0, 1.0, 1.0, 0.25));
+	/// view.set_backdrop_blur(6.0);
+	/// assert_eq!(view.get_backdrop_blur(), 6.0);
+	/// ```
+	//==============================================================================
+	pub fn set_backdrop_blur(&mut self, blur_radius: f64) {
+		self.backdrop_blur_radius = blur_radius.max(0.0);
+	}
+
+	//==============================================================================
+	/// 뒤 화면 흐림 반지름 반환.
+	///
+	/// # 돌려줌
+	/// 흐림 반지름. (기기 픽셀, 0 이면 꺼짐)
+	//==============================================================================
+	pub fn get_backdrop_blur(&self) -> f64 {
+		self.backdrop_blur_radius
+	}
+
+	//==============================================================================
+	/// 뒤 화면 흐림이 켜졌는지. (켜졌으면 기하 캐시를 쓰지 않는다, 합성한 뷰가 그리기 입력 적기에서 본다)
+	//==============================================================================
+	#[reflect(skip)]
+	pub(crate) fn is_backdrop_blur_enabled(&self) -> bool {
+		self.backdrop_blur_radius > 0.0
+	}
+
+	//==============================================================================
+	/// 뒤 화면 흐리기. (draw_background 가 부른다)
+	/// - 먼저 그린 것을 화면에 내보내고, 이 뷰의 내용 영역이 화면에서 차지한 사각형(변환한 네 귀퉁이의 경계 상자, 기기 픽셀)만 ScreenEffect 의 흐림(blur)으로 흐려 같은 자리에 되돌린다.
+	/// - 화면(기본 프레임버퍼)을 그릴 때만 한다. 렌더 타겟에 그리는 중이면 흐리지 않는다.
+	//==============================================================================
+	fn draw_backdrop_blur(&self, transform: &NodeTransform, graphic: &mut Graphic) {
+		let content_size = transform.get_content_size();
+		if !(content_size.x > 0.0 && content_size.y > 0.0) {
+			return;
+		}
+		let transform_matrix = graphic.get_transform_matrix();
+		let corner_list = [
+			transform_matrix.transform_point(0.0, 0.0),
+			transform_matrix.transform_point(content_size.x, 0.0),
+			transform_matrix.transform_point(content_size.x, content_size.y),
+			transform_matrix.transform_point(0.0, content_size.y),
+		];
+		let mut left_x = f64::INFINITY;
+		let mut top_y = f64::INFINITY;
+		let mut right_x = f64::NEG_INFINITY;
+		let mut bottom_y = f64::NEG_INFINITY;
+		for corner in corner_list {
+			left_x = left_x.min(corner.x);
+			top_y = top_y.min(corner.y);
+			right_x = right_x.max(corner.x);
+			bottom_y = bottom_y.max(corner.y);
+		}
+		let region_x = left_x.round();
+		let region_y = top_y.round();
+		let region_width = right_x.round() - region_x;
+		let region_height = bottom_y.round() - region_y;
+		if region_width <= 0.0 || region_height <= 0.0 {
+			return;
+		}
+		let blur_radius = self.backdrop_blur_radius;
+		let mut screen_effect_slot = self.backdrop_screen_effect.borrow_mut();
+		let screen_effect = screen_effect_slot.get_or_insert_with(|| {
+			let mut screen_effect = ScreenEffect::new();
+			screen_effect.set_enabled(ScreenEffectType::Blur, true);
+			screen_effect
+		});
+		graphic.run_external_graphic_pass(false, |pass_graphic| {
+			if pass_graphic.get_current_framebuffer().is_some() {
+				return;
+			}
+			screen_effect.set_parameters(ScreenEffectType::Blur, blur_radius, 0.0, 0.0, 0.0);
+			screen_effect.set_region(region_x, region_y, region_width, region_height, 0.0);
+			screen_effect.begin(pass_graphic);
+			screen_effect.end(pass_graphic);
+		});
+	}
+
+	//==============================================================================
 	/// 배경의 그리기 입력을 기하 캐시 열쇠에 적기. (배경색, 내용 크기, UILabel 등 배경을 그리는 뷰가 함께 쓴다)
 	//==============================================================================
 	pub(crate) fn write_background_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) {
@@ -138,6 +240,10 @@ impl UIView {
 	/// - `graphic`: 그릴 그래픽.
 	//==============================================================================
 	pub fn draw_background(&self, transform: &NodeTransform, graphic: &mut Graphic) {
+		// 뒤 화면 흐림. (바탕색보다 먼저, 이미 그려진 뒤 화면을 이 뷰 자리만 흐린다)
+		if self.backdrop_blur_radius > 0.0 {
+			self.draw_backdrop_blur(transform, graphic);
+		}
 		let background_color = self.get_background_color();
 		if background_color.alpha <= 0.0 {
 			return;
@@ -215,6 +321,9 @@ impl Component for UIView {
 	//==============================================================================
 	#[reflect(skip)]
 	fn write_geometry_key(&self, transform: &NodeTransform, geometry_key: &mut GeometryKey) -> bool {
+		if self.is_backdrop_blur_enabled() {
+			return false;
+		}
 		self.write_background_geometry_key(transform, geometry_key);
 		true
 	}
@@ -296,6 +405,18 @@ mod tests {
 	//==============================================================================
 	/// 배경색은 처음에 알파 0 흰색(그리지 않음)이고, 칠한 뒤 알파 0 색을 주면 다시 지워진다. (원본 setBackgroundColor(null) 자리)
 	//==============================================================================
+	#[test]
+	fn backdrop_blur_defaults_off_and_clamps() {
+		let mut view = UIView::new();
+		assert_eq!(view.get_backdrop_blur(), 0.0);
+		assert!(!view.is_backdrop_blur_enabled());
+		view.set_backdrop_blur(6.0);
+		assert_eq!(view.get_backdrop_blur(), 6.0);
+		assert!(view.is_backdrop_blur_enabled());
+		view.set_backdrop_blur(-3.0);
+		assert_eq!(view.get_backdrop_blur(), 0.0);
+	}
+
 	#[test]
 	fn background_color_can_be_cleared() {
 		let mut view = UIView::new();

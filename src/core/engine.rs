@@ -1347,6 +1347,32 @@ impl Engine {
 	}
 
 	//==============================================================================
+	/// 바깥 주소 열기. (원본 Engine.openUrl)
+	/// - 웹은 window.open(주소, "_blank", "noopener") 로 새 탭에 연다. 사용자 입력(누름, 탭, 키) 처리 안에서 부를 때만 열린다. 브라우저의 팝업 차단 규칙이다. 입력과 상관없이(타이머, 프레임) 부르면 막혀 열리지 않는다.
+	/// - 데스크탑은 운영체제의 기본 프로그램으로 연다. (맥 `open`, 윈도우 ShellExecuteW, 리눅스 xdg-open)
+	/// - 열 수 있는 것은 http, https, mailto, tel 뿐이다. 그 밖의 꼴(javascript:, file: 같은)은 열지 않고 false.
+	///
+	/// # 인자
+	/// - `url`: 열 주소. (http, https, mailto, tel)
+	///
+	/// # 돌려줌
+	/// 열기를 운영체제나 브라우저에 넘겼으면 true. (주소가 맞지 않거나 넘기지 못하면 false)
+	///
+	/// # 예제
+	/// 열 수 없는 꼴은 false
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// assert!(!engine.open_url("javascript:alert(1)"));
+	/// assert!(!engine.open_url("file:///etc/passwd"));
+	/// ```
+	//==============================================================================
+	pub fn open_url(&self, url: &str) -> bool {
+		platform::open_url(url)
+	}
+
+	//==============================================================================
 	/// 종료 요청 여부.
 	///
 	/// # 돌려줌

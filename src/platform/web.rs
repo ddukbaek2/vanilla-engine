@@ -1058,6 +1058,26 @@ pub fn exit_application() {
 }
 
 //==============================================================================
+/// 바깥 주소 열기. (원본 Engine.openUrl, window.open(주소, "_blank", "noopener") 로 새 탭에 연다)
+/// - 사용자 입력(누름, 탭, 키) 처리 안에서 부를 때만 열린다. 브라우저의 팝업 차단 규칙이다.
+/// - 열 수 있는 것은 http, https, mailto, tel 뿐이다. (is_openable_url) 그 밖의 꼴은 열지 않고 false.
+//==============================================================================
+pub fn open_url(url: &str) -> bool {
+	if !crate::platform::is_openable_url(url) {
+		return false;
+	}
+	let window = match web_sys::window() {
+		Some(window) => {
+			window
+		}
+		None => {
+			return false;
+		}
+	};
+	window.open_with_url_and_target_and_features(url, "_blank", "noopener").is_ok()
+}
+
+//==============================================================================
 /// 자바스크립트 오류를 글로.
 //==============================================================================
 fn describe_js_error(error: JsValue) -> String {

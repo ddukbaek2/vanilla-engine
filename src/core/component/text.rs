@@ -600,6 +600,8 @@ pub struct Text {
 	word_wrap_width: f64,
 	wrap_mode: TextWrapMode,
 	line_spacing: f64,
+	/// 글자 간격. (픽셀, CSS letter-spacing 과 같은 뜻, 글자 묶음마다 뒤에 더한다)
+	letter_spacing: f64,
 	visible_character_count: i32,
 	/// 폰트 문자열. (폰트 이름, 크기, 굵게, 기울임이 바뀔 때만 다시 만든다)
 	font_string: String,
@@ -640,6 +642,7 @@ impl Text {
 		geometry_key.add(self.word_wrap_width);
 		geometry_key.add(self.wrap_mode as u32);
 		geometry_key.add(self.line_spacing);
+		geometry_key.add(self.letter_spacing);
 		geometry_key.add(self.visible_character_count);
 		geometry_key.add(self.fit_width);
 		geometry_key.add(self.fit_minimum_ratio);
@@ -674,6 +677,7 @@ impl Text {
 			word_wrap_width: 0.0,
 			wrap_mode: TextWrapMode::Word,
 			line_spacing: 1.25,
+			letter_spacing: 0.0,
 			visible_character_count: -1,
 			font_string: String::new(),
 			is_layout_dirty: true,
@@ -794,7 +798,7 @@ impl Text {
 		// 한 줄 글이 맞출 너비를 넘치면 처음 크기에서 최소 비율까지 줄인다. (원본 setFitWidth, 0.1 단위로 내림)
 		let mut fitted_font_size = self.font_size;
 		if !is_wrapped && self.fit_width > 0.0 && !self.text.is_empty() {
-			let natural_width = graphic.measure_text_with_font_string(&self.font_string, &self.text).width;
+			let natural_width = graphic.measure_text_with_font_string(&self.font_string, &self.text).width + self.measure_letter_spacing(&self.text);
 			if natural_width > self.fit_width {
 				let fit_ratio = self.fit_minimum_ratio.max(self.fit_width / natural_width);
 				fitted_font_size = (self.font_size * fit_ratio * 10.0).floor() / 10.0;
@@ -817,7 +821,8 @@ impl Text {
 		self.line_width_list.clear();
 		for line_text in &line_list {
 			let line_metrics = graphic.measure_text(line_text);
-			self.line_width_list.push(line_metrics.width);
+			let spacing_width = self.measure_letter_spacing(line_text);
+			self.line_width_list.push(line_metrics.width + spacing_width);
 		}
 		self.line_list = line_list;
 		self.layout_wrap_width = wrap_width;
@@ -939,7 +944,7 @@ impl Text {
 	/// ```
 	//==============================================================================
 	pub fn wrap_text_to_lines(&self, graphic: &Graphic, text: &str, maximum_width: f64) -> Vec<String> {
-		self.wrap_text_to_lines_with(text, maximum_width, &|candidate_text: &str| graphic.measure_text(candidate_text).width)
+		self.wrap_text_to_lines_with(text, maximum_width, &|candidate_text: &str| graphic.measure_text(candidate_text).width + self.measure_letter_spacing(candidate_text))
 	}
 
 	//==============================================================================
@@ -1083,7 +1088,7 @@ impl Text {
 	pub fn wrap_lines_without_graphic(&self, maximum_width: f64) -> Option<Vec<String>> {
 		crate::core::textstringtexturecache::measure_text_without_graphic(&self.font_string, "")?;
 		let font_string = self.font_string.clone();
-		Some(self.wrap_text_to_lines_with(&self.text, maximum_width, &|line_text: &str| crate::core::textstringtexturecache::measure_text_without_graphic(&font_string, line_text).map(|text_metrics| text_metrics.width).unwrap_or(0.0)))
+		Some(self.wrap_text_to_lines_with(&self.text, maximum_width, &|line_text: &str| crate::core::textstringtexturecache::measure_text_without_graphic(&font_string, line_text).map(|text_metrics| text_metrics.width).unwrap_or(0.0) + self.measure_letter_spacing(line_text)))
 	}
 
 	//==============================================================================
@@ -1268,6 +1273,61 @@ impl Text {
 	}
 
 	//==============================================================================
+	/// 글자 간격으로 늘어나는 너비. (글자 묶음 수 x 글자 간격, 간격이 0 이면 0)
+	//==============================================================================
+	fn measure_letter_spacing(&self, text: &str) -> f64 {
+		if self.letter_spacing == 0.0 {
+			return 0.0;
+		}
+		count_graphemes(text) as f64 * self.letter_spacing
+	}
+
+	//==============================================================================
+	/// 한 줄 글 그리기. (원본 drawTextLine, 글자 간격이 0 이면 한 번에, 아니면 글자 묶음마다 간격을 더한 자리에)
+	/// - 자리(k) = 자리(k-1) + (앞 글자 묶음과 이 묶음을 붙인 너비) - (이 묶음만의 너비) + 글자 간격. 짝 커닝은 그대로 남는다.
+	/// - 글 전체 너비는 글자 묶음 수 x 글자 간격을 더한 값이다. (CSS letter-spacing 처럼 마지막 글자 뒤에도 더한다) 정렬은 이 너비로 잡는다.
+	/// - 오른쪽에서 왼쪽으로 쓰는 글은 글자 간격 없이 그린다.
+	//==============================================================================
+	fn draw_text_line(&self, graphic: &mut Graphic, font_string: &str, text: &str, x: f64, y: f64, text_align: TextAlign, is_stroke: bool) {
+		let letter_spacing = self.letter_spacing;
+		if letter_spacing == 0.0 || graphic.get_text_direction() == TextDirection::Rtl {
+			if is_stroke {
+				graphic.draw_stroke_text(text, x, y, self.stroke_width);
+			}
+			else {
+				graphic.draw_fill_text(text, x, y);
+			}
+			return;
+		}
+		let grapheme_list = split_graphemes(text);
+		let total_width = graphic.measure_text_with_font_string(font_string, text).width + grapheme_list.len() as f64 * letter_spacing;
+		let draw_x = match text_align {
+			TextAlign::Right | TextAlign::End => x - total_width,
+			TextAlign::Center => x - total_width * 0.5,
+			_ => x,
+		};
+		graphic.set_text_align(TextAlign::Left);
+		let mut previous_grapheme: Option<&str> = None;
+		let mut position = 0.0;
+		for grapheme in grapheme_list {
+			if let Some(previous) = previous_grapheme {
+				let pair_text = format!("{}{}", previous, grapheme);
+				let pair_width = graphic.measure_text_with_font_string(font_string, &pair_text).width;
+				let grapheme_width = graphic.measure_text_with_font_string(font_string, grapheme).width;
+				position += pair_width - grapheme_width + letter_spacing;
+			}
+			if is_stroke {
+				graphic.draw_stroke_text(grapheme, draw_x + position, y, self.stroke_width);
+			}
+			else {
+				graphic.draw_fill_text(grapheme, draw_x + position, y);
+			}
+			previous_grapheme = Some(grapheme);
+		}
+		graphic.set_text_align(text_align);
+	}
+
+	//==============================================================================
 	/// 한 줄 출력. (text_width 는 밑줄 / 취소선 길이, 꾸밈이 없으면 쓰지 않는다)
 	//==============================================================================
 	fn draw_plain_text(&self, graphic: &mut Graphic, content_width: f64, content_height: f64, text: &str, text_width: f64) {
@@ -1293,10 +1353,10 @@ impl Text {
 
 		if self.stroke_width > 0.0 {
 			graphic.set_stroke_color(self.stroke_color);
-			graphic.draw_stroke_text(text, draw_x, draw_y, self.stroke_width);
+			self.draw_text_line(graphic, &self.draw_font_string, text, draw_x, draw_y, text_align, true);
 		}
 		graphic.set_fill_color(self.text_color);
-		graphic.draw_fill_text(text, draw_x, draw_y);
+		self.draw_text_line(graphic, &self.draw_font_string, text, draw_x, draw_y, text_align, false);
 
 		if self.is_underline || self.is_strikethrough {
 			let start_x = self.calculate_underline_start_x(draw_x, text_width, text_align);
@@ -1361,10 +1421,10 @@ impl Text {
 			let line_y = block_top + (line_index as f64 + 0.5) * line_height;
 			if self.stroke_width > 0.0 {
 				graphic.set_stroke_color(self.stroke_color);
-				graphic.draw_stroke_text(line_text, draw_x, line_y, self.stroke_width);
+				self.draw_text_line(graphic, &self.font_string, line_text, draw_x, line_y, text_align, true);
 			}
 			graphic.set_fill_color(self.text_color);
-			graphic.draw_fill_text(line_text, draw_x, line_y);
+			self.draw_text_line(graphic, &self.font_string, line_text, draw_x, line_y, text_align, false);
 
 			// 밑줄 / 취소선. (원본처럼 밑줄은 줄 가운데에서 글자 크기 반과 선 두께만큼 아래, 취소선은 줄 가운데)
 			if self.is_underline || self.is_strikethrough {
@@ -1372,7 +1432,7 @@ impl Text {
 					self.line_width_list.get(line_index).copied().unwrap_or(0.0)
 				}
 				else {
-					graphic.measure_text(line_text).width
+					graphic.measure_text(line_text).width + self.measure_letter_spacing(line_text)
 				};
 				let start_x = self.calculate_underline_start_x(draw_x, line_width, text_align);
 				let decoration_line_width = self.calculate_decoration_line_width();
@@ -1564,7 +1624,7 @@ impl Text {
 			return 0.0;
 		}
 		let font_string = self.build_font_string_with_size(font_size);
-		graphic.measure_text_with_font_string(&font_string, text).width
+		graphic.measure_text_with_font_string(&font_string, text).width + self.measure_letter_spacing(text)
 	}
 
 	//==============================================================================
@@ -1600,6 +1660,41 @@ impl Text {
 	pub fn set_line_spacing(&mut self, line_spacing: f64) {
 		self.component_base.mark_drawn_rect_dirty();
 		self.line_spacing = line_spacing;
+	}
+
+	//==============================================================================
+	/// 글자 간격 설정. (CSS letter-spacing, 언리얼 UMG 글자 간격과 같은 뜻. 원본 setLetterSpacing)
+	///
+	/// # 인자
+	/// - `letter_spacing`: 글자 묶음마다 뒤에 더하는 간격. (픽셀, 음수는 좁힘, 기본 0)
+	///
+	/// # 예제
+	/// 글자 간격 정하기
+	/// ```rust
+	/// use vanilla::Text;
+	///
+	/// let mut text = Text::new();
+	/// assert_eq!(text.get_letter_spacing(), 0.0);
+	/// text.set_letter_spacing(2.5);
+	/// assert_eq!(text.get_letter_spacing(), 2.5);
+	/// ```
+	//==============================================================================
+	pub fn set_letter_spacing(&mut self, letter_spacing: f64) {
+		self.component_base.mark_drawn_rect_dirty();
+		if self.letter_spacing != letter_spacing {
+			self.letter_spacing = letter_spacing;
+			self.is_layout_dirty = true;
+		}
+	}
+
+	//==============================================================================
+	/// 글자 간격 반환.
+	///
+	/// # 돌려줌
+	/// 글자 간격. (픽셀, 기본 0)
+	//==============================================================================
+	pub fn get_letter_spacing(&self) -> f64 {
+		self.letter_spacing
 	}
 
 	//==============================================================================
@@ -1955,7 +2050,7 @@ impl Component for Text {
 		}
 		match crate::core::textstringtexturecache::measure_text_without_graphic(&self.font_string, &self.text) {
 			Some(text_metrics) => {
-				Vector2::create(text_metrics.width, self.font_size)
+				Vector2::create(text_metrics.width + self.measure_letter_spacing(&self.text), self.font_size)
 			}
 			None => {
 				Vector2::create(-1.0, -1.0)
@@ -2022,7 +2117,7 @@ impl Component for Text {
 			}
 			else {
 				graphic.set_font_string(&self.draw_font_string);
-				text_width = graphic.measure_text(&self.text[..visible_length]).width;
+				text_width = graphic.measure_text(&self.text[..visible_length]).width + self.measure_letter_spacing(&self.text[..visible_length]);
 			}
 		}
 		self.draw_plain_text(graphic, content_size.x, content_size.y, &self.text[..visible_length], text_width);
@@ -2093,6 +2188,29 @@ mod tests {
 		assert_eq!(split_words("Rust로 게임engine입니다."), vec!["Rust", "로 ", "게임", "engine", "입니다."]);
 		assert_eq!(split_words("HP\u{00A0}100 MP"), vec!["HP\u{00A0}100 ", "MP"]);
 		assert_eq!(split_words("我们今天去公园玩吧"), vec!["我们", "今天", "去", "公园", "玩", "吧"]);
+	}
+
+	//==============================================================================
+	/// 글자 간격: 정하면 글 너비가 글자 묶음 수 x 간격만큼 늘어난다.
+	//==============================================================================
+	#[test]
+	fn letter_spacing_widens_measured_width() {
+		let mut text = Text::create_with_text("Hello", 20.0);
+		assert_eq!(text.get_letter_spacing(), 0.0);
+		let base_size = text.get_intrinsic_content_size();
+		text.set_letter_spacing(3.0);
+		assert_eq!(text.get_letter_spacing(), 3.0);
+		let spaced_size = text.get_intrinsic_content_size();
+		// 글꼴이 등록되어 있으면 너비가 글자 묶음 수 x 간격만큼 늘고, 아니면 둘 다 잴 수 없다.
+		if base_size.x >= 0.0 {
+			assert!((spaced_size.x - base_size.x - 15.0).abs() < 1e-9, "{} {}", base_size.x, spaced_size.x);
+		}
+		else {
+			assert_eq!(spaced_size.x, -1.0);
+		}
+		let mut grapheme_text = Text::create_with_text("e\u{301}x", 20.0);
+		grapheme_text.set_letter_spacing(-1.0);
+		assert_eq!(grapheme_text.measure_letter_spacing("e\u{301}x"), -2.0);
 	}
 
 	//==============================================================================
