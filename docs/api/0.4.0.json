@@ -123427,6 +123427,89 @@
 					]
 				},
 				{
+					"name": "ToonProgramPrewarmOptions",
+					"kind": "struct",
+					"summary": {
+						"ko": "미리 짓기에 더할 조합 목록. (원본 prewarmDrawQueue 의 options, 기본값은 아무것도 더하지 않음)",
+						"en": "List of combinations to add to the prewarm. (The options of the original prewarmDrawQueue; the default adds nothing)"
+					},
+					"traits": [
+						"Clone",
+						"Copy",
+						"Default"
+					],
+					"source": "src/graphics3d/toon/toonrenderer.rs",
+					"members": [
+						{
+							"kind": "field",
+							"name": "queue_list",
+							"signature": "pub queue_list: &'a [&'a ToonDrawQueue<'q>]",
+							"params": [],
+							"returns": {
+								"type": "&'a [&'a ToonDrawQueue<'q>]",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "더 읽을 그리기 줄. (나중에 나올 재질이나 인스턴스 꼴을 담은 줄, 원본 queueList)",
+								"en": "Draw queues to read more from. (Queues holding materials or instance layouts that appear later; the original queueList)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs"
+						},
+						{
+							"kind": "field",
+							"name": "light_set_list",
+							"signature": "pub light_set_list: &'a [&'a ToonLightSet]",
+							"params": [],
+							"returns": {
+								"type": "&'a [&'a ToonLightSet]",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "그리기 줄의 모든 그리기에 더 맞춰 볼 빛 묶음. (지금 값의 기능 비트를 쓴다, 원본 lightSetList)",
+								"en": "Light sets to additionally match against every draw in the draw queue. (Uses the feature bits of their current values; the original lightSetList)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs"
+						},
+						{
+							"kind": "field",
+							"name": "light_feature_list",
+							"signature": "pub light_feature_list: &'a [&'a [&'a str]]",
+							"params": [],
+							"returns": {
+								"type": "&'a [&'a [&'a str]]",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "더 맞춰 볼 빛 묶음 쪽 기능 조합. (조합마다 \"rampTexture\", \"shadeStops\", \"rim\", \"shadeRim\", \"intensityLimit\" 중 더 켜질 것의 이름, 원본 lightFeatureList)",
+								"en": "Light set side feature combinations to additionally match. (Per combination, the names among \"rampTexture\", \"shadeStops\", \"rim\", \"shadeRim\" and \"intensityLimit\" that will additionally turn on; the original lightFeatureList)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs"
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "",
+								"en": ""
+							},
+							"code": "use vanilla::ToonProgramPrewarmOptions;\n\nlet options = ToonProgramPrewarmOptions::default();\nassert!(options.light_feature_list.is_empty());",
+							"language": "rust"
+						}
+					]
+				},
+				{
 					"name": "ToonProgramPrewarm",
 					"kind": "struct",
 					"summary": {
@@ -123745,6 +123828,78 @@
 						},
 						{
 							"kind": "method",
+							"name": "set_async_program_build",
+							"signature": "pub fn set_async_program_build(&mut self, is_async: bool)",
+							"params": [
+								{
+									"name": "is_async",
+									"type": "bool",
+									"description": {
+										"ko": "true 면 장면 중간에 처음 보는 몸 변형을 그 자리에서 짓지 않고, 다 지어질 때까지 전부 켠 기본 몸(같은 화면)으로 그린다. false 면 그 자리에서 짓고 기다린다.",
+										"en": "If true, a body variant first seen mid-scene is not built on the spot; it is drawn with the default body with every feature on (same picture) until it finishes building. If false, it is built on the spot and waited for."
+									}
+								}
+							],
+							"description": {
+								"ko": "처음 보는 몸 변형을 맡기고 기본 몸으로 그릴지 정하기. (원본 setAsyncProgramBuild, 기본 true, 병렬 컴파일 확장이 없으면 이 값과 상관없이 그 자리에서 짓는다)",
+								"en": "Sets whether to hand off a body variant first seen and draw with the default body meanwhile. (The original setAsyncProgramBuild; default true; without the parallel compile extension it is built on the spot regardless of this value)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/toon/toonrenderer",
+								"class": "ToonRenderer",
+								"name": "setAsyncProgramBuild"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "",
+										"en": ""
+									},
+									"code": "use vanilla::ToonRenderer;\n\nfn configure(gl: &vanilla::GlContext) -> Result<(), String> {\n\tlet mut renderer = ToonRenderer::new(gl)?;\n\trenderer.set_async_program_build(false);\n\tassert!(!renderer.is_async_program_build());\n\tOk(())\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "is_async_program_build",
+							"signature": "pub fn is_async_program_build(&self) -> bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "맡기고 기본 몸으로 그리면 true. (기본 true)",
+									"en": "True if handed off and drawn with the default body. (Default true)"
+								}
+							},
+							"description": {
+								"ko": "처음 보는 몸 변형을 맡기고 기본 몸으로 그리는지 읽기. (원본 isAsyncProgramBuild)",
+								"en": "Reads whether a body variant first seen is handed off and the default body is drawn meanwhile. (The original isAsyncProgramBuild)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/toon/toonrenderer",
+								"class": "ToonRenderer",
+								"name": "isAsyncProgramBuild"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "",
+										"en": ""
+									},
+									"code": "use vanilla::ToonRenderer;\n\nfn read(gl: &vanilla::GlContext) -> Result<(), String> {\n\tlet renderer = ToonRenderer::new(gl)?;\n\tassert!(renderer.is_async_program_build());\n\tOk(())\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
 							"name": "prepare_material",
 							"signature": "pub fn prepare_material(&mut self, gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>) -> bool",
 							"params": [
@@ -123841,6 +123996,60 @@
 										"en": "Prewarming variants after adding the scene and before the first frame"
 									},
 									"code": "use vanilla::{create_sphere_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonDrawQueue, ToonPartOptions, ToonRenderer};\n\nfn prewarm(gl: &vanilla::GlContext) -> Result<(), String> {\n\tlet mut renderer = ToonRenderer::new(gl)?;\n\tlet mut builder = MeshBuilder::new();\n\tbuilder.add_part(&create_sphere_geometry(0.5, 16, 10, std::f64::consts::PI), &Matrix4::create_identity(), \"#f0e8e0\", ToonPartOptions::default());\n\tlet mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or(\"empty mesh\")?;\n\tlet mut queue = ToonDrawQueue::new();\n\tqueue.add_mesh(&mesh, &Matrix4::create_identity(), ToonDrawOptions { casts_shadow: false, ..ToonDrawOptions::default() });\n\tlet mut prewarm = renderer.prewarm_draw_queue(gl, &queue);\n\tprewarm.wait(gl, &mut renderer);\n\tassert!(prewarm.is_ready());\n\tOk(())\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "prewarm_draw_queue_with_options",
+							"signature": "pub fn prewarm_draw_queue_with_options<'x, 'a: 'x, 'q: 'x>(&mut self, gl: &crate::GlContext, queue: &ToonDrawQueue<'a>, options: &ToonProgramPrewarmOptions<'_, 'q>) -> Result<ToonProgramPrewarm, String>",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&crate::GlContext",
+									"description": {
+										"ko": "렌더러를 지은 GL 컨텍스트.",
+										"en": "GL context that built the renderer."
+									}
+								},
+								{
+									"name": "queue",
+									"type": "&ToonDrawQueue<'a>",
+									"description": {
+										"ko": "변형을 읽을 그리기 줄.",
+										"en": "Draw queue to read the variants from."
+									}
+								},
+								{
+									"name": "options",
+									"type": "&ToonProgramPrewarmOptions<'_, 'q>",
+									"description": {
+										"ko": "더 지을 조합 목록. (ToonProgramPrewarmOptions::default() 는 prewarm_draw_queue 와 같다)",
+										"en": "List of combinations to build in addition. (ToonProgramPrewarmOptions::default() is the same as prewarm_draw_queue)"
+									}
+								}
+							],
+							"returns": {
+								"type": "Result<ToonProgramPrewarm, String>",
+								"description": {
+									"ko": "미리 짓기의 진행. 잘못된 빛 기능 이름이면 Err.",
+									"en": "Progress of the prewarm. Err if a light feature name is wrong."
+								}
+							},
+							"description": {
+								"ko": "그리기 줄에 담긴 것에 게임이 장면 중간에 쓸 조합까지 더해 미리 짓기. (원본 prewarmDrawQueue(queue, options), 유니티 ShaderVariantCollection 처럼 조합 목록을 준다)\n- 줄이 담은 변형에 options 의 빛 기능 조합, 빛 묶음, 다른 줄이 읽은 변형을 더해 지금 담기지 않은 것까지 같은 열쇠로 짓는다. 그 밖은 prewarm_draw_queue 와 같다.\n- 빛 기능 이름이 rampTexture, shadeStops, rim, shadeRim, intensityLimit 가 아니면 아무것도 짓지 않고 Err 로 돌려준다. (원본은 던진다)",
+								"en": "Prewarms what a draw queue holds plus the combinations the game will use mid-scene. (The original prewarmDrawQueue(queue, options); like Unity ShaderVariantCollection, you give a list of combinations)\n- To the variants the queue holds it adds the light feature combinations of options, the light sets and the variants read from other queues, and builds even what is not in the queue now with the same keys. Everything else is the same as prewarm_draw_queue.\n- If a light feature name is not rampTexture, shadeStops, rim, shadeRim or intensityLimit, nothing is built and Err is returned. (The original throws)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs",
+							"examples": [
+								{
+									"title": {
+										"ko": "장면 중간에 켜질 림 라이트 조합까지 미리 짓기",
+										"en": "Prewarming up to the rim light combinations that turn on mid-scene"
+									},
+									"code": "use vanilla::{create_sphere_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonDrawQueue, ToonPartOptions, ToonProgramPrewarmOptions, ToonRenderer};\n\nfn prewarm(gl: &vanilla::GlContext) -> Result<(), String> {\n\tlet mut renderer = ToonRenderer::new(gl)?;\n\tlet mut builder = MeshBuilder::new();\n\tbuilder.add_part(&create_sphere_geometry(0.5, 16, 10, std::f64::consts::PI), &Matrix4::create_identity(), \"#f0e8e0\", ToonPartOptions::default());\n\tlet mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or(\"empty mesh\")?;\n\tlet mut queue = ToonDrawQueue::new();\n\tqueue.add_mesh(&mesh, &Matrix4::create_identity(), ToonDrawOptions { casts_shadow: false, ..ToonDrawOptions::default() });\n\tlet rim: &[&str] = &[\"rim\"];\n\tlet rim_and_shade_rim: &[&str] = &[\"rim\", \"shadeRim\"];\n\tlet options = ToonProgramPrewarmOptions { light_feature_list: &[rim, rim_and_shade_rim], ..ToonProgramPrewarmOptions::default() };\n\tlet mut prewarm = renderer.prewarm_draw_queue_with_options(gl, &queue, &options)?;\n\tprewarm.wait(gl, &mut renderer);\n\tassert!(prewarm.is_ready());\n\tOk(())\n}",
 									"language": "rust"
 								}
 							]
