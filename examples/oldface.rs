@@ -1,7 +1,7 @@
 //==============================================================================
 // 노인 얼굴 예제. (원본 examples/oldface 의 HumanSkinRenderer 장면을 엔진 루프 안에서 돌린다)
 // - 원본 애셋(character_lod1.glb, hair_lod2.glb, expressions.json, wrinkles.json, 피부, 눈, 머리카락, 수염 텍스처)을 BlobAsset 으로 읽는다.
-//   애셋은 저장소에 없다. examples/oldface_assets 에 둔다. (MetaHuman, Epic Games, 언리얼 엔진 EULA. 웹은 페이지 기준 상대 주소로 받는다)
+//   애셋은 examples/oldface_assets 에 있다. (MetaHuman, Epic Games, 언리얼 엔진 EULA, 데모 전용. 웹은 페이지 기준 상대 주소로 받는다)
 // - 원본 기본값 그대로: 머리 LOD 1, 머리카락 HIGH(hair_lod2, 프린지 블렌드, 흔들림 0.8), 2K 그림자 8 표본, 렌더 기준 1080P, FXAA.
 // - 패스는 원본과 같다: 섀도우 깊이 → 피부 MRT(배경 + 불투명) → 블렌드(머리카락 프린지, 눈꺼풀 차폐, 눈물선) → AO → SSS
 //   → 합성(HDR) → 블룸 → 톤 매핑(LDR) → FXAA(화면) → graphic.restore_render_state() → draw 에서 2D 글.
@@ -23,10 +23,10 @@ use vanilla::{
 //==============================================================================
 // 전역 상수 목록.
 //==============================================================================
-// 예제 애셋 폴더. (MetaHuman 자산은 언리얼 엔진 EULA 라 저장소에 올리지 않는다. 이 폴더는 .gitignore 로 빠져 있고, 자산은 바닐라펀치닷컴 데모에서 본다)
+// 예제 애셋 폴더. (MetaHuman 자산은 Epic Games 의 것으로 언리얼 엔진 EULA 를 따르고, 이 데모 안에서만 쓴다. 라이선스는 폴더의 ASSETS_LICENSE.md)
 const EXAMPLE_ASSET_DIRECTORY: &str = "examples/oldface_assets";
 /// 화면 아래 저작권 고지.
-const ATTRIBUTION_TEXT: &str = "CHARACTER: EPIC METAHUMAN (MetaHuman, Epic Games)";
+const ATTRIBUTION_TEXT: &str = "MetaHuman, Epic Games, 데모 전용, https://www.metahuman.com/ , https://www.metahuman.com/en-US/license";
 
 // 카메라. (원본 값)
 const CAMERA_FIELD_OF_VIEW: f64 = 0.44;

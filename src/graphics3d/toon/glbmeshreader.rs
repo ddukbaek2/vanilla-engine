@@ -1014,6 +1014,19 @@ pub fn read_glb_images(bytes: &[u8]) -> Result<Vec<ToonGlbImage>, String> {
 /// (너비, 높이, RGBA 바이트) 풀어 낸 그림. (ToonRenderer::create_texture 에 넘긴다) 풀지 못하면 Err(까닭 글).
 //==============================================================================
 pub fn decode_glb_image(image: &ToonGlbImage) -> Result<(u32, u32, Vec<u8>), String> {
+	// JPEG 은 image 크레이트가 아니라 엔진 해독기가 푼다. (데스크탑)
+	#[cfg(not(target_arch = "wasm32"))]
+	{
+		return crate::core::image::Image::decode_straight_pixels(&image.data).map_err(|error| format!("GLB 그림 {} 을 풀지 못했다: {}", image.name, error));
+	}
+	#[cfg(target_arch = "wasm32")]
+	{
+		decode_glb_image_with_image_crate(image)
+	}
+}
+
+#[cfg(target_arch = "wasm32")]
+fn decode_glb_image_with_image_crate(image: &ToonGlbImage) -> Result<(u32, u32, Vec<u8>), String> {
 	let decoded = image::load_from_memory(&image.data).map_err(|error| format!("GLB 그림 {} 을 풀지 못했다: {}", image.name, error))?;
 	let rgba = decoded.to_rgba8();
 	Ok((rgba.width(), rgba.height(), rgba.into_raw()))

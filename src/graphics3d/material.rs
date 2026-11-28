@@ -986,6 +986,19 @@ fn compute_mipmap_byte_count(width: u32, height: u32) -> usize {
 /// ```
 //==============================================================================
 pub fn decode_image_bytes(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+	// JPEG 은 image 크레이트가 아니라 엔진 해독기가 푼다. (데스크탑)
+	#[cfg(not(target_arch = "wasm32"))]
+	{
+		return crate::core::image::Image::decode_straight_pixels(bytes).map_err(|error| format!("Material: image decode failed: {}", error));
+	}
+	#[cfg(target_arch = "wasm32")]
+	{
+		decode_image_bytes_with_image_crate(bytes)
+	}
+}
+
+#[cfg(target_arch = "wasm32")]
+fn decode_image_bytes_with_image_crate(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 	let dynamic_image = image::load_from_memory(bytes).map_err(|error| format!("Material: image decode failed: {}", error))?;
 	let rgba_image = dynamic_image.to_rgba8();
 	let width = rgba_image.width();
