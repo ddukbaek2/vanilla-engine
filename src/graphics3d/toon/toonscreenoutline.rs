@@ -58,7 +58,8 @@ use crate::core::graphic::{GlBuffer, GlProgram, GlTexture, GlVertexArray};
 use crate::core::shaderprogram::ShaderProgram;
 use crate::core::colorspace::{add_color_space_define, read_engine_color_space, ColorSpace};
 use crate::graphics3d::toon::toonmaterial::{TOON_INSTANCE_LINE_ID_LOCATION, TOON_INSTANCE_MATRIX_NAME};
-use crate::graphics3d::toon::toonrenderer::{create_mesh_instance_vertex_array, is_sphere_in_frustum, read_instance_buffer_sphere, read_matrix_determinant, ToonInstance, ToonInstanceBuffer, ToonMesh, TOON_ATTRIBUTE_LOCATIONS, TOON_INSTANCE_FLOAT_COUNT, TOON_MAXIMUM_JOINTS};
+use crate::graphics3d::toon::toonrenderer::{create_mesh_instance_vertex_array, is_sphere_in_frustum, read_instance_buffer_sphere, read_matrix_determinant, ToonInstance, ToonInstanceBuffer, ToonMesh, TOON_ATTRIBUTE_LOCATIONS, TOON_INSTANCE_FLOAT_COUNT};
+use crate::graphics3d::jointblock::{joint_block_glsl_source, JointBlockBuffer};
 use crate::graphics3d::GlFramebuffer;
 
 /// 선 번호의 상한. (선의 판에 14 비트로 쓴다, 0 은 빈 곳)
@@ -338,6 +339,8 @@ pub struct ToonScreenOutline {
 	line_color_table: Vec<u8>,
 	line_color_count: u32,
 	line_color_texture: Option<GlTexture>,
+	/// 뼈 행렬 유니폼 블록의 버퍼. (JointBlock)
+	joint_block_buffer: JointBlockBuffer,
 	is_line_color_table_dirty: bool,
 	/// 색 공간. (원본 #colorSpace, 생성 때 정함, HDR 출력에서 선 색을 선형으로 바꾸는 곡선)
 	color_space: ColorSpace,
@@ -516,6 +519,7 @@ impl ToonScreenOutline {
 	/// 새 화면 공간 바깥선. 셰이더를 짓지 못하거나 버텍스 어레이를 못 만들면 Err(오류 글).
 	//==============================================================================
 	pub fn new_with_options(gl: &GlContext, options: ToonScreenOutlineOptions) -> Result<ToonScreenOutline, String> {
+		let joint_block_buffer = JointBlockBuffer::new(gl)?;
 		let line_program = ShaderProgram::create_with_attribute_locations(gl, LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER, &read_line_attribute_locations())?;
 		let seed_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, SEED_FRAGMENT_SHADER)?;
 		let seed_gather_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, SEED_GATHER_FRAGMENT_SHADER)?;
@@ -561,6 +565,7 @@ impl ToonScreenOutline {
 			line_color_table: vec![0; (TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID as usize + 1) * 4],
 			line_color_count: 0,
 			line_color_texture: None,
+			joint_block_buffer,
 			is_line_color_table_dirty: false,
 			color_space: options.color_space,
 		})
@@ -1214,8 +1219,7 @@ impl ToonScreenOutline {
 			}
 			self.line_uniform_values.set(line_uniform_values);
 			if let (true, Some(joint_matrices)) = (is_skinned, options.joint_matrices) {
-				let joint_float_count = joint_matrices.len().min(TOON_MAXIMUM_JOINTS * 16) / 16 * 16;
-				gl.uniform_matrix_4_f32_slice(line_program.get_uniform_location(gl, "jointMatrices").as_ref(), false, &joint_matrices[..joint_float_count]);
+				self.joint_block_buffer.upload(gl, joint_matrices);
 			}
 			if index_count == 0 {
 				return;
@@ -1968,6 +1972,7 @@ impl ToonScreenOutline {
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &GlContext) {
 		self.delete_line_target(gl);
+		self.joint_block_buffer.destroy(gl);
 		for slot in self.batch_slots.drain(..) {
 			unsafe {
 				for (_, vertex_array) in slot.vertex_arrays {
@@ -2049,7 +2054,7 @@ fn read_line_attribute_locations() -> Vec<(&'static str, u32)> {
 }
 
 // @shaders-begin
-const LINE_VERTEX_SHADER: &str = "#version 300 es
+const LINE_VERTEX_SHADER: &str = concat!("#version 300 es
 in vec3 vertexPosition;
 in vec3 vertexNormal;
 in vec4 vertexJoints;
@@ -2060,7 +2065,7 @@ in vec4 instanceMatrix2;
 in vec4 instanceMatrix3;
 in vec4 instanceTint;
 in float instanceLineId;
-uniform mat4 jointMatrices[96];
+", joint_block_glsl_source!(), "
 uniform float skinned;
 uniform float instanced;
 uniform float instanceLineIds;
@@ -2082,7 +2087,7 @@ void main() {
 	surfaceLineId = instanced < 0.5 || instanceLineIds < 0.5 ? lineId : (instanceLineIds < 1.5 ? instanceTint.x : instanceLineId);
 	gl_Position = viewProjectionMatrix * objectMatrix * skinMatrix * vec4(vertexPosition, 1.0);
 }
-";
+");
 
 const LINE_FRAGMENT_SHADER: &str = "#version 300 es
 precision highp float;

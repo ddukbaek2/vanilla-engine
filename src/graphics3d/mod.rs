@@ -23,6 +23,7 @@
 pub mod ambientocclusioneffect;
 pub mod bloomeffect;
 pub mod fbxloader;
+pub mod jointblock;
 pub mod material;
 pub mod rendertarget;
 pub mod shadowmap;

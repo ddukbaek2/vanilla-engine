@@ -17,6 +17,7 @@
 use crate::core::glcontext::GlContext;
 use crate::core::graphic::GlTexture;
 use crate::core::shaderprogram::ShaderProgram;
+use crate::graphics3d::jointblock::{joint_block_glsl_source, JointBlockBuffer, MORPH_WEIGHT_VECTOR_COUNT};
 use crate::graphics3d::material::TEXTURE_UNIT_SHADOWMAP;
 use crate::graphics3d::skinnedmodel::{Drawable, SkinnedModel};
 use crate::core::gluniform::GlUniformF64;
@@ -37,7 +38,7 @@ uniform sampler2D morphTexture;
 uniform int morphTargetCount;
 uniform int morphRowsPerTarget;
 uniform int morphTextureWidth;
-uniform float morphWeights[96];
+uniform vec4 morphWeights[24];
 
 vec3 fetchMorphDelta(int blockRow, int vertexIndex) {
 	int texelX = vertexIndex % morphTextureWidth;
@@ -47,7 +48,7 @@ vec3 fetchMorphDelta(int blockRow, int vertexIndex) {
 
 void applyMorphTargets(inout vec3 position, inout vec3 normal) {
 	for (int targetIndex = 0; targetIndex < morphTargetCount; ++targetIndex) {
-		float weight = morphWeights[targetIndex];
+		float weight = morphWeights[targetIndex >> 2][targetIndex & 3];
 		if (abs(weight) < 0.0001) {
 			continue;
 		}
@@ -73,7 +74,7 @@ layout(location = 4) in vec4 vertexWeights;
 uniform mat4 modelMatrix;
 uniform mat4 viewProjectionMatrix;
 uniform mat4 lightViewProjectionMatrix;
-uniform mat4 jointMatrices[96];
+", joint_block_glsl_source!(), "
 out vec3 worldPosition;
 out vec3 worldNormal;
 out vec2 fragmentTextureCoordinate;
@@ -240,7 +241,7 @@ layout(location = 3) in uvec4 vertexJoints;
 layout(location = 4) in vec4 vertexWeights;
 uniform mat4 modelMatrix;
 uniform mat4 lightViewProjectionMatrix;
-uniform mat4 jointMatrices[96];
+", joint_block_glsl_source!(), "
 ", morphGlslSource!(), "
 void main() {
 	vec3 morphedPosition = vertexPosition;
@@ -267,7 +268,7 @@ layout(location = 3) in uvec4 vertexJoints;
 layout(location = 4) in vec4 vertexWeights;
 uniform mat4 modelMatrix;
 uniform mat4 viewProjectionMatrix;
-uniform mat4 jointMatrices[96];
+", joint_block_glsl_source!(), "
 ", morphGlslSource!(), "
 void main() {
 	vec3 morphedPosition = vertexPosition;
@@ -329,6 +330,8 @@ pub struct SkinnedModelRenderer {
 	shader_program: Rc<ShaderProgram>,
 	depth_shader_program: ShaderProgram,
 	wireframe_shader_program: ShaderProgram,
+	/// 뼈 행렬 유니폼 블록의 버퍼. (JointBlock)
+	joint_block_buffer: JointBlockBuffer,
 	shadow_map_texture: Option<GlTexture>,
 	/// 그림자를 받지 않을 때 섀도우 유닛에 묶는 1x1 비교 깊이 텍스처.
 	empty_shadow_texture: GlTexture,
@@ -376,11 +379,13 @@ impl SkinnedModelRenderer {
 		let shader_program = ShaderProgram::new(gl, resolved_vertex_shader_source.trim(), resolved_fragment_shader_source.trim())?;
 		let depth_shader_program = ShaderProgram::new(gl, SKINNED_DEPTH_VERTEXSHADER_SOURCE.trim(), SKINNED_DEPTH_FRAGMENTSHADER_SOURCE.trim())?;
 		let wireframe_shader_program = ShaderProgram::new(gl, SKINNED_WIREFRAME_VERTEXSHADER_SOURCE.trim(), SKINNED_WIREFRAME_FRAGMENTSHADER_SOURCE.trim())?;
+		let joint_block_buffer = JointBlockBuffer::new(gl)?;
 		let empty_shadow_texture = SkinnedModelRenderer::create_empty_shadow_texture(gl)?;
 		Ok(SkinnedModelRenderer {
 			shader_program: Rc::new(shader_program),
 			depth_shader_program,
 			wireframe_shader_program,
+			joint_block_buffer,
 			shadow_map_texture: None,
 			empty_shadow_texture,
 			light_view_projection_elements: None,
@@ -390,6 +395,17 @@ impl SkinnedModelRenderer {
 			fog_color: [0.8, 0.85, 0.92],
 			fog_range: [55.0, 250.0],
 		})
+	}
+
+	//==============================================================================
+	/// 뼈 행렬 올리기. (JointBlock 유니폼 블록, 프로그램은 ShaderProgram 이 링크 뒤에 같은 바인딩 자리로 묶는다, 원본 uploadJointMatrices)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `joint_matrix_array`: 뼈 행렬의 수. (16 의 배수)
+	//==============================================================================
+	pub fn upload_joint_matrices(&self, gl: &GlContext, joint_matrix_array: &[f32]) {
+		self.joint_block_buffer.upload(gl, joint_matrix_array);
 	}
 
 	//==============================================================================
@@ -477,7 +493,6 @@ impl SkinnedModelRenderer {
 			}
 		}
 
-		let joint_matrices_location = shader_program.get_uniform_location(gl, "jointMatrices[0]");
 		let skin_list = skinned_model.get_skin_list();
 		for drawable in skinned_model.get_drawable_list().iter() {
 			let skin = match skin_list.get(drawable.skin_index) {
@@ -488,9 +503,7 @@ impl SkinnedModelRenderer {
 					continue;
 				}
 			};
-			unsafe {
-				gl.uniform_matrix_4_f32_slice(joint_matrices_location.as_ref(), false, &skin.joint_matrix_array);
-			}
+			self.upload_joint_matrices(gl, &skin.joint_matrix_array);
 			self.apply_morph_uniforms(gl, shader_program, drawable);
 			drawable.material.apply(gl);
 			draw_drawable_triangles(gl, drawable);
@@ -539,7 +552,6 @@ impl SkinnedModelRenderer {
 		depth_shader_program.use_program(gl);
 		let light_view_projection_location = depth_shader_program.get_uniform_location(gl, "lightViewProjectionMatrix");
 		let model_matrix_location = depth_shader_program.get_uniform_location(gl, "modelMatrix");
-		let joint_matrices_location = depth_shader_program.get_uniform_location(gl, "jointMatrices[0]");
 		unsafe {
 			gl.uniform_matrix_4_f32_slice(light_view_projection_location.as_ref(), false, light_view_projection_elements);
 			gl.uniform_matrix_4_f32_slice(model_matrix_location.as_ref(), false, model_matrix_elements);
@@ -554,9 +566,7 @@ impl SkinnedModelRenderer {
 					continue;
 				}
 			};
-			unsafe {
-				gl.uniform_matrix_4_f32_slice(joint_matrices_location.as_ref(), false, &skin.joint_matrix_array);
-			}
+			self.upload_joint_matrices(gl, &skin.joint_matrix_array);
 			self.apply_morph_uniforms(gl, depth_shader_program, drawable);
 			draw_drawable_triangles(gl, drawable);
 		}
@@ -593,7 +603,6 @@ impl SkinnedModelRenderer {
 		let view_projection_location = wireframe_shader_program.get_uniform_location(gl, "viewProjectionMatrix");
 		let model_matrix_location = wireframe_shader_program.get_uniform_location(gl, "modelMatrix");
 		let wireframe_color_location = wireframe_shader_program.get_uniform_location(gl, "wireframeColor");
-		let joint_matrices_location = wireframe_shader_program.get_uniform_location(gl, "jointMatrices[0]");
 		unsafe {
 			gl.uniform_matrix_4_f32_slice(view_projection_location.as_ref(), false, view_projection_elements);
 			gl.uniform_matrix_4_f32_slice(model_matrix_location.as_ref(), false, model_matrix_elements);
@@ -609,9 +618,7 @@ impl SkinnedModelRenderer {
 					continue;
 				}
 			};
-			unsafe {
-				gl.uniform_matrix_4_f32_slice(joint_matrices_location.as_ref(), false, &skin.joint_matrix_array);
-			}
+			self.upload_joint_matrices(gl, &skin.joint_matrix_array);
 			self.apply_morph_uniforms(gl, wireframe_shader_program, drawable);
 			unsafe {
 				crate::core::glstatecache::bind_vertex_array(gl, Some(drawable.vertex_array));
@@ -656,7 +663,11 @@ impl SkinnedModelRenderer {
 		unsafe {
 			gl.uniform_1_i32(morph_rows_per_target_location.as_ref(), drawable.morph_rows_per_target);
 			gl.uniform_1_i32(morph_texture_width_location.as_ref(), drawable.morph_texture_width);
-			gl.uniform_1_f32_slice(morph_weights_location.as_ref(), &drawable.morph_weights);
+			// 가중치는 vec4 배열로 올린다. (float 배열은 원소마다 한 칸이라 96 칸을 쓴다, 넷씩 묶으면 24 칸)
+			let mut morph_weight_values = [0.0f32; MORPH_WEIGHT_VECTOR_COUNT * 4];
+			let morph_weight_count = drawable.morph_weights.len().min(morph_weight_values.len());
+			morph_weight_values[..morph_weight_count].copy_from_slice(&drawable.morph_weights[..morph_weight_count]);
+			gl.uniform_4_f32_slice(morph_weights_location.as_ref(), &morph_weight_values);
 			gl.uniform_1_i32(morph_texture_location.as_ref(), MORPH_TEXTURE_UNIT as i32);
 			crate::core::glstatecache::active_texture(gl, glow::TEXTURE0 + MORPH_TEXTURE_UNIT);
 			crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, drawable.morph_texture);
@@ -789,12 +800,12 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn morph_glsl_matches_maximum() {
-		let expected_declaration = format!("uniform float morphWeights[{}];", MORPH_TARGET_MAXIMUM);
+		let expected_declaration = format!("uniform vec4 morphWeights[{}];", MORPH_TARGET_MAXIMUM / 4);
 		assert!(MORPH_GLSL.contains(&expected_declaration));
 		for source in [SKINNED_VERTEXSHADER_SOURCE, SKINNED_DEPTH_VERTEXSHADER_SOURCE, SKINNED_WIREFRAME_VERTEXSHADER_SOURCE] {
 			assert!(source.starts_with("#version 300 es"));
 			assert!(source.contains(MORPH_GLSL));
-			assert!(source.contains("uniform mat4 jointMatrices[96];"));
+			assert!(source.contains(crate::graphics3d::jointblock::JOINT_BLOCK_GLSL));
 		}
 	}
 }

@@ -449,6 +449,8 @@ fn instance_layout_shader_sources_match_original() {
 	assert_eq!(sources.depth_vertex_shader, read_field("depth"), "깊이 정점 셰이더 글");
 	let line_sources = ToonScreenOutline::read_program_sources(ColorSpace::Gamma);
 	assert_eq!(line_sources[0].0, read_field("line"), "선의 판 정점 셰이더 글");
+	assert_eq!(crate::JOINT_BLOCK_GLSL, read_field("jointblock"), "뼈 행렬 블록 선언 글");
+	assert_eq!(crate::MORPH_GLSL, read_field("morph"), "모프 타깃 셰이더 글");
 	assert!(sources.solid_vertex_shader.contains("in float instanceLineId;\nin vec2 instanceShape;\n"));
 }
 

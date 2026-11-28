@@ -48,6 +48,11 @@ harness = false
 name = "toonoutlinefast"
 harness = false
 
+# 정점, 조각 유니폼 칸 한도 시험. (원본 tests/graphics3d/uniformlimitchrome.test.mjs)
+[[test]]
+name = "uniformlimit"
+harness = false
+
 # 해 그림자 치우침 찍기 시험. (원본 tests/graphics3d/shadowbiaschrome.test.mjs 와 같은 장면)
 [[test]]
 name = "shadowbias"

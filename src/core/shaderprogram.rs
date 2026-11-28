@@ -8,6 +8,13 @@ use crate::core::glcontext::GlContext;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+/// 엔진이 이름으로 정한 뼈 행렬 유니폼 블록의 이름. (링크한 프로그램에 이 이름의 블록이 있으면 JOINT_BLOCK_BINDING 자리에 묶는다, 원본 JOINT_BLOCK_NAME)
+/// - 뼈 행렬 같은 큰 배열은 기본 블록 유니폼 한도(WebGL2 가 보장하는 최솟값 256 칸)에 들지 않아 유니폼 블록으로 넘긴다.
+///   (툰 재질 블록 0, 바깥선 블록 1, 프레임 블록 2 는 툰 렌더러가 따로 묶는다)
+pub const JOINT_BLOCK_NAME: &str = "JointBlock";
+/// 뼈 행렬 유니폼 블록의 바인딩 자리. (원본 JOINT_BLOCK_BINDING)
+pub const JOINT_BLOCK_BINDING: u32 = 3;
+
 //==============================================================================
 /// 셰이더 프로그램. (버텍스, 프래그먼트 셰이더를 링크한 GL 프로그램과 유니폼, 어트리뷰트 위치 캐시)
 /// - 소스는 GLSL ES 3.00 으로 쓴다. 데스크탑은 머리만 #version 330 core 로 바꿔 컴파일한다.
@@ -136,6 +143,7 @@ impl ShaderProgram {
 				crate::core::glstatecache::delete_program(gl, program);
 				return Err(format!("셰이더 프로그램 링크 실패: {}", program_info_log));
 			}
+			bind_known_blocks(gl, program);
 			Ok(ShaderProgram {
 				program,
 				uniform_location_table: RefCell::new(HashMap::new()),
@@ -318,6 +326,7 @@ impl ShaderProgram {
 				crate::core::glstatecache::delete_program(gl, self.program);
 				return Err(error_message);
 			}
+			bind_known_blocks(gl, self.program);
 		}
 		Ok(())
 	}
@@ -437,6 +446,17 @@ pub(crate) fn report_shader_build_failure(gl: &GlContext, name: &str, error: &st
 //==============================================================================
 /// 셰이더 하나 컴파일.
 //==============================================================================
+//==============================================================================
+// 엔진이 이름으로 정한 유니폼 블록 묶기. (링크 뒤에 한 번, 블록이 없으면 아무것도 하지 않는다, 원본 bindKnownBlocks)
+//==============================================================================
+unsafe fn bind_known_blocks(gl: &GlContext, program: crate::core::graphic::GlProgram) {
+	unsafe {
+		if let Some(block_index) = gl.get_uniform_block_index(program, JOINT_BLOCK_NAME) {
+			gl.uniform_block_binding(program, block_index, JOINT_BLOCK_BINDING);
+		}
+	}
+}
+
 unsafe fn compile_shader(gl: &GlContext, shader_type: u32, source: &str) -> Result<crate::core::graphic::GlShader, String> {
 	let shader = gl.create_shader(shader_type)?;
 	gl.shader_source(shader, source);
