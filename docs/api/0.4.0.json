@@ -80908,6 +80908,189 @@
 							"source": "src/core/shaderprogram.rs"
 						},
 						{
+							"kind": "static",
+							"name": "create_deferred",
+							"signature": "pub fn create_deferred(gl: &GlContext, vertex_shader_source: &str, fragment_shader_source: &str, attribute_location_list: &[(&str, u32)]) -> Result<ShaderProgram, String>",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&GlContext",
+									"description": {
+										"ko": "GL 컨텍스트.",
+										"en": "GL context."
+									}
+								},
+								{
+									"name": "vertex_shader_source",
+									"type": "&str",
+									"description": {
+										"ko": "버텍스 셰이더 소스. (GLSL ES 3.00)",
+										"en": "Vertex shader source. (GLSL ES 3.00)"
+									}
+								},
+								{
+									"name": "fragment_shader_source",
+									"type": "&str",
+									"description": {
+										"ko": "프래그먼트 셰이더 소스. (GLSL ES 3.00)",
+										"en": "Fragment shader source. (GLSL ES 3.00)"
+									}
+								},
+								{
+									"name": "attribute_location_list",
+									"type": "&[(&str, u32)]",
+									"description": {
+										"ko": "(어트리뷰트 이름, 위치) 목록. (링크 전에 건다)",
+										"en": "List of (attribute name, location). (Bound before linking)"
+									}
+								}
+							],
+							"returns": {
+								"type": "Result<ShaderProgram, String>",
+								"description": {
+									"ko": "맡긴 프로그램. 컴파일이나 링크 오류는 finish_build 가 알린다. GL 객체를 만들지 못하면 그 오류 글을 담은 Err.",
+									"en": "The handed-off program. A compile or link error is reported by finish_build. Err with the error text if a GL object cannot be created."
+								}
+							},
+							"description": {
+								"ko": "컴파일과 링크를 맡기기만 하고 결과는 확인하지 않는 생성. (원본 생성자의 isDeferred, finish_build 를 불러야 쓸 수 있다)\n- KHR_parallel_shader_compile 이 있으면 드라이버가 뒤에서 짓고 is_build_complete 로 주 스레드를 막지 않고 끝을 물을 수 있다.",
+								"en": "Creation that only hands off compiling and linking without checking the result. (The original constructor's isDeferred; finish_build must be called before use)\n- With KHR_parallel_shader_compile the driver builds in the background and is_build_complete can poll completion without blocking the main thread."
+							},
+							"since": "0.4.0",
+							"source": "src/core/shaderprogram.rs",
+							"examples": [
+								{
+									"title": {
+										"ko": "맡겨 두었다가 끝나면 끝내 쓰기",
+										"en": "Handing off the build and finishing it when done"
+									},
+									"code": "use vanilla::{Graphic, ShaderProgram};\n\nconst VERTEX_SHADER_SOURCE: &str = \"#version 300 es\nin vec2 vertexPosition;\nvoid main() {\n\tgl_Position = vec4(vertexPosition, 0.0, 1.0);\n}\n\";\n\nconst FRAGMENT_SHADER_SOURCE: &str = \"#version 300 es\nprecision highp float;\nout vec4 outputColor;\nvoid main() {\n\toutputColor = vec4(1.0);\n}\n\";\n\nfn build(graphic: &Graphic) -> Result<ShaderProgram, String> {\n\tlet gl = graphic.get_gl();\n\tlet shader_program = ShaderProgram::create_deferred(gl, VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE, &[(\"vertexPosition\", 0)])?;\n\tassert!(shader_program.is_deferred());\n\t// Finish it once it is done. (finish_build waits until done if it is not)\n\tif shader_program.is_build_complete(gl) {\n\t\tshader_program.finish_build(gl)?;\n\t}\n\tOk(shader_program)\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "static",
+							"name": "is_parallel_compile_supported",
+							"signature": "pub fn is_parallel_compile_supported(gl: &GlContext) -> bool",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&GlContext",
+									"description": {
+										"ko": "GL 컨텍스트.",
+										"en": "GL context."
+									}
+								}
+							],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "있으면 true. (있으면 컴파일과 링크를 맡기고 주 스레드를 막지 않고 끝을 물을 수 있다)",
+									"en": "True if present. (If present, compiling and linking can be handed off and completion polled without blocking the main thread)"
+								}
+							},
+							"description": {
+								"ko": "병렬 셰이더 컴파일 확장이 있는지. (원본 isParallelCompileSupported, KHR_parallel_shader_compile, 웹은 같은 확장)",
+								"en": "Whether the parallel shader compile extension exists. (The original isParallelCompileSupported, KHR_parallel_shader_compile; the web uses the same extension)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/shaderprogram.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic/shaderprogram",
+								"class": "ShaderProgram",
+								"name": "isParallelCompileSupported"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "is_deferred",
+							"signature": "pub fn is_deferred(&self) -> bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "짓기를 맡긴 채 아직 끝내지 않았는지. (create_deferred 로 지었고 finish_build 를 아직 안 불렀으면 true)",
+								"en": "Whether the build is handed off and not yet finished. (True if built with create_deferred and finish_build has not been called yet)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/shaderprogram.rs"
+						},
+						{
+							"kind": "method",
+							"name": "is_build_complete",
+							"signature": "pub fn is_build_complete(&self, gl: &GlContext) -> bool",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&GlContext",
+									"description": {
+										"ko": "프로그램을 만든 GL 컨텍스트.",
+										"en": "GL context that created the program."
+									}
+								}
+							],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "끝났으면 true. (true 여도 finish_build 로 결과를 확인해야 쓴다)",
+									"en": "True if done. (Even when true, call finish_build to check the result before use)"
+								}
+							},
+							"description": {
+								"ko": "맡긴 짓기가 끝났는지. (원본 isBuildComplete, 맡기지 않았거나 이미 끝냈으면 true, 확장이 없으면 true, 물을 뿐 멈추지 않는다)",
+								"en": "Whether the handed-off build is done. (The original isBuildComplete; true if nothing was handed off or it is already finished, or if the extension is missing; it only asks and never blocks)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/shaderprogram.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic/shaderprogram",
+								"class": "ShaderProgram",
+								"name": "isBuildComplete"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "finish_build",
+							"signature": "pub fn finish_build(&self, gl: &GlContext) -> Result<(), String>",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&GlContext",
+									"description": {
+										"ko": "프로그램을 만든 GL 컨텍스트.",
+										"en": "GL context that created the program."
+									}
+								}
+							],
+							"returns": {
+								"type": "Result<(), String>",
+								"description": {
+									"ko": "성공하면 Ok. 컴파일이나 링크에 실패하면 Err.",
+									"en": "Ok on success. Err if compiling or linking failed."
+								}
+							},
+							"description": {
+								"ko": "맡긴 짓기 끝내기. (원본 finishBuild, 컴파일과 링크 결과를 확인한다, 안 끝났으면 끝날 때까지 기다린다, 맡기지 않았거나 이미 끝냈으면 아무것도 하지 않는다)\n- 실패하면 셰이더와 프로그램을 지우고 정보 로그를 담은 Err 를 돌려준다. (생성자와 같은 글)",
+								"en": "Finishes the handed-off build. (The original finishBuild; checks the compile and link results and waits until done if not; does nothing if nothing was handed off or it is already finished)\n- On failure, deletes the shaders and program and returns an Err with the info log. (Same message as the constructor)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/shaderprogram.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/graphic/shaderprogram",
+								"class": "ShaderProgram",
+								"name": "finishBuild"
+							}
+						},
+						{
 							"kind": "method",
 							"name": "use_program",
 							"signature": "pub fn use_program(&self, gl: &GlContext)",
@@ -123244,6 +123427,128 @@
 					]
 				},
 				{
+					"name": "ToonProgramPrewarm",
+					"kind": "struct",
+					"summary": {
+						"ko": "프로그램 변형 미리 짓기의 진행. (ToonRenderer::prewarm_draw_queue 의 결과, 원본 ToonProgramPrewarm)\n- 병렬 컴파일 확장이 없으면 만들어질 때 이미 끝나 있다. 있으면 맡긴 컴파일을 step 으로 프레임마다 나눠 끝낸다.",
+						"en": "Progress of prewarming program variants. (The result of ToonRenderer::prewarm_draw_queue, the original ToonProgramPrewarm)\n- Without the parallel compile extension it is already finished when created. With it, the handed-off compiles are finished a few per frame by step."
+					},
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "graphics3d/toon/toonrenderer",
+						"class": "ToonProgramPrewarm"
+					},
+					"source": "src/graphics3d/toon/toonrenderer.rs",
+					"members": [
+						{
+							"kind": "method",
+							"name": "step",
+							"signature": "pub fn step(&mut self, gl: &crate::GlContext, renderer: &mut ToonRenderer) -> bool",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&crate::GlContext",
+									"description": {
+										"ko": "렌더러를 지은 GL 컨텍스트.",
+										"en": "GL context that built the renderer."
+									}
+								},
+								{
+									"name": "renderer",
+									"type": "&mut ToonRenderer",
+									"description": {
+										"ko": "prewarm_draw_queue 를 부른 렌더러.",
+										"en": "The renderer that prewarm_draw_queue was called on."
+									}
+								}
+							],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "모두 끝났으면 true.",
+									"en": "True if everything is finished."
+								}
+							},
+							"description": {
+								"ko": "한 걸음. (끝난 컴파일을 끝내 프로그램 칸에 넣는다, 한 걸음에 몇 개까지만, 프레임마다 부른다)",
+								"en": "One step. (Finishes compiled programs and puts them in the program slots, only a few per step, call it every frame)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs"
+						},
+						{
+							"kind": "method",
+							"name": "is_ready",
+							"signature": "pub fn is_ready(&self) -> bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "모두 지었으면 true.",
+									"en": "True if everything is built."
+								}
+							},
+							"description": {
+								"ko": "다 지었는지. (그려도 되지만 안 지은 것은 그 자리에서 짓는다)",
+								"en": "Whether everything is built. (Drawing is allowed anyway; anything not built is built on the spot)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/toon/toonrenderer",
+								"class": "ToonProgramPrewarm",
+								"name": "isReady"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "wait",
+							"signature": "pub fn wait(&mut self, gl: &crate::GlContext, renderer: &mut ToonRenderer)",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&crate::GlContext",
+									"description": {
+										"ko": "렌더러를 지은 GL 컨텍스트.",
+										"en": "GL context that built the renderer."
+									}
+								},
+								{
+									"name": "renderer",
+									"type": "&mut ToonRenderer",
+									"description": {
+										"ko": "prewarm_draw_queue 를 부른 렌더러.",
+										"en": "The renderer that prewarm_draw_queue was called on."
+									}
+								}
+							],
+							"description": {
+								"ko": "다 지을 때까지 기다리기. (남은 컴파일을 이 호출 안에서 모두 끝낸다)",
+								"en": "Waits until everything is built. (Finishes all the remaining compiles inside this call)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/toon/toonrenderer",
+								"class": "ToonProgramPrewarm",
+								"name": "wait"
+							}
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "불러오는 동안 프레임마다 한 걸음씩 끝내고 끝나면 시작하기",
+								"en": "Finishing one step per frame while loading and starting once done"
+							},
+							"code": "use vanilla::{ToonDrawQueue, ToonRenderer};\n\nfn update_loading(gl: &vanilla::GlContext, renderer: &mut ToonRenderer, queue: &ToonDrawQueue) -> bool {\n\tlet mut prewarm = renderer.prewarm_draw_queue(gl, queue);\n\twhile !prewarm.step(gl, renderer) {\n\t\t// Call again each frame.\n\t}\n\tprewarm.is_ready()\n}",
+							"language": "rust"
+						}
+					]
+				},
+				{
 					"name": "ToonRenderer",
 					"kind": "struct",
 					"summary": {
@@ -123487,6 +123792,58 @@
 								"class": "ToonRenderer",
 								"name": "prepareMaterial"
 							}
+						},
+						{
+							"kind": "method",
+							"name": "prewarm_draw_queue",
+							"signature": "pub fn prewarm_draw_queue(&mut self, gl: &crate::GlContext, queue: &ToonDrawQueue) -> ToonProgramPrewarm",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&crate::GlContext",
+									"description": {
+										"ko": "렌더러를 지은 GL 컨텍스트.",
+										"en": "GL context that built the renderer."
+									}
+								},
+								{
+									"name": "queue",
+									"type": "&ToonDrawQueue",
+									"description": {
+										"ko": "변형을 읽을 그리기 줄. (담은 것만 읽고 그리지 않는다)",
+										"en": "Draw queue to read the variants from. (Only reads what was added; does not draw)"
+									}
+								}
+							],
+							"returns": {
+								"type": "ToonProgramPrewarm",
+								"description": {
+									"ko": "미리 짓기의 진행. (is_ready, step, wait)",
+									"en": "Progress of the prewarm. (is_ready, step, wait)"
+								}
+							},
+							"description": {
+								"ko": "그리기 줄에 담긴 것이 쓸 프로그램 변형을 그리지 않고 미리 짓기. (원본 prewarmDrawQueue, 유니티 ShaderVariantCollection.WarmUp, 언리얼 PSO 캐시 꼴)\n- 머티리얼, 인스턴스 꼴, 몸 기능 비트(빛 묶음과 그리기 꼴이 정함), 모서리 어둠 몸, 바깥선, 그림자 깊이를 그리기 줄이 그릴 때와 같은 열쇠로 짓는다.\n- 첫 그리기에서 처음 보는 조합의 프로그램을 짓느라 한 프레임이 끊기는 것을 불러오는 동안으로 옮긴다. 장면을 담은 뒤 첫 프레임 앞에서 한 번 부른다.\n- GL_KHR_parallel_shader_compile 이 있으면(웹은 같은 확장) 컴파일만 맡기고, 프레임마다 ToonProgramPrewarm::step 으로 끝났는지 물어 나눠 끝낸다. 없으면 이 호출 안에서 짓는다.\n- 미리 짓기가 끝나기 전에 그려도 된다. 아직 안 지어진 변형은 그 자리에서 지어 쓴다. (동작은 같다)\n- 그리기 줄이 쓰는 인스턴스 꼴이 생기면 그 꼴의 변형도 같은 열쇠로 짓는다. (ToonProgramRequest 의 instance_layout)",
+								"en": "Prewarms, without drawing, the program variants that the items in a draw queue will use. (The original prewarmDrawQueue; same idea as Unity ShaderVariantCollection.WarmUp and Unreal PSO caches)\n- Builds the material, body feature bits (decided by the light set and draw options), ambient occlusion body, outline and shadow depth programs with the same keys the draw queue uses when drawing.\n- Moves the one-frame hitch of building a program for a combination first seen in the first draw into loading time. Call it once after adding the scene and before the first frame.\n- With GL_KHR_parallel_shader_compile (the web uses the same extension) it only hands off compiling and finishes the compiled ones each frame with ToonProgramPrewarm::step. Without it, programs are built inside this call.\n- Drawing before the prewarm finishes is fine. A variant not built yet is built on the spot. (Same behavior)\n- Once the draw queue gets instance layouts, their variants are built with the same keys. (instance_layout of ToonProgramRequest)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/toon/toonrenderer",
+								"class": "ToonRenderer",
+								"name": "prewarmDrawQueue"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "장면을 담은 뒤 첫 프레임 앞에 변형을 미리 짓기",
+										"en": "Prewarming variants after adding the scene and before the first frame"
+									},
+									"code": "use vanilla::{create_sphere_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonDrawQueue, ToonPartOptions, ToonRenderer};\n\nfn prewarm(gl: &vanilla::GlContext) -> Result<(), String> {\n\tlet mut renderer = ToonRenderer::new(gl)?;\n\tlet mut builder = MeshBuilder::new();\n\tbuilder.add_part(&create_sphere_geometry(0.5, 16, 10, std::f64::consts::PI), &Matrix4::create_identity(), \"#f0e8e0\", ToonPartOptions::default());\n\tlet mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or(\"empty mesh\")?;\n\tlet mut queue = ToonDrawQueue::new();\n\tqueue.add_mesh(&mesh, &Matrix4::create_identity(), ToonDrawOptions { casts_shadow: false, ..ToonDrawOptions::default() });\n\tlet mut prewarm = renderer.prewarm_draw_queue(gl, &queue);\n\tprewarm.wait(gl, &mut renderer);\n\tassert!(prewarm.is_ready());\n\tOk(())\n}",
+									"language": "rust"
+								}
+							]
 						},
 						{
 							"kind": "method",

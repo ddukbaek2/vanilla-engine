@@ -4,7 +4,7 @@
 //! - 화면 해시는 TOON_BATCH_HASH 가 있으면 줄마다 `해시 이름 값` 으로 찍는다. (고치기 전 코드와 견주기)
 //==============================================================================
 use super::toondrawqueue::{ToonDrawQueue, ToonDrawStage};
-use super::toonrenderer::{ToonDrawOptions, ToonMesh, ToonRenderer, BUILT_FEATURE_VARIANTS, DISABLE_FEATURE_VARIANTS, UPLOAD_COUNTS};
+use super::toonrenderer::{ToonDrawOptions, ToonMesh, ToonRenderer, BUILT_FEATURE_VARIANTS, DISABLE_FEATURE_VARIANTS, FORCE_DEFERRED_PREWARM, UPLOAD_COUNTS};
 use super::toonscreenoutline::ToonScreenOutline;
 use crate::base::matrix4::Matrix4;
 use crate::core::glcontext::GlContext;
@@ -479,4 +479,129 @@ fn body_feature_variant_keeps_pixels() {
 	assert!(base_pixels.chunks(4).any(|pixel| pixel[0] != 26), "무엇인가 그려졌다");
 	assert!(base_pixels == variant_pixels, "변형 프로그램 화면이 기본 프로그램과 바이트까지 같다");
 	assert!(variant_pixels == again_pixels, "다시 그려도 같은 화면");
+}
+
+//==============================================================================
+/// 프로그램 변형 미리 짓기 시험의 한 갈래 결과. (원본 크롬 시험 toonprogramprewarmchrome 의 plain, warmed, early, deleted)
+//==============================================================================
+struct PrewarmOutcome {
+	/// 그리기 프레임이 지은 프로그램 수. (미리 짓기 호출은 뺀다, 둘째 프레임)
+	frame_built: u32,
+	second_frame_built: u32,
+	/// 미리 짓기 호출이 지은 프로그램 수.
+	prewarm_built: u32,
+	hash: u64,
+	second_hash: u64,
+	was_ready_at_once: bool,
+	is_ready: bool,
+	pending_count: usize,
+}
+
+//==============================================================================
+/// 렌더러 하나와 그것이 그릴 장면으로 한 갈래 돌리기. (몸 기능 비트가 다른 셋: 기본, 림 빛 묶음, 머티리얼)
+/// - kind 0: 미리 짓기 없이, 1: 미리 짓고 끝난 뒤, 2: 미리 짓기가 끝나기 전에 그린다, 3: 미리 짓고 머티리얼을 지운 뒤 다시 미리 짓는다.
+//==============================================================================
+fn run_prewarm_scenario(gl: &GlContext, target: &Target, kind: u8) -> PrewarmOutcome {
+	use crate::core::shaderprogram::BUILT_PROGRAM_COUNT;
+	use crate::ToonMaterialChunks;
+	let mut renderer = ToonRenderer::new(gl).expect("툰 렌더러");
+	let mesh = create_mesh(gl, &mut renderer, &create_sphere_geometry(0.4, 12, 8, std::f64::consts::PI), "#c8b090");
+	let material = renderer.create_material(ToonMaterialChunks { name: String::from("tint"), surface_chunk: String::from("void applySurface(inout ToonSurface surface) { surface.baseColor *= 0.8; }"), ..Default::default() });
+	let mut rim_light_set = renderer.create_light_set();
+	rim_light_set.set_rim_light([0.6, 0.65, 0.8], 2.5, 0.0, 1.0);
+	let camera = create_camera();
+	let mut queue = ToonDrawQueue::new();
+	queue.add_mesh(&mesh, &Matrix4::create_translation(-1.2, 0.5, 0.0), ToonDrawOptions { casts_shadow: false, ..ToonDrawOptions::default() });
+	queue.add_mesh(&mesh, &Matrix4::create_translation(1.2, 0.5, 0.0), ToonDrawOptions { casts_shadow: false, light_set: Some(&rim_light_set), ..ToonDrawOptions::default() });
+	queue.add_mesh(&mesh, &Matrix4::create_translation(0.0, 0.5, 1.0), ToonDrawOptions { casts_shadow: false, material: Some(&material), ..ToonDrawOptions::default() });
+	let draw_frame = |renderer: &mut ToonRenderer| -> (u32, u64) {
+		target.clear();
+		let before = BUILT_PROGRAM_COUNT.with(|count| count.get());
+		queue.draw(gl, renderer, &camera);
+		let built = BUILT_PROGRAM_COUNT.with(|count| count.get()) - before;
+		(built, read_hash(&target.read_pixels()))
+	};
+	let mut outcome = PrewarmOutcome { frame_built: 0, second_frame_built: 0, prewarm_built: 0, hash: 0, second_hash: 0, was_ready_at_once: false, is_ready: false, pending_count: 0 };
+	match kind {
+		0 => {
+			(outcome.frame_built, outcome.hash) = draw_frame(&mut renderer);
+			(outcome.second_frame_built, outcome.second_hash) = draw_frame(&mut renderer);
+			outcome.is_ready = true;
+		}
+		1 => {
+			let before = BUILT_PROGRAM_COUNT.with(|count| count.get());
+			let mut prewarm = renderer.prewarm_draw_queue(gl, &queue);
+			outcome.was_ready_at_once = prewarm.is_ready();
+			prewarm.wait(gl, &mut renderer);
+			outcome.prewarm_built = BUILT_PROGRAM_COUNT.with(|count| count.get()) - before;
+			outcome.is_ready = prewarm.is_ready();
+			(outcome.frame_built, outcome.hash) = draw_frame(&mut renderer);
+			(outcome.second_frame_built, outcome.second_hash) = draw_frame(&mut renderer);
+		}
+		2 => {
+			let mut prewarm = renderer.prewarm_draw_queue(gl, &queue);
+			outcome.was_ready_at_once = prewarm.is_ready();
+			(outcome.frame_built, outcome.hash) = draw_frame(&mut renderer);
+			prewarm.wait(gl, &mut renderer);
+			outcome.is_ready = prewarm.is_ready();
+			(outcome.second_frame_built, outcome.second_hash) = draw_frame(&mut renderer);
+		}
+		_ => {
+			let _ = renderer.prewarm_draw_queue(gl, &queue);
+			renderer.delete_material(gl, &material);
+			let mut prewarm = renderer.prewarm_draw_queue(gl, &queue);
+			prewarm.wait(gl, &mut renderer);
+			outcome.is_ready = prewarm.is_ready();
+			(outcome.frame_built, outcome.hash) = draw_frame(&mut renderer);
+		}
+	}
+	outcome.pending_count = renderer.get_pending_build_count();
+	renderer.destroy(gl);
+	outcome
+}
+
+//==============================================================================
+/// 프로그램 변형 미리 짓기: 미리 짓고 나면 첫 그리기 프레임이 프로그램을 짓지 않고(미리 짓기 없이는 짓는다), 끝나기 전에 그려도 화면이 같고, 머티리얼을 지워도 오류 없이 끝난다.
+/// - 이 기계(맥 GL)는 병렬 컴파일 확장이 없어 호출 안에서 짓는 길을, FORCE_DEFERRED_PREWARM 으로 맡기는 길(UNIT 단위 한 걸음씩)을 둘 다 돌린다. 화면은 모두 바이트까지 같다.
+//==============================================================================
+#[test]
+fn program_prewarm_removes_first_frame_builds_and_keeps_pixels() {
+	let Some(glow_context) = crate::core::glstatecache::tests::create_surfaceless_context() else {
+		panic!("창 없는 GL 컨텍스트를 짓지 못함");
+	};
+	let _ = crate::core::glstatecache::attach(&glow_context);
+	let gl: &GlContext = GlContext::from_context(&glow_context);
+	let target = create_target(gl);
+	let is_parallel = crate::ShaderProgram::is_parallel_compile_supported(gl);
+	let plain = run_prewarm_scenario(gl, &target, 0);
+	assert!(plain.frame_built > 0, "미리 짓기 없이는 첫 프레임에 프로그램을 짓는다 ({})", plain.frame_built);
+	assert_eq!(plain.second_frame_built, 0, "미리 짓기 없이도 둘째 프레임은 짓지 않는다");
+	assert!(plain.hash == plain.second_hash);
+	assert!(read_hash(&target.read_pixels()) != 0);
+	for is_forced_deferred in [false, true] {
+		FORCE_DEFERRED_PREWARM.with(|flag| flag.set(is_forced_deferred));
+		let warmed = run_prewarm_scenario(gl, &target, 1);
+		let early = run_prewarm_scenario(gl, &target, 2);
+		let deleted = run_prewarm_scenario(gl, &target, 3);
+		FORCE_DEFERRED_PREWARM.with(|flag| flag.set(false));
+		eprintln!("미리 짓기(병렬 확장 {}, 맡기는 길 {}): 미리 짓기 없이 첫 프레임 짓기 {}, 미리 짓기가 지은 것 {}, 미리 짓기 뒤 첫 프레임 {}, 끝나기 전에 그린 프레임 {}", is_parallel, is_forced_deferred, plain.frame_built, warmed.prewarm_built, warmed.frame_built, early.frame_built);
+		assert!(warmed.prewarm_built > 0, "미리 짓기가 프로그램을 지었다");
+		assert_eq!(warmed.frame_built, 0, "미리 짓기 뒤 첫 프레임에 프로그램 짓기 0 번");
+		assert_eq!(warmed.second_frame_built, 0, "미리 짓기 뒤 둘째 프레임도 0 번");
+		assert!(warmed.hash == plain.hash && warmed.second_hash == plain.hash, "미리 지은 화면이 미리 짓기 없는 화면과 바이트까지 같다");
+		assert!(early.hash == plain.hash, "끝나기 전에 그린 화면이 같다");
+		assert!(early.second_hash == plain.hash && early.second_frame_built == 0, "끝난 뒤에도 같은 화면, 더 짓지 않는다");
+		assert!(early.is_ready && warmed.is_ready && deleted.is_ready, "wait 가 끝난 뒤 is_ready");
+		assert!(deleted.hash == plain.hash, "머티리얼을 지우고 다시 미리 지어도 같은 화면");
+		for outcome in [&warmed, &early, &deleted] {
+			assert_eq!(outcome.pending_count, 0, "맡긴 칸이 남지 않는다");
+		}
+		if is_forced_deferred || is_parallel {
+			assert!(!warmed.was_ready_at_once, "맡기는 길은 맡기고 돌아온다 (한 걸음에 끝내는 수보다 변형이 많다)");
+		}
+		else {
+			assert!(warmed.was_ready_at_once, "확장이 없으면 호출 안에서 끝");
+		}
+	}
+	assert_eq!(unsafe { glow_context_error(&glow_context) }, 0, "GL 오류");
 }

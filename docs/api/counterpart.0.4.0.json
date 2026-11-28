@@ -15477,6 +15477,42 @@
 			"vanilla-engine": {
 				"module": "core/shaderprogram",
 				"class": "ShaderProgram",
+				"name": "is_parallel_compile_supported"
+			},
+			"vanilla.js": {
+				"module": "core/graphic/shaderprogram",
+				"class": "ShaderProgram",
+				"name": "isParallelCompileSupported"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/shaderprogram",
+				"class": "ShaderProgram",
+				"name": "is_build_complete"
+			},
+			"vanilla.js": {
+				"module": "core/graphic/shaderprogram",
+				"class": "ShaderProgram",
+				"name": "isBuildComplete"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/shaderprogram",
+				"class": "ShaderProgram",
+				"name": "finish_build"
+			},
+			"vanilla.js": {
+				"module": "core/graphic/shaderprogram",
+				"class": "ShaderProgram",
+				"name": "finishBuild"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/shaderprogram",
+				"class": "ShaderProgram",
 				"name": "use_program"
 			},
 			"vanilla.js": {
@@ -22706,6 +22742,40 @@
 		{
 			"vanilla-engine": {
 				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonProgramPrewarm"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonProgramPrewarm"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonProgramPrewarm",
+				"name": "is_ready"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonProgramPrewarm",
+				"name": "isReady"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonProgramPrewarm",
+				"name": "wait"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonProgramPrewarm",
+				"name": "wait"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
 				"class": "ToonRenderer"
 			},
 			"vanilla.js": {
@@ -22759,6 +22829,18 @@
 				"module": "graphics3d/toon/toonrenderer",
 				"class": "ToonRenderer",
 				"name": "prepareMaterial"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "prewarm_draw_queue"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "prewarmDrawQueue"
 			}
 		},
 		{
