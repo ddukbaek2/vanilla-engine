@@ -5,8 +5,9 @@
 // - 원본 기본값 그대로: 머리 LOD 1, 머리카락 HIGH(hair_lod2, 프린지 블렌드, 흔들림 0.8), 2K 그림자 8 표본, 렌더 기준 1080P, FXAA.
 // - 패스는 원본과 같다: 섀도우 깊이 → 피부 MRT(배경 + 불투명) → 블렌드(머리카락 프린지, 눈꺼풀 차폐, 눈물선) → AO → SSS
 //   → 합성(HDR) → 블룸 → 톤 매핑(LDR) → FXAA(화면) → graphic.restore_render_state() → draw 에서 2D 글.
-// - 원본 예제의 HTML 패널(옵션, 슬라이더, 머티리얼 그래프, HUD)은 옮기지 않는다. 표정은 4초마다 차례로 바뀌고,
-//   숫자 키 1 ~ 9 로 고르면 자동 전환이 멈춘다. 끌기로 궤도 회전, 휠로 줌.
+// - 원본 OPTIONS 패널(토글 9 개, 슬라이더 38 개, 같은 묶음, 차례, 범위, 기본값, 제목을 눌러 접고 펼침)을 엔진 UI(UISlider, UIScrollView, UIButton)로 짓고
+//   원본이 바꾸는 렌더러 값을 같게 바꾼다. 숫자 키 1 ~ 9 는 토글 전환(원본과 같음). 표정은 4초마다 차례로 바뀌고 단추로 고르면 자동 전환이 멈춘다.
+//   머티리얼 그래프와 RENDERING INFO 는 아직 옮기지 않았다(토글만 있다). 끌기로 궤도 회전, 휠로 줌.
 // - 원본 FRAME RATE 기본처럼 30fps 로 제한하고, 갱신 시간은 원본처럼 지난 시간(0.1초 상한)을 쓴다.
 //   화면 저장(VANILLA_CAPTURE_PATH)을 켜면 1/30초씩 고정으로 나아간다. (프레임 번호로 같은 장면을 잡도록)
 // - 실행: cargo run --release --example oldface
@@ -14,11 +15,11 @@
 //==============================================================================
 
 use serde_json::Value;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use vanilla::{
-	AmbientOcclusionEffect, GlContext, BlobAsset, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, Graphic, HumanSkinRenderer, ImageDescription, ImageDescriptionOptions, KeyCode, Material, Matrix4, MouseButton, RenderTarget, RenderTargetOptions, Scene, SceneBase, SeededRandom, ComponentContext, NodeId, NodeTree, Paint, Pivot, TouchRecognizer, UIButton, UILabel, ShadowMap, SkinnedModel, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector2, Vector3, SKIN_SHADING_EYE, SKIN_SHADING_FACIALHAIR, SKIN_SHADING_FLUID, SKIN_SHADING_HAIR, SKIN_SHADING_OCCLUSION, SKIN_SHADING_SKIN, SKIN_TEXTURE_UNIT_DETAILHEIGHT, SKIN_TEXTURE_UNIT_LAYERCOLOR, SKIN_TEXTURE_UNIT_LAYERNORMAL, SKIN_TEXTURE_UNIT_MASKATLAS, SKIN_TEXTURE_UNIT_MICRO,
+	AmbientOcclusionEffect, GlContext, BlobAsset, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, Graphic, HumanSkinRenderer, ImageDescription, ImageDescriptionOptions, KeyCode, Material, Matrix4, MouseButton, RenderTarget, RenderTargetOptions, create_bezier_easing, Scene, SceneBase, SeededRandom, ComponentContext, NodeId, NodeTree, Paint, Pivot, TouchRecognizer, UIButton, UILabel, UIScrollView, UISlider, ShadowMap, SkinnedModel, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector2, Vector3, SKIN_SHADING_EYE, SKIN_SHADING_FACIALHAIR, SKIN_SHADING_FLUID, SKIN_SHADING_HAIR, SKIN_SHADING_OCCLUSION, SKIN_SHADING_SKIN, SKIN_TEXTURE_UNIT_DETAILHEIGHT, SKIN_TEXTURE_UNIT_LAYERCOLOR, SKIN_TEXTURE_UNIT_LAYERNORMAL, SKIN_TEXTURE_UNIT_MASKATLAS, SKIN_TEXTURE_UNIT_MICRO,
 };
 
 //==============================================================================
@@ -39,6 +40,199 @@ const FOOTER_LINES: [&str; 3] = [
 	"METAHUMAN, EPIC GAMES, DEMO ONLY: METAHUMAN.COM / LICENSE",
 ];
 
+// 옵션 패널. (원본 optionDefinitions 와 sliderDefinitions 의 차례, 범위, 기본값)
+const TOGGLE_LABELS: [&str; 9] = ["SUBSURFACE SCATTERING", "4K PORE DETAIL", "KEY LIGHT SHADOW", "BLOOM", "AMBIENT OCCLUSION", "EXPRESSION WRINKLE MAPS", "WIREFRAME", "MATERIAL GRAPH", "RENDERING INFO"];
+const TOGGLE_DEFAULTS: [bool; 9] = [true, true, true, true, true, true, false, false, false];
+const TOGGLE_SUBSURFACE: usize = 0;
+const TOGGLE_DETAIL: usize = 1;
+const TOGGLE_SHADOW: usize = 2;
+const TOGGLE_BLOOM: usize = 3;
+const TOGGLE_OCCLUSION: usize = 4;
+const TOGGLE_WRINKLE: usize = 5;
+const TOGGLE_WIREFRAME: usize = 6;
+const SLIDER_COUNT: usize = 38;
+const SLIDER_FRAME_RATE: usize = 0;
+const SLIDER_RENDER_BASE: usize = 1;
+const SLIDER_RENDER_SCALE: usize = 2;
+const SLIDER_ANTIALIAS: usize = 3;
+const SLIDER_EXPOSURE: usize = 4;
+const SLIDER_BLOOM_STRENGTH: usize = 5;
+const SLIDER_BLOOM_THRESHOLD: usize = 6;
+const SLIDER_VIGNETTE: usize = 7;
+const SLIDER_GRAIN: usize = 8;
+const SLIDER_HEAD_LOD: usize = 9;
+const SLIDER_HAIR_QUALITY: usize = 10;
+const SLIDER_TEXTURE_SIZE: usize = 11;
+const SLIDER_SHADOW_QUALITY: usize = 12;
+const SLIDER_SHADOW_SOFTNESS: usize = 13;
+const SLIDER_SHADOW_STRENGTH: usize = 14;
+const SLIDER_NORMAL_STRENGTH: usize = 15;
+const SLIDER_PORE_DETAIL: usize = 16;
+const SLIDER_CAVITY: usize = 17;
+const SLIDER_MICRO_NORMAL: usize = 18;
+const SLIDER_WRINKLE_DEPTH: usize = 19;
+const SLIDER_SUBSURFACE_WIDTH: usize = 20;
+const SLIDER_SPECULAR: usize = 21;
+const SLIDER_ROUGHNESS: usize = 22;
+const SLIDER_SHEEN: usize = 23;
+const SLIDER_OCCLUSION_STRENGTH: usize = 24;
+const SLIDER_OCCLUSION_RADIUS: usize = 25;
+const SLIDER_KEY_INTENSITY: usize = 26;
+const SLIDER_FILL_INTENSITY: usize = 27;
+const SLIDER_RIM_INTENSITY: usize = 28;
+const SLIDER_AMBIENT_INTENSITY: usize = 29;
+const SLIDER_HAIR_SWAY: usize = 30;
+const SLIDER_HAIR_SPECULAR: usize = 31;
+const SLIDER_HAIR_ROOT_SHADE: usize = 32;
+const SLIDER_IRIS_SIZE: usize = 33;
+const SLIDER_PUPIL_SIZE: usize = 34;
+const SLIDER_IRIS_DEPTH: usize = 35;
+const SLIDER_HEAD_FOLLOW: usize = 36;
+const SLIDER_BLINK_RATE: usize = 37;
+
+struct SliderDefinition {
+	group: &'static str,
+	label: &'static str,
+	minimum: f64,
+	maximum: f64,
+	step: f64,
+	value: f64,
+}
+
+const fn slider(group: &'static str, label: &'static str, minimum: f64, maximum: f64, step: f64, value: f64) -> SliderDefinition {
+	SliderDefinition { group, label, minimum, maximum, step, value }
+}
+
+const SLIDER_DEFINITIONS: [SliderDefinition; SLIDER_COUNT] = [
+	slider("RENDER", "FRAME RATE", 0.0, 1.0, 1.0, 0.0),
+	slider("RENDER", "RENDER BASE", 0.0, 3.0, 1.0, 1.0),
+	slider("RENDER", "RESOLUTION SCALE", 0.5, 2.0, 0.05, 1.0),
+	slider("RENDER", "ANTI-ALIASING", 0.0, 2.0, 1.0, 1.0),
+	slider("RENDER", "EXPOSURE", 0.3, 1.5, 0.01, 0.95),
+	slider("RENDER", "BLOOM STRENGTH", 0.0, 0.4, 0.01, 0.12),
+	slider("RENDER", "BLOOM THRESHOLD", 0.5, 2.5, 0.05, 1.05),
+	slider("RENDER", "VIGNETTE", 0.0, 1.0, 0.02, 0.5),
+	slider("RENDER", "FILM GRAIN", 0.0, 0.06, 0.002, 0.0),
+	slider("GEOMETRY", "HEAD MESH LOD", 0.0, 2.0, 1.0, 1.0),
+	slider("GEOMETRY", "HAIR CARDS", 0.0, 5.0, 1.0, 3.0),
+	slider("GEOMETRY", "TEXTURE SIZE", 0.0, 3.0, 1.0, 3.0),
+	slider("SHADOW", "SHADOW MAP", 0.0, 4.0, 1.0, 1.0),
+	slider("SHADOW", "SHADOW SOFTNESS", 0.0, 8.0, 0.25, 3.0),
+	slider("SHADOW", "SHADOW STRENGTH", 0.0, 1.0, 0.02, 0.85),
+	slider("SKIN", "NORMAL MAP", 0.0, 3.0, 0.05, 1.5),
+	slider("SKIN", "PORE DETAIL", 0.0, 8.0, 0.1, 3.5),
+	slider("SKIN", "CAVITY", 0.0, 6.0, 0.1, 2.5),
+	slider("SKIN", "MICRO NORMAL", 0.0, 1.5, 0.05, 0.55),
+	slider("SKIN", "WRINKLE DEPTH", 0.0, 2.0, 0.05, 1.0),
+	slider("SKIN", "SSS WIDTH", 0.0, 20.0, 0.5, 8.0),
+	slider("SKIN", "SPECULAR", 0.0, 2.0, 0.05, 1.25),
+	slider("SKIN", "ROUGHNESS", 0.5, 1.4, 0.02, 0.9),
+	slider("SKIN", "PEACH FUZZ SHEEN", 0.0, 0.6, 0.02, 0.12),
+	slider("AMBIENT OCCLUSION", "AO STRENGTH", 0.0, 2.0, 0.05, 1.15),
+	slider("AMBIENT OCCLUSION", "AO RADIUS", 0.01, 0.08, 0.002, 0.028),
+	slider("LIGHTING", "KEY LIGHT", 0.0, 5.0, 0.1, 2.6),
+	slider("LIGHTING", "FILL LIGHT", 0.0, 3.0, 0.1, 1.1),
+	slider("LIGHTING", "RIM LIGHT", 0.0, 4.0, 0.1, 1.4),
+	slider("LIGHTING", "AMBIENT", 0.0, 2.5, 0.05, 1.0),
+	slider("HAIR", "HAIR SWAY", 0.0, 1.0, 0.05, 0.25),
+	slider("HAIR", "HAIR SPECULAR", 0.0, 1.0, 0.05, 0.5),
+	slider("HAIR", "HAIR ROOT SHADE", 0.0, 1.0, 0.05, 0.0),
+	slider("EYES", "IRIS SIZE", 0.1, 0.18, 0.002, 0.14),
+	slider("EYES", "PUPIL SIZE", 0.015, 0.075, 0.001, 0.042),
+	slider("EYES", "IRIS DEPTH", 0.0, 0.1, 0.005, 0.05),
+	slider("ANIMATION", "HEAD FOLLOW POINTER", 0.0, 1.0, 0.05, 0.0),
+	slider("ANIMATION", "BLINK RATE", 0.0, 2.0, 0.1, 1.0),
+];
+
+const FRAME_RATE_OPTIONS: [f64; 2] = [30.0, 60.0];
+const RENDER_BASE_OPTIONS: [f64; 4] = [720.0, 1080.0, 1440.0, 2160.0];
+const RENDER_BASE_LABELS: [&str; 4] = ["720P", "1080P", "1440P", "4K"];
+const HEAD_LOD_FILES: [&str; 3] = ["character_lod0.glb", "character_lod1.glb", "character_lod2.glb"];
+// 머리카락 단계. (이름, 파일, 프린지 블렌드, 흔들림 배율)
+const HAIR_LEVEL_DEFINITIONS: [(&str, Option<&str>, bool, f64); 6] = [
+	("NONE", None, false, 0.0),
+	("LOW", Some("hair_lod4.glb"), false, 0.0),
+	("MEDIUM", Some("hair_lod3.glb"), false, 0.5),
+	("HIGH", Some("hair_lod2.glb"), true, 0.8),
+	("ULTRA", Some("hair_lod1.glb"), true, 1.0),
+	("CINEMATIC", Some("hair_lod0.glb"), true, 1.0),
+];
+// 그림자 단계. (이름, 해상도, 표본 수)
+const SHADOW_LEVEL_DEFINITIONS: [(&str, i32, i32); 5] = [("1K HARD", 1024, 4), ("2K", 2048, 8), ("4K", 4096, 12), ("4K FINE", 4096, 20), ("8K FINE", 8192, 24)];
+const TEXTURE_SIZE_LABELS: [&str; 4] = ["EIGHTH", "QUARTER", "HALF", "FULL"];
+const ANTIALIAS_LABELS: [&str; 3] = ["OFF", "FXAA", "FXAA + SHARPEN"];
+
+// 슬라이더 값 글자. (원본 sliderDefinitions 의 format)
+fn format_slider(index: usize, value: f64) -> String {
+	let level = value.max(0.0) as usize;
+	match index {
+		SLIDER_FRAME_RATE => format!("{} FPS", FRAME_RATE_OPTIONS[level] as i64),
+		SLIDER_RENDER_BASE => RENDER_BASE_LABELS[level].to_string(),
+		SLIDER_RENDER_SCALE => format!("{}%", (value * 100.0).round() as i64),
+		SLIDER_ANTIALIAS => ANTIALIAS_LABELS[level].to_string(),
+		SLIDER_GRAIN => format!("{:.3}", value),
+		SLIDER_HEAD_LOD => format!("LOD {}", 2 - level),
+		SLIDER_HAIR_QUALITY => HAIR_LEVEL_DEFINITIONS[level].0.to_string(),
+		SLIDER_TEXTURE_SIZE => TEXTURE_SIZE_LABELS[level].to_string(),
+		SLIDER_SHADOW_QUALITY => SHADOW_LEVEL_DEFINITIONS[level].0.to_string(),
+		SLIDER_PORE_DETAIL | SLIDER_CAVITY | SLIDER_KEY_INTENSITY | SLIDER_FILL_INTENSITY | SLIDER_RIM_INTENSITY => format!("{:.1}", value),
+		SLIDER_SUBSURFACE_WIDTH => format!("{:.1} MM", value),
+		SLIDER_OCCLUSION_RADIUS => format!("{:.1} CM", value * 100.0),
+		SLIDER_IRIS_SIZE | SLIDER_PUPIL_SIZE | SLIDER_IRIS_DEPTH => format!("{:.3}", value),
+		SLIDER_BLINK_RATE => format!("{:.1}X", value),
+		_ => format!("{:.2}", value),
+	}
+}
+
+// 옵션 값. (원본 optionStates, sliderStates, 패널 접힘. 기본은 접힘)
+#[derive(Clone)]
+struct OptionValues {
+	toggles: [bool; 9],
+	sliders: [f64; SLIDER_COUNT],
+	is_collapsed: bool,
+}
+
+impl OptionValues {
+	fn new() -> OptionValues {
+		let mut sliders = [0.0; SLIDER_COUNT];
+		for (index, definition) in SLIDER_DEFINITIONS.iter().enumerate() {
+			sliders[index] = definition.value;
+		}
+		OptionValues { toggles: TOGGLE_DEFAULTS, sliders, is_collapsed: true }
+	}
+}
+
+// 모델 읽어 캐시에 넣기. (이미 있으면 그대로. 예제 폴더에서 바로 읽고 머티리얼을 붙인다)
+fn load_cached_model(gl: &GlContext, resources: &mut FaceResources, file_name: &str) -> Result<(), String> {
+	if resources.model_cache.iter().any(|(name, _)| name == file_name) {
+		return Ok(());
+	}
+	let bytes = std::fs::read(PathBuf::from(EXAMPLE_ASSET_DIRECTORY).join(file_name)).map_err(|error| format!("{}: {}", file_name, error))?;
+	let mut model = SkinnedModel::load_from_bytes(gl, &bytes, &resources.skin_renderer)?;
+	assign_materials(&mut model, &resources.material_list)?;
+	model.update(0.0);
+	resources.model_cache.push((file_name.to_string(), model));
+	Ok(())
+}
+
+// 활성 모델. (머리, 머리카락 차례. 캐시에서 이름으로 찾는다)
+fn collect_active<'a>(model_cache: &'a mut Vec<(String, SkinnedModel)>, head_file: &str, hair_file: Option<&str>) -> Vec<&'a mut SkinnedModel> {
+	let mut head_model = None;
+	let mut hair_model = None;
+	for (name, model) in model_cache.iter_mut() {
+		if name == head_file {
+			head_model = Some(model);
+		}
+		else if Some(name.as_str()) == hair_file {
+			hair_model = Some(model);
+		}
+	}
+	let mut model_list = Vec::new();
+	model_list.extend(head_model);
+	model_list.extend(hair_model);
+	model_list
+}
+
 // 카메라. (원본 값)
 const CAMERA_FIELD_OF_VIEW: f64 = 0.44;
 const CAMERA_NEAR_DISTANCE: f64 = 0.05;
@@ -53,7 +247,7 @@ const SHADOWMAP_RESOLUTION: i32 = 2048;
 const SHADOW_SAMPLE_COUNT: i32 = 8;
 
 // 내부 렌더 기준 세로 해상도. (원본 RENDER BASE 기본 1080P, 화면이 더 크면 줄이고 작으면 슈퍼샘플링)
-const RENDER_BASE_HEIGHT: f64 = 1080.0;
+
 
 // 높이 디테일 텍스처 한 변. (원본 DETAIL_TEXTURE_SIZE)
 const DETAIL_TEXTURE_SIZE: f64 = 4096.0;
@@ -68,7 +262,7 @@ const EXPRESSION_CYCLE_SECONDS: f64 = 4.0;
 // 애셋 파일. (원본 HEAD_LOD_FILES[1], HAIR_LEVEL_DEFINITIONS[3])
 const HEAD_MODEL_FILE: &str = "character_lod1.glb";
 const HAIR_MODEL_FILE: &str = "hair_lod2.glb";
-const HAIR_SWAY_SCALE: f64 = 0.8;
+
 const DETAIL_HEIGHT_FILE: &str = "skin_detail.jpg";
 
 // 조명 방향. (원본 KEY / FILL / RIM_LIGHT_DIRECTION, 정규화 전)
@@ -272,8 +466,11 @@ void main() {
 //==============================================================================
 struct FaceResources {
 	skin_renderer: HumanSkinRenderer,
-	head_model: SkinnedModel,
-	hair_model: SkinnedModel,
+	model_cache: Vec<(String, SkinnedModel)>,
+	head_file: String,
+	hair_file: Option<String>,
+	material_list: Vec<(&'static str, Rc<Material>)>,
+	shadow_resolution: i32,
 	shadow_map: ShadowMap,
 	scene_render_target: RenderTarget,
 	hdr_render_target: RenderTarget,
@@ -326,6 +523,11 @@ struct OldFaceScene {
 	touch_recognizer: TouchRecognizer,
 	ui: Option<OldFaceUi>,
 	pending_expression_index: Rc<Cell<Option<usize>>>,
+	option_values: Rc<RefCell<OptionValues>>,
+	applied_sliders: [f64; SLIDER_COUNT],
+	pointer_position: Option<Vector2>,
+	has_pointer_moved: bool,
+	intro_start: web_time::Instant,
 }
 
 //==============================================================================
@@ -336,6 +538,16 @@ struct OldFaceUi {
 	divider_id: NodeId,
 	subtitle_id: NodeId,
 	options_id: NodeId,
+	options_fill_id: NodeId,
+	options_title_id: NodeId,
+	options_hit_id: NodeId,
+	options_divider_id: NodeId,
+	options_scroll_id: NodeId,
+	options_content_height: f64,
+	toggle_state_ids: Vec<NodeId>,
+	slider_value_ids: Vec<NodeId>,
+	value_texts: Vec<String>,
+	laid_out_panel: (bool, f64, f64),
 	expression_button_ids: Vec<NodeId>,
 	expression_fill_ids: Vec<NodeId>,
 	home_id: NodeId,
@@ -392,7 +604,6 @@ impl OldFaceScene {
 		let divider_id = create_box_node(node_tree, root_id, "divider", Vector2::create(240.0, 1.0));
 		node_tree[divider_id].add_component(Paint::create_with_color(create_color(242.0, 236.0, 226.0, 0.55)));
 		let subtitle_id = create_label_node(node_tree, root_id, "subtitle", Vector2::create(600.0, 20.0), "V A N I L L A   E N G I N E", 12.0, create_color(230.0, 226.0, 220.0, 0.78), TextAlign::Center);
-		let (options_id, _) = create_pill_button(node_tree, root_id, "options", Vector2::create(122.0, 34.0), "OPTIONS", 10.0, create_color(232.0, 201.0, 138.0, 0.95), create_color(60.0, 57.0, 59.0, 1.0), create_color(30.0, 28.0, 30.0, 0.9), 12.0);
 		let mut expression_button_ids = Vec::new();
 		let mut expression_fill_ids = Vec::new();
 		for (expression_index, definition) in EXPRESSION_DEFINITIONS.iter().enumerate() {
@@ -412,7 +623,117 @@ impl OldFaceScene {
 		for (line_index, line) in FOOTER_LINES.iter().enumerate() {
 			footer_ids.push(create_label_node(node_tree, root_id, &format!("footer{}", line_index), Vector2::create(1200.0, 18.0), line, 9.5, create_color(242.0, 236.0, 226.0, 0.5), TextAlign::Left));
 		}
-		self.ui = Some(OldFaceUi { title_id, divider_id, subtitle_id, options_id, expression_button_ids, expression_fill_ids, home_id, footer_ids });
+		// 옵션 패널은 맨 뒤에 만든다. (원본 z-index 5, 표정 단추 위에 그려진다)
+		let option_values = self.option_values.clone();
+		let gold = create_color(232.0, 201.0, 138.0, 0.95);
+		let panel_text = create_color(242.0, 236.0, 226.0, 0.86);
+		let options_id = create_box_node(node_tree, root_id, "options", Vector2::create(122.0, 34.0));
+		node_tree[options_id].add_component(Paint::create_with_color(create_color(60.0, 57.0, 59.0, 1.0))).set_round_size(12.0);
+		let options_fill_id = create_box_node(node_tree, options_id, "fill", Vector2::create(120.0, 32.0));
+		node_tree[options_fill_id].set_local_position(Vector2::create(1.0, 1.0));
+		node_tree[options_fill_id].add_component(Paint::create_with_color(create_color(30.0, 28.0, 30.0, 0.9))).set_round_size(11.0);
+		let options_title_id = create_label_node(node_tree, options_fill_id, "text", Vector2::create(120.0, 32.0), "OPTIONS", 10.0, gold, TextAlign::Center);
+		let options_divider_id = create_box_node(node_tree, options_fill_id, "titleDivider", Vector2::create(370.0, 1.0));
+		node_tree[options_divider_id].set_local_position(Vector2::create(0.0, 33.0));
+		node_tree[options_divider_id].add_component(Paint::create_with_color(create_color(242.0, 236.0, 226.0, 0.1)));
+		node_tree[options_divider_id].set_visible(false);
+		let options_hit_id = create_box_node(node_tree, options_id, "titleHit", Vector2::create(122.0, 34.0));
+		node_tree.add_component(options_hit_id, UIButton::new());
+		{
+			let option_values = option_values.clone();
+			if let Some(button) = node_tree[options_hit_id].get_component_mut::<UIButton>() {
+				button.set_click_event(Box::new(move |_button: &mut UIButton, _context: &mut ComponentContext| {
+					let mut values = option_values.borrow_mut();
+					values.is_collapsed = !values.is_collapsed;
+				}));
+			}
+		}
+		let options_scroll_id = create_box_node(node_tree, options_id, "scroll", Vector2::create(370.0, 100.0));
+		node_tree[options_scroll_id].set_local_position(Vector2::create(1.0, 35.0));
+		let content_id = {
+			let scroll_view = node_tree.add_component(options_scroll_id, UIScrollView::new()).expect("scroll view");
+			scroll_view.set_background_color(Color::create(0.0, 0.0, 0.0, 0.0));
+			scroll_view.set_horizontal(false);
+			scroll_view.get_content().expect("content")
+		};
+		let mut content_y = 0.0;
+		let mut toggle_state_ids = Vec::new();
+		for (toggle_index, label) in TOGGLE_LABELS.iter().enumerate() {
+			let row_id = create_box_node(node_tree, content_id, "toggleRow", Vector2::create(370.0, 28.0));
+			node_tree[row_id].set_local_position(Vector2::create(0.0, content_y));
+			let key_id = create_box_node(node_tree, row_id, "key", Vector2::create(18.0, 16.0));
+			node_tree[key_id].set_local_position(Vector2::create(12.0, 6.0));
+			node_tree[key_id].add_component(Paint::create_with_color(create_color(242.0, 236.0, 226.0, 0.22))).set_round_size(4.0);
+			let key_fill_id = create_box_node(node_tree, key_id, "keyFill", Vector2::create(16.0, 14.0));
+			node_tree[key_fill_id].set_local_position(Vector2::create(1.0, 1.0));
+			node_tree[key_fill_id].add_component(Paint::create_with_color(create_color(28.0, 26.0, 28.0, 1.0))).set_round_size(3.0);
+			create_label_node(node_tree, key_fill_id, "digit", Vector2::create(16.0, 14.0), &format!("{}", toggle_index + 1), 9.0, create_color(242.0, 236.0, 226.0, 0.6), TextAlign::Center);
+			let label_id = create_label_node(node_tree, row_id, "label", Vector2::create(240.0, 28.0), label, 10.5, panel_text, TextAlign::Left);
+			node_tree[label_id].set_local_position(Vector2::create(40.0, 0.0));
+			let state_id = create_label_node(node_tree, row_id, "state", Vector2::create(60.0, 28.0), "", 9.5, create_color(242.0, 236.0, 226.0, 0.4), TextAlign::Right);
+			node_tree[state_id].set_local_position(Vector2::create(296.0, 0.0));
+			toggle_state_ids.push(state_id);
+			node_tree.add_component(row_id, UIButton::new());
+			let option_values = option_values.clone();
+			if let Some(button) = node_tree[row_id].get_component_mut::<UIButton>() {
+				button.set_click_event(Box::new(move |_button: &mut UIButton, _context: &mut ComponentContext| {
+					let mut values = option_values.borrow_mut();
+					values.toggles[toggle_index] = !values.toggles[toggle_index];
+				}));
+			}
+			content_y += 28.0;
+		}
+		let mut slider_value_ids = Vec::new();
+		let mut previous_group = "";
+		for (slider_index, definition) in SLIDER_DEFINITIONS.iter().enumerate() {
+			if definition.group != previous_group {
+				previous_group = definition.group;
+				let group_id = create_box_node(node_tree, content_id, "group", Vector2::create(370.0, 25.0));
+				node_tree[group_id].set_local_position(Vector2::create(0.0, content_y));
+				let line_id = create_box_node(node_tree, group_id, "line", Vector2::create(370.0, 1.0));
+				node_tree[line_id].add_component(Paint::create_with_color(create_color(242.0, 236.0, 226.0, 0.08)));
+				let group_label_id = create_label_node(node_tree, group_id, "groupLabel", Vector2::create(340.0, 12.0), definition.group, 9.0, create_color(232.0, 201.0, 138.0, 0.7), TextAlign::Left);
+				node_tree[group_label_id].set_local_position(Vector2::create(12.0, 9.0));
+				content_y += 25.0;
+			}
+			let row_id = create_box_node(node_tree, content_id, "sliderRow", Vector2::create(370.0, 26.0));
+			node_tree[row_id].set_local_position(Vector2::create(0.0, content_y));
+			let label_id = create_label_node(node_tree, row_id, "label", Vector2::create(118.0, 26.0), definition.label, 9.5, panel_text, TextAlign::Left);
+			node_tree[label_id].set_local_position(Vector2::create(12.0, 0.0));
+			let slider_id = create_box_node(node_tree, row_id, "slider", Vector2::create(132.0, 12.0));
+			node_tree[slider_id].set_local_position(Vector2::create(134.0, 7.0));
+			{
+				let slider = node_tree.add_component(slider_id, UISlider::new()).expect("slider");
+				slider.set_range(definition.minimum, definition.maximum);
+				slider.set_value(definition.value);
+				slider.set_track_thickness(2.0);
+				slider.set_thumb_radius(5.0);
+				slider.set_track_color(create_color(242.0, 236.0, 226.0, 0.18));
+				slider.set_fill_color(create_color(242.0, 236.0, 226.0, 0.18));
+				slider.set_thumb_color(create_color(212.0, 176.0, 106.0, 1.0));
+				let option_values = option_values.clone();
+				let step = definition.step;
+				let minimum = definition.minimum;
+				let maximum = definition.maximum;
+				slider.set_value_changed_event(Box::new(move |slider: &mut UISlider, _context: &mut ComponentContext| {
+					let snapped = (minimum + ((slider.get_value() - minimum) / step).round() * step).clamp(minimum, maximum);
+					if (snapped - slider.get_value()).abs() > 1e-9 {
+						slider.set_value(snapped);
+					}
+					option_values.borrow_mut().sliders[slider_index] = snapped;
+				}));
+			}
+			let value_id = create_label_node(node_tree, row_id, "value", Vector2::create(82.0, 26.0), "", 9.0, create_color(232.0, 201.0, 138.0, 0.9), TextAlign::Right);
+			node_tree[value_id].set_local_position(Vector2::create(276.0, 0.0));
+			slider_value_ids.push(value_id);
+			content_y += 26.0;
+		}
+		let options_content_height = content_y;
+		if let Some(scroll_view) = node_tree[options_scroll_id].get_component_mut::<UIScrollView>() {
+			scroll_view.set_scroll_content_size(Vector2::create(370.0, options_content_height));
+		}
+		node_tree[options_scroll_id].set_visible(false);
+		self.ui = Some(OldFaceUi { title_id, divider_id, subtitle_id, options_id, options_fill_id, options_title_id, options_hit_id, options_divider_id, options_scroll_id, options_content_height, toggle_state_ids, slider_value_ids, value_texts: vec![String::new(); SLIDER_COUNT + 9], laid_out_panel: (true, 0.0, 0.0), expression_button_ids, expression_fill_ids, home_id, footer_ids });
 		self.refresh_expression_buttons();
 	}
 
@@ -420,7 +741,8 @@ impl OldFaceScene {
 	// UI 자리 잡기. (화면 크기가 바뀌어도 원본처럼 가운데, 아래, 오른쪽 위 기준)
 	//==============================================================================
 	fn layout_ui(&mut self, canvas_size: Vector2) {
-		let ui = match &self.ui {
+		let is_collapsed = self.option_values.borrow().is_collapsed;
+		let ui = match &mut self.ui {
 			Some(ui) => ui,
 			None => {
 				return;
@@ -434,12 +756,38 @@ impl OldFaceScene {
 		if let Some(label) = node_tree[ui.title_id].get_component_mut::<UILabel>() {
 			label.set_font_size(title_font);
 		}
-		node_tree[ui.divider_id].set_local_position(Vector2::create(center_x - 120.0, canvas_size.y * 0.07 - 5.0 + 80.0 - 5.0));
-		node_tree[ui.subtitle_id].set_local_position(Vector2::create(center_x - 300.0, canvas_size.y * 0.07 - 5.0 + 80.0 + 14.0));
+		node_tree[ui.divider_id].set_local_position(Vector2::create(center_x - 120.0, canvas_size.y * 0.07 - 5.0 + 80.0 + 8.0));
+		node_tree[ui.subtitle_id].set_local_position(Vector2::create(center_x - 300.0, canvas_size.y * 0.07 - 5.0 + 80.0 + 18.0));
 		if let Some(label) = node_tree[ui.subtitle_id].get_component_mut::<UILabel>() {
 			label.set_font_size(sub_font);
 		}
-		node_tree[ui.options_id].set_local_position(Vector2::create(canvas_size.x - 18.0 - 122.0, 18.0));
+		// 옵션 패널. (접힘은 제목 알약, 펼침은 폭 372 에 높이는 화면 높이 - 48 까지(원본 updatePanelLimits). 폭 720 이하는 폭 316, 여백 10)
+		let is_narrow = canvas_size.x <= 720.0;
+		let panel_width = if is_collapsed { 122.0 } else if is_narrow { 318.0 } else { 374.0 };
+		let panel_margin = if is_narrow { 10.0 } else { 18.0 };
+		let panel_height = if is_collapsed { 34.0 } else { (34.0 + 1.0 + ui.options_content_height + 1.0).min((canvas_size.y - 48.0).max(120.0) + 2.0) };
+		node_tree[ui.options_id].set_local_position(Vector2::create(canvas_size.x - panel_margin - panel_width, panel_margin));
+		if ui.laid_out_panel != (is_collapsed, panel_width, panel_height) {
+			ui.laid_out_panel = (is_collapsed, panel_width, panel_height);
+			node_tree[ui.options_id].set_content_size(Vector2::create(panel_width, panel_height));
+			node_tree[ui.options_fill_id].set_content_size(Vector2::create(panel_width - 2.0, panel_height - 2.0));
+			node_tree[ui.options_hit_id].set_content_size(Vector2::create(panel_width, 34.0));
+			node_tree[ui.options_title_id].set_content_size(Vector2::create(panel_width - 2.0, 32.0));
+			node_tree[ui.options_title_id].set_local_position(Vector2::create(if is_collapsed { 0.0 } else { 15.0 }, 0.0));
+			if let Some(label) = node_tree[ui.options_title_id].get_component_mut::<UILabel>() {
+				label.set_text_align(if is_collapsed { TextAlign::Center } else { TextAlign::Left });
+			}
+			node_tree[ui.options_divider_id].set_content_size(Vector2::create(panel_width - 2.0, 1.0));
+			node_tree[ui.options_divider_id].set_visible(!is_collapsed);
+			node_tree[ui.options_scroll_id].set_visible(!is_collapsed);
+			node_tree[ui.options_scroll_id].set_content_size(Vector2::create(panel_width - 2.0, (panel_height - 36.0).max(0.0)));
+			if let Some(paint) = node_tree[ui.options_id].get_component_mut::<Paint>() {
+				paint.set_color(if is_collapsed { create_color(60.0, 57.0, 59.0, 1.0) } else { create_color(242.0, 236.0, 226.0, 0.14) });
+			}
+			if let Some(paint) = node_tree[ui.options_fill_id].get_component_mut::<Paint>() {
+				paint.set_color(if is_collapsed { create_color(30.0, 28.0, 30.0, 0.9) } else { create_color(14.0, 12.0, 14.0, 0.5) });
+			}
+		}
 		// 표정 단추 두 줄. (가운데 맞춤, 아래 쪽 줄의 아래 끝이 화면 아래에서 5.5% + 56px)
 		let bottom_y = canvas_size.y - (canvas_size.y * 0.055 + 56.0);
 		let row_ranges = [(0, EXPRESSION_ROW_LENGTH), (EXPRESSION_ROW_LENGTH, EXPRESSION_BUTTON_WIDTHS.len())];
@@ -455,6 +803,161 @@ impl OldFaceScene {
 		node_tree[ui.home_id].set_local_position(Vector2::create(center_x - 122.0, canvas_size.y - canvas_size.y * 0.055 - 34.0));
 		for (line_index, footer_id) in ui.footer_ids.iter().enumerate() {
 			node_tree[*footer_id].set_local_position(Vector2::create(18.0, canvas_size.y - 16.0 - 18.0 * (FOOTER_LINES.len() - line_index) as f64));
+		}
+	}
+
+	//==============================================================================
+	// 등장 애니메이션. (원본 CSS: 제목, 알약, 사이트 단추는 3.2초 titleEntrance(불투명 0 에서 1, 위 14 에서 제자리, 블러는 못 함),
+	// 표정 단추, 옵션 패널, 아래 안내는 2.4초 panelEntrance(불투명). 곡선은 cubic-bezier(0.16, 1, 0.3, 1). 시작은 화면을 만든 때)
+	//==============================================================================
+	fn apply_intro(&mut self) {
+		let ease = create_bezier_easing(0.16, 1.0, 0.3, 1.0);
+		let seconds = self.intro_start.elapsed().as_secs_f64();
+		let title_progress = ease((seconds / 3.2).min(1.0));
+		let panel_progress = ease((seconds / 2.4).min(1.0));
+		let ui = match &self.ui {
+			Some(ui) => {
+				ui
+			}
+			None => {
+				return;
+			}
+		};
+		let node_tree = self.scene_base.get_node_tree_mut();
+		for node_id in [ui.title_id, ui.divider_id, ui.subtitle_id, ui.home_id] {
+			let position = node_tree[node_id].get_local_position();
+			node_tree[node_id].set_local_position(Vector2::create(position.x, position.y - 14.0 * (1.0 - title_progress)));
+			node_tree[node_id].set_local_opacity(title_progress);
+		}
+		let mut panel_id_list = ui.expression_button_ids.clone();
+		panel_id_list.push(ui.options_id);
+		panel_id_list.extend(ui.footer_ids.iter().copied());
+		for node_id in panel_id_list {
+			node_tree[node_id].set_local_opacity(panel_progress);
+		}
+	}
+
+	//==============================================================================
+	// 옵션 변경 처리. (프레임 제한, 머리 LOD, 머리카락 단계, 텍스처 크기, 그림자 단계는 바뀐 때만. 모델은 필요할 때 읽어 캐시)
+	//==============================================================================
+	fn apply_option_changes(&mut self, engine: &Engine) {
+		let values = self.option_values.borrow().clone();
+		let applied = self.applied_sliders;
+		self.applied_sliders = values.sliders;
+		let resources = match &mut self.resources {
+			Some(resources) => {
+				resources
+			}
+			None => {
+				return;
+			}
+		};
+		let graphic = match engine.get_graphic() {
+			Some(graphic) => {
+				graphic
+			}
+			None => {
+				return;
+			}
+		};
+		let gl = graphic.get_gl();
+		if values.sliders[SLIDER_FRAME_RATE] != applied[SLIDER_FRAME_RATE] {
+			engine.set_maximum_frame_per_second(FRAME_RATE_OPTIONS[values.sliders[SLIDER_FRAME_RATE] as usize]);
+		}
+		if values.sliders[SLIDER_HEAD_LOD] != applied[SLIDER_HEAD_LOD] {
+			let file_name = HEAD_LOD_FILES[2 - values.sliders[SLIDER_HEAD_LOD] as usize];
+			match load_cached_model(gl, resources, file_name) {
+				Ok(()) => {
+					resources.head_file = file_name.to_string();
+				}
+				Err(error) => {
+					eprintln!("oldface: {}", error);
+				}
+			}
+		}
+		if values.sliders[SLIDER_HAIR_QUALITY] != applied[SLIDER_HAIR_QUALITY] {
+			match HAIR_LEVEL_DEFINITIONS[values.sliders[SLIDER_HAIR_QUALITY] as usize].1 {
+				Some(file_name) => {
+					match load_cached_model(gl, resources, file_name) {
+						Ok(()) => {
+							resources.hair_file = Some(file_name.to_string());
+						}
+						Err(error) => {
+							eprintln!("oldface: {}", error);
+						}
+					}
+				}
+				None => {
+					resources.hair_file = None;
+				}
+			}
+		}
+		if values.sliders[SLIDER_TEXTURE_SIZE] != applied[SLIDER_TEXTURE_SIZE] {
+			// 모든 머티리얼 텍스처의 최소 밉 레벨을 올려 실효 해상도를 낮춘다.
+			let level = (3.0 - values.sliders[SLIDER_TEXTURE_SIZE]) as f32;
+			for (_keyword, material) in resources.material_list.iter() {
+				for (_name, _unit, texture) in material.get_texture_bindings() {
+					if let Some(texture) = texture {
+						unsafe {
+							gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+							gl.tex_parameter_f32(glow::TEXTURE_2D, glow::TEXTURE_MIN_LOD, level);
+						}
+					}
+				}
+			}
+			unsafe {
+				gl.bind_texture(glow::TEXTURE_2D, None);
+			}
+		}
+		if values.sliders[SLIDER_SHADOW_QUALITY] != applied[SLIDER_SHADOW_QUALITY] {
+			let shadow_level = &SHADOW_LEVEL_DEFINITIONS[values.sliders[SLIDER_SHADOW_QUALITY] as usize];
+			if shadow_level.1 != resources.shadow_resolution {
+				match ShadowMap::new(gl, shadow_level.1) {
+					Ok(shadow_map) => {
+						resources.shadow_map = shadow_map;
+						resources.shadow_resolution = shadow_level.1;
+					}
+					Err(error) => {
+						eprintln!("oldface: {}", error);
+					}
+				}
+			}
+			resources.skin_renderer.set_shadow_sample_count(shadow_level.2);
+		}
+	}
+
+	//==============================================================================
+	// 옵션 글자 고치기. (토글 ON / OFF, 슬라이더 값 글자. 바뀐 것만)
+	//==============================================================================
+	fn refresh_option_labels(&mut self) {
+		let values = self.option_values.borrow().clone();
+		let ui = match &mut self.ui {
+			Some(ui) => {
+				ui
+			}
+			None => {
+				return;
+			}
+		};
+		let node_tree = self.scene_base.get_node_tree_mut();
+		for toggle_index in 0..9 {
+			let text = if values.toggles[toggle_index] { "ON" } else { "OFF" };
+			if ui.value_texts[SLIDER_COUNT + toggle_index] != text {
+				ui.value_texts[SLIDER_COUNT + toggle_index] = text.to_string();
+				if let Some(label) = node_tree[ui.toggle_state_ids[toggle_index]].get_component_mut::<UILabel>() {
+					label.set_text(text);
+					label.set_text_color(if values.toggles[toggle_index] { create_color(232.0, 201.0, 138.0, 1.0) } else { create_color(242.0, 236.0, 226.0, 0.4) });
+				}
+			}
+		}
+		for slider_index in 0..SLIDER_COUNT {
+			let text = format_slider(slider_index, values.sliders[slider_index]);
+			if ui.value_texts[slider_index] != text {
+				if let Some(label) = node_tree[ui.slider_value_ids[slider_index]].get_component_mut::<UILabel>() {
+					label.set_text(&text);
+				}
+				ui.value_texts[slider_index] = text;
+			}
 		}
 	}
 
@@ -534,6 +1037,31 @@ impl OldFaceScene {
 			touch_recognizer: TouchRecognizer::new(),
 			ui: None,
 			pending_expression_index: Rc::new(Cell::new(None)),
+			option_values: Rc::new(RefCell::new({
+				// 확인용: 환경 변수 VANILLA_OLDFACE_OPEN=1 이면 옵션 패널을 펼친 채로 시작한다.
+				let mut values = OptionValues::new();
+				values.is_collapsed = std::env::var("VANILLA_OLDFACE_OPEN").map(|value| value != "1").unwrap_or(true);
+				// 확인용: VANILLA_OLDFACE_SET="s9=0,s10=5,t6=1" 이면 슬라이더 9 번을 0 으로, 토글 6 번을 켠다. (번호는 옵션 표의 차례, 0 부터)
+				if let Ok(text) = std::env::var("VANILLA_OLDFACE_SET") {
+					for item in text.split(',') {
+						if let Some((key, value)) = item.split_once('=') {
+							let index = key[1..].parse::<usize>().unwrap_or(usize::MAX);
+							let number = value.parse::<f64>().unwrap_or(0.0);
+							if key.starts_with('s') && index < SLIDER_COUNT {
+								values.sliders[index] = number;
+							}
+							else if key.starts_with('t') && index < 9 {
+								values.toggles[index] = number != 0.0;
+							}
+						}
+					}
+				}
+				values
+			})),
+			applied_sliders: OptionValues::new().sliders,
+			pointer_position: None,
+			has_pointer_moved: false,
+			intro_start: web_time::Instant::now(),
 		}
 	}
 
@@ -679,8 +1207,11 @@ impl OldFaceScene {
 		let unit_count = expression_unit_names.len();
 		let mut resources = FaceResources {
 			skin_renderer,
-			head_model,
-			hair_model,
+			model_cache: vec![(HEAD_MODEL_FILE.to_string(), head_model), (HAIR_MODEL_FILE.to_string(), hair_model)],
+			head_file: HEAD_MODEL_FILE.to_string(),
+			hair_file: Some(HAIR_MODEL_FILE.to_string()),
+			material_list: material_by_keyword,
+			shadow_resolution: SHADOWMAP_RESOLUTION,
 			shadow_map,
 			scene_render_target,
 			hdr_render_target,
@@ -726,14 +1257,16 @@ impl OldFaceScene {
 			let next_weight = current_weight + (resources.target_weights[unit_index] - current_weight) * approach;
 			resources.current_weights[unit_index] = next_weight;
 			let unit_name = &resources.expression_unit_names[unit_index];
-			resources.head_model.set_morph_weight(unit_name, next_weight);
-			resources.hair_model.set_morph_weight(unit_name, next_weight);
+			for model in collect_active(&mut resources.model_cache, &resources.head_file, resources.hair_file.as_deref()) {
+				model.set_morph_weight(unit_name, next_weight);
+			}
 		}
 
 		// 깜빡임. (눈 감기 단위, 표정이 감은 만큼보다 크게 덮어쓴다, 간격은 원본 BLINK RATE 기본 1)
 		if elapsed_time >= self.next_blink_time {
 			self.blink_start_time = elapsed_time;
-			self.next_blink_time = elapsed_time + 2.8 + self.random.next_value() as f64 * 3.6;
+			let blink_rate = self.option_values.borrow().sliders[SLIDER_BLINK_RATE];
+			self.next_blink_time = elapsed_time + if blink_rate > 0.001 { (2.8 + self.random.next_value() as f64 * 3.6) / blink_rate } else { 1e9 };
 		}
 		let blink_local = elapsed_time - self.blink_start_time;
 		let blink = if (0.0..0.3).contains(&blink_local) {
@@ -744,7 +1277,7 @@ impl OldFaceScene {
 		};
 		let left_closed = read_unit_weight(resources, "EyeBlinkLeft").max(blink);
 		let right_closed = read_unit_weight(resources, "EyeBlinkRight").max(blink);
-		for model in [&mut resources.head_model, &mut resources.hair_model] {
+		for model in collect_active(&mut resources.model_cache, &resources.head_file, resources.hair_file.as_deref()) {
 			model.set_morph_weight("EyeBlinkLeft", left_closed);
 			model.set_morph_weight("EyeBlinkRight", right_closed);
 		}
@@ -759,12 +1292,18 @@ impl OldFaceScene {
 		let mut selected_index = None;
 		for (key_index, key) in DIGIT_KEYS.iter().enumerate() {
 			if input_manager.is_key_just_pressed(key) {
-				selected_index = Some(key_index);
+				let mut values = self.option_values.borrow_mut();
+				values.toggles[key_index] = !values.toggles[key_index];
 			}
 		}
 		if let Some(pending_index) = self.pending_expression_index.take() {
 			selected_index = Some(pending_index);
 		}
+		let current_pointer_position = input_manager.get_canvas_native_input_position();
+		if self.pointer_position.map(|position| position.x != current_pointer_position.x || position.y != current_pointer_position.y).unwrap_or(current_pointer_position.x != 0.0 || current_pointer_position.y != 0.0) {
+			self.has_pointer_moved = true;
+		}
+		self.pointer_position = Some(current_pointer_position);
 		if input_manager.is_mouse_button_down(MouseButton::Left) && !self.is_pointer_over_ui(engine) {
 			let pointer_position = input_manager.get_canvas_native_input_position();
 			if let Some(last_pointer_position) = self.last_pointer_position {
@@ -779,7 +1318,7 @@ impl OldFaceScene {
 			self.last_pointer_position = None;
 		}
 		let wheel_delta_y = input_manager.get_wheel_delta_y();
-		if wheel_delta_y != 0.0 {
+		if wheel_delta_y != 0.0 && !self.is_pointer_over_ui(engine) {
 			self.camera_target_distance = (self.camera_target_distance * (1.0 + wheel_delta_y * 0.0012)).clamp(CAMERA_MINIMUM_DISTANCE, CAMERA_MAXIMUM_DISTANCE);
 		}
 		if let Some(selected_index) = selected_index {
@@ -827,31 +1366,34 @@ impl OldFaceScene {
 	//==============================================================================
 	// 렌더러 파라미터. (원본 renderFrame 이 슬라이더 기본값으로 프레임마다 넣는 값)
 	//==============================================================================
-	fn apply_render_parameters(resources: &mut FaceResources, elapsed_time: f64) {
+	fn apply_render_parameters(resources: &mut FaceResources, elapsed_time: f64, values: &OptionValues) {
+		let slider = &values.sliders;
 		let skin_renderer = &mut resources.skin_renderer;
-		skin_renderer.set_detail_strength(3.5);
-		skin_renderer.set_cavity_strength(2.5);
-		skin_renderer.set_micro_detail(38.0, 0.55);
-		skin_renderer.set_normal_strength(1.5);
-		skin_renderer.set_wrinkle_maps(true, 1.0, 0.45);
-		skin_renderer.set_specular_strength(1.25);
-		skin_renderer.set_roughness_range(0.9 * 0.85, 0.9 * 1.1);
-		skin_renderer.set_sheen_strength(0.12);
-		skin_renderer.set_shadow_softness(3.0);
+		skin_renderer.set_detail_strength(if values.toggles[TOGGLE_DETAIL] { slider[SLIDER_PORE_DETAIL] } else { 0.0 });
+		skin_renderer.set_cavity_strength(if values.toggles[TOGGLE_DETAIL] { slider[SLIDER_CAVITY] } else { 0.0 });
+		skin_renderer.set_micro_detail(38.0, if values.toggles[TOGGLE_DETAIL] { slider[SLIDER_MICRO_NORMAL] } else { 0.0 });
+		skin_renderer.set_normal_strength(slider[SLIDER_NORMAL_STRENGTH]);
+		skin_renderer.set_wrinkle_maps(values.toggles[TOGGLE_WRINKLE], slider[SLIDER_WRINKLE_DEPTH], (slider[SLIDER_WRINKLE_DEPTH] * 0.45).min(1.0));
+		skin_renderer.set_specular_strength(slider[SLIDER_SPECULAR]);
+		skin_renderer.set_roughness_range(slider[SLIDER_ROUGHNESS] * 0.85, slider[SLIDER_ROUGHNESS] * 1.1);
+		skin_renderer.set_sheen_strength(slider[SLIDER_SHEEN]);
+		skin_renderer.set_shadow_softness(slider[SLIDER_SHADOW_SOFTNESS]);
 		let key_light_direction = Vector3::create(KEY_LIGHT_DIRECTION[0], KEY_LIGHT_DIRECTION[1], KEY_LIGHT_DIRECTION[2]).normalize();
 		let fill_light_direction = Vector3::create(FILL_LIGHT_DIRECTION[0], FILL_LIGHT_DIRECTION[1], FILL_LIGHT_DIRECTION[2]).normalize();
 		let rim_light_direction = Vector3::create(RIM_LIGHT_DIRECTION[0], RIM_LIGHT_DIRECTION[1], RIM_LIGHT_DIRECTION[2]).normalize();
-		skin_renderer.set_light(0, key_light_direction.x, key_light_direction.y, key_light_direction.z, 1.0, 0.92, 0.82, 2.6);
-		skin_renderer.set_light(1, fill_light_direction.x, fill_light_direction.y, fill_light_direction.z, 0.6, 0.7, 0.9, 1.1);
-		skin_renderer.set_light(2, rim_light_direction.x, rim_light_direction.y, rim_light_direction.z, 0.95, 0.97, 1.0, 1.4);
-		skin_renderer.set_ambient_colors([0.2, 0.21, 0.25], [0.13, 0.12, 0.12], [0.09, 0.08, 0.075]);
-		skin_renderer.set_hair_fringe(true);
-		skin_renderer.set_hair_sway(0.25 * HAIR_SWAY_SCALE * 0.012, elapsed_time, 1.6);
-		skin_renderer.set_hair_parameters([-0.1, 0.16], [160.0, 24.0], [0.24 * 0.5, 0.52 * 0.5, 0.2], 0.0);
-		skin_renderer.set_eye_parameters(0.14, 0.042, 0.05);
-		resources.subsurface_effect.set_scatter_width(8.0 * 0.001);
-		resources.ambient_occlusion_effect.set_parameters(0.028, 1.15, 0.0015);
-		resources.bloom_effect.set_threshold(1.05, 1.05 + 0.85);
+		skin_renderer.set_light(0, key_light_direction.x, key_light_direction.y, key_light_direction.z, 1.0, 0.92, 0.82, slider[SLIDER_KEY_INTENSITY]);
+		skin_renderer.set_light(1, fill_light_direction.x, fill_light_direction.y, fill_light_direction.z, 0.6, 0.7, 0.9, slider[SLIDER_FILL_INTENSITY]);
+		skin_renderer.set_light(2, rim_light_direction.x, rim_light_direction.y, rim_light_direction.z, 0.95, 0.97, 1.0, slider[SLIDER_RIM_INTENSITY]);
+		let ambient_scale = slider[SLIDER_AMBIENT_INTENSITY];
+		skin_renderer.set_ambient_colors([0.2 * ambient_scale, 0.21 * ambient_scale, 0.25 * ambient_scale], [0.13 * ambient_scale, 0.12 * ambient_scale, 0.12 * ambient_scale], [0.09 * ambient_scale, 0.08 * ambient_scale, 0.075 * ambient_scale]);
+		let hair_level = &HAIR_LEVEL_DEFINITIONS[slider[SLIDER_HAIR_QUALITY] as usize];
+		skin_renderer.set_hair_fringe(hair_level.2);
+		skin_renderer.set_hair_sway(slider[SLIDER_HAIR_SWAY] * hair_level.3 * 0.012, elapsed_time, 1.6);
+		skin_renderer.set_hair_parameters([-0.1, 0.16], [160.0, 24.0], [0.24 * slider[SLIDER_HAIR_SPECULAR], 0.52 * slider[SLIDER_HAIR_SPECULAR], 0.2], slider[SLIDER_HAIR_ROOT_SHADE]);
+		skin_renderer.set_eye_parameters(slider[SLIDER_IRIS_SIZE], slider[SLIDER_PUPIL_SIZE], slider[SLIDER_IRIS_DEPTH]);
+		resources.subsurface_effect.set_scatter_width(slider[SLIDER_SUBSURFACE_WIDTH] * 0.001);
+		resources.ambient_occlusion_effect.set_parameters(slider[SLIDER_OCCLUSION_RADIUS], slider[SLIDER_OCCLUSION_STRENGTH], 0.0015);
+		resources.bloom_effect.set_threshold(slider[SLIDER_BLOOM_THRESHOLD], slider[SLIDER_BLOOM_THRESHOLD] + 0.85);
 	}
 
 	//==============================================================================
@@ -859,6 +1401,8 @@ impl OldFaceScene {
 	//==============================================================================
 	fn render_scene(&mut self, gl: &GlContext, canvas_width: i32, canvas_height: i32) -> Result<(), String> {
 		let elapsed_time = self.elapsed_time;
+		let values = self.option_values.borrow().clone();
+		let slider = values.sliders;
 		let resources = match &mut self.resources {
 			Some(resources) => {
 				resources
@@ -869,8 +1413,9 @@ impl OldFaceScene {
 		};
 
 		// 내부 렌더 해상도. (RENDER BASE 의 픽셀 수를 캔버스 종횡비로, GPU 상한으로 자른다)
-		let render_pixel_budget = RENDER_BASE_HEIGHT * (16.0 / 9.0) * RENDER_BASE_HEIGHT;
-		let pixel_budget_scale = (render_pixel_budget / ((canvas_width * canvas_height).max(1) as f64)).sqrt();
+		let render_base_height = RENDER_BASE_OPTIONS[slider[SLIDER_RENDER_BASE] as usize];
+		let render_pixel_budget = render_base_height * (16.0 / 9.0) * render_base_height;
+		let pixel_budget_scale = (render_pixel_budget / ((canvas_width * canvas_height).max(1) as f64)).sqrt() * slider[SLIDER_RENDER_SCALE];
 		let longest_display_side = canvas_width.max(canvas_height).max(1) as f64;
 		let size_limit_scale = (resources.maximum_render_target_size as f64 / (longest_display_side * pixel_budget_scale)).min(1.0);
 		let render_width = ((canvas_width as f64 * pixel_budget_scale * size_limit_scale).floor() as i32).max(2);
@@ -922,13 +1467,15 @@ impl OldFaceScene {
 		let key_light_direction = Vector3::create(KEY_LIGHT_DIRECTION[0], KEY_LIGHT_DIRECTION[1], KEY_LIGHT_DIRECTION[2]).normalize();
 		resources.shadow_map.update_light_matrix(resources.shadow_focus_position, key_light_direction.multiply_scalar(-1.0), 0.45, 0.2, 4.0);
 		let light_view_projection_elements = *resources.shadow_map.get_light_view_projection_matrix().get_elements();
-		resources.shadow_map.begin_render(gl);
-		for model in [&mut resources.head_model, &mut resources.hair_model] {
-			resources.skin_renderer.draw_depth(gl, model, &light_view_projection_elements, &model_elements);
+		if values.toggles[TOGGLE_SHADOW] {
+			resources.shadow_map.begin_render(gl);
+			for model in collect_active(&mut resources.model_cache, &resources.head_file, resources.hair_file.as_deref()) {
+				resources.skin_renderer.draw_depth(gl, model, &light_view_projection_elements, &model_elements);
+			}
 		}
 		let shadow_depth_texture = resources.shadow_map.get_depth_texture();
-		resources.skin_renderer.set_shadow_map(Some(shadow_depth_texture), Some(&light_view_projection_elements), 1.0 / SHADOWMAP_RESOLUTION as f64);
-		resources.skin_renderer.set_shadow_strength(0.85);
+		resources.skin_renderer.set_shadow_map(Some(shadow_depth_texture), Some(&light_view_projection_elements), 1.0 / resources.shadow_resolution as f64);
+		resources.skin_renderer.set_shadow_strength(if values.toggles[TOGGLE_SHADOW] { slider[SLIDER_SHADOW_STRENGTH] } else { 0.0 });
 
 		// 2. 피부 MRT 패스. (배경 → 조도 / 알베도 / 스펙큘러 / 노멀 + 깊이)
 		resources.scene_render_target.bind(gl);
@@ -947,7 +1494,7 @@ impl OldFaceScene {
 		unsafe {
 			gl.enable(glow::DEPTH_TEST);
 		}
-		for model in [&mut resources.head_model, &mut resources.hair_model] {
+		for model in collect_active(&mut resources.model_cache, &resources.head_file, resources.hair_file.as_deref()) {
 			resources.skin_renderer.draw(gl, model, &view_projection_elements, &model_elements, camera_x, camera_y, camera_z);
 		}
 
@@ -958,7 +1505,7 @@ impl OldFaceScene {
 			gl.depth_mask(false);
 			gl.disable(glow::CULL_FACE);
 		}
-		for model in [&mut resources.head_model, &mut resources.hair_model] {
+		for model in collect_active(&mut resources.model_cache, &resources.head_file, resources.hair_file.as_deref()) {
 			resources.skin_renderer.draw_blended(gl, model, &view_projection_elements, &model_elements, camera_x, camera_y, camera_z);
 		}
 		unsafe {
@@ -973,10 +1520,16 @@ impl OldFaceScene {
 		let specular_texture = resources.scene_render_target.get_color_texture(2);
 		let normal_texture = resources.scene_render_target.get_color_texture(3);
 		let scene_depth_texture = resources.scene_render_target.get_depth_texture();
-		resources.ambient_occlusion_effect.render(gl, scene_depth_texture, normal_texture, view_matrix.get_elements(), CAMERA_FIELD_OF_VIEW, aspect_ratio, CAMERA_NEAR_DISTANCE, CAMERA_FAR_DISTANCE);
-		let occlusion_result_texture = resources.ambient_occlusion_effect.get_result_texture();
-		resources.subsurface_effect.render(gl, irradiance_texture, scene_depth_texture, CAMERA_FIELD_OF_VIEW, aspect_ratio, CAMERA_NEAR_DISTANCE, CAMERA_FAR_DISTANCE);
-		let scattered_irradiance_texture = resources.subsurface_effect.get_result_texture();
+		let mut occlusion_result_texture = albedo_texture;
+		if values.toggles[TOGGLE_OCCLUSION] {
+			resources.ambient_occlusion_effect.render(gl, scene_depth_texture, normal_texture, view_matrix.get_elements(), CAMERA_FIELD_OF_VIEW, aspect_ratio, CAMERA_NEAR_DISTANCE, CAMERA_FAR_DISTANCE);
+			occlusion_result_texture = resources.ambient_occlusion_effect.get_result_texture();
+		}
+		let mut scattered_irradiance_texture = irradiance_texture;
+		if values.toggles[TOGGLE_SUBSURFACE] {
+			resources.subsurface_effect.render(gl, irradiance_texture, scene_depth_texture, CAMERA_FIELD_OF_VIEW, aspect_ratio, CAMERA_NEAR_DISTANCE, CAMERA_FAR_DISTANCE);
+			scattered_irradiance_texture = resources.subsurface_effect.get_result_texture();
+		}
 
 		// 4. 합성 → HDR. (조도 x 알베도 + 스펙큘러 + 배경)
 		resources.hdr_render_target.bind(gl);
@@ -991,7 +1544,7 @@ impl OldFaceScene {
 			gl.uniform_1_i32(combine_pass.get_uniform_location(gl, "specularTexture").as_ref(), 2);
 			gl.uniform_1_i32(combine_pass.get_uniform_location(gl, "occlusionTexture").as_ref(), 3);
 			gl.uniform_1_f32(combine_pass.get_uniform_location(gl, "aspectRatio").as_ref(), aspect_ratio as f32);
-			gl.uniform_1_f32(combine_pass.get_uniform_location(gl, "occlusionStrength").as_ref(), 1.15f32.min(1.0));
+			gl.uniform_1_f32(combine_pass.get_uniform_location(gl, "occlusionStrength").as_ref(), if values.toggles[TOGGLE_OCCLUSION] { (slider[SLIDER_OCCLUSION_STRENGTH] as f32).min(1.0) } else { 0.0 });
 			gl.active_texture(glow::TEXTURE0);
 			gl.bind_texture(glow::TEXTURE_2D, scattered_irradiance_texture);
 			gl.active_texture(glow::TEXTURE1);
@@ -1013,46 +1566,93 @@ impl OldFaceScene {
 
 		// 5. 블룸.
 		let hdr_color_texture = resources.hdr_render_target.get_color_texture(0);
-		resources.bloom_effect.render(gl, hdr_color_texture);
+		if values.toggles[TOGGLE_BLOOM] {
+			resources.bloom_effect.render(gl, hdr_color_texture);
+		}
 
-		// 6. 톤 매핑 합성 → LDR.
-		resources.ldr_render_target.bind(gl);
+		// 6. 톤 매핑 합성 → LDR(FXAA 켜짐) 또는 화면.
+		let use_antialias = slider[SLIDER_ANTIALIAS] > 0.0;
+		if use_antialias {
+			resources.ldr_render_target.bind(gl);
+		}
+		else {
+			unsafe {
+				gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+				gl.viewport(0, 0, canvas_width, canvas_height);
+			}
+		}
 		let composite_pass = &resources.composite_pass;
 		composite_pass.use_program(gl);
 		unsafe {
 			gl.uniform_1_i32(composite_pass.get_uniform_location(gl, "sceneTexture").as_ref(), 0);
 			gl.uniform_1_i32(composite_pass.get_uniform_location(gl, "bloomTexture").as_ref(), 1);
-			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "exposure").as_ref(), 0.95);
-			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "bloomStrength").as_ref(), 0.12);
-			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "vignetteStrength").as_ref(), 0.5);
-			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "grainStrength").as_ref(), 0.0);
+			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "exposure").as_ref(), slider[SLIDER_EXPOSURE] as f32);
+			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "bloomStrength").as_ref(), if values.toggles[TOGGLE_BLOOM] { slider[SLIDER_BLOOM_STRENGTH] as f32 } else { 0.0 });
+			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "vignetteStrength").as_ref(), slider[SLIDER_VIGNETTE] as f32);
+			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "grainStrength").as_ref(), slider[SLIDER_GRAIN] as f32);
 			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "elapsedTime").as_ref(), elapsed_time as f32);
 			gl.uniform_2_f32(composite_pass.get_uniform_location(gl, "resolution").as_ref(), render_width as f32, render_height as f32);
 			gl.active_texture(glow::TEXTURE0);
 			gl.bind_texture(glow::TEXTURE_2D, hdr_color_texture);
 			gl.active_texture(glow::TEXTURE1);
-			gl.bind_texture(glow::TEXTURE_2D, resources.bloom_effect.get_result_texture());
+			gl.bind_texture(glow::TEXTURE_2D, if values.toggles[TOGGLE_BLOOM] { resources.bloom_effect.get_result_texture() } else { hdr_color_texture });
 			gl.active_texture(glow::TEXTURE0);
 		}
 		composite_pass.draw(gl);
 
-		// 7. FXAA → 화면.
-		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-			gl.viewport(0, 0, canvas_width, canvas_height);
+		// 7. FXAA(와 샤픈) → 화면.
+		if use_antialias {
+			unsafe {
+				gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+				gl.viewport(0, 0, canvas_width, canvas_height);
+			}
+			let antialias_pass = &resources.antialias_pass;
+			antialias_pass.use_program(gl);
+			unsafe {
+				gl.uniform_1_i32(antialias_pass.get_uniform_location(gl, "sourceTexture").as_ref(), 0);
+				gl.uniform_2_f32(antialias_pass.get_uniform_location(gl, "texelSize").as_ref(), 1.0 / render_width as f32, 1.0 / render_height as f32);
+				gl.uniform_1_f32(antialias_pass.get_uniform_location(gl, "sharpenStrength").as_ref(), if slider[SLIDER_ANTIALIAS] >= 2.0 { 0.5 } else { 0.0 });
+				gl.active_texture(glow::TEXTURE1);
+				gl.bind_texture(glow::TEXTURE_2D, None);
+				gl.active_texture(glow::TEXTURE0);
+				gl.bind_texture(glow::TEXTURE_2D, resources.ldr_render_target.get_color_texture(0));
+			}
+			antialias_pass.draw(gl);
 		}
-		let antialias_pass = &resources.antialias_pass;
-		antialias_pass.use_program(gl);
-		unsafe {
-			gl.uniform_1_i32(antialias_pass.get_uniform_location(gl, "sourceTexture").as_ref(), 0);
-			gl.uniform_2_f32(antialias_pass.get_uniform_location(gl, "texelSize").as_ref(), 1.0 / render_width as f32, 1.0 / render_height as f32);
-			gl.uniform_1_f32(antialias_pass.get_uniform_location(gl, "sharpenStrength").as_ref(), 0.0);
-			gl.active_texture(glow::TEXTURE1);
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			gl.active_texture(glow::TEXTURE0);
-			gl.bind_texture(glow::TEXTURE_2D, resources.ldr_render_target.get_color_texture(0));
+
+		// 8. 와이어프레임. (화면 깊이 프리패스로 앞면 모서리만)
+		if values.toggles[TOGGLE_WIREFRAME] {
+			unsafe {
+				gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+				gl.viewport(0, 0, canvas_width, canvas_height);
+				gl.enable(glow::DEPTH_TEST);
+				gl.depth_mask(true);
+				gl.clear(glow::DEPTH_BUFFER_BIT);
+				gl.color_mask(false, false, false, false);
+				gl.enable(glow::POLYGON_OFFSET_FILL);
+				gl.polygon_offset(1.5, 2.0);
+			}
+			for model in collect_active(&mut resources.model_cache, &resources.head_file, resources.hair_file.as_deref()) {
+				resources.skin_renderer.draw_depth(gl, model, &view_projection_elements, &model_elements);
+			}
+			unsafe {
+				gl.disable(glow::POLYGON_OFFSET_FILL);
+				gl.color_mask(true, true, true, true);
+				gl.depth_mask(false);
+				gl.depth_func(glow::LEQUAL);
+				gl.enable(glow::BLEND);
+				gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+			}
+			for model in collect_active(&mut resources.model_cache, &resources.head_file, resources.hair_file.as_deref()) {
+				resources.skin_renderer.draw_wireframe(gl, model, &view_projection_elements, &model_elements, 0.91, 0.79, 0.54, 0.55);
+			}
+			unsafe {
+				gl.disable(glow::BLEND);
+				gl.depth_mask(true);
+				gl.depth_func(glow::LESS);
+				gl.disable(glow::DEPTH_TEST);
+			}
 		}
-		antialias_pass.draw(gl);
 		unsafe {
 			gl.disable(glow::CULL_FACE);
 		}
@@ -1107,7 +1707,7 @@ impl Scene for OldFaceScene {
 		match self.create_resources(graphic.get_gl()) {
 			Ok(resources) => {
 				self.load_seconds = load_start_instant.elapsed().as_secs_f64();
-				println!("oldface: 준비 {:.2}초, 머리 드로어블 {}, 머리카락 드로어블 {}", self.load_seconds, resources.head_model.get_drawable_list().len(), resources.hair_model.get_drawable_list().len());
+				println!("oldface: 준비 {:.2}초, 모델 {}", self.load_seconds, resources.model_cache.len());
 				self.resources = Some(resources);
 			}
 			Err(error) => {
@@ -1125,6 +1725,7 @@ impl Scene for OldFaceScene {
 		let view_size = engine.get_view_manager().get_view_size();
 		self.scene_base.get_root_mut().set_content_size(view_size);
 		self.layout_ui(view_size);
+		self.apply_intro();
 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 		self.touch_recognizer.tick_touch(self.scene_base.get_node_tree_mut(), engine);
 		if self.resources.is_none() {
@@ -1148,17 +1749,27 @@ impl Scene for OldFaceScene {
 
 		// 표정 / 머리 방향. (머리는 느린 배회, 원본 HEAD FOLLOW POINTER 기본 0)
 		self.update_expressions(delta_time);
-		let wander_yaw = 0.035 * (elapsed_time * 0.23).sin() + 0.02 * (elapsed_time * 0.61 + 1.3).sin();
-		let wander_pitch = 0.015 * (elapsed_time * 0.31 + 0.6).sin();
+		let head_follow = self.option_values.borrow().sliders[SLIDER_HEAD_FOLLOW];
+		let canvas_native_size = engine.get_view_manager().get_canvas_native_size();
+		let (follow_yaw, follow_pitch) = match (self.has_pointer_moved, self.pointer_position) {
+			(true, Some(position)) => ((position.x / canvas_native_size.x.max(1.0) * 2.0 - 1.0).clamp(-1.0, 1.0) * 0.42 * head_follow, (position.y / canvas_native_size.y.max(1.0) * 2.0 - 1.0).clamp(-1.0, 1.0) * 0.22 * head_follow),
+			_ => (0.0, 0.0),
+		};
+		let wander_yaw = 0.035 * (elapsed_time * 0.23).sin() + 0.02 * (elapsed_time * 0.61 + 1.3).sin() + follow_yaw;
+		let wander_pitch = 0.015 * (elapsed_time * 0.31 + 0.6).sin() + follow_pitch;
 		let head_approach = (delta_time * 2.2).min(1.0);
 		self.head_yaw += (wander_yaw.clamp(-0.6, 0.6) - self.head_yaw) * head_approach;
 		self.head_pitch += (wander_pitch.clamp(-0.35, 0.35) - self.head_pitch) * head_approach;
 
+		self.apply_option_changes(engine);
+		self.refresh_option_labels();
+		let values = self.option_values.borrow().clone();
 		if let Some(resources) = &mut self.resources {
-			update_wrinkle_weights(resources);
-			OldFaceScene::apply_render_parameters(resources, elapsed_time);
-			resources.head_model.update(delta_time);
-			resources.hair_model.update(delta_time);
+			update_wrinkle_weights(resources, values.toggles[TOGGLE_WRINKLE]);
+			OldFaceScene::apply_render_parameters(resources, elapsed_time, &values);
+			for model in collect_active(&mut resources.model_cache, &resources.head_file, resources.hair_file.as_deref()) {
+				model.update(delta_time);
+			}
 		}
 	}
 
@@ -1238,10 +1849,13 @@ fn read_unit_weight(resources: &FaceResources, unit_name: &str) -> f64 {
 //==============================================================================
 // 주름 가중치 갱신. (원본 updateWrinkleWeights, 셰이프 → 영역 값 합 → 마스크 채널마다 주름 맵 1 / 2 / 3 기여)
 //==============================================================================
-fn update_wrinkle_weights(resources: &mut FaceResources) {
+fn update_wrinkle_weights(resources: &mut FaceResources, is_enabled: bool) {
 	let mut region_values: Vec<(String, f64)> = Vec::new();
 	let shape_table = resources.wrinkle_table.get("shapes");
 	for (unit_index, unit_name) in resources.expression_unit_names.iter().enumerate() {
+		if !is_enabled {
+			break;
+		}
 		let weight = resources.current_weights[unit_index] as f64;
 		let region_table = match shape_table.and_then(|table| table.get(unit_name)).and_then(Value::as_object) {
 			Some(region_table) => {
