@@ -36,7 +36,7 @@ use crate::core::graphic::GlTexture;
 use crate::graphics3d::camera3d::Camera3D;
 use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowCache, ShadowCasterRecord, ShadowMap, ShadowRenderTarget, ShadowUpdateMode};
 use crate::graphics3d::toon::toonmaterial::ToonBlendMode;
-use crate::graphics3d::toon::toonrenderer::{is_same_batch_state, read_instance_buffer_sphere, read_matrix_determinant, ToonDrawOptions, ToonInstance, ToonInstanceBuffer, ToonMesh, ToonRenderer, DRAW_PART_BODY, DRAW_PART_OUTLINE, DRAW_PART_ALL};
+use crate::graphics3d::toon::toonrenderer::{is_same_batch_state, read_instance_buffer_sphere, read_matrix_determinant, ToonDrawOptions, ToonInstance, ToonInstanceBuffer, ToonMesh, ToonProgramRequest, ToonProgramRequests, ToonRenderer, DRAW_PART_BODY, DRAW_PART_OUTLINE, DRAW_PART_ALL};
 use crate::graphics3d::toon::toonscreenoutline::{ToonLineDrawOptions, ToonScreenOutline, TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID};
 use crate::graphics3d::toon::toonpostprocess::ToonPostProcess;
 
@@ -500,6 +500,29 @@ impl<'a> ToonDrawQueue<'a> {
 		};
 		*self.opaque_index_list.get_mut() = None;
 		self.item_list.push(ToonDrawItem { mesh, model_matrix: Matrix4::create_identity(), instance_list: None, instance_buffer: Some(instance_buffer), instance_count, options, is_transparent: is_transparent_options(&options), depth_position, material_block: Cell::new(0), mirror_sign: Cell::new(0) });
+	}
+
+	//==============================================================================
+	/// 담은 것이 그릴 때 쓸 프로그램 변형 읽기. (렌더러의 prewarm_draw_queue 가 부른다, 그리지 않는다, 원본 readProgramRequests)
+	/// - 같은 변형은 한 번만 담는다. (머티리얼, 인스턴스 꼴, 몸 기능 비트가 같은 것)
+	//==============================================================================
+	pub(crate) fn read_program_requests(&self, renderer: &ToonRenderer) -> ToonProgramRequests<'a> {
+		let mut request_list: Vec<ToonProgramRequest<'a>> = Vec::new();
+		let mut key_set: std::collections::HashSet<(u32, u32, Option<u32>)> = std::collections::HashSet::new();
+		for item in self.item_list.iter() {
+			let options = &item.options;
+			let light_set = options.light_set.unwrap_or_else(|| renderer.get_light_set());
+			let feature_mask = if options.is_body_drawn { Some(renderer.read_feature_mask(options, light_set)) } else { None };
+			let material_id = options.material.map(|material| material.get_id()).unwrap_or(0);
+			let instance_layout = item.instance_buffer.map(|instance_buffer| instance_buffer.get_layout());
+			let instance_layout_id = instance_layout.map(|instance_layout| instance_layout.get_id()).unwrap_or(0);
+			if !key_set.insert((material_id, instance_layout_id, feature_mask)) {
+				continue;
+			}
+			request_list.push(ToonProgramRequest { material: options.material, instance_layout, feature_mask });
+		}
+		let is_ambient_occlusion = self.post_process.borrow().as_ref().is_some_and(|post_process| post_process.is_ambient_occlusion_enabled());
+		ToonProgramRequests { is_ambient_occlusion, request_list }
 	}
 
 	//==============================================================================

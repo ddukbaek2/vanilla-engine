@@ -51,7 +51,18 @@ pub struct ShaderProgram {
 	program: crate::core::graphic::GlProgram,
 	uniform_location_table: RefCell<HashMap<String, Option<crate::core::graphic::GlUniformLocation>>>,
 	attribute_location_table: RefCell<HashMap<String, Option<u32>>>,
+	/// 짓기를 맡긴 채 아직 끝내지 않은 셰이더. (맡기지 않았거나 끝냈으면 None, 원본 pendingVertexShader, pendingFragmentShader)
+	pending_shader_list: RefCell<Option<(crate::core::graphic::GlShader, crate::core::graphic::GlShader)>>,
 }
+
+// 시험이 지은 프로그램 수를 셀 때. (그리기 프레임이 프로그램을 짓는지 보는 시험)
+#[cfg(test)]
+thread_local! {
+	pub(crate) static BUILT_PROGRAM_COUNT: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// 링크가 끝났는지 묻는 값. (KHR_parallel_shader_compile 의 COMPLETION_STATUS_KHR)
+const COMPLETION_STATUS: u32 = 0x91B1;
 
 impl ShaderProgram {
 	//==============================================================================
@@ -82,6 +93,8 @@ impl ShaderProgram {
 	/// 링크한 프로그램. 셰이더 컴파일이나 프로그램 링크에 실패하면 정보 로그를 담은 Err, GL 객체를 만들지 못하면 그 오류 글을 담은 Err.
 	//==============================================================================
 	pub fn create_with_attribute_locations(gl: &GlContext, vertex_shader_source: &str, fragment_shader_source: &str, attribute_location_list: &[(&str, u32)]) -> Result<ShaderProgram, String> {
+		#[cfg(test)]
+		BUILT_PROGRAM_COUNT.with(|count| count.set(count.get() + 1));
 		let desktop_vertex_shader_source = convert_to_desktop_source(vertex_shader_source);
 		let desktop_fragment_shader_source = convert_to_desktop_source(fragment_shader_source);
 		unsafe {
@@ -125,8 +138,177 @@ impl ShaderProgram {
 				program,
 				uniform_location_table: RefCell::new(HashMap::new()),
 				attribute_location_table: RefCell::new(HashMap::new()),
+				pending_shader_list: RefCell::new(None),
 			})
 		}
+	}
+
+	//==============================================================================
+	/// 컴파일과 링크를 맡기기만 하고 결과는 확인하지 않는 생성. (원본 생성자의 isDeferred, finish_build 를 불러야 쓸 수 있다)
+	/// - KHR_parallel_shader_compile 이 있으면 드라이버가 뒤에서 짓고 is_build_complete 로 주 스레드를 막지 않고 끝을 물을 수 있다.
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `vertex_shader_source`: 버텍스 셰이더 소스. (GLSL ES 3.00)
+	/// - `fragment_shader_source`: 프래그먼트 셰이더 소스. (GLSL ES 3.00)
+	/// - `attribute_location_list`: (어트리뷰트 이름, 위치) 목록. (링크 전에 건다)
+	///
+	/// # 돌려줌
+	/// 맡긴 프로그램. 컴파일이나 링크 오류는 finish_build 가 알린다. GL 객체를 만들지 못하면 그 오류 글을 담은 Err.
+	///
+	/// # 예제
+	/// 맡겨 두었다가 끝나면 끝내 쓰기
+	/// ```rust,no_run
+	/// use vanilla::{Graphic, ShaderProgram};
+	///
+	/// const VERTEX_SHADER_SOURCE: &str = "#version 300 es
+	/// in vec2 vertexPosition;
+	/// void main() {
+	/// 	gl_Position = vec4(vertexPosition, 0.0, 1.0);
+	/// }
+	/// ";
+	///
+	/// const FRAGMENT_SHADER_SOURCE: &str = "#version 300 es
+	/// precision highp float;
+	/// out vec4 outputColor;
+	/// void main() {
+	/// 	outputColor = vec4(1.0);
+	/// }
+	/// ";
+	///
+	/// fn build(graphic: &Graphic) -> Result<ShaderProgram, String> {
+	/// 	let gl = graphic.get_gl();
+	/// 	let shader_program = ShaderProgram::create_deferred(gl, VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE, &[("vertexPosition", 0)])?;
+	/// 	assert!(shader_program.is_deferred());
+	/// 	// Finish it once it is done. (finish_build waits until done if it is not)
+	/// 	if shader_program.is_build_complete(gl) {
+	/// 		shader_program.finish_build(gl)?;
+	/// 	}
+	/// 	Ok(shader_program)
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn create_deferred(gl: &GlContext, vertex_shader_source: &str, fragment_shader_source: &str, attribute_location_list: &[(&str, u32)]) -> Result<ShaderProgram, String> {
+		#[cfg(test)]
+		BUILT_PROGRAM_COUNT.with(|count| count.set(count.get() + 1));
+		let desktop_vertex_shader_source = convert_to_desktop_source(vertex_shader_source);
+		let desktop_fragment_shader_source = convert_to_desktop_source(fragment_shader_source);
+		unsafe {
+			let vertex_shader = gl.create_shader(glow::VERTEX_SHADER)?;
+			gl.shader_source(vertex_shader, &desktop_vertex_shader_source);
+			gl.compile_shader(vertex_shader);
+			let fragment_shader = match gl.create_shader(glow::FRAGMENT_SHADER) {
+				Ok(fragment_shader) => {
+					fragment_shader
+				}
+				Err(error) => {
+					gl.delete_shader(vertex_shader);
+					return Err(error);
+				}
+			};
+			gl.shader_source(fragment_shader, &desktop_fragment_shader_source);
+			gl.compile_shader(fragment_shader);
+			let program = match crate::core::glstatecache::create_program(gl) {
+				Ok(program) => {
+					program
+				}
+				Err(error) => {
+					gl.delete_shader(vertex_shader);
+					gl.delete_shader(fragment_shader);
+					return Err(error);
+				}
+			};
+			gl.attach_shader(program, vertex_shader);
+			gl.attach_shader(program, fragment_shader);
+			for (attribute_name, attribute_location) in attribute_location_list {
+				gl.bind_attrib_location(program, *attribute_location, attribute_name);
+			}
+			crate::core::glstatecache::link_program(gl, program);
+			Ok(ShaderProgram {
+				program,
+				uniform_location_table: RefCell::new(HashMap::new()),
+				attribute_location_table: RefCell::new(HashMap::new()),
+				pending_shader_list: RefCell::new(Some((vertex_shader, fragment_shader))),
+			})
+		}
+	}
+
+	//==============================================================================
+	/// 병렬 셰이더 컴파일 확장이 있는지. (원본 isParallelCompileSupported, KHR_parallel_shader_compile, 웹은 같은 확장)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	///
+	/// # 돌려줌
+	/// 있으면 true. (있으면 컴파일과 링크를 맡기고 주 스레드를 막지 않고 끝을 물을 수 있다)
+	//==============================================================================
+	pub fn is_parallel_compile_supported(gl: &GlContext) -> bool {
+		gl.supported_extensions().iter().any(|extension_name| extension_name.contains("parallel_shader_compile"))
+	}
+
+	//==============================================================================
+	/// 짓기를 맡긴 채 아직 끝내지 않았는지. (create_deferred 로 지었고 finish_build 를 아직 안 불렀으면 true)
+	//==============================================================================
+	pub fn is_deferred(&self) -> bool {
+		self.pending_shader_list.borrow().is_some()
+	}
+
+	//==============================================================================
+	/// 맡긴 짓기가 끝났는지. (원본 isBuildComplete, 맡기지 않았거나 이미 끝냈으면 true, 확장이 없으면 true, 물을 뿐 멈추지 않는다)
+	///
+	/// # 인자
+	/// - `gl`: 프로그램을 만든 GL 컨텍스트.
+	///
+	/// # 돌려줌
+	/// 끝났으면 true. (true 여도 finish_build 로 결과를 확인해야 쓴다)
+	//==============================================================================
+	pub fn is_build_complete(&self, gl: &GlContext) -> bool {
+		if self.pending_shader_list.borrow().is_none() {
+			return true;
+		}
+		if !ShaderProgram::is_parallel_compile_supported(gl) {
+			return true;
+		}
+		unsafe {
+			gl.get_program_parameter_i32(self.program, COMPLETION_STATUS) != 0
+		}
+	}
+
+	//==============================================================================
+	/// 맡긴 짓기 끝내기. (원본 finishBuild, 컴파일과 링크 결과를 확인한다, 안 끝났으면 끝날 때까지 기다린다, 맡기지 않았거나 이미 끝냈으면 아무것도 하지 않는다)
+	/// - 실패하면 셰이더와 프로그램을 지우고 정보 로그를 담은 Err 를 돌려준다. (생성자와 같은 글)
+	///
+	/// # 인자
+	/// - `gl`: 프로그램을 만든 GL 컨텍스트.
+	///
+	/// # 돌려줌
+	/// 성공하면 Ok. 컴파일이나 링크에 실패하면 Err.
+	//==============================================================================
+	pub fn finish_build(&self, gl: &GlContext) -> Result<(), String> {
+		let Some((vertex_shader, fragment_shader)) = self.pending_shader_list.borrow_mut().take() else {
+			return Ok(());
+		};
+		unsafe {
+			let mut error_message = None;
+			if !gl.get_shader_compile_status(vertex_shader) {
+				error_message = Some(format!("셰이더 컴파일 실패: {}", gl.get_shader_info_log(vertex_shader)));
+			}
+			else if !gl.get_shader_compile_status(fragment_shader) {
+				error_message = Some(format!("셰이더 컴파일 실패: {}", gl.get_shader_info_log(fragment_shader)));
+			}
+			else if !crate::core::glstatecache::get_program_link_status(gl, self.program) {
+				error_message = Some(format!("셰이더 프로그램 링크 실패: {}", gl.get_program_info_log(self.program)));
+			}
+			gl.detach_shader(self.program, vertex_shader);
+			gl.detach_shader(self.program, fragment_shader);
+			gl.delete_shader(vertex_shader);
+			gl.delete_shader(fragment_shader);
+			if let Some(error_message) = error_message {
+				crate::core::glstatecache::delete_program(gl, self.program);
+				return Err(error_message);
+			}
+		}
+		Ok(())
 	}
 
 	//==============================================================================

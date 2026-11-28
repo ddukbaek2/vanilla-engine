@@ -84,6 +84,7 @@ use crate::core::colorspace::{add_color_space_define, read_engine_color_space, C
 use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowAtlasLight, ShadowMap, SHADOW_ATLAS_MAXIMUM_LIGHTS};
 use crate::graphics3d::toon::meshbuilder::{ToonMeshArrays, SKIN_FLOAT_COUNT, VERTEX_FLOAT_COUNT};
 use crate::graphics3d::toon::toonlightset::{ToonLightColorUsage, ToonLightModel, ToonLightSet, ToonPointLight, ToonShade, TOON_MAXIMUM_BAND_STEPS, TOON_MAXIMUM_POINT_LIGHTS};
+use crate::graphics3d::toon::toondrawqueue::ToonDrawQueue;
 use crate::graphics3d::toon::toonmaterial::{ToonBlendMode, ToonBufferUsage, ToonMatcapBlend, ToonInstanceLayout, ToonMaterial, ToonMaterialChunks, TOON_INSTANCE_MATRIX_NAME, TOON_INSTANCE_TINT_NAME};
 
 /// 한 모형이 쓰는 뼈대 수의 상한. (셰이더의 유니폼 배열 크기)
@@ -438,7 +439,13 @@ const TOON_FEATURE_SHADE_RIM: u32 = 256;
 const TOON_FEATURE_SHADOW: u32 = 512;
 const TOON_FEATURE_INTENSITY_LIMIT: u32 = 1024;
 /// 모든 갈래를 쓰는 비트. (기본 몸 프로그램)
+/// 미리 짓기가 한 걸음에 끝내는 프로그램 수. (끝내기의 유니폼 칸 읽기를 프레임에 나눈다, 원본 PREWARM_FINISH_PER_STEP)
+const PREWARM_FINISH_PER_STEP: usize = 3;
 const TOON_FEATURE_ALL: u32 = 2047;
+/// 그리기 꼴이 정하는 기능 비트. (텍스처 다섯과 그림자 받기, 나머지는 빛 묶음이 정한다, 원본 TOON_FEATURE_DRAW_BITS)
+const TOON_FEATURE_DRAW_BITS: u32 = TOON_FEATURE_BASE_TEXTURE | TOON_FEATURE_EMISSIVE_TEXTURE | TOON_FEATURE_DECAL_TEXTURE | TOON_FEATURE_MATCAP | TOON_FEATURE_ANGEL_RING | TOON_FEATURE_SHADOW;
+/// prewarm_draw_queue_with_options 의 light_feature_list 이름과 기능 비트. (원본 TOON_FEATURE_LIGHT_BIT_TABLE)
+const TOON_FEATURE_LIGHT_BIT_TABLE: [(&str, u32); 5] = [("rampTexture", TOON_FEATURE_RAMP_TEXTURE), ("shadeStops", TOON_FEATURE_SHADE_STOPS), ("rim", TOON_FEATURE_RIM), ("shadeRim", TOON_FEATURE_SHADE_RIM), ("intensityLimit", TOON_FEATURE_INTENSITY_LIMIT)];
 
 /// 몸을 그리는 조각 셰이더의 머리. (유니폼, 표면과 빛 구조, 공용 함수)
 const SOLID_FRAGMENT_HEAD: &str = concat!("#version 300 es
@@ -1944,6 +1951,8 @@ pub(crate) fn count_instance_upload() {
 #[cfg(test)]
 thread_local! {
 	pub(crate) static DISABLE_FEATURE_VARIANTS: Cell<bool> = const { Cell::new(false) };
+	/// 시험이 병렬 컴파일 확장 없이도 맡기는 길로 미리 짓게 할 때.
+	pub(crate) static FORCE_DEFERRED_PREWARM: Cell<bool> = const { Cell::new(false) };
 	pub(crate) static BUILT_FEATURE_VARIANTS: Cell<u32> = const { Cell::new(0) };
 }
 
@@ -2167,6 +2176,139 @@ impl ToonProgramEntry {
 }
 
 //==============================================================================
+/// 미리 짓기가 맡긴 칸의 열쇠. (원본 #pendingBuilds 의 열쇠 "번호/번호", "번호/번호/ao", "번호/번호/v비트")
+//==============================================================================
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum PendingKey {
+	/// (머티리얼 번호, 인스턴스 꼴 번호) 의 세 프로그램.
+	Set((u32, u32)),
+	/// (머티리얼 번호, 인스턴스 꼴 번호) 의 모서리 어둠 몸 프로그램.
+	AmbientOcclusion((u32, u32)),
+	/// (머티리얼 번호, 인스턴스 꼴 번호, 모서리 어둠인지, 기능 비트) 의 기능 갈래 몸 프로그램.
+	Variant((u32, u32, bool, u32)),
+}
+
+//==============================================================================
+/// 컴파일을 맡긴 프로그램. (칸이 세 프로그램이면 몸, 바깥선, 깊이 순서, 아니면 몸 하나)
+//==============================================================================
+struct PendingBuild {
+	program_list: Vec<ShaderProgram>,
+	/// 실패를 알릴 때 쓸 이름. (머티리얼 이름이나 번호 둘)
+	name: String,
+}
+
+//==============================================================================
+/// 그리기 줄이 그릴 때 쓸 프로그램 변형 하나. (ToonDrawQueue::read_program_requests 의 결과, 원본 { material, instanceLayout, featureMask, isBodyDrawn })
+//==============================================================================
+pub(crate) struct ToonProgramRequest<'a> {
+	pub(crate) material: Option<&'a ToonMaterial>,
+	/// 담은 것이 쓰는 인스턴스 꼴. (그리기 줄이 인스턴스 버퍼를 담는 길이 생기면 그 꼴, 지금은 늘 None)
+	pub(crate) instance_layout: Option<&'a ToonInstanceLayout>,
+	/// 몸 기능 비트. (몸을 그리지 않으면 None)
+	pub(crate) feature_mask: Option<u32>,
+}
+
+//==============================================================================
+/// 그리기 줄이 쓸 프로그램 변형 목록. (같은 변형은 한 번만)
+//==============================================================================
+pub(crate) struct ToonProgramRequests<'a> {
+	/// 줄이 모서리 어둠을 켠 것.
+	pub(crate) is_ambient_occlusion: bool,
+	pub(crate) request_list: Vec<ToonProgramRequest<'a>>,
+}
+
+//==============================================================================
+/// 미리 짓기에 더할 조합 목록. (원본 prewarmDrawQueue 의 options, 기본값은 아무것도 더하지 않음)
+///
+/// # 예제
+/// ```rust
+/// use vanilla::ToonProgramPrewarmOptions;
+///
+/// let options = ToonProgramPrewarmOptions::default();
+/// assert!(options.light_feature_list.is_empty());
+/// ```
+//==============================================================================
+#[derive(Clone, Copy, Default)]
+pub struct ToonProgramPrewarmOptions<'a, 'q> {
+	/// 더 읽을 그리기 줄. (나중에 나올 재질이나 인스턴스 꼴을 담은 줄, 원본 queueList)
+	pub queue_list: &'a [&'a ToonDrawQueue<'q>],
+	/// 그리기 줄의 모든 그리기에 더 맞춰 볼 빛 묶음. (지금 값의 기능 비트를 쓴다, 원본 lightSetList)
+	pub light_set_list: &'a [&'a ToonLightSet],
+	/// 더 맞춰 볼 빛 묶음 쪽 기능 조합. (조합마다 "rampTexture", "shadeStops", "rim", "shadeRim", "intensityLimit" 중 더 켜질 것의 이름, 원본 lightFeatureList)
+	pub light_feature_list: &'a [&'a [&'a str]],
+}
+
+//==============================================================================
+/// 프로그램 변형 미리 짓기의 진행. (ToonRenderer::prewarm_draw_queue 의 결과, 원본 ToonProgramPrewarm)
+/// - 병렬 컴파일 확장이 없으면 만들어질 때 이미 끝나 있다. 있으면 맡긴 컴파일을 step 으로 프레임마다 나눠 끝낸다.
+///
+/// # 예제
+/// 불러오는 동안 프레임마다 한 걸음씩 끝내고 끝나면 시작하기
+/// ```rust,no_run
+/// use vanilla::{ToonDrawQueue, ToonRenderer};
+///
+/// fn update_loading(gl: &vanilla::GlContext, renderer: &mut ToonRenderer, queue: &ToonDrawQueue) -> bool {
+/// 	let mut prewarm = renderer.prewarm_draw_queue(gl, queue);
+/// 	while !prewarm.step(gl, renderer) {
+/// 		// Call again each frame.
+/// 	}
+/// 	prewarm.is_ready()
+/// }
+/// ```
+//==============================================================================
+pub struct ToonProgramPrewarm {
+	unit_list: Vec<PendingKey>,
+	is_ready: bool,
+}
+
+impl ToonProgramPrewarm {
+	//==============================================================================
+	/// 한 걸음. (끝난 컴파일을 끝내 프로그램 칸에 넣는다, 한 걸음에 몇 개까지만, 프레임마다 부른다)
+	///
+	/// # 인자
+	/// - `gl`: 렌더러를 지은 GL 컨텍스트.
+	/// - `renderer`: prewarm_draw_queue 를 부른 렌더러.
+	///
+	/// # 돌려줌
+	/// 모두 끝났으면 true.
+	//==============================================================================
+	pub fn step(&mut self, gl: &crate::GlContext, renderer: &mut ToonRenderer) -> bool {
+		if self.is_ready {
+			return true;
+		}
+		if renderer.advance_prewarm(gl, &mut self.unit_list, PREWARM_FINISH_PER_STEP) {
+			self.is_ready = true;
+		}
+		self.is_ready
+	}
+
+	//==============================================================================
+	/// 다 지었는지. (그려도 되지만 안 지은 것은 그 자리에서 짓는다)
+	///
+	/// # 돌려줌
+	/// 모두 지었으면 true.
+	//==============================================================================
+	pub fn is_ready(&self) -> bool {
+		self.is_ready
+	}
+
+	//==============================================================================
+	/// 다 지을 때까지 기다리기. (남은 컴파일을 이 호출 안에서 모두 끝낸다)
+	///
+	/// # 인자
+	/// - `gl`: 렌더러를 지은 GL 컨텍스트.
+	/// - `renderer`: prewarm_draw_queue 를 부른 렌더러.
+	//==============================================================================
+	pub fn wait(&mut self, gl: &crate::GlContext, renderer: &mut ToonRenderer) {
+		if self.is_ready {
+			return;
+		}
+		renderer.advance_prewarm(gl, &mut self.unit_list, usize::MAX);
+		self.is_ready = true;
+	}
+}
+
+//==============================================================================
 /// 머티리얼과 인스턴스 꼴 하나의 세 프로그램.
 //==============================================================================
 struct ToonProgramSet {
@@ -2262,8 +2404,12 @@ pub struct ToonRenderer {
 	ambient_occlusion_program_table: HashMap<(u32, u32), Option<ToonProgramEntry>>,
 	/// (머티리얼 번호, 인스턴스 꼴 번호, 모서리 어둠인지, 기능 비트) → 쓰는 기능 갈래만 남긴 몸 프로그램. (원본 programSet.variants, 짓지 못했으면 None 이고 기본 몸 칸으로 그린다)
 	solid_variant_table: HashMap<(u32, u32, bool, u32), Option<ToonProgramEntry>>,
+	/// 미리 짓기가 컴파일을 맡긴 채 아직 끝내지 않은 프로그램. (원본 #pendingBuilds, 칸의 열쇠 → 프로그램, 그릴 때 꺼내 끝내 쓴다, destroy 가 &self 라 RefCell)
+	pending_build_table: RefCell<HashMap<PendingKey, PendingBuild>>,
 	/// 기능 비트를 셈한 빛 묶음 번호와 판 번호와 빛 묶음 쪽 비트. (원본 #featureLightSet, #featureLightVersion, #featureLightMask)
 	feature_light_cache: Cell<(u32, u64, u32)>,
+	/// 처음 보는 몸 변형을 병렬 컴파일에 맡기고 그동안 기본 몸으로 그릴지. (원본 #isAsyncProgramBuild, 기본 true, 병렬 확장이 있을 때만)
+	is_async_program_build: bool,
 }
 
 //==============================================================================
@@ -2782,6 +2928,8 @@ impl ToonRenderer {
 			ambient_occlusion_input: None,
 			ambient_occlusion_program_table: HashMap::new(),
 			solid_variant_table: HashMap::new(),
+			is_async_program_build: true,
+			pending_build_table: RefCell::new(HashMap::new()),
 			feature_light_cache: Cell::new((0, u64::MAX, 0)),
 		})
 	}
@@ -2790,31 +2938,57 @@ impl ToonRenderer {
 	/// 세 프로그램 짓기. (짓지 못하면 Err, 몸 프로그램의 텍스처 유닛을 정해 둔다)
 	//==============================================================================
 	fn create_program_set(gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, color_space: ColorSpace) -> Result<ToonProgramSet, String> {
+		let program_list = ToonRenderer::start_program_set(gl, material, instance_layout, color_space, false)?;
+		ToonRenderer::finish_program_set(gl, program_list)
+	}
+
+	//==============================================================================
+	/// 세 프로그램의 컴파일 시작. (원본 startProgramList, 몸, 바깥선, 깊이 순서, is_deferred 면 결과를 확인하지 않고 맡기기만 한다, 아니면 짓고 확인한다)
+	//==============================================================================
+	fn start_program_set(gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, color_space: ColorSpace, is_deferred: bool) -> Result<Vec<ShaderProgram>, String> {
 		let sources = compose_toon_program_sources(material, instance_layout, false, color_space, &[]);
 		let attribute_locations: Vec<(&str, u32)> = sources.attribute_locations.iter().map(|(name, location)| (name.as_str(), *location)).collect();
-		let solid_program = ShaderProgram::create_with_attribute_locations(gl, &sources.solid_vertex_shader, &sources.solid_fragment_shader, &attribute_locations)?;
-		let outline_program = match ShaderProgram::create_with_attribute_locations(gl, &sources.outline_vertex_shader, &sources.outline_fragment_shader, &attribute_locations) {
-			Ok(program) => {
-				program
+		let mut program_list: Vec<ShaderProgram> = Vec::with_capacity(3);
+		for (vertex_shader_source, fragment_shader_source) in [(&sources.solid_vertex_shader, &sources.solid_fragment_shader), (&sources.outline_vertex_shader, &sources.outline_fragment_shader), (&sources.depth_vertex_shader, &sources.depth_fragment_shader)] {
+			let result = if is_deferred {
+				ShaderProgram::create_deferred(gl, vertex_shader_source, fragment_shader_source, &attribute_locations)
 			}
-			Err(error) => {
-				unsafe {
-					crate::core::glstatecache::delete_program(gl, solid_program.get_program());
+			else {
+				ShaderProgram::create_with_attribute_locations(gl, vertex_shader_source, fragment_shader_source, &attribute_locations)
+			};
+			match result {
+				Ok(program) => {
+					program_list.push(program);
+				}
+				Err(error) => {
+					ToonRenderer::delete_programs(gl, &program_list);
+					return Err(error);
+				}
+			}
+		}
+		Ok(program_list)
+	}
+
+	//==============================================================================
+	/// 맡긴 세 프로그램 끝내기. (원본 createProgramSet 의 finishBuild 와 유니폼 정하기, 실패하면 셋 다 지우고 Err)
+	//==============================================================================
+	fn finish_program_set(gl: &crate::GlContext, program_list: Vec<ShaderProgram>) -> Result<ToonProgramSet, String> {
+		for (index, program) in program_list.iter().enumerate() {
+			if let Err(error) = program.finish_build(gl) {
+				// 실패한 프로그램은 finish_build 가 지웠다. 나머지를 지운다.
+				for (other_index, other) in program_list.iter().enumerate() {
+					if other_index != index {
+						unsafe {
+							crate::core::glstatecache::delete_program(gl, other.get_program());
+						}
+					}
 				}
 				return Err(error);
 			}
-		};
-		let depth_program = match ShaderProgram::create_with_attribute_locations(gl, &sources.depth_vertex_shader, &sources.depth_fragment_shader, &attribute_locations) {
-			Ok(program) => {
-				program
-			}
-			Err(error) => {
-				unsafe {
-					crate::core::glstatecache::delete_program(gl, solid_program.get_program());
-					crate::core::glstatecache::delete_program(gl, outline_program.get_program());
-				}
-				return Err(error);
-			}
+		}
+		let mut program_iterator = program_list.into_iter();
+		let (Some(solid_program), Some(outline_program), Some(depth_program)) = (program_iterator.next(), program_iterator.next(), program_iterator.next()) else {
+			return Err(String::from("셰이더 프로그램 셋이 아님"));
 		};
 		unsafe {
 			let previous_program = crate::graphics3d::read_program_binding(gl);
@@ -2834,6 +3008,17 @@ impl ToonRenderer {
 			outline: ToonProgramEntry::new(outline_program),
 			depth: ToonProgramEntry::new(depth_program),
 		})
+	}
+
+	//==============================================================================
+	/// 프로그램 여럿 지우기. (맡겨 두었다가 쓰지 않게 된 것, 짓다가 실패한 것)
+	//==============================================================================
+	fn delete_programs(gl: &crate::GlContext, program_list: &[ShaderProgram]) {
+		for program in program_list {
+			unsafe {
+				crate::core::glstatecache::delete_program(gl, program.get_program());
+			}
+		}
 	}
 
 	//==============================================================================
@@ -2857,12 +3042,24 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
-	/// 몸 프로그램 하나 짓기. (원본 createProgramSet 의 baseProgramSet 이 있는 길과 prepareSolidProgram, 몸만 짓고 텍스처 유닛과 모서리 어둠 유닛을 정해 둔다, 모서리 어둠 몸이나 기능 갈래를 뺀 몸)
+	/// 몸 프로그램 하나의 컴파일 시작. (원본 startSolidVariant, 모서리 어둠 몸이나 기능 갈래를 뺀 몸, is_deferred 면 결과를 확인하지 않고 맡기기만 한다)
 	//==============================================================================
-	fn create_solid_entry(gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, is_ambient_occlusion: bool, color_space: ColorSpace, disabled_features: &[&str]) -> Result<ToonProgramEntry, String> {
+	fn start_solid_program(gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, is_ambient_occlusion: bool, color_space: ColorSpace, disabled_features: &[&str], is_deferred: bool) -> Result<ShaderProgram, String> {
 		let sources = compose_toon_program_sources(material, instance_layout, is_ambient_occlusion, color_space, disabled_features);
 		let attribute_locations: Vec<(&str, u32)> = sources.attribute_locations.iter().map(|(name, location)| (name.as_str(), *location)).collect();
-		let solid_program = ShaderProgram::create_with_attribute_locations(gl, &sources.solid_vertex_shader, &sources.solid_fragment_shader, &attribute_locations)?;
+		if is_deferred {
+			ShaderProgram::create_deferred(gl, &sources.solid_vertex_shader, &sources.solid_fragment_shader, &attribute_locations)
+		}
+		else {
+			ShaderProgram::create_with_attribute_locations(gl, &sources.solid_vertex_shader, &sources.solid_fragment_shader, &attribute_locations)
+		}
+	}
+
+	//==============================================================================
+	/// 맡긴 몸 프로그램 끝내기. (원본 createProgramSet 의 baseProgramSet 이 있는 길과 prepareSolidProgram, 결과를 확인하고 텍스처 유닛과 모서리 어둠 유닛을 정해 둔다, 실패하면 지우고 Err)
+	//==============================================================================
+	fn finish_solid_entry(gl: &crate::GlContext, solid_program: ShaderProgram, is_ambient_occlusion: bool) -> Result<ToonProgramEntry, String> {
+		solid_program.finish_build(gl)?;
 		unsafe {
 			let previous_program = crate::graphics3d::read_program_binding(gl);
 			solid_program.use_program(gl);
@@ -2880,6 +3077,20 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
+	/// 프로그램 이름. (실패를 알릴 때의 이름, 머티리얼 이름이 없으면 번호 둘)
+	//==============================================================================
+	fn read_program_name(material: Option<&ToonMaterial>, key: (u32, u32)) -> String {
+		material.map(|material| String::from(material.get_name())).filter(|name| !name.is_empty()).unwrap_or_else(|| format!("{}/{}", key.0, key.1))
+	}
+
+	//==============================================================================
+	/// 미리 짓기가 맡겨 둔 몸 프로그램 꺼내기. (원본 takePendingBuild, 꺼내면 맡긴 칸에서 빠진다, 없으면 None)
+	//==============================================================================
+	fn take_pending_solid(&self, pending_key: PendingKey) -> Option<ShaderProgram> {
+		self.pending_build_table.borrow_mut().remove(&pending_key).and_then(|pending_build| pending_build.program_list.into_iter().next())
+	}
+
+	//==============================================================================
 	/// 모서리 어둠 몸 프로그램이 있게 하기. (원본 readProgramSetVariant 의 "/ao" 칸, 짓지 못하면 알리고 None 을 기억해 기본 칸으로 그린다)
 	//==============================================================================
 	fn ensure_ambient_occlusion_program(&mut self, gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>) {
@@ -2887,12 +3098,28 @@ impl ToonRenderer {
 		if self.ambient_occlusion_program_table.contains_key(&key) {
 			return;
 		}
-		let entry = match ToonRenderer::create_solid_entry(gl, material, instance_layout, true, self.color_space, &[]) {
+		// 미리 짓기가 컴파일을 맡겨 둔 것이 있으면 그것을 끝내 쓴다. (아직 안 끝났으면 여기서 기다린다, 동작은 그 자리에서 짓는 것과 같다)
+		let started = match self.take_pending_solid(PendingKey::AmbientOcclusion(key)) {
+			Some(program) => {
+				Ok(program)
+			}
+			None => {
+				ToonRenderer::start_solid_program(gl, material, instance_layout, true, self.color_space, &[], false)
+			}
+		};
+		let name = ToonRenderer::read_program_name(material, key);
+		self.finish_ambient_occlusion(gl, key, &name, started);
+	}
+
+	//==============================================================================
+	/// 모서리 어둠 몸 프로그램 끝내 칸에 넣기. (ensure_ambient_occlusion_program 과 미리 짓기 한 걸음이 부른다)
+	//==============================================================================
+	fn finish_ambient_occlusion(&mut self, gl: &crate::GlContext, key: (u32, u32), name: &str, started: Result<ShaderProgram, String>) {
+		let entry = match started.and_then(|program| ToonRenderer::finish_solid_entry(gl, program, true)) {
 			Ok(entry) => {
 				Some(entry)
 			}
 			Err(error) => {
-				let name = material.map(|material| String::from(material.get_name())).filter(|name| !name.is_empty()).unwrap_or_else(|| format!("{}/{}", key.0, key.1));
 				eprintln!("[ToonRenderer] 머티리얼 {} 의 모서리 어둠 셰이더를 짓지 못해 모서리 어둠 없이 그린다. {}", name, error);
 				// 컨텍스트를 잃은 탓이면 알리지도 기억하지도 않는다. (되살린 뒤 다시 짓는다)
 				if !crate::core::shaderprogram::report_shader_build_failure(gl, &format!("ToonRenderer.{}/ao", name), &error) {
@@ -2911,7 +3138,7 @@ impl ToonRenderer {
 	/// # 돌려줌
 	/// 기능 비트. (TOON_FEATURE_ALL 이면 전부 쓰는 기본 프로그램)
 	//==============================================================================
-	fn read_feature_mask(&self, options: &ToonDrawOptions, light_set: &ToonLightSet) -> u32 {
+	pub(crate) fn read_feature_mask(&self, options: &ToonDrawOptions, light_set: &ToonLightSet) -> u32 {
 		#[cfg(test)]
 		if DISABLE_FEATURE_VARIANTS.with(|flag| flag.get()) {
 			return TOON_FEATURE_ALL;
@@ -2939,6 +3166,13 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
+	/// 기능 비트에서 지울 갈래 이름들. (원본 startSolidVariant 의 disabledFeatures)
+	//==============================================================================
+	fn read_disabled_features(feature_mask: u32) -> Vec<&'static str> {
+		TOON_FEATURE_DEFINE_LIST.iter().enumerate().filter(|(index, _)| feature_mask & (1 << index) == 0).map(|(_, name)| *name).collect()
+	}
+
+	//==============================================================================
 	/// 쓰는 기능 갈래만 남긴 몸 프로그램이 있게 하기. (원본 readSolidVariant, 없으면 짓고, 짓지 못하면 알리고 None 을 기억해 기본 몸 칸으로 그린다)
 	//==============================================================================
 	fn ensure_solid_variant(&mut self, gl: &crate::GlContext, material: Option<&ToonMaterial>, instance_layout: Option<&ToonInstanceLayout>, is_ambient_occlusion: bool, feature_mask: u32) {
@@ -2949,16 +3183,47 @@ impl ToonRenderer {
 		if self.solid_variant_table.contains_key(&key) {
 			return;
 		}
-		let disabled_features: Vec<&str> = TOON_FEATURE_DEFINE_LIST.iter().enumerate().filter(|(index, _)| feature_mask & (1 << index) == 0).map(|(_, name)| *name).collect();
-		let entry = match ToonRenderer::create_solid_entry(gl, material, instance_layout, is_ambient_occlusion, self.color_space, &disabled_features) {
+		if self.is_async_program_build && ToonRenderer::is_async_build_available(gl) {
+			let pending_state = self.pending_build_table.borrow().get(&PendingKey::Variant(key)).map(|pending_build| pending_build.program_list.iter().all(|program| program.is_build_complete(gl)));
+			match pending_state {
+				Some(false) => {
+					return; // 아직 짓는 중이면 전부 켠 기본 몸(같은 화면)으로 그리고 칸에 넣지 않는다. 다음 그리기에 다시 묻는다.
+				}
+				None => {
+					// 처음 보는 변형은 컴파일만 맡기고 이번 프레임은 기본 몸으로 그려 프레임을 막지 않는다.
+					if let Ok(program) = ToonRenderer::start_solid_program(gl, material, instance_layout, is_ambient_occlusion, self.color_space, &ToonRenderer::read_disabled_features(feature_mask), true) {
+						self.pending_build_table.borrow_mut().insert(PendingKey::Variant(key), PendingBuild { program_list: vec![program], name: ToonRenderer::read_program_name(material, (key.0, key.1)) });
+						return;
+					}
+				}
+				Some(true) => {}
+			}
+		}
+		// 미리 짓기가 컴파일을 맡겨 둔 것이 있으면 그것을 끝내 쓴다.
+		let started = match self.take_pending_solid(PendingKey::Variant(key)) {
+			Some(program) => {
+				Ok(program)
+			}
+			None => {
+				ToonRenderer::start_solid_program(gl, material, instance_layout, is_ambient_occlusion, self.color_space, &ToonRenderer::read_disabled_features(feature_mask), false)
+			}
+		};
+		let name = ToonRenderer::read_program_name(material, (key.0, key.1));
+		self.finish_solid_variant(gl, key, &name, started);
+	}
+
+	//==============================================================================
+	/// 기능 갈래 몸 프로그램 끝내 칸에 넣기. (ensure_solid_variant 와 미리 짓기 한 걸음이 부른다)
+	//==============================================================================
+	fn finish_solid_variant(&mut self, gl: &crate::GlContext, key: (u32, u32, bool, u32), name: &str, started: Result<ShaderProgram, String>) {
+		let entry = match started.and_then(|program| ToonRenderer::finish_solid_entry(gl, program, key.2)) {
 			Ok(entry) => {
 				Some(entry)
 			}
 			Err(error) => {
-				let name = material.map(|material| String::from(material.get_name())).filter(|name| !name.is_empty()).unwrap_or_else(|| format!("{}/{}", key.0, key.1));
-				eprintln!("[ToonRenderer] 기능 갈래 {} 의 몸 셰이더를 짓지 못해 기본 몸 셰이더로 그린다. ({}) {}", feature_mask, name, error);
+				eprintln!("[ToonRenderer] 기능 갈래 {} 의 몸 셰이더를 짓지 못해 기본 몸 셰이더로 그린다. ({}) {}", key.3, name, error);
 				// 컨텍스트를 잃은 탓이면 알리지도 기억하지도 않는다. (되살린 뒤 다시 짓는다)
-				if !crate::core::shaderprogram::report_shader_build_failure(gl, &format!("ToonRenderer.{}/features{}", name, feature_mask), &error) {
+				if !crate::core::shaderprogram::report_shader_build_failure(gl, &format!("ToonRenderer.{}/features{}", name, key.3), &error) {
 					return;
 				}
 				None
@@ -2977,12 +3242,29 @@ impl ToonRenderer {
 		if let Some(program_set) = self.program_set_table.get(&key) {
 			return program_set.is_some();
 		}
-		let program_set = match ToonRenderer::create_program_set(gl, material, instance_layout, self.color_space) {
+		// 미리 짓기가 컴파일을 맡겨 둔 것이 있으면 그것을 끝내 쓴다. (아직 안 끝났으면 여기서 기다린다, 동작은 그 자리에서 짓는 것과 같다)
+		let pending_build = self.pending_build_table.borrow_mut().remove(&PendingKey::Set(key));
+		let started = match pending_build {
+			Some(pending_build) => {
+				Ok(pending_build.program_list)
+			}
+			None => {
+				ToonRenderer::start_program_set(gl, material, instance_layout, self.color_space, false)
+			}
+		};
+		let name = ToonRenderer::read_program_name(material, key);
+		self.finish_program_set_entry(gl, key, &name, started)
+	}
+
+	//==============================================================================
+	/// 세 프로그램 끝내 칸에 넣기. (ensure_program_set 과 미리 짓기 한 걸음이 부른다, 있으면 true)
+	//==============================================================================
+	fn finish_program_set_entry(&mut self, gl: &crate::GlContext, key: (u32, u32), name: &str, started: Result<Vec<ShaderProgram>, String>) -> bool {
+		let program_set = match started.and_then(|program_list| ToonRenderer::finish_program_set(gl, program_list)) {
 			Ok(program_set) => {
 				Some(program_set)
 			}
 			Err(error) => {
-				let name = material.map(|material| String::from(material.get_name())).filter(|name| !name.is_empty()).unwrap_or_else(|| format!("{}/{}", key.0, key.1));
 				eprintln!("[ToonRenderer] 머티리얼 {} 의 셰이더를 짓지 못했다. {}", name, error);
 				// 셰이더 탓이면 게임에 한 번 알리고 기억한다. 컨텍스트를 잃은 탓이면 알리지도 기억하지도 않고, 되살린 뒤 다시 짓는다.
 				if !crate::core::shaderprogram::report_shader_build_failure(gl, &format!("ToonRenderer.{}", name), &error) {
@@ -3010,6 +3292,60 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
+	/// 컴파일을 맡기고 기본 몸으로 그리는 길을 쓸 수 있는지. (병렬 컴파일 확장이 있을 때, 시험은 FORCE_DEFERRED_PREWARM 으로도)
+	//==============================================================================
+	fn is_async_build_available(gl: &crate::GlContext) -> bool {
+		#[cfg(test)]
+		if FORCE_DEFERRED_PREWARM.with(|flag| flag.get()) {
+			return true;
+		}
+		ShaderProgram::is_parallel_compile_supported(gl)
+	}
+
+	//==============================================================================
+	/// 처음 보는 몸 변형을 맡기고 기본 몸으로 그릴지 정하기. (원본 setAsyncProgramBuild, 기본 true, 병렬 컴파일 확장이 없으면 이 값과 상관없이 그 자리에서 짓는다)
+	///
+	/// # 인자
+	/// - `is_async`: true 면 장면 중간에 처음 보는 몸 변형을 그 자리에서 짓지 않고, 다 지어질 때까지 전부 켠 기본 몸(같은 화면)으로 그린다. false 면 그 자리에서 짓고 기다린다.
+	///
+	/// # 예제
+	/// ```rust,no_run
+	/// use vanilla::ToonRenderer;
+	///
+	/// fn configure(gl: &vanilla::GlContext) -> Result<(), String> {
+	/// 	let mut renderer = ToonRenderer::new(gl)?;
+	/// 	renderer.set_async_program_build(false);
+	/// 	assert!(!renderer.is_async_program_build());
+	/// 	Ok(())
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn set_async_program_build(&mut self, is_async: bool) {
+		self.is_async_program_build = is_async;
+	}
+
+	//==============================================================================
+	/// 처음 보는 몸 변형을 맡기고 기본 몸으로 그리는지 읽기. (원본 isAsyncProgramBuild)
+	///
+	/// # 돌려줌
+	/// 맡기고 기본 몸으로 그리면 true. (기본 true)
+	///
+	/// # 예제
+	/// ```rust,no_run
+	/// use vanilla::ToonRenderer;
+	///
+	/// fn read(gl: &vanilla::GlContext) -> Result<(), String> {
+	/// 	let renderer = ToonRenderer::new(gl)?;
+	/// 	assert!(renderer.is_async_program_build());
+	/// 	Ok(())
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn is_async_program_build(&self) -> bool {
+		self.is_async_program_build
+	}
+
+	//==============================================================================
 	/// 머티리얼의 프로그램을 미리 짓기. (처음 그릴 때의 멈춤을 피할 때, 짓지 못하면 false)
 	///
 	/// # 인자
@@ -3025,6 +3361,328 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
+	/// 그리기 줄에 담긴 것이 쓸 프로그램 변형을 그리지 않고 미리 짓기. (원본 prewarmDrawQueue, 유니티 ShaderVariantCollection.WarmUp, 언리얼 PSO 캐시 꼴)
+	/// - 머티리얼, 인스턴스 꼴, 몸 기능 비트(빛 묶음과 그리기 꼴이 정함), 모서리 어둠 몸, 바깥선, 그림자 깊이를 그리기 줄이 그릴 때와 같은 열쇠로 짓는다.
+	/// - 첫 그리기에서 처음 보는 조합의 프로그램을 짓느라 한 프레임이 끊기는 것을 불러오는 동안으로 옮긴다. 장면을 담은 뒤 첫 프레임 앞에서 한 번 부른다.
+	/// - GL_KHR_parallel_shader_compile 이 있으면(웹은 같은 확장) 컴파일만 맡기고, 프레임마다 ToonProgramPrewarm::step 으로 끝났는지 물어 나눠 끝낸다. 없으면 이 호출 안에서 짓는다.
+	/// - 미리 짓기가 끝나기 전에 그려도 된다. 아직 안 지어진 변형은 그 자리에서 지어 쓴다. (동작은 같다)
+	/// - 그리기 줄이 쓰는 인스턴스 꼴이 생기면 그 꼴의 변형도 같은 열쇠로 짓는다. (ToonProgramRequest 의 instance_layout)
+	///
+	/// # 인자
+	/// - `gl`: 렌더러를 지은 GL 컨텍스트.
+	/// - `queue`: 변형을 읽을 그리기 줄. (담은 것만 읽고 그리지 않는다)
+	///
+	/// # 돌려줌
+	/// 미리 짓기의 진행. (is_ready, step, wait)
+	///
+	/// # 예제
+	/// 장면을 담은 뒤 첫 프레임 앞에 변형을 미리 짓기
+	/// ```rust,no_run
+	/// use vanilla::{create_sphere_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonDrawQueue, ToonPartOptions, ToonRenderer};
+	///
+	/// fn prewarm(gl: &vanilla::GlContext) -> Result<(), String> {
+	/// 	let mut renderer = ToonRenderer::new(gl)?;
+	/// 	let mut builder = MeshBuilder::new();
+	/// 	builder.add_part(&create_sphere_geometry(0.5, 16, 10, std::f64::consts::PI), &Matrix4::create_identity(), "#f0e8e0", ToonPartOptions::default());
+	/// 	let mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("empty mesh")?;
+	/// 	let mut queue = ToonDrawQueue::new();
+	/// 	queue.add_mesh(&mesh, &Matrix4::create_identity(), ToonDrawOptions { casts_shadow: false, ..ToonDrawOptions::default() });
+	/// 	let mut prewarm = renderer.prewarm_draw_queue(gl, &queue);
+	/// 	prewarm.wait(gl, &mut renderer);
+	/// 	assert!(prewarm.is_ready());
+	/// 	Ok(())
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn prewarm_draw_queue(&mut self, gl: &crate::GlContext, queue: &ToonDrawQueue) -> ToonProgramPrewarm {
+		let request_list = queue.read_program_requests(self);
+		self.prewarm_request_list(gl, request_list)
+	}
+
+	//==============================================================================
+	/// 그리기 줄에 담긴 것에 게임이 장면 중간에 쓸 조합까지 더해 미리 짓기. (원본 prewarmDrawQueue(queue, options), 유니티 ShaderVariantCollection 처럼 조합 목록을 준다)
+	/// - 줄이 담은 변형에 options 의 빛 기능 조합, 빛 묶음, 다른 줄이 읽은 변형을 더해 지금 담기지 않은 것까지 같은 열쇠로 짓는다. 그 밖은 prewarm_draw_queue 와 같다.
+	/// - 빛 기능 이름이 rampTexture, shadeStops, rim, shadeRim, intensityLimit 가 아니면 아무것도 짓지 않고 Err 로 돌려준다. (원본은 던진다)
+	///
+	/// # 인자
+	/// - `gl`: 렌더러를 지은 GL 컨텍스트.
+	/// - `queue`: 변형을 읽을 그리기 줄.
+	/// - `options`: 더 지을 조합 목록. (ToonProgramPrewarmOptions::default() 는 prewarm_draw_queue 와 같다)
+	///
+	/// # 돌려줌
+	/// 미리 짓기의 진행. 잘못된 빛 기능 이름이면 Err.
+	///
+	/// # 예제
+	/// 장면 중간에 켜질 림 라이트 조합까지 미리 짓기
+	/// ```rust,no_run
+	/// use vanilla::{create_sphere_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonDrawQueue, ToonPartOptions, ToonProgramPrewarmOptions, ToonRenderer};
+	///
+	/// fn prewarm(gl: &vanilla::GlContext) -> Result<(), String> {
+	/// 	let mut renderer = ToonRenderer::new(gl)?;
+	/// 	let mut builder = MeshBuilder::new();
+	/// 	builder.add_part(&create_sphere_geometry(0.5, 16, 10, std::f64::consts::PI), &Matrix4::create_identity(), "#f0e8e0", ToonPartOptions::default());
+	/// 	let mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("empty mesh")?;
+	/// 	let mut queue = ToonDrawQueue::new();
+	/// 	queue.add_mesh(&mesh, &Matrix4::create_identity(), ToonDrawOptions { casts_shadow: false, ..ToonDrawOptions::default() });
+	/// 	let rim: &[&str] = &["rim"];
+	/// 	let rim_and_shade_rim: &[&str] = &["rim", "shadeRim"];
+	/// 	let options = ToonProgramPrewarmOptions { light_feature_list: &[rim, rim_and_shade_rim], ..ToonProgramPrewarmOptions::default() };
+	/// 	let mut prewarm = renderer.prewarm_draw_queue_with_options(gl, &queue, &options)?;
+	/// 	prewarm.wait(gl, &mut renderer);
+	/// 	assert!(prewarm.is_ready());
+	/// 	Ok(())
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn prewarm_draw_queue_with_options<'x, 'a: 'x, 'q: 'x>(&mut self, gl: &crate::GlContext, queue: &ToonDrawQueue<'a>, options: &ToonProgramPrewarmOptions<'_, 'q>) -> Result<ToonProgramPrewarm, String> {
+		let request_list = self.expand_prewarm_requests(queue, options)?;
+		Ok(self.prewarm_request_list(gl, request_list))
+	}
+
+	//==============================================================================
+	/// 미리 지을 변형 목록 만들기. (원본 expandPrewarmRequests, 그리기 줄들이 읽은 것에 빛 묶음 쪽 기능 조합을 곱한다, 같은 열쇠는 한 번만)
+	//==============================================================================
+	fn expand_prewarm_requests<'x, 'a: 'x, 'q: 'x>(&self, queue: &ToonDrawQueue<'a>, options: &ToonProgramPrewarmOptions<'_, 'q>) -> Result<ToonProgramRequests<'x>, String> {
+		let mut added_mask_list: Vec<u32> = Vec::new();
+		for name_list in options.light_feature_list.iter() {
+			let mut light_mask = 0;
+			for name in name_list.iter() {
+				let Some((_, bit)) = TOON_FEATURE_LIGHT_BIT_TABLE.iter().find(|(feature_name, _)| feature_name == name) else {
+					return Err(format!("ToonRenderer::prewarm_draw_queue_with_options: 알 수 없는 빛 기능 이름 {} (rampTexture, shadeStops, rim, shadeRim, intensityLimit)", name));
+				};
+				light_mask |= bit;
+			}
+			added_mask_list.push(light_mask);
+		}
+		let light_mask_list: Vec<u32> = options.light_set_list.iter().map(|light_set| ToonRenderer::read_light_feature_mask(light_set)).collect();
+		let mut program_requests = queue.read_program_requests(self);
+		let request_key = |request: &ToonProgramRequest| (request.material.map(|material| material.get_id()).unwrap_or(0), request.instance_layout.map(|instance_layout| instance_layout.get_id()).unwrap_or(0), request.feature_mask);
+		let mut key_set: std::collections::HashSet<(u32, u32, Option<u32>)> = program_requests.request_list.iter().map(request_key).collect();
+		for other_queue in options.queue_list.iter() {
+			let other_requests = other_queue.read_program_requests(self);
+			program_requests.is_ambient_occlusion = program_requests.is_ambient_occlusion || other_requests.is_ambient_occlusion;
+			for request in other_requests.request_list {
+				if key_set.insert(request_key(&request)) {
+					program_requests.request_list.push(request);
+				}
+			}
+		}
+		let base_count = program_requests.request_list.len();
+		for index in 0..base_count {
+			let (material, instance_layout, base_mask) = {
+				let request = &program_requests.request_list[index];
+				let Some(base_mask) = request.feature_mask else {
+					continue;
+				};
+				(request.material, request.instance_layout, base_mask)
+			};
+			let mut feature_mask_list: Vec<u32> = Vec::new();
+			for light_mask in light_mask_list.iter() {
+				feature_mask_list.push((base_mask & TOON_FEATURE_DRAW_BITS) | light_mask);
+			}
+			for added_mask in added_mask_list.iter() {
+				feature_mask_list.push(base_mask | added_mask);
+			}
+			for feature_mask in feature_mask_list {
+				let expanded = ToonProgramRequest { material, instance_layout, feature_mask: Some(feature_mask) };
+				if key_set.insert(request_key(&expanded)) {
+					program_requests.request_list.push(expanded);
+				}
+			}
+		}
+		Ok(program_requests)
+	}
+
+	//==============================================================================
+	/// 빛 묶음 쪽 몸 기능 비트. (원본 readLightFeatureMask, read_feature_mask 의 빛 묶음 몫, 캐시는 건드리지 않는다)
+	//==============================================================================
+	fn read_light_feature_mask(light_set: &ToonLightSet) -> u32 {
+		(if light_set.get_ramp_texture().is_some() { TOON_FEATURE_RAMP_TEXTURE } else { 0 })
+			| (if light_set.get_shade_ramp().positions.len() >= 2 { TOON_FEATURE_SHADE_STOPS } else { 0 })
+			| (if light_set.get_rim_light().power > 0.0 { TOON_FEATURE_RIM } else { 0 })
+			| (if light_set.get_shade_rim_light().power > 0.0 { TOON_FEATURE_SHADE_RIM } else { 0 })
+			| (if light_set.is_light_intensity_limited() { TOON_FEATURE_INTENSITY_LIMIT } else { 0 })
+	}
+
+	//==============================================================================
+	/// 미리 짓기 본체. (읽어 둔 변형 목록을 짓거나 맡긴다)
+	//==============================================================================
+	fn prewarm_request_list(&mut self, gl: &crate::GlContext, request_list: ToonProgramRequests) -> ToonProgramPrewarm {
+		let is_ambient_occlusion = request_list.is_ambient_occlusion || self.ambient_occlusion_input.is_some();
+		#[cfg(test)]
+		let is_forced_deferred = FORCE_DEFERRED_PREWARM.with(|flag| flag.get());
+		#[cfg(not(test))]
+		let is_forced_deferred = false;
+		if !ShaderProgram::is_parallel_compile_supported(gl) && !is_forced_deferred {
+			for request in request_list.request_list.iter() {
+				if !self.ensure_program_set(gl, request.material, request.instance_layout) {
+					continue;
+				}
+				if is_ambient_occlusion {
+					self.ensure_ambient_occlusion_program(gl, request.material, request.instance_layout);
+				}
+				if let Some(feature_mask) = request.feature_mask {
+					let key = (request.material.map(|material| material.get_id()).unwrap_or(0), request.instance_layout.map(|instance_layout| instance_layout.get_id()).unwrap_or(0));
+					let is_ambient_occlusion_drawn = is_ambient_occlusion && matches!(self.ambient_occlusion_program_table.get(&key), Some(Some(_)));
+					self.ensure_solid_variant(gl, request.material, request.instance_layout, is_ambient_occlusion_drawn, feature_mask);
+				}
+			}
+			return ToonProgramPrewarm { unit_list: Vec::new(), is_ready: true };
+		}
+		let mut unit_list: Vec<PendingKey> = Vec::new();
+		for request in request_list.request_list.iter() {
+			let key = (request.material.map(|material| material.get_id()).unwrap_or(0), request.instance_layout.map(|instance_layout| instance_layout.get_id()).unwrap_or(0));
+			if !self.program_set_table.contains_key(&key) && !self.pending_build_table.borrow().contains_key(&PendingKey::Set(key)) {
+				// 컨텍스트를 잃은 탓 같은 실패는 그릴 때 다시 짓고 알린다.
+				if let Ok(program_list) = ToonRenderer::start_program_set(gl, request.material, request.instance_layout, self.color_space, true) {
+					self.pending_build_table.borrow_mut().insert(PendingKey::Set(key), PendingBuild { program_list, name: ToonRenderer::read_program_name(request.material, key) });
+					unit_list.push(PendingKey::Set(key));
+				}
+			}
+			if is_ambient_occlusion && !self.ambient_occlusion_program_table.contains_key(&key) && !self.pending_build_table.borrow().contains_key(&PendingKey::AmbientOcclusion(key)) {
+				if let Ok(program) = ToonRenderer::start_solid_program(gl, request.material, request.instance_layout, true, self.color_space, &[], true) {
+					self.pending_build_table.borrow_mut().insert(PendingKey::AmbientOcclusion(key), PendingBuild { program_list: vec![program], name: ToonRenderer::read_program_name(request.material, key) });
+					unit_list.push(PendingKey::AmbientOcclusion(key));
+				}
+			}
+		}
+		for request in request_list.request_list.iter() {
+			let Some(feature_mask) = request.feature_mask else {
+				continue;
+			};
+			if feature_mask == TOON_FEATURE_ALL {
+				continue;
+			}
+			let key = (request.material.map(|material| material.get_id()).unwrap_or(0), request.instance_layout.map(|instance_layout| instance_layout.get_id()).unwrap_or(0));
+			let variant_key = (key.0, key.1, is_ambient_occlusion, feature_mask);
+			if self.solid_variant_table.contains_key(&variant_key) || self.pending_build_table.borrow().contains_key(&PendingKey::Variant(variant_key)) {
+				continue;
+			}
+			if let Ok(program) = ToonRenderer::start_solid_program(gl, request.material, request.instance_layout, is_ambient_occlusion, self.color_space, &ToonRenderer::read_disabled_features(feature_mask), true) {
+				self.pending_build_table.borrow_mut().insert(PendingKey::Variant(variant_key), PendingBuild { program_list: vec![program], name: ToonRenderer::read_program_name(request.material, key) });
+				unit_list.push(PendingKey::Variant(variant_key));
+			}
+		}
+		let mut prewarm = ToonProgramPrewarm { unit_list, is_ready: false };
+		prewarm.step(gl, self);
+		prewarm
+	}
+
+	//==============================================================================
+	/// 맡긴 채 끝내지 않은 프로그램 칸 수. (시험이 미리 짓기가 다 치웠는지 볼 때)
+	//==============================================================================
+	#[cfg(test)]
+	pub(crate) fn get_pending_build_count(&self) -> usize {
+		self.pending_build_table.borrow().len()
+	}
+
+	//==============================================================================
+	/// 미리 짓기 한 걸음. (원본 advancePrewarm, 컴파일이 끝난 것을 끝내 칸에 넣는다, 한 걸음에 PREWARM_FINISH_PER_STEP 개까지, 모두 끝내려면 budget 을 usize::MAX 로)
+	//==============================================================================
+	fn advance_prewarm(&mut self, gl: &crate::GlContext, unit_list: &mut Vec<PendingKey>, mut finish_budget: usize) -> bool {
+		let mut index = 0;
+		while index < unit_list.len() {
+			let unit = unit_list[index];
+			let is_done = match unit {
+				PendingKey::Set(key) => {
+					let is_complete = match self.pending_build_table.borrow().get(&unit) {
+						None => {
+							None
+						}
+						Some(pending_build) => {
+							Some(finish_budget > 0 && pending_build.program_list.iter().all(|program| program.is_build_complete(gl)))
+						}
+					};
+					match is_complete {
+						None => {
+							true
+						}
+						Some(true) => {
+							let taken_build = self.pending_build_table.borrow_mut().remove(&unit);
+							if let Some(pending_build) = taken_build {
+								self.finish_program_set_entry(gl, key, &pending_build.name, Ok(pending_build.program_list));
+							}
+							finish_budget -= 1;
+							true
+						}
+						Some(false) => {
+							false
+						}
+					}
+				}
+				PendingKey::AmbientOcclusion(key) => {
+					let is_complete = match self.pending_build_table.borrow().get(&unit) {
+						None => {
+							None
+						}
+						Some(pending_build) => {
+							Some(finish_budget > 0 && pending_build.program_list.iter().all(|program| program.is_build_complete(gl)))
+						}
+					};
+					match is_complete {
+						None => {
+							true
+						}
+						Some(true) => {
+							let taken_build = self.pending_build_table.borrow_mut().remove(&unit);
+							if let Some(pending_build) = taken_build {
+								let program = pending_build.program_list.into_iter().next();
+								if let Some(program) = program {
+									self.finish_ambient_occlusion(gl, key, &pending_build.name, Ok(program));
+								}
+							}
+							finish_budget -= 1;
+							true
+						}
+						Some(false) => {
+							false
+						}
+					}
+				}
+				PendingKey::Variant(variant_key) => {
+					let set_key = (variant_key.0, variant_key.1);
+					let is_set_waiting = self.pending_build_table.borrow().contains_key(&PendingKey::Set(set_key));
+					let is_ambient_occlusion_waiting = variant_key.2 && self.pending_build_table.borrow().contains_key(&PendingKey::AmbientOcclusion(set_key));
+					if !self.pending_build_table.borrow().contains_key(&unit) {
+						true // 그릴 때 이미 끝냈거나 머티리얼을 지웠다.
+					}
+					else if is_set_waiting || is_ambient_occlusion_waiting {
+						false
+					}
+					else if !matches!(self.program_set_table.get(&set_key), Some(Some(_))) || (variant_key.2 && !matches!(self.ambient_occlusion_program_table.get(&set_key), Some(Some(_)))) {
+						// 쓰일 몸이 없다. (기본 칸이나 모서리 어둠 몸을 짓지 못했다)
+						let taken_build = self.pending_build_table.borrow_mut().remove(&unit);
+							if let Some(pending_build) = taken_build {
+							ToonRenderer::delete_programs(gl, &pending_build.program_list);
+						}
+						true
+					}
+					else {
+						let is_complete = finish_budget > 0 && self.pending_build_table.borrow().get(&unit).is_some_and(|pending_build| pending_build.program_list.iter().all(|program| program.is_build_complete(gl)));
+						if is_complete {
+							let taken_build = self.pending_build_table.borrow_mut().remove(&unit);
+							if let Some(pending_build) = taken_build {
+								if let Some(program) = pending_build.program_list.into_iter().next() {
+									self.finish_solid_variant(gl, variant_key, &pending_build.name, Ok(program));
+								}
+							}
+							finish_budget -= 1;
+						}
+						is_complete
+					}
+				}
+			};
+			if is_done {
+				unit_list.remove(index);
+			}
+			else {
+				index += 1;
+			}
+		}
+		unit_list.is_empty()
+	}
+
+	//==============================================================================
 	/// 머티리얼의 프로그램 지우기. (모든 인스턴스 꼴의 것, 다시 그리면 새로 짓는다)
 	///
 	/// # 인자
@@ -3033,6 +3691,16 @@ impl ToonRenderer {
 	//==============================================================================
 	pub fn delete_material(&mut self, gl: &crate::GlContext, material: &ToonMaterial) {
 		let material_id = material.get_id();
+		// 미리 짓기가 맡겨 둔 것도 지운다.
+		let pending_key_list: Vec<PendingKey> = self.pending_build_table.borrow().keys().filter(|pending_key| match pending_key {
+			PendingKey::Set(key) | PendingKey::AmbientOcclusion(key) => key.0 == material_id,
+			PendingKey::Variant(key) => key.0 == material_id,
+		}).copied().collect();
+		for pending_key in pending_key_list {
+			if let Some(pending_build) = self.pending_build_table.borrow_mut().remove(&pending_key) {
+				ToonRenderer::delete_programs(gl, &pending_build.program_list);
+			}
+		}
 		let mut key_list: Vec<(u32, u32)> = self.program_set_table.keys().filter(|key| key.0 == material_id).copied().collect();
 		key_list.extend(self.ambient_occlusion_program_table.keys().filter(|key| key.0 == material_id && !self.program_set_table.contains_key(key)).copied());
 		for key in key_list {
@@ -3324,6 +3992,9 @@ impl ToonRenderer {
 			unsafe {
 				crate::core::glstatecache::delete_program(gl, entry.program.get_program());
 			}
+		}
+		for pending_build in self.pending_build_table.borrow_mut().drain().map(|(_, pending_build)| pending_build) {
+			ToonRenderer::delete_programs(gl, &pending_build.program_list);
 		}
 		self.uniform_slot_table.borrow_mut().clear();
 		for block_cache in [&self.material_blocks, &self.outline_blocks] {
