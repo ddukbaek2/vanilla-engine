@@ -120,6 +120,10 @@ cargo run --release --example modelviewer
 | `uigallery`, `uigallery2` | Every UI widget |
 | `inputgallery` | Input fields, Korean IME composition, selection, rich text, gamepad vibration test |
 | `effectgallery` | 49 shader sprite effects, screen effects, trails, particles |
+| `particleeffects` | Eighteen particle effects |
+| `spriteeffects` | Sprite shaders, screen effects and staging |
+| `uisample` | Load a uiasset with UIDocument |
+| `uishowcase` | A dashboard app (six uiassets, themes, popups, responsive layout) |
 | `misctour` | Camera, path finding, dialogue system, screen shake, floating text |
 | `timelineshowcase` | Timeline document playback |
 | `modelviewer` | Skinned 3D (glTF, FBX), shadows, bloom |

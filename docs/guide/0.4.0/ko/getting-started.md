@@ -120,6 +120,10 @@ cargo run --release --example modelviewer
 | `uigallery`, `uigallery2` | UI 위젯 전부 |
 | `inputgallery` | 입력 필드, 한글 IME 조합, 선택 영역, 리치텍스트, 게임패드 진동 시험 |
 | `effectgallery` | 셰이더 스프라이트 49 종, 화면 효과, 트레일, 파티클 |
+| `particleeffects` | 파티클 이펙트 열여덟 |
+| `spriteeffects` | 스프라이트 셰이더, 화면 효과, 연출 |
+| `uisample` | UIDocument 로 uiasset 읽기 |
+| `uishowcase` | 대시보드 앱 한 벌(uiasset 여섯, 테마, 팝업, 반응형) |
 | `misctour` | 카메라, 길찾기, 대화 시스템, 화면 흔들림, 플로팅 텍스트 |
 | `timelineshowcase` | 타임라인 문서 재생 |
 | `modelviewer` | 스키닝 3D(glTF, FBX), 그림자, 블룸 |
