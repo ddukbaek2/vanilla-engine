@@ -649,6 +649,7 @@ struct ToonShadingScene {
 	gpu_memory_sample_seconds: f64,
 	last_face_blend: f64,
 	last_hair_blend: f64,
+	#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 	last_frame_instant: Option<std::time::Instant>,
 	drag_is_right: bool,
 	tick_milliseconds: f64,
