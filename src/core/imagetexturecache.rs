@@ -739,6 +739,13 @@ pub(crate) mod fake_gl {
 	}
 
 	//==============================================================================
+	/// glGetUniformBlockIndex 자리. (유니폼 블록이 없다고 답한다, GL_INVALID_INDEX)
+	//==============================================================================
+	extern "system" fn get_uniform_block_index(_program: u32, _name: *const i8) -> u32 {
+		u32::MAX
+	}
+
+	//==============================================================================
 	/// glReadPixels 자리. (아무것도 쓰지 않는다)
 	//==============================================================================
 	extern "system" fn read_pixels(_x: i32, _y: i32, _width: i32, _height: i32, _format: u32, _component_type: u32, _pixels: *mut c_void) {
@@ -780,6 +787,7 @@ pub(crate) mod fake_gl {
 			b"glBindTexture" | b"glBindFramebuffer" | b"glBindRenderbuffer" | b"glAttachShader" | b"glDetachShader" | b"glBindBuffer" | b"glVertexAttribDivisor" => set_name_pair as *const c_void,
 			b"glCompileShader" | b"glLinkProgram" | b"glGenerateMipmap" | b"glBindVertexArray" | b"glEnableVertexAttribArray" => set_name as *const c_void,
 			b"glGetIntegerv" => get_integer as *const c_void,
+			b"glGetUniformBlockIndex" => get_uniform_block_index as *const c_void,
 			b"glReadPixels" => read_pixels as *const c_void,
 			b"glInvalidateFramebuffer" => invalidate_framebuffer as *const c_void,
 			b"glDisable" | b"glEnable" | b"glActiveTexture" | b"glUseProgram" | b"glBlendFunc" | b"glBlendFuncSeparate" | b"glViewport" | b"glDrawArrays" | b"glUniform1i" | b"glUniform1f" | b"glUniform2f" | b"glUniform2i" | b"glUniform3f" | b"glUniform4f" | b"glScissor" | b"glColorMask" | b"glDepthMask" | b"glBlendEquation" | b"glBlendEquationSeparate" | b"glGetUniformLocation" => do_nothing as *const c_void,

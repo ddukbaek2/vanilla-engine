@@ -24,6 +24,7 @@ use crate::core::graphic::GlTexture;
 use crate::core::shaderprogram::ShaderProgram;
 use crate::graphics3d::material::{Material, TEXTURE_UNIT_BASECOLOR, TEXTURE_UNIT_SHADOWMAP};
 use crate::graphics3d::skinnedmodel::{Drawable, SkinnedModel};
+use crate::graphics3d::jointblock::joint_block_glsl_source;
 use crate::graphics3d::skinnedmodelrenderer::{SkinnedModelRenderer, MORPH_GLSL};
 use crate::core::gluniform::GlUniformF64;
 use std::ops::{Deref, DerefMut};
@@ -616,7 +617,7 @@ void main() {
 ";
 
 /// 피부 버텍스 셰이더 앞부분. (원본 템플릿의 ${MORPH_GLSL} 앞, 기본 스키닝 / 모프 경로 + 머리카락 흔들림)
-const SKIN_VERTEXSHADER_HEAD_SOURCE: &str = "#version 300 es
+const SKIN_VERTEXSHADER_HEAD_SOURCE: &str = concat!("#version 300 es
 layout(location = 0) in vec3 vertexPosition;
 layout(location = 1) in vec3 vertexNormal;
 layout(location = 2) in vec2 vertexTextureCoordinate;
@@ -625,7 +626,7 @@ layout(location = 4) in vec4 vertexWeights;
 uniform mat4 modelMatrix;
 uniform mat4 viewProjectionMatrix;
 uniform mat4 lightViewProjectionMatrix;
-uniform mat4 jointMatrices[96];
+", joint_block_glsl_source!(), "
 uniform int shadingMode;
 uniform sampler2D layerNormalTexture;
 uniform vec4 hairSway;
@@ -633,7 +634,7 @@ out vec3 worldPosition;
 out vec3 worldNormal;
 out vec2 fragmentTextureCoordinate;
 out vec4 lightSpacePosition;
-";
+");
 
 /// 피부 버텍스 셰이더 뒷부분. (원본 템플릿의 ${MORPH_GLSL} 뒤, 카드 탄젠트 아틀라스의 가닥 좌표(a)가 클수록(끝) 크게 흔든다)
 const SKIN_VERTEXSHADER_TAIL_SOURCE: &str = "
@@ -667,16 +668,16 @@ void main() {
 ";
 
 /// 컷아웃 깊이 버텍스 셰이더 앞부분. (섀도우 맵 캐스팅, 머리카락 / 속눈썹의 투명 영역을 오파시티로 제거하기 위해 UV 를 넘긴다)
-const CUTOUT_DEPTH_VERTEXSHADER_HEAD_SOURCE: &str = "#version 300 es
+const CUTOUT_DEPTH_VERTEXSHADER_HEAD_SOURCE: &str = concat!("#version 300 es
 layout(location = 0) in vec3 vertexPosition;
 layout(location = 2) in vec2 vertexTextureCoordinate;
 layout(location = 3) in uvec4 vertexJoints;
 layout(location = 4) in vec4 vertexWeights;
 uniform mat4 modelMatrix;
 uniform mat4 lightViewProjectionMatrix;
-uniform mat4 jointMatrices[96];
+", joint_block_glsl_source!(), "
 out vec2 fragmentTextureCoordinate;
-";
+");
 
 /// 컷아웃 깊이 버텍스 셰이더 뒷부분.
 const CUTOUT_DEPTH_VERTEXSHADER_TAIL_SOURCE: &str = "
@@ -977,7 +978,6 @@ impl HumanSkinRenderer {
 			gl.uniform_4_f64(hair_sway_location.as_ref(), self.hair_sway[0], self.hair_sway[1], self.hair_sway[2], 0.0);
 		}
 
-		let joint_matrices_location = shader_program.get_uniform_location(gl, "jointMatrices[0]");
 		let skin_list = skinned_model.get_skin_list();
 		for drawable in skinned_model.get_drawable_list().iter() {
 			let shading_mode = self.get_material_shading_mode(&drawable.material);
@@ -1000,9 +1000,7 @@ impl HumanSkinRenderer {
 					continue;
 				}
 			};
-			unsafe {
-				gl.uniform_matrix_4_f32_slice(joint_matrices_location.as_ref(), false, &skin.joint_matrix_array);
-			}
+			self.upload_joint_matrices(gl, &skin.joint_matrix_array);
 			self.skinned_model_renderer.apply_morph_uniforms(gl, shader_program, drawable);
 			unsafe {
 				gl.uniform_1_i32(shading_mode_location.as_ref(), shading_mode);
@@ -1050,7 +1048,6 @@ impl HumanSkinRenderer {
 			shader_program.use_program(gl);
 			let light_view_projection_location = shader_program.get_uniform_location(gl, "lightViewProjectionMatrix");
 			let model_matrix_location = shader_program.get_uniform_location(gl, "modelMatrix");
-			let joint_matrices_location = shader_program.get_uniform_location(gl, "jointMatrices[0]");
 			let coverage_texture_location = shader_program.get_uniform_location(gl, "coverageTexture");
 			unsafe {
 				gl.uniform_matrix_4_f32_slice(light_view_projection_location.as_ref(), false, light_view_projection_elements);
@@ -1077,9 +1074,7 @@ impl HumanSkinRenderer {
 						continue;
 					}
 				};
-				unsafe {
-					gl.uniform_matrix_4_f32_slice(joint_matrices_location.as_ref(), false, &skin.joint_matrix_array);
-				}
+				self.upload_joint_matrices(gl, &skin.joint_matrix_array);
 				self.skinned_model_renderer.apply_morph_uniforms(gl, shader_program, drawable);
 				if use_cutout {
 					// 커버리지 텍스처. (머리카락은 기본 색 알파, 그 외는 오파시티 텍스처)
@@ -1659,7 +1654,7 @@ mod tests {
 		let skin_vertex_source = create_skin_vertex_shader_source();
 		assert!(skin_vertex_source.starts_with("#version 300 es"));
 		assert!(skin_vertex_source.contains(MORPH_GLSL));
-		assert!(skin_vertex_source.contains("uniform mat4 jointMatrices[96];"));
+		assert!(skin_vertex_source.contains(crate::graphics3d::jointblock::JOINT_BLOCK_GLSL));
 		assert!(skin_vertex_source.contains(&format!("if (shadingMode == {} && hairSway.x > 0.0) {{", SKIN_SHADING_HAIR)));
 		let cutout_vertex_source = create_cutout_depth_vertex_shader_source();
 		assert!(cutout_vertex_source.starts_with("#version 300 es"));

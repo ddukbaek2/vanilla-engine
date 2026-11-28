@@ -75,6 +75,7 @@ use crate::core::gluniform::GlUniformF64;
 
 use crate::base::rect::Rect;
 use crate::graphics3d::camera3d::Camera3D;
+use crate::graphics3d::jointblock::{joint_block_glsl_source, JointBlockBuffer};
 
 use crate::base::matrix4::Matrix4;
 use crate::core::graphic::{GlBuffer, GlProgram, GlTexture, GlUniformLocation, GlVertexArray};
@@ -88,7 +89,7 @@ use crate::graphics3d::toon::toondrawqueue::ToonDrawQueue;
 use crate::graphics3d::toon::toonmaterial::{ToonBlendMode, ToonBufferUsage, ToonMatcapBlend, ToonInstanceLayout, ToonMaterial, ToonMaterialChunks, TOON_INSTANCE_MATRIX_NAME, TOON_INSTANCE_TINT_NAME};
 
 /// 한 모형이 쓰는 뼈대 수의 상한. (셰이더의 유니폼 배열 크기)
-pub const TOON_MAXIMUM_JOINTS: usize = 96;
+pub const TOON_MAXIMUM_JOINTS: usize = crate::graphics3d::jointblock::JOINT_BLOCK_MAXIMUM;
 
 /// 인스턴스 하나의 수 개수. (행렬 16, 틴트 4)
 /// - 행렬은 아핀 3x4 로 읽는다. 아래 줄 네 칸(원소 3, 7, 11, 15)은 인스턴스 빛남(sRGB r, g, b 와 선형 세기)이다. (Godot MultiMesh, 유니티 BatchRendererGroup 의 3x4 행렬 꼴)
@@ -243,14 +244,14 @@ in vec4 vertexUv;
 /// 꼭짓점을 본으로 움직이고 인스턴스 행렬을 고르는 셰이더 조각.
 /// - instanced: 0 이면 인스턴스 아님, 1 이면 인스턴스 행렬과 틴트, 2 면 인스턴스 틴트만(모형 행렬은 유니폼).
 /// - 인스턴스 행렬은 아핀 3x4 로 짓고, 네 열의 w(행렬의 아래 줄)는 인스턴스 빛남으로 읽는다. (TOON_INSTANCE_FLOAT_COUNT 머리말)
-const VERTEX_COMMON_CHUNK: &str = "in vec4 vertexJoints;
+const VERTEX_COMMON_CHUNK: &str = concat!("in vec4 vertexJoints;
 in vec4 vertexWeights;
 in vec4 instanceMatrix0;
 in vec4 instanceMatrix1;
 in vec4 instanceMatrix2;
 in vec4 instanceMatrix3;
 in vec4 instanceTint;
-uniform mat4 jointMatrices[96];
+", joint_block_glsl_source!(), "
 uniform float skinned;
 uniform float instanced;
 uniform mat4 modelMatrix;
@@ -278,7 +279,7 @@ vec4 readInstanceEmissive() {
 	}
 	return vec4(instanceMatrix0.w, instanceMatrix1.w, instanceMatrix2.w, instanceMatrix3.w);
 }
-";
+");
 
 /// 정점 조각이 고칠 꼭짓점. (월드로 옮기기 전)
 const VERTEX_STRUCT_CHUNK: &str = "struct ToonVertex {
@@ -2390,6 +2391,8 @@ pub struct ToonRenderer {
 	frame_number: u64,
 	/// 프레임 블록(ToonFrame) 고리. (장의 칸마다 한 패스의 값, GPU 가 읽는 장은 고치지 않는다)
 	frame_ring: RefCell<FrameRing>,
+	/// 뼈 행렬 유니폼 블록의 버퍼. (뼈 행렬 96 개는 기본 블록 정점 유니폼 한도를 넘어 블록으로 올린다)
+	joint_block_buffer: JointBlockBuffer,
 	/// 재질 블록(ToonDrawMaterial)과 바깥선 블록(ToonDrawOutline)의 갈래. (값이 같은 블록은 하나)
 	material_blocks: RefCell<BlockCache>,
 	outline_blocks: RefCell<BlockCache>,
@@ -2908,6 +2911,7 @@ impl ToonRenderer {
 		let color_space = options.color_space;
 		let default_program_set = ToonRenderer::create_program_set(gl, None, None, color_space)?;
 		let empty_shadow_texture = ToonRenderer::create_empty_shadow_texture(gl)?;
+		let joint_block_buffer = JointBlockBuffer::new(gl)?;
 		let white_texture = upload_texture(gl, 1, 1, &[255, 255, 255, 255], ToonTextureOptions { is_mipmapped: false, ..ToonTextureOptions::default() }, ColorSpace::Gamma)?;
 		let mut program_set_table = HashMap::new();
 		program_set_table.insert((0, 0), Some(default_program_set));
@@ -2928,6 +2932,7 @@ impl ToonRenderer {
 			frame_serial: 1,
 			frame_number: 0,
 			frame_ring: RefCell::new(FrameRing::new()),
+			joint_block_buffer,
 			material_blocks: RefCell::new(BlockCache::new(MATERIAL_BLOCK_BINDING, MATERIAL_BLOCK_FLOAT_COUNT)),
 			outline_blocks: RefCell::new(BlockCache::new(OUTLINE_BLOCK_BINDING, OUTLINE_BLOCK_FLOAT_COUNT)),
 			batch_slots: RefCell::new(Vec::new()),
@@ -4037,6 +4042,7 @@ impl ToonRenderer {
 			ToonRenderer::delete_programs(gl, &pending_build.program_list);
 		}
 		self.uniform_slot_table.borrow_mut().clear();
+		self.joint_block_buffer.destroy(gl);
 		for block_cache in [&self.material_blocks, &self.outline_blocks] {
 			let mut block_cache = block_cache.borrow_mut();
 			for block in block_cache.blocks.drain(..) {
@@ -5105,8 +5111,7 @@ impl ToonRenderer {
 		self.write_uniform_floats(gl, program, "instanced", 1, [instanced_mode, 0.0, 0.0, 0.0]);
 		self.write_uniform_floats(gl, program, "skinned", 1, [if is_skinned { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0]);
 		if let (true, Some(joint_matrices)) = (is_skinned, joint_matrices) {
-			let joint_float_count = joint_matrices.len().min(TOON_MAXIMUM_JOINTS * 16) / 16 * 16;
-			self.write_uniform_matrix4(gl, program, "jointMatrices", &joint_matrices[..joint_float_count]);
+			self.joint_block_buffer.upload(gl, joint_matrices);
 		}
 	}
 

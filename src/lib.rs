@@ -146,6 +146,7 @@ pub use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowAtlasLight, ShadowAtla
 pub use crate::graphics3d::skinnedmodel::{AnimationClip, AnimationPath, Drawable, MeshDescription, MorphTarget, Skin, SkinnedModel, SkinnedModelNode, MORPH_TARGET_MAXIMUM};
 pub use crate::graphics3d::skinnedmodelasset::{SkinnedModelAsset, SkinnedModelAssetContent};
 pub use crate::graphics3d::skinnedmodelrenderer::{SkinnedModelRenderer, MORPH_GLSL};
+pub use crate::graphics3d::jointblock::{JOINT_BLOCK_GLSL, JOINT_BLOCK_MAXIMUM};
 pub use crate::graphics3d::subsurfacescatteringeffect::SubsurfaceScatteringEffect;
 pub use crate::graphics3d::toon::glbmeshreader::{adjust_bones, read_animation_swing, read_glb_arrays, read_glb_node_arrays, read_glb_node_infos, write_skin_pose, BoneModifier, BoneModifyMode, ToonAnimation, ToonAnimationChannel, ToonChannelPath, ToonNodeInfo, ToonOutlineOptions, ToonPartArrays, ToonPoseAdjust, ToonPoseBlend, ToonSkeleton, ToonSkeletonNode, ToonSwingScales};
 pub use crate::graphics3d::toon::meshbuilder::{create_box_geometry, create_capsule_geometry, create_cylinder_geometry, create_lathe_geometry, create_octahedron_geometry, create_part_matrix, create_rounded_box_geometry, create_sphere_geometry, create_torus_geometry, read_color_values, MeshBuilder, ToonGeometry, ToonMeshArrays, ToonPartOptions, ToonQuad, DEFAULT_OUTLINE_WIDTH, SKIN_FLOAT_COUNT, VERTEX_FLOAT_COUNT};
