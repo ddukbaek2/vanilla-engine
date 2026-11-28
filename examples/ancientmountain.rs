@@ -13,13 +13,14 @@
 //   화면 저장: VANILLA_CAPTURE_PATH=shots/mountain_{frame}.png VANILLA_CAPTURE_FRAMES=300 VANILLA_CAPTURE_EXIT=1
 //==============================================================================
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use vanilla::core::fullscreenpass::FullscreenPass;
 use vanilla::core::graphic::{GlTexture, GlVertexArray};
 use vanilla::core::shaderprogram::ShaderProgram;
-use vanilla::{BloomEffect, Color, Engine, EngineConfiguration, GlContext, Graphic, Image, ImageDescription, ImageSource, Material, Matrix4, MouseButton, Rect, RenderTarget, Scene, SceneBase, ShadowMap, SkinnedModel, SkinnedModelLoadHandle, SkinnedModelRenderer, TextAlign, TextBaseline, Vector2, Vector3};
+use vanilla::{BlobAsset, BloomEffect, Canvas2D, CanvasTextAlign, CanvasTextBaseline, Color, Engine, EngineConfiguration, GlContext, Graphic, Image, ImageDescription, ImageSource, Material, Matrix4, MouseButton, Rect, RenderTarget, Scene, SceneBase, ShadowMap, SkinnedModel, SkinnedModelLoadHandle, SkinnedModelRenderer, TextAlign, TextBaseline, TouchPhase, Vector2, Vector3, VirtualPad};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -53,6 +54,8 @@ const PANEL_ROW_HEIGHT: f64 = 30.0;
 const PANEL_MARGIN_RIGHT: f64 = 18.0;
 const SLIDER_TRACK_WIDTH: f64 = 90.0;
 const BUTTON_RADIUS: f64 = 34.0;
+// 지형, 바위 텍스처. (엔진 애셋 읽기 길로 받는다: 데스크탑은 애셋 폴더 파일, 웹은 fetch)
+const TEXTURE_NAME_LIST: [&str; 4] = ["grass.jpg", "rock.jpg", "dirt.jpg", "boulder.jpg"];
 
 // 블롭 그림자.
 const SHADOW_SEGMENT_COUNT: usize = 16;
@@ -415,22 +418,6 @@ out vec4 outputColor;
 void main() {
 	outputColor = vec4(0.05, 0.07, 0.05, fragmentAlpha * shadowStrength);
 }";
-
-//==============================================================================
-// 애셋 파일 읽기. (애셋 폴더 후보를 차례로 본다)
-//==============================================================================
-fn read_asset_bytes(file_name: &str) -> Result<Vec<u8>, String> {
-	let mut directory_list = vec![PathBuf::from(EXAMPLE_ASSET_DIRECTORY)];
-	if let Ok(home_directory) = std::env::var("HOME") {
-		directory_list.push(PathBuf::from(home_directory).join("Github/vanilla.js/examples/ancientmountain/assets"));
-	}
-	for directory in directory_list {
-		if let Ok(bytes) = std::fs::read(directory.join(file_name)) {
-			return Ok(bytes);
-		}
-	}
-	Err(format!("애셋을 찾지 못함: {}", file_name))
-}
 
 //==============================================================================
 // 격자 해시와 노이즈. (셰이더와 비트 단위로 같다)
@@ -893,6 +880,7 @@ struct AncientMountainScene {
 	scene_base: SceneBase,
 	character_load_handle: Option<SkinnedModelLoadHandle>,
 	fox_load_handle: Option<SkinnedModelLoadHandle>,
+	texture_blob_list: Vec<BlobAsset>,
 	resources: Option<MountainResources>,
 	load_error_message: Option<String>,
 	world: World,
@@ -907,6 +895,16 @@ struct AncientMountainScene {
 	is_mouse_dragging: bool,
 	has_mouse_drag_moved: bool,
 	drag_last: Option<Vector2>,
+	// 터치. (원본 touchRouteMap, virtualPad, padInputX / Y, isTouchDevice)
+	touch_route_list: Vec<(i64, TouchRoute)>,
+	virtual_pad: VirtualPad,
+	pad_input: Rc<Cell<(f64, f64)>>,
+	is_touch_device: bool,
+	is_pad_placed: bool,
+	// 원본 HTML 오버레이(제목, 링크, 저작자 표기)를 구운 그림. (창 크기, 번짐 단계마다)
+	overlay_image_table: HashMap<String, Rc<Image>>,
+	overlay_key: String,
+	overlay_measure_canvas: Canvas2D,
 	pending_drag_yaw_delta: f64,
 	pending_drag_pitch_delta: f64,
 	jump_pressed: bool,
@@ -985,6 +983,7 @@ impl AncientMountainScene {
 			scene_base: SceneBase::new(),
 			character_load_handle: None,
 			fox_load_handle: None,
+			texture_blob_list: Vec::new(),
 			resources: None,
 			load_error_message: None,
 			rock_list: Vec::new(),
@@ -998,6 +997,14 @@ impl AncientMountainScene {
 			is_mouse_dragging: false,
 			has_mouse_drag_moved: false,
 			drag_last: None,
+			touch_route_list: Vec::new(),
+			virtual_pad: VirtualPad::new(),
+			pad_input: Rc::new(Cell::new((0.0, 0.0))),
+			is_touch_device: false,
+			is_pad_placed: false,
+			overlay_image_table: HashMap::new(),
+			overlay_key: String::new(),
+			overlay_measure_canvas: Canvas2D::new(1, 1),
 			pending_drag_yaw_delta: 0.0,
 			pending_drag_pitch_delta: 0.0,
 			jump_pressed: false,
@@ -1282,8 +1289,8 @@ impl AncientMountainScene {
 		// 텍스처. (미러 반복 랩 모드, 어떤 이미지든 이음매 없이 타일링)
 		// - 머티리얼의 이미지 해석 길은 JPEG 를 풀지 못하므로(image 크레이트에 jpeg 기능이 꺼져 있다) 엔진 Image 의 JPEG 해독기로 풀어 픽셀로 넘긴다.
 		let mut texture_list: Vec<GlTexture> = Vec::new();
-		for texture_name in ["grass.jpg", "rock.jpg", "dirt.jpg", "boulder.jpg"] {
-			let texture_bytes = read_asset_bytes(texture_name)?;
+		for (texture_index, texture_name) in TEXTURE_NAME_LIST.iter().enumerate() {
+			let texture_bytes = self.texture_blob_list[texture_index].get_blob().ok_or_else(|| format!("텍스처를 아직 받는 중: {}", texture_name))?;
 			let decoded_image = Image::load_from_memory(&texture_bytes)?;
 			let image_description = ImageDescription { source: Some(Rc::new(ImageSource { width: decoded_image.get_width(), height: decoded_image.get_height(), pixels: decoded_image.get_pixels().to_vec() })), ..ImageDescription::default() };
 			let texture = Material::create_texture(gl, Some(&image_description), [128, 128, 128, 255])?;
@@ -1519,8 +1526,9 @@ impl AncientMountainScene {
 				if key_list.move_back {
 					move_input_z -= 1.0;
 				}
-				move_input_x += self.gamepad_move_x;
-				move_input_z += -self.gamepad_move_y;
+				let (pad_input_x, pad_input_y) = self.pad_input.get();
+				move_input_x += pad_input_x + self.gamepad_move_x;
+				move_input_z += -pad_input_y - self.gamepad_move_y;
 				let input_length = (move_input_x * move_input_x + move_input_z * move_input_z).sqrt();
 				let input_strength = input_length.min(1.0);
 				self.current_move_input_x = move_input_x.clamp(-1.0, 1.0);
@@ -1538,8 +1546,9 @@ impl AncientMountainScene {
 					let yaw_difference = wrap_angle(target_yaw - self.character_yaw);
 					self.character_yaw += yaw_difference * (6.5 * delta_time).min(1.0);
 				}
+				let pad_strength = (pad_input_x * pad_input_x + pad_input_y * pad_input_y).sqrt();
 				let gamepad_strength = (self.gamepad_move_x * self.gamepad_move_x + self.gamepad_move_y * self.gamepad_move_y).sqrt();
-				let is_sprinting = key_list.sprint || self.gamepad_sprint_held || gamepad_strength > 0.97;
+				let is_sprinting = key_list.sprint || self.gamepad_sprint_held || pad_strength > 0.97 || gamepad_strength > 0.97;
 				let target_move_speed = (if is_sprinting { SPRINT_SPEED } else { RUN_SPEED }) * input_strength;
 				let acceleration_rate = if target_move_speed > self.current_move_speed { 5.5 } else { 7.5 };
 				self.current_move_speed += (target_move_speed - self.current_move_speed) * (acceleration_rate * delta_time).min(1.0);
@@ -2245,6 +2254,137 @@ impl AncientMountainScene {
 		graphic.draw_line(&[Vector2::create(center_x + cross_offset, center_y - cross_offset), Vector2::create(center_x - cross_offset, center_y + cross_offset)], line_width);
 	}
 
+	// 줄 높이. (크롬 line-height: normal 은 위 길이와 아래 길이를 따로 반올림해 더한다)
+	fn measure_normal_line_height(canvas: &mut Canvas2D, font: &str) -> (f64, f64) {
+		let (font_ascent, font_descent) = measure_line_height(canvas, font);
+		(font_ascent.round(), font_descent.round())
+	}
+
+	// 제목, 링크, 저작자 표기 그리기. (원본 index.html 의 #titleOverlay, #homeLink, #creditNote CSS 값 그대로)
+	fn draw_overlay(&mut self, graphic: &mut Graphic, window_size: Vector2) {
+		let engine = Engine::get_engine().unwrap();
+		let canvas_pixel_size = engine.get_view_manager().get_canvas_pixel_size();
+		let device_scale = if window_size.x > 0.0 { canvas_pixel_size.x / window_size.x } else { 1.0 };
+		let overlay_key = format!("{}x{}@{}", window_size.x, window_size.y, device_scale);
+		if overlay_key != self.overlay_key {
+			self.overlay_image_table.clear();
+			self.overlay_key = overlay_key;
+		}
+		let window_width = window_size.x;
+		let window_height = window_size.y;
+		let center_x = window_width * 0.5;
+
+		// 제목 배치. (#titleMain: clamp(26px, 5vw, 58px), 굵기 200, letter-spacing 0.5em, text-indent 0.5em)
+		let title_font_size = (window_width * 0.05).clamp(26.0, 58.0);
+		let title_font = format!("200 {}px {}", title_font_size, OVERLAY_LIGHT_FONT);
+		let title_letter_spacing = title_font_size * 0.5;
+		let (title_ascent, title_descent) = AncientMountainScene::measure_normal_line_height(&mut self.overlay_measure_canvas, &title_font);
+		let title_line_height = title_ascent + title_descent;
+		let full_title = "ANCIENT MOUNTAIN";
+		let full_title_width = measure_spaced_text(&mut self.overlay_measure_canvas, full_title, &title_font, title_letter_spacing) + title_letter_spacing * 2.0;
+		let title_line_list: Vec<&str> = if full_title_width > window_width * 0.5 { vec!["ANCIENT", "MOUNTAIN"] } else { vec![full_title] };
+		let title_top = window_height * 0.09;
+		let divider_y = title_top + title_line_list.len() as f64 * title_line_height + 14.0;
+		let divider_width = 240.0f64.min(window_width * 0.4);
+		let sub_font_size = (window_width * 0.012).clamp(9.0, 12.0);
+		let sub_font = format!("300 {}px {}", sub_font_size, OVERLAY_LIGHT_FONT);
+		let sub_letter_spacing = sub_font_size * 0.85;
+		let (sub_ascent, sub_descent) = AncientMountainScene::measure_normal_line_height(&mut self.overlay_measure_canvas, &sub_font);
+		let sub_top = divider_y + 1.0 + 12.0;
+		let title_bake_margin = 140.0;
+		let title_bake_rect = Rect::create((center_x - 520.0).max(0.0), title_top - title_bake_margin, (window_width).min(1040.0), (sub_top + sub_ascent + sub_descent) - title_top + title_bake_margin * 2.0);
+
+		// 링크 배치. (#homeLink: 굵기 300, letter-spacing 0.45em, 안쪽 여백 10px 22px, 테두리 1px)
+		let link_font_size = sub_font_size;
+		let link_font = format!("300 {}px {}", link_font_size, OVERLAY_SYSTEM_FONT);
+		let link_letter_spacing = link_font_size * 0.45;
+		let (link_ascent, link_descent) = AncientMountainScene::measure_normal_line_height(&mut self.overlay_measure_canvas, &link_font);
+		let link_text = "VANILLAPUNCH.COM";
+		let link_text_width = measure_spaced_text(&mut self.overlay_measure_canvas, link_text, &link_font, link_letter_spacing) + link_letter_spacing * 2.0;
+		let link_box = Rect::create(0.0, 0.0, link_text_width + 44.0 + 2.0, link_ascent + link_descent + 20.0 + 2.0);
+		let link_box = Rect::create(center_x - link_box.size.x * 0.5, window_height - window_height * 0.055 - link_box.size.y, link_box.size.x, link_box.size.y);
+		let link_bake_margin = 40.0;
+		let link_bake_rect = Rect::create(link_box.position.x - link_bake_margin, link_box.position.y - link_bake_margin, link_box.size.x + link_bake_margin * 2.0, link_box.size.y + link_bake_margin * 2.0);
+
+		// 저작자 표기 배치. (#creditNote: 8.5px, letter-spacing 0.12em, line-height 1.7, 너비 720 이하는 7px, 0.04em, 1.5)
+		let is_narrow = window_width <= 720.0;
+		let credit_font_size = if is_narrow { 7.0 } else { 8.5 };
+		let credit_font = format!("{}px {}", credit_font_size, OVERLAY_SYSTEM_FONT);
+		let credit_letter_spacing = credit_font_size * if is_narrow { 0.04 } else { 0.12 };
+		let credit_line_height = credit_font_size * if is_narrow { 1.5 } else { 1.7 };
+		let (credit_ascent, credit_descent) = AncientMountainScene::measure_normal_line_height(&mut self.overlay_measure_canvas, &credit_font);
+		let credit_top = window_height - 4.0 - credit_line_height * 2.0;
+		let credit_bake_rect = Rect::create(0.0, credit_top - 20.0, window_width, credit_line_height * 2.0 + 20.0 + 4.0);
+
+		// 등장. (titleEntrance 3.2초, cubic-bezier(0.16, 1, 0.3, 1): 투명도, 위에서 14px 내려옴, 번짐 8px 에서 0)
+		let entrance_ease = css_cubic_bezier(0.16, 1.0, 0.3, 1.0, (self.elapsed_time / 3.2).clamp(0.0, 1.0));
+		let blur_level = ((1.0 - entrance_ease) * 8.0).round() as i32;
+		let entrance_offset_y = -14.0 * (1.0 - entrance_ease);
+		let title_color = rgba(247.0, 243.0, 232.0, 1.0);
+		let sub_color = rgba(233.0, 236.0, 240.0, 0.8);
+		let shadow_dark = rgba(20.0, 34.0, 52.0, 0.8);
+
+		let title_key = format!("title|{}", blur_level);
+		if !self.overlay_image_table.contains_key(&title_key) {
+			let image = bake_overlay(title_bake_rect.size.x, title_bake_rect.size.y, device_scale, blur_level as f64, &|canvas| {
+				canvas.translate(-title_bake_rect.position.x, -title_bake_rect.position.y);
+				let title_shadow_list = [TextShadow { color: rgba(20.0, 34.0, 52.0, 0.85), offset_y: 2.0, blur: 18.0 }, TextShadow { color: rgba(255.0, 226.0, 150.0, 0.25), offset_y: 0.0, blur: 42.0 }];
+				for (line_index, line_text) in title_line_list.iter().enumerate() {
+					let baseline_y = title_top + line_index as f64 * title_line_height + title_ascent;
+					draw_css_text(canvas, device_scale, &[(line_text, title_color)], &title_font, title_letter_spacing, if line_index == 0 { center_x } else { center_x - title_letter_spacing * 0.5 }, baseline_y, &title_shadow_list);
+				}
+				let mut gradient = canvas.create_linear_gradient(center_x - divider_width * 0.5, 0.0, center_x + divider_width * 0.5, 0.0);
+				gradient.add_color_stop(0.0, rgba(247.0, 243.0, 232.0, 0.0));
+				gradient.add_color_stop(0.5, rgba(247.0, 243.0, 232.0, 0.75));
+				gradient.add_color_stop(1.0, rgba(247.0, 243.0, 232.0, 0.0));
+				canvas.set_fill_style(gradient);
+				canvas.fill_rect(center_x - divider_width * 0.5, divider_y.round(), divider_width, 1.0);
+				draw_css_text(canvas, device_scale, &[("VANILLA ENGINE", sub_color)], &sub_font, sub_letter_spacing, center_x, sub_top + sub_ascent, &[TextShadow { color: shadow_dark, offset_y: 1.0, blur: 8.0 }]);
+			});
+			self.overlay_image_table.insert(title_key.clone(), image);
+		}
+		let link_key = format!("link|{}", blur_level);
+		if !self.overlay_image_table.contains_key(&link_key) {
+			let image = bake_overlay(link_bake_rect.size.x, link_bake_rect.size.y, device_scale, blur_level as f64, &|canvas| {
+				canvas.translate(-link_bake_rect.position.x, -link_bake_rect.position.y);
+				let radius = link_box.size.y * 0.5;
+				let mut path = vanilla::Path2D::new();
+				path.round_rect((link_box.position.x + 0.5) as f32, (link_box.position.y + 0.5) as f32, (link_box.size.x - 1.0) as f32, (link_box.size.y - 1.0) as f32, &[radius - 0.5]);
+				canvas.set_fill_style(rgba(16.0, 26.0, 38.0, 0.4));
+				canvas.fill_path(&path, vanilla::CanvasFillRule::NonZero);
+				canvas.set_stroke_style(rgba(247.0, 243.0, 232.0, 0.32));
+				canvas.set_line_width(1.0);
+				canvas.stroke_path(&path);
+				draw_css_text(canvas, device_scale, &[(link_text, rgba(247.0, 243.0, 232.0, 0.8))], &link_font, link_letter_spacing, link_box.position.x + link_box.size.x * 0.5, link_box.position.y + 1.0 + 10.0 + link_ascent, &[TextShadow { color: shadow_dark, offset_y: 1.0, blur: 8.0 }]);
+			});
+			self.overlay_image_table.insert(link_key.clone(), image);
+		}
+		let credit_key = String::from("credit");
+		if !self.overlay_image_table.contains_key(&credit_key) {
+			let image = bake_overlay(credit_bake_rect.size.x, credit_bake_rect.size.y, device_scale, 0.0, &|canvas| {
+				canvas.translate(-credit_bake_rect.position.x, -credit_bake_rect.position.y);
+				let label_color = rgba(247.0, 243.0, 232.0, 0.42);
+				let link_color = rgba(247.0, 243.0, 232.0, 0.55);
+				let credit_shadow_list = [TextShadow { color: rgba(0.0, 0.0, 0.0, 0.8), offset_y: 1.0, blur: 6.0 }];
+				let credit_line_list: [[(&str, Color); 2]; 2] = [
+					[("CHARACTER: ", label_color), ("QUATERNIUS UNIVERSAL ANIMATION LIBRARY (CC0)", link_color)],
+					[("FOX: ", label_color), ("MODEL PIXELMANNEN (CC0), RIGGING AND ANIMATION TOMKRANIS (CC BY 4.0), GLTF CONVERSION ASOBOSTUDIO AND SCUREST (CC BY 4.0)", link_color)],
+				];
+				for (line_index, run_list) in credit_line_list.iter().enumerate() {
+					let baseline_y = credit_top + line_index as f64 * credit_line_height + (credit_line_height - (credit_ascent + credit_descent)) * 0.5 + credit_ascent;
+					// 줄 끝의 letter-spacing 도 줄 너비에 들어가므로 글은 그 반만큼 왼쪽으로 간다.
+					draw_css_text(canvas, device_scale, run_list, &credit_font, credit_letter_spacing, center_x - credit_letter_spacing * 0.5, baseline_y, &credit_shadow_list);
+				}
+			});
+			self.overlay_image_table.insert(credit_key.clone(), image);
+		}
+		graphic.set_global_alpha(entrance_ease);
+		graphic.draw_image(&self.overlay_image_table[&title_key], Vector2::create(title_bake_rect.position.x, title_bake_rect.position.y + entrance_offset_y), title_bake_rect.size);
+		graphic.draw_image(&self.overlay_image_table[&link_key], Vector2::create(link_bake_rect.position.x, link_bake_rect.position.y + entrance_offset_y), link_bake_rect.size);
+		graphic.set_global_alpha(1.0);
+		graphic.draw_image(&self.overlay_image_table[&credit_key], Vector2::create(credit_bake_rect.position.x, credit_bake_rect.position.y), credit_bake_rect.size);
+	}
+
 	// 프롬프트. (아이콘 + 레이블)
 	fn draw_prompt(graphic: &mut Graphic, screen: Vector2, label: &str, elapsed_time: f64) {
 		let pulse_scale = 1.0 + (elapsed_time * 5.5).sin() * 0.06;
@@ -2254,28 +2394,193 @@ impl AncientMountainScene {
 		graphic.set_stroke_color(rgba(255.0, 255.0, 255.0, 0.4));
 		graphic.draw_stroke_circle(screen, prompt_radius, 1.6);
 		AncientMountainScene::draw_circle_icon(graphic, screen.x, screen.y, prompt_radius * 0.62, rgba(255.0, 255.0, 255.0, 0.98), 3.0);
-		graphic.set_font_string("15px default");
+		graphic.set_font_string(r#"600 15px "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif"#);
 		graphic.set_text_align(TextAlign::Left);
 		graphic.set_text_baseline(TextBaseline::Middle);
 		AncientMountainScene::draw_shadowed_text(graphic, label, screen.x + prompt_radius + 10.0, screen.y);
 	}
 
-	// 글자를 자간을 벌려 가운데 맞춤으로 그린다. (원본 CSS 의 letter-spacing)
-	fn draw_spaced_text(graphic: &mut Graphic, text: &str, center_x: f64, middle_y: f64, spacing: f64) {
-		let width_list: Vec<f64> = text.chars().map(|character| graphic.measure_text(&character.to_string()).width).collect();
-		let total_width: f64 = width_list.iter().sum::<f64>() + spacing * (width_list.len().saturating_sub(1)) as f64;
-		let mut character_x = center_x - total_width * 0.5;
-		graphic.set_text_align(TextAlign::Left);
-		for (character, character_width) in text.chars().zip(width_list.iter()) {
-			graphic.draw_fill_text(&character.to_string(), character_x, middle_y);
-			character_x += character_width + spacing;
+}
+
+//==============================================================================
+// 원본 HTML 오버레이 꼴 굽기. (CSS 의 글자 굵기, letter-spacing, text-shadow, filter: blur 를 엔진 Canvas2D 로 굽는다)
+// - 원본은 제목, 링크, 저작자 표기를 HTML 요소로 얹는다. 러스트 판은 같은 CSS 값을 Canvas2D 에 그려 한 장으로 굽고 엔진 Graphic 으로 그린다.
+// - 글꼴 문자열은 원본 CSS 그대로다. (운영체제에 없는 이름은 엔진이 다음 이름, 일반 이름으로 넘어간다)
+//==============================================================================
+const OVERLAY_SYSTEM_FONT: &str = "\"Segoe UI\", \"Malgun Gothic\", \"Apple SD Gothic Neo\", sans-serif";
+const OVERLAY_LIGHT_FONT: &str = "\"Segoe UI Light\", \"Segoe UI\", \"Malgun Gothic\", \"Apple SD Gothic Neo\", sans-serif";
+const OVERLAY_SHADOW_FAR: f64 = 30000.0;
+
+// CSS text-shadow 한 겹. (x 번짐 없이 y 만 내림)
+#[derive(Clone, Copy)]
+struct TextShadow {
+	color: Color,
+	offset_y: f64,
+	blur: f64,
+}
+
+// 글자 하나씩 자간을 벌려 그린 줄의 가로 길이. (CSS letter-spacing 이 마지막 글자 뒤에도 붙는 것은 text-indent 가 맞춘다)
+fn measure_spaced_text(canvas: &mut Canvas2D, text: &str, font: &str, letter_spacing: f64) -> f64 {
+	canvas.set_font(font);
+	let width_sum: f64 = text.chars().map(|character| canvas.measure_text(&character.to_string()).width).sum();
+	width_sum + letter_spacing * (text.chars().count().saturating_sub(1)) as f64
+}
+
+// CSS 처럼 그림자를 먼저 깔고 글을 올려 한 줄을 가운데 맞춤으로 그린다. (기준선은 alphabetic, 좌표는 CSS 픽셀, 글 조각마다 색이 다를 수 있다)
+fn draw_css_text(canvas: &mut Canvas2D, device_scale: f64, run_list: &[(&str, Color)], font: &str, letter_spacing: f64, center_x: f64, baseline_y: f64, shadow_list: &[TextShadow]) {
+	canvas.set_font(font);
+	canvas.set_text_align(CanvasTextAlign::Left);
+	canvas.set_text_baseline(CanvasTextBaseline::Alphabetic);
+	let mut character_list: Vec<(String, f64, Color)> = Vec::new();
+	for (run_text, run_color) in run_list {
+		for character in run_text.chars() {
+			let character_text = character.to_string();
+			let character_width = canvas.measure_text(&character_text).width;
+			character_list.push((character_text, character_width, *run_color));
 		}
 	}
+	let total_width = character_list.iter().map(|character| character.1).sum::<f64>() + letter_spacing * (character_list.len().saturating_sub(1)) as f64;
+	let start_x = center_x - total_width * 0.5;
+	for shadow in shadow_list {
+		// 그림자만: 글은 멀리 밖에 그리고 그림자를 같은 만큼 되돌려 놓는다.
+		canvas.set_shadow_color(shadow.color);
+		canvas.set_shadow_blur(shadow.blur * device_scale);
+		canvas.set_shadow_offset_x(OVERLAY_SHADOW_FAR);
+		canvas.set_shadow_offset_y(shadow.offset_y * device_scale);
+		canvas.set_fill_style(Color::create(0.0, 0.0, 0.0, 1.0));
+		let mut character_x = start_x;
+		for (character_text, character_width, _) in character_list.iter() {
+			canvas.fill_text(character_text, character_x - OVERLAY_SHADOW_FAR / device_scale, baseline_y, None);
+			character_x += character_width + letter_spacing;
+		}
+	}
+	canvas.set_shadow_color(Color::create(0.0, 0.0, 0.0, 0.0));
+	canvas.set_shadow_blur(0.0);
+	canvas.set_shadow_offset_x(0.0);
+	canvas.set_shadow_offset_y(0.0);
+	let mut character_x = start_x;
+	for (character_text, character_width, character_color) in character_list.iter() {
+		canvas.set_fill_style(*character_color);
+		canvas.fill_text(character_text, character_x, baseline_y, None);
+		character_x += character_width + letter_spacing;
+	}
+}
+
+// 글꼴의 줄 높이. (CSS line-height: normal 에 가깝게 위 길이와 아래 길이의 합)
+fn measure_line_height(canvas: &mut Canvas2D, font: &str) -> (f64, f64) {
+	canvas.set_font(font);
+	let metrics = canvas.measure_text("M");
+	(metrics.font_ascent, metrics.font_descent)
+}
+
+// CSS filter: blur(시그마) 를 곱한 알파로. (가로 세로 가우스, 모서리는 투명)
+fn blur_image_data(image_data: &mut vanilla::ImageData, sigma: f64) {
+	if sigma < 0.3 {
+		return;
+	}
+	let width = image_data.width as usize;
+	let height = image_data.height as usize;
+	let radius = (sigma * 3.0).ceil() as i32;
+	let mut kernel: Vec<f32> = (-radius..=radius).map(|offset| (-((offset * offset) as f64) / (2.0 * sigma * sigma)).exp() as f32).collect();
+	let kernel_sum: f32 = kernel.iter().sum();
+	for weight in kernel.iter_mut() {
+		*weight /= kernel_sum;
+	}
+	// 곱한 알파로 바꿔 흐린다.
+	let mut channel_list: Vec<f32> = vec![0.0; width * height * 4];
+	for pixel_index in 0..width * height {
+		let alpha = image_data.data[pixel_index * 4 + 3] as f32 / 255.0;
+		for channel_index in 0..3 {
+			channel_list[pixel_index * 4 + channel_index] = image_data.data[pixel_index * 4 + channel_index] as f32 / 255.0 * alpha;
+		}
+		channel_list[pixel_index * 4 + 3] = alpha;
+	}
+	let mut temporary_list = vec![0.0f32; width * height * 4];
+	for row_index in 0..height {
+		for column_index in 0..width {
+			let mut sum = [0.0f32; 4];
+			for (kernel_index, weight) in kernel.iter().enumerate() {
+				let source_column = column_index as i32 + kernel_index as i32 - radius;
+				if source_column >= 0 && (source_column as usize) < width {
+					let source_index = (row_index * width + source_column as usize) * 4;
+					for channel_index in 0..4 {
+						sum[channel_index] += channel_list[source_index + channel_index] * weight;
+					}
+				}
+			}
+			temporary_list[(row_index * width + column_index) * 4..(row_index * width + column_index) * 4 + 4].copy_from_slice(&sum);
+		}
+	}
+	for row_index in 0..height {
+		for column_index in 0..width {
+			let mut sum = [0.0f32; 4];
+			for (kernel_index, weight) in kernel.iter().enumerate() {
+				let source_row = row_index as i32 + kernel_index as i32 - radius;
+				if source_row >= 0 && (source_row as usize) < height {
+					let source_index = (source_row as usize * width + column_index) * 4;
+					for channel_index in 0..4 {
+						sum[channel_index] += temporary_list[source_index + channel_index] * weight;
+					}
+				}
+			}
+			let pixel_index = row_index * width + column_index;
+			let alpha = sum[3];
+			for channel_index in 0..3 {
+				image_data.data[pixel_index * 4 + channel_index] = if alpha > 0.0001 { (sum[channel_index] / alpha * 255.0).round().clamp(0.0, 255.0) as u8 } else { 0 };
+			}
+			image_data.data[pixel_index * 4 + 3] = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+		}
+	}
+}
+
+// 오버레이 굽기 한 장. (draw_function 이 Canvas2D 에 CSS 픽셀 좌표로 그린다, 시그마가 0 보다 크면 흐린다)
+fn bake_overlay(width: f64, height: f64, device_scale: f64, blur_sigma: f64, draw_function: &dyn Fn(&mut Canvas2D)) -> Rc<Image> {
+	let mut canvas = Canvas2D::new((width * device_scale).ceil() as u32, (height * device_scale).ceil() as u32);
+	canvas.scale(device_scale, device_scale);
+	draw_function(&mut canvas);
+	if blur_sigma >= 0.3 {
+		let mut image_data = canvas.get_image_data(0, 0, (width * device_scale).ceil() as u32, (height * device_scale).ceil() as u32);
+		blur_image_data(&mut image_data, blur_sigma * device_scale);
+		canvas.reset_transform();
+		canvas.clear_rect(0.0, 0.0, width * device_scale, height * device_scale);
+		canvas.put_image_data(&image_data, 0, 0);
+	}
+	canvas.to_image()
+}
+
+// CSS cubic-bezier(x1, y1, x2, y2) 이징. (animation-timing-function)
+fn css_cubic_bezier(x1: f64, y1: f64, x2: f64, y2: f64, progress: f64) -> f64 {
+	let curve = |t: f64, p1: f64, p2: f64| -> f64 { 3.0 * (1.0 - t) * (1.0 - t) * t * p1 + 3.0 * (1.0 - t) * t * t * p2 + t * t * t };
+	let mut low = 0.0;
+	let mut high = 1.0;
+	for _ in 0..40 {
+		let middle = (low + high) * 0.5;
+		if curve(middle, x1, x2) < progress {
+			low = middle;
+		}
+		else {
+			high = middle;
+		}
+	}
+	curve((low + high) * 0.5, y1, y2)
 }
 
 //==============================================================================
 // 한 프레임의 키 상태.
 //==============================================================================
+//==============================================================================
+// 터치 담당 영역. (원본 touchRouteMap 의 값)
+//==============================================================================
+#[derive(Clone, Copy, PartialEq)]
+enum TouchRoute {
+	Panel,
+	VirtualPad,
+	ConfirmButton,
+	CancelButton,
+	PromptIcon,
+	CameraDrag,
+}
+
 struct KeyState {
 	move_right: bool,
 	move_left: bool,
@@ -2309,6 +2614,12 @@ impl Scene for AncientMountainScene {
 		self.scene_base.track_load_handle(fox_load_handle.get_load_handle());
 		self.character_load_handle = Some(character_load_handle);
 		self.fox_load_handle = Some(fox_load_handle);
+		for texture_name in TEXTURE_NAME_LIST {
+			let mut texture_blob = BlobAsset::new();
+			let texture_load_handle = texture_blob.load(engine, texture_name);
+			self.scene_base.track_load_handle(&texture_load_handle);
+			self.texture_blob_list.push(texture_blob);
+		}
 	}
 
 	//==============================================================================
@@ -2426,6 +2737,119 @@ impl Scene for AncientMountainScene {
 			self.previous_gamepad_interact = cancel_state;
 		}
 
+		// 가상 조이스틱 처음 설정. (원본 VirtualPad 설정, 자리는 왼쪽 아래)
+		if !self.is_pad_placed {
+			self.is_pad_placed = true;
+			self.virtual_pad.set_pad_radius(62.0);
+			self.virtual_pad.set_ball_radius(26.0);
+			self.virtual_pad.set_pad_color(Color::create(0.06, 0.09, 0.13, 0.32));
+			self.virtual_pad.set_ball_color(Color::create(1.0, 1.0, 1.0, 0.5));
+			self.virtual_pad.set_pad_position(Vector2::create(120.0, window_size.y - 140.0));
+			let pad_input = self.pad_input.clone();
+			self.virtual_pad.set_ball_move_event(move |normalized_direction, pull_strength| {
+				pad_input.set(((normalized_direction.x * 2.0 - 1.0) * pull_strength, (normalized_direction.y * 2.0 - 1.0) * pull_strength));
+			});
+			self.is_touch_device = engine.get_input_manager().is_touch_input();
+		}
+
+		// 터치. (원본 touchstart, touchmove, touchend: 손가락마다 담당 영역을 기억한다)
+		let (touch_point_list, ended_touch_point_list) = {
+			let input_manager = engine.get_input_manager();
+			(input_manager.get_touch_points().to_vec(), input_manager.get_ended_touch_points().to_vec())
+		};
+		let is_touch_frame = !touch_point_list.is_empty() || !ended_touch_point_list.is_empty();
+		for touch_point in touch_point_list.iter() {
+			let touch_position = touch_point.canvas_native_position;
+			let route = self.touch_route_list.iter().find(|(identifier, _)| *identifier == touch_point.identifier).map(|(_, route)| *route);
+			match route {
+				None => {
+					self.is_touch_device = true;
+					self.has_any_input_happened = true;
+					let new_route = if self.handle_panel_press(touch_position.x, touch_position.y, window_size.x) {
+						TouchRoute::Panel
+					}
+					else if AncientMountainScene::hit_test_circle(touch_position, AncientMountainScene::jump_button_center(window_size), BUTTON_RADIUS + 10.0) {
+						self.is_jump_button_held = true;
+						self.jump_pressed = true;
+						TouchRoute::ConfirmButton
+					}
+					else if AncientMountainScene::hit_test_circle(touch_position, AncientMountainScene::interact_button_center(window_size), BUTTON_RADIUS + 10.0) {
+						self.is_interact_button_held = true;
+						self.interact_pressed = true;
+						TouchRoute::CancelButton
+					}
+					else if self.prompt_screen_position.is_some() && AncientMountainScene::hit_test_circle(touch_position, self.prompt_screen_position.unwrap(), 32.0) {
+						self.interact_pressed = true;
+						TouchRoute::PromptIcon
+					}
+					else if touch_position.x < window_size.x * 0.42 {
+						self.virtual_pad.set_pad_position(touch_position);
+						self.virtual_pad.touch_press(touch_position);
+						TouchRoute::VirtualPad
+					}
+					else {
+						self.drag_last = Some(touch_position);
+						TouchRoute::CameraDrag
+					};
+					self.touch_route_list.push((touch_point.identifier, new_route));
+				}
+				Some(route) => {
+					if touch_point.phase != TouchPhase::Moved {
+						continue;
+					}
+					match route {
+						TouchRoute::Panel => {
+							if self.active_slider_index.is_some() {
+								self.update_slider_from_x(touch_position.x, window_size.x);
+							}
+						}
+						TouchRoute::VirtualPad => {
+							self.virtual_pad.touch_move(touch_position);
+						}
+						TouchRoute::CameraDrag => {
+							if let Some(drag_last) = self.drag_last {
+								self.pending_drag_yaw_delta += (touch_position.x - drag_last.x) * 0.0052;
+								self.pending_drag_pitch_delta -= (touch_position.y - drag_last.y) * 0.0038;
+							}
+							self.drag_last = Some(touch_position);
+						}
+						_ => {
+						}
+					}
+				}
+			}
+		}
+		for touch_point in ended_touch_point_list.iter() {
+			let route = match self.touch_route_list.iter().position(|(identifier, _)| *identifier == touch_point.identifier) {
+				Some(route_index) => {
+					self.touch_route_list.remove(route_index).1
+				}
+				None => {
+					continue;
+				}
+			};
+			match route {
+				TouchRoute::Panel => {
+					self.active_slider_index = None;
+				}
+				TouchRoute::VirtualPad => {
+					self.virtual_pad.touch_release(touch_point.canvas_native_position);
+				}
+				TouchRoute::ConfirmButton => {
+					self.is_jump_button_held = false;
+				}
+				TouchRoute::CancelButton => {
+					self.is_interact_button_held = false;
+				}
+				TouchRoute::CameraDrag => {
+					self.drag_last = None;
+				}
+				TouchRoute::PromptIcon => {
+				}
+			}
+		}
+		let (left_just_pressed, left_down, left_just_released, right_just_pressed) = if is_touch_frame { (false, false, false, false) } else { (left_just_pressed, left_down, left_just_released, right_just_pressed) };
+
 		// 마우스. (좌클릭 = 점프, 우클릭 = 등반, 하산, 취소, 좌드래그 = 시점 회전)
 		if right_just_pressed {
 			self.interact_pressed = true;
@@ -2467,7 +2891,7 @@ impl Scene for AncientMountainScene {
 				self.drag_last = Some(pointer_position);
 			}
 		}
-		if left_just_released || !left_down {
+		if !is_touch_frame && (left_just_released || !left_down) {
 			if left_just_released && self.is_mouse_dragging && !self.has_mouse_drag_moved {
 				self.jump_pressed = true;
 			}
@@ -2648,56 +3072,10 @@ impl Scene for AncientMountainScene {
 		graphic.set_global_alpha(1.0);
 		graphic.set_text_baseline(TextBaseline::Middle);
 
-		// 제목. (원본 titleEntrance 3.2초)
-		let entrance_progress = (elapsed_time / 3.2).clamp(0.0, 1.0);
-		let entrance_ease = 1.0 - (1.0 - entrance_progress).powi(5);
-		let title_font_size = (window_size.x * 0.05).clamp(26.0, 58.0);
-		let sub_font_size = (window_size.x * 0.012).clamp(9.0, 12.0);
-		let title_top = window_size.y * 0.09 - 14.0 * (1.0 - entrance_ease);
-		let center_x = window_size.x * 0.5;
-		graphic.set_global_alpha(entrance_ease);
-		graphic.set_font_string(&format!("{}px default", title_font_size.round()));
-		graphic.set_fill_color(rgba(247.0, 243.0, 232.0, 1.0));
-		let full_title = "ANCIENT MOUNTAIN";
-		let full_width: f64 = full_title.chars().map(|character| graphic.measure_text(&character.to_string()).width + title_font_size * 0.5).sum();
-		let line_pitch = title_font_size * 1.18;
-		let line_count;
-		if full_width > window_size.x * 0.5 {
-			line_count = 2.0;
-			AncientMountainScene::draw_spaced_text(graphic, "ANCIENT", center_x, title_top + title_font_size * 0.53, title_font_size * 0.5);
-			AncientMountainScene::draw_spaced_text(graphic, "MOUNTAIN", center_x, title_top + title_font_size * 0.53 + line_pitch, title_font_size * 0.5);
-		}
-		else {
-			line_count = 1.0;
-			AncientMountainScene::draw_spaced_text(graphic, full_title, center_x, title_top + title_font_size * 0.53, title_font_size * 0.5);
-		}
-		let divider_width = 240.0f64.min(window_size.x * 0.4);
-		let divider_y = title_top + line_count * line_pitch + 14.0;
-		for step_index in 0..40 {
-			let step_ratio = step_index as f64 / 39.0;
-			let step_alpha = 0.75 * (1.0 - (step_ratio * 2.0 - 1.0).abs());
-			graphic.set_fill_color(rgba(247.0, 243.0, 232.0, step_alpha));
-			graphic.draw_rect(Rect::create(center_x - divider_width * 0.5 + divider_width * step_index as f64 / 40.0, divider_y, divider_width / 40.0 + 0.5, 1.0));
-		}
-		graphic.set_font_string(&format!("{}px default", sub_font_size.round()));
-		graphic.set_fill_color(rgba(233.0, 236.0, 240.0, 0.8));
-		AncientMountainScene::draw_spaced_text(graphic, "VANILLA ENGINE", center_x, divider_y + 12.0 + sub_font_size * 0.67, sub_font_size * 0.85);
-
-		// 아래쪽 사이트 링크와 저작자 표기.
-		let link_width = 245.0;
-		let link_height = 36.0;
-		let link_rect = Rect::create(center_x - link_width * 0.5, window_size.y * 0.945 - link_height, link_width, link_height);
-		graphic.set_fill_color(rgba(16.0, 26.0, 38.0, 0.4));
-		graphic.draw_round_rect(link_rect, link_height * 0.5);
-		graphic.set_stroke_color(rgba(247.0, 243.0, 232.0, 0.32));
-		graphic.draw_stroke_round_rect(link_rect, link_height * 0.5, 1.0);
-		graphic.set_fill_color(rgba(247.0, 243.0, 232.0, 0.8));
-		AncientMountainScene::draw_spaced_text(graphic, "VANILLAPUNCH.COM", center_x, link_rect.position.y + link_height * 0.5 + 1.0, sub_font_size * 0.45);
+		// 제목, 링크, 저작자 표기. (원본 HTML 오버레이를 같은 CSS 값으로 구워 그린다)
+		self.draw_overlay(graphic, window_size);
 		graphic.set_global_alpha(1.0);
-		graphic.set_font_string("9px default");
-		graphic.set_fill_color(rgba(247.0, 243.0, 232.0, 0.42));
-		AncientMountainScene::draw_spaced_text(graphic, "CHARACTER: QUATERNIUS UNIVERSAL ANIMATION LIBRARY (CC0)", center_x, window_size.y - 4.0 - 14.0, 1.0);
-		AncientMountainScene::draw_spaced_text(graphic, "FOX: MODEL PIXELMANNEN (CC0), RIGGING AND ANIMATION TOMKRANIS (CC BY 4.0), GLTF CONVERSION ASOBOSTUDIO AND SCUREST (CC BY 4.0)", center_x, window_size.y - 4.0 - 3.0, 0.6);
+		graphic.set_text_baseline(TextBaseline::Middle);
 
 		// 등반 프롬프트. (절벽의 손 닿는 높이에 O 아이콘 + 레이블)
 		self.prompt_screen_position = None;
@@ -2724,7 +3102,7 @@ impl Scene for AncientMountainScene {
 				graphic.set_stroke_color(rgba(255.0, 255.0, 255.0, 0.4));
 				graphic.draw_stroke_circle(cancel_screen, 15.0, 1.6);
 				AncientMountainScene::draw_circle_icon(graphic, cancel_screen.x, cancel_screen.y, 10.0, rgba(255.0, 255.0, 255.0, 0.95), 2.4);
-				graphic.set_font_string("13px default");
+				graphic.set_font_string(r#"600 13px "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif"#);
 				graphic.set_text_align(TextAlign::Left);
 				AncientMountainScene::draw_shadowed_text(graphic, "취소", cancel_screen.x + 24.0, cancel_screen.y);
 			}
@@ -2736,10 +3114,11 @@ impl Scene for AncientMountainScene {
 		graphic.draw_round_rect(counter_rect, 15.0);
 		graphic.set_stroke_color(rgba(255.0, 226.0, 150.0, 0.28));
 		graphic.draw_stroke_round_rect(counter_rect, 15.0, 1.0);
-		graphic.set_font_string("14px default");
+		graphic.set_font_string(r#"500 14px "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif"#);
 		graphic.set_text_align(TextAlign::Left);
+		graphic.set_text_baseline(TextBaseline::Middle);
 		graphic.set_fill_color(rgba(255.0, 205.0, 90.0, 0.95));
-		graphic.draw_fill_text("^", 28.0, 30.0);
+		graphic.draw_fill_text("\u{25b2}", 28.0, 30.0);
 		AncientMountainScene::draw_shadowed_text(graphic, &format!("정상 {} / {}", self.cleared_summit_count, self.world.hill_count), 46.0, 30.0);
 
 		// 전체 클리어 배너.
@@ -2747,12 +3126,18 @@ impl Scene for AncientMountainScene {
 		if all_cleared_elapsed > 0.0 && all_cleared_elapsed < 7.0 {
 			let banner_alpha = (all_cleared_elapsed / 0.8).min(1.0) * (1.0 - smoothstep_value(5.5, 7.0, all_cleared_elapsed));
 			graphic.set_global_alpha(banner_alpha);
-			graphic.set_font_string("34px default");
+			graphic.set_font_string(r#"300 34px "Segoe UI Light", "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif"#);
 			graphic.set_text_align(TextAlign::Center);
 			AncientMountainScene::draw_shadowed_text(graphic, "모든 정상을 정복했습니다", window_size.x * 0.5, window_size.y * 0.36);
-			graphic.set_font_string("14px default");
+			graphic.set_font_string(r#"300 14px "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif"#);
 			AncientMountainScene::draw_shadowed_text(graphic, "잃어버린 순환로의 여섯 봉우리를 모두 올랐습니다", window_size.x * 0.5, window_size.y * 0.36 + 34.0);
 			graphic.set_global_alpha(1.0);
+		}
+
+		// 가상 조이스틱. (터치 기기)
+		if self.is_touch_device {
+			self.virtual_pad.tick(self.delta_time);
+			self.virtual_pad.draw(graphic);
 		}
 
 		// X, O 단추. (우하단)
@@ -2776,19 +3161,27 @@ impl Scene for AncientMountainScene {
 		let hint_alpha = if self.has_any_input_happened { (1.0 - (elapsed_time - self.hint_fade_start_time) / 3.0).max(0.0) } else { 1.0 };
 		if hint_alpha > 0.01 {
 			graphic.set_global_alpha(hint_alpha);
-			graphic.set_font_string("12px default");
+			graphic.set_font_string(r#"400 12px "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif"#);
+			graphic.set_text_baseline(TextBaseline::Middle);
 			graphic.set_text_align(TextAlign::Left);
 			let hint_base_y = window_size.y - 148.0;
-			let hint_card_rect = Rect::create(10.0, hint_base_y - 36.0, 366.0, 116.0);
+			let hint_card_rect = if self.is_touch_device { Rect::create(10.0, hint_base_y - 16.0, 252.0, 72.0) } else { Rect::create(10.0, hint_base_y - 36.0, 366.0, 116.0) };
 			graphic.set_fill_color(rgba(12.0, 20.0, 32.0, 0.5));
 			graphic.draw_round_rect(hint_card_rect, 12.0);
 			graphic.set_stroke_color(rgba(255.0, 226.0, 150.0, 0.2));
 			graphic.draw_stroke_round_rect(hint_card_rect, 12.0, 1.0);
-			AncientMountainScene::draw_shadowed_text(graphic, "W A S D - 이동  /  SHIFT / R2 - 질주", 18.0, hint_base_y - 20.0);
-			AncientMountainScene::draw_shadowed_text(graphic, "방향키 / 마우스 드래그 - 시점", 18.0, hint_base_y);
-			AncientMountainScene::draw_shadowed_text(graphic, "SPACE / 좌클릭 - 점프 (X)", 18.0, hint_base_y + 20.0);
-			AncientMountainScene::draw_shadowed_text(graphic, "O / 우클릭 - 등반 / 뛰어내리기 / 취소 (O)", 18.0, hint_base_y + 40.0);
-			AncientMountainScene::draw_shadowed_text(graphic, "절벽을 바라보면 등반 / 가장자리에서 아래를 보면 뛰어내리기", 18.0, hint_base_y + 60.0);
+			if self.is_touch_device {
+				AncientMountainScene::draw_shadowed_text(graphic, "왼쪽 드래그 \u{2014} 이동 (끝까지 밀면 질주)", 18.0, hint_base_y);
+				AncientMountainScene::draw_shadowed_text(graphic, "오른쪽 드래그 \u{2014} 시점", 18.0, hint_base_y + 20.0);
+				AncientMountainScene::draw_shadowed_text(graphic, "\u{2715} 점프 \u{00b7} \u{25cb} 등반 / 뛰어내리기", 18.0, hint_base_y + 40.0);
+			}
+			else {
+				AncientMountainScene::draw_shadowed_text(graphic, "W A S D \u{2014} 이동  \u{00b7}  SHIFT / R2 \u{2014} 질주", 18.0, hint_base_y - 20.0);
+				AncientMountainScene::draw_shadowed_text(graphic, "방향키 / 마우스 드래그 \u{2014} 시점", 18.0, hint_base_y);
+				AncientMountainScene::draw_shadowed_text(graphic, "SPACE / 좌클릭 \u{2014} 점프 (\u{2715})", 18.0, hint_base_y + 20.0);
+				AncientMountainScene::draw_shadowed_text(graphic, "O / 우클릭 \u{2014} 등반 \u{00b7} 뛰어내리기 \u{00b7} 취소 (\u{25cb})", 18.0, hint_base_y + 40.0);
+				AncientMountainScene::draw_shadowed_text(graphic, "절벽을 바라보면 등반 \u{00b7} 가장자리에서 아래를 보면 뛰어내리기", 18.0, hint_base_y + 60.0);
+			}
 			graphic.set_global_alpha(1.0);
 		}
 
@@ -2843,7 +3236,7 @@ impl Scene for AncientMountainScene {
 			)
 		};
 		let indicator_center_x = 46.0;
-		let indicator_center_y = window_size.y - 40.0;
+		let indicator_center_y = window_size.y - if self.is_touch_device { 258.0 } else { 40.0 };
 		let indicator_center = Vector2::create(indicator_center_x, indicator_center_y);
 		graphic.set_fill_color(rgba(12.0, 20.0, 32.0, 0.5));
 		graphic.draw_circle(indicator_center, 26.0);
@@ -2852,7 +3245,7 @@ impl Scene for AncientMountainScene {
 		let move_magnitude = (self.current_move_input_x * self.current_move_input_x + self.current_move_input_z * self.current_move_input_z).sqrt();
 		graphic.set_fill_color(if move_magnitude > 0.05 { rgba(255.0, 236.0, 180.0, 0.95) } else { rgba(238.0, 240.0, 244.0, 0.35) });
 		graphic.draw_circle(Vector2::create(indicator_center_x + self.current_move_input_x * 15.0, indicator_center_y - self.current_move_input_z * 15.0), 6.0);
-		graphic.set_font_string("11px default");
+		graphic.set_font_string(r#"500 11px "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif"#);
 		graphic.set_text_align(TextAlign::Center);
 		let mut indicator_chip_x = indicator_center_x + 38.0;
 		for (label, is_held, chip_width) in [("질주", indicator_sprint_held, 46.0), ("점프", indicator_jump_held, 46.0), ("상호작용", indicator_interact_held, 66.0)] {
@@ -2873,13 +3266,14 @@ impl Scene for AncientMountainScene {
 		graphic.draw_round_rect(panel_rect, 14.0);
 		graphic.set_stroke_color(rgba(255.0, 226.0, 150.0, 0.28));
 		graphic.draw_stroke_round_rect(panel_rect, 14.0, 1.0);
-		graphic.set_font_string("11px default");
+		graphic.set_font_string(r#"300 11px "Segoe UI", "Apple SD Gothic Neo", sans-serif"#);
+		graphic.set_text_baseline(TextBaseline::Middle);
 		graphic.set_text_align(TextAlign::Left);
 		graphic.set_fill_color(rgba(255.0, 236.0, 180.0, 0.92));
 		graphic.draw_fill_text("O P T I O N S", panel_x + 16.0, panel_y + PANEL_HEADER_HEIGHT * 0.5 + 1.0);
 		graphic.set_text_align(TextAlign::Right);
 		graphic.set_fill_color(rgba(255.0, 236.0, 180.0, 0.6));
-		graphic.draw_fill_text(if self.is_panel_collapsed { ">" } else { "v" }, panel_x + PANEL_WIDTH - 16.0, panel_y + PANEL_HEADER_HEIGHT * 0.5 + 1.0);
+		graphic.draw_fill_text(if self.is_panel_collapsed { "\u{25b8}" } else { "\u{25be}" }, panel_x + PANEL_WIDTH - 16.0, panel_y + PANEL_HEADER_HEIGHT * 0.5 + 1.0);
 		if self.panel_collapse_blend > 0.05 {
 			for (row_index, label) in OPTION_LABEL_LIST.iter().enumerate() {
 				let row_y = panel_y + PANEL_HEADER_HEIGHT + 4.0 + row_index as f64 * PANEL_ROW_HEIGHT;
@@ -2889,7 +3283,7 @@ impl Scene for AncientMountainScene {
 				let row_middle_y = row_y + PANEL_ROW_HEIGHT * 0.5;
 				graphic.set_global_alpha(self.panel_collapse_blend);
 				graphic.set_text_align(TextAlign::Left);
-				graphic.set_font_string("11px default");
+				graphic.set_font_string(r#"300 11px "Segoe UI", "Apple SD Gothic Neo", sans-serif"#);
 				graphic.set_fill_color(rgba(238.0, 240.0, 244.0, 0.85));
 				graphic.draw_fill_text(label, panel_x + 16.0, row_middle_y + 1.0);
 				if row_index == OPTION_SHADOW {
@@ -2900,7 +3294,7 @@ impl Scene for AncientMountainScene {
 					graphic.set_stroke_color(rgba(255.0, 226.0, 150.0, 0.5));
 					graphic.draw_stroke_round_rect(chip_rect, 9.5, 1.0);
 					graphic.set_text_align(TextAlign::Center);
-					graphic.set_font_string("10px default");
+					graphic.set_font_string(r#"600 10px "Segoe UI", "Apple SD Gothic Neo", sans-serif"#);
 					graphic.set_fill_color(rgba(255.0, 236.0, 180.0, 0.95));
 					graphic.draw_fill_text(SHADOW_STATE_LABEL_LIST[self.shadow_state], panel_x + PANEL_WIDTH - 16.0 - chip_width * 0.5, row_middle_y + 1.0);
 				}

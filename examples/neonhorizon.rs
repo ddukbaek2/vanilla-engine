@@ -10,11 +10,13 @@
 //   화면 저장: VANILLA_CAPTURE_PATH=shots/neon_{frame}.png VANILLA_CAPTURE_FRAMES=240 VANILLA_CAPTURE_EXIT=1
 //==============================================================================
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 use vanilla::core::fullscreenpass::FullscreenPass;
 use vanilla::core::graphic::GlTexture;
 use vanilla::core::shaderprogram::ShaderProgram;
-use vanilla::{Color, Engine, EngineConfiguration, GlContext, Graphic, RenderTarget, Rect, Scene, SceneBase, SkinnedModel, SkinnedModelLoadHandle, SkinnedModelRenderer, TextAlign, TextBaseline, Vector2};
+use vanilla::{Canvas2D, CanvasTextAlign, CanvasTextBaseline, Color, Engine, EngineConfiguration, GlContext, Graphic, Image, RenderTarget, Rect, Scene, SceneBase, SkinnedModel, SkinnedModelLoadHandle, SkinnedModelRenderer, TextAlign, TextBaseline, Vector2};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -685,6 +687,169 @@ struct NeonResources {
 //==============================================================================
 // 네온 호라이즌 씬.
 //==============================================================================
+//==============================================================================
+// 원본 HTML 오버레이 꼴 굽기. (CSS 의 글자 굵기, letter-spacing, text-shadow, filter: blur 를 엔진 Canvas2D 로 굽는다)
+// - 원본은 제목, 링크, 저작자 표기를 HTML 요소로 얹는다. 러스트 판은 같은 CSS 값을 Canvas2D 에 그려 한 장으로 굽고 엔진 Graphic 으로 그린다.
+// - 글꼴 문자열은 원본 CSS 그대로다. (운영체제에 없는 이름은 엔진이 다음 이름, 일반 이름으로 넘어간다)
+//==============================================================================
+const OVERLAY_SYSTEM_FONT: &str = "\"Segoe UI\", \"Malgun Gothic\", \"Apple SD Gothic Neo\", sans-serif";
+const OVERLAY_LIGHT_FONT: &str = "\"Segoe UI Light\", \"Segoe UI\", \"Malgun Gothic\", \"Apple SD Gothic Neo\", sans-serif";
+const OVERLAY_SHADOW_FAR: f64 = 30000.0;
+
+// CSS text-shadow 한 겹. (x 번짐 없이 y 만 내림)
+#[derive(Clone, Copy)]
+struct TextShadow {
+	color: Color,
+	offset_y: f64,
+	blur: f64,
+}
+
+// 글자 하나씩 자간을 벌려 그린 줄의 가로 길이. (CSS letter-spacing 이 마지막 글자 뒤에도 붙는 것은 text-indent 가 맞춘다)
+fn measure_spaced_text(canvas: &mut Canvas2D, text: &str, font: &str, letter_spacing: f64) -> f64 {
+	canvas.set_font(font);
+	let width_sum: f64 = text.chars().map(|character| canvas.measure_text(&character.to_string()).width).sum();
+	width_sum + letter_spacing * (text.chars().count().saturating_sub(1)) as f64
+}
+
+// CSS 처럼 그림자를 먼저 깔고 글을 올려 한 줄을 가운데 맞춤으로 그린다. (기준선은 alphabetic, 좌표는 CSS 픽셀, 글 조각마다 색이 다를 수 있다)
+fn draw_css_text(canvas: &mut Canvas2D, device_scale: f64, run_list: &[(&str, Color)], font: &str, letter_spacing: f64, center_x: f64, baseline_y: f64, shadow_list: &[TextShadow]) {
+	canvas.set_font(font);
+	canvas.set_text_align(CanvasTextAlign::Left);
+	canvas.set_text_baseline(CanvasTextBaseline::Alphabetic);
+	let mut character_list: Vec<(String, f64, Color)> = Vec::new();
+	for (run_text, run_color) in run_list {
+		for character in run_text.chars() {
+			let character_text = character.to_string();
+			let character_width = canvas.measure_text(&character_text).width;
+			character_list.push((character_text, character_width, *run_color));
+		}
+	}
+	let total_width = character_list.iter().map(|character| character.1).sum::<f64>() + letter_spacing * (character_list.len().saturating_sub(1)) as f64;
+	let start_x = center_x - total_width * 0.5;
+	for shadow in shadow_list {
+		// 그림자만: 글은 멀리 밖에 그리고 그림자를 같은 만큼 되돌려 놓는다.
+		canvas.set_shadow_color(shadow.color);
+		canvas.set_shadow_blur(shadow.blur * device_scale);
+		canvas.set_shadow_offset_x(OVERLAY_SHADOW_FAR);
+		canvas.set_shadow_offset_y(shadow.offset_y * device_scale);
+		canvas.set_fill_style(Color::create(0.0, 0.0, 0.0, 1.0));
+		let mut character_x = start_x;
+		for (character_text, character_width, _) in character_list.iter() {
+			canvas.fill_text(character_text, character_x - OVERLAY_SHADOW_FAR / device_scale, baseline_y, None);
+			character_x += character_width + letter_spacing;
+		}
+	}
+	canvas.set_shadow_color(Color::create(0.0, 0.0, 0.0, 0.0));
+	canvas.set_shadow_blur(0.0);
+	canvas.set_shadow_offset_x(0.0);
+	canvas.set_shadow_offset_y(0.0);
+	let mut character_x = start_x;
+	for (character_text, character_width, character_color) in character_list.iter() {
+		canvas.set_fill_style(*character_color);
+		canvas.fill_text(character_text, character_x, baseline_y, None);
+		character_x += character_width + letter_spacing;
+	}
+}
+
+// 글꼴의 줄 높이. (CSS line-height: normal 에 가깝게 위 길이와 아래 길이의 합)
+fn measure_line_height(canvas: &mut Canvas2D, font: &str) -> (f64, f64) {
+	canvas.set_font(font);
+	let metrics = canvas.measure_text("M");
+	(metrics.font_ascent, metrics.font_descent)
+}
+
+// CSS filter: blur(시그마) 를 곱한 알파로. (가로 세로 가우스, 모서리는 투명)
+fn blur_image_data(image_data: &mut vanilla::ImageData, sigma: f64) {
+	if sigma < 0.3 {
+		return;
+	}
+	let width = image_data.width as usize;
+	let height = image_data.height as usize;
+	let radius = (sigma * 3.0).ceil() as i32;
+	let mut kernel: Vec<f32> = (-radius..=radius).map(|offset| (-((offset * offset) as f64) / (2.0 * sigma * sigma)).exp() as f32).collect();
+	let kernel_sum: f32 = kernel.iter().sum();
+	for weight in kernel.iter_mut() {
+		*weight /= kernel_sum;
+	}
+	// 곱한 알파로 바꿔 흐린다.
+	let mut channel_list: Vec<f32> = vec![0.0; width * height * 4];
+	for pixel_index in 0..width * height {
+		let alpha = image_data.data[pixel_index * 4 + 3] as f32 / 255.0;
+		for channel_index in 0..3 {
+			channel_list[pixel_index * 4 + channel_index] = image_data.data[pixel_index * 4 + channel_index] as f32 / 255.0 * alpha;
+		}
+		channel_list[pixel_index * 4 + 3] = alpha;
+	}
+	let mut temporary_list = vec![0.0f32; width * height * 4];
+	for row_index in 0..height {
+		for column_index in 0..width {
+			let mut sum = [0.0f32; 4];
+			for (kernel_index, weight) in kernel.iter().enumerate() {
+				let source_column = column_index as i32 + kernel_index as i32 - radius;
+				if source_column >= 0 && (source_column as usize) < width {
+					let source_index = (row_index * width + source_column as usize) * 4;
+					for channel_index in 0..4 {
+						sum[channel_index] += channel_list[source_index + channel_index] * weight;
+					}
+				}
+			}
+			temporary_list[(row_index * width + column_index) * 4..(row_index * width + column_index) * 4 + 4].copy_from_slice(&sum);
+		}
+	}
+	for row_index in 0..height {
+		for column_index in 0..width {
+			let mut sum = [0.0f32; 4];
+			for (kernel_index, weight) in kernel.iter().enumerate() {
+				let source_row = row_index as i32 + kernel_index as i32 - radius;
+				if source_row >= 0 && (source_row as usize) < height {
+					let source_index = (source_row as usize * width + column_index) * 4;
+					for channel_index in 0..4 {
+						sum[channel_index] += temporary_list[source_index + channel_index] * weight;
+					}
+				}
+			}
+			let pixel_index = row_index * width + column_index;
+			let alpha = sum[3];
+			for channel_index in 0..3 {
+				image_data.data[pixel_index * 4 + channel_index] = if alpha > 0.0001 { (sum[channel_index] / alpha * 255.0).round().clamp(0.0, 255.0) as u8 } else { 0 };
+			}
+			image_data.data[pixel_index * 4 + 3] = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+		}
+	}
+}
+
+// 오버레이 굽기 한 장. (draw_function 이 Canvas2D 에 CSS 픽셀 좌표로 그린다, 시그마가 0 보다 크면 흐린다)
+fn bake_overlay(width: f64, height: f64, device_scale: f64, blur_sigma: f64, draw_function: &dyn Fn(&mut Canvas2D)) -> Rc<Image> {
+	let mut canvas = Canvas2D::new((width * device_scale).ceil() as u32, (height * device_scale).ceil() as u32);
+	canvas.scale(device_scale, device_scale);
+	draw_function(&mut canvas);
+	if blur_sigma >= 0.3 {
+		let mut image_data = canvas.get_image_data(0, 0, (width * device_scale).ceil() as u32, (height * device_scale).ceil() as u32);
+		blur_image_data(&mut image_data, blur_sigma * device_scale);
+		canvas.reset_transform();
+		canvas.clear_rect(0.0, 0.0, width * device_scale, height * device_scale);
+		canvas.put_image_data(&image_data, 0, 0);
+	}
+	canvas.to_image()
+}
+
+// CSS cubic-bezier(x1, y1, x2, y2) 이징. (animation-timing-function)
+fn css_cubic_bezier(x1: f64, y1: f64, x2: f64, y2: f64, progress: f64) -> f64 {
+	let curve = |t: f64, p1: f64, p2: f64| -> f64 { 3.0 * (1.0 - t) * (1.0 - t) * t * p1 + 3.0 * (1.0 - t) * t * t * p2 + t * t * t };
+	let mut low = 0.0;
+	let mut high = 1.0;
+	for _ in 0..40 {
+		let middle = (low + high) * 0.5;
+		if curve(middle, x1, x2) < progress {
+			low = middle;
+		}
+		else {
+			high = middle;
+		}
+	}
+	curve((low + high) * 0.5, y1, y2)
+}
+
 struct NeonHorizonScene {
 	scene_base: SceneBase,
 	flagship_load_handle: Option<SkinnedModelLoadHandle>,
@@ -698,6 +863,11 @@ struct NeonHorizonScene {
 	pointer_current_x: f64,
 	pointer_current_y: f64,
 	last_pointer_position: Vector2,
+	// 원본 HTML 오버레이(제목, 링크)를 구운 그림. (창 크기, 번짐 단계마다)
+	overlay_image_table: HashMap<String, Rc<Image>>,
+	overlay_key: String,
+	overlay_measure_canvas: Canvas2D,
+	link_hit_rect: Rect,
 	is_boost_pressed: bool,
 	drag_last_x: Option<f64>,
 	player_target_x: f64,
@@ -735,6 +905,10 @@ impl NeonHorizonScene {
 			pointer_current_x: 0.0,
 			pointer_current_y: 0.0,
 			last_pointer_position: Vector2::create(-1.0, -1.0),
+			overlay_image_table: HashMap::new(),
+			overlay_key: String::new(),
+			overlay_measure_canvas: Canvas2D::new(1, 1),
+			link_hit_rect: Rect::create(0.0, 0.0, 0.0, 0.0),
 			is_boost_pressed: false,
 			drag_last_x: None,
 			player_target_x: 0.0,
@@ -1180,19 +1354,108 @@ impl NeonHorizonScene {
 		Ok(())
 	}
 
-	//==============================================================================
-	// 글자를 자간을 벌려 가운데 맞춤으로 그린다. (원본 CSS 의 letter-spacing + text-indent 와 같은 모양)
-	//==============================================================================
-	fn draw_spaced_text(graphic: &mut Graphic, text: &str, center_x: f64, middle_y: f64, spacing: f64) {
-		let width_list: Vec<f64> = text.chars().map(|character| graphic.measure_text(&character.to_string()).width).collect();
-		let total_width: f64 = width_list.iter().sum::<f64>() + spacing * (width_list.len().saturating_sub(1)) as f64;
-		let mut character_x = center_x - total_width * 0.5;
-		graphic.set_text_align(TextAlign::Left);
-		for (character, character_width) in text.chars().zip(width_list.iter()) {
-			graphic.draw_fill_text(&character.to_string(), character_x, middle_y);
-			character_x += character_width + spacing;
-		}
+	// 줄 높이. (크롬 line-height: normal 은 위 길이와 아래 길이를 따로 반올림해 더한다)
+	fn measure_normal_line_height(canvas: &mut Canvas2D, font: &str) -> (f64, f64) {
+		let (font_ascent, font_descent) = measure_line_height(canvas, font);
+		(font_ascent.round(), font_descent.round())
 	}
+
+	// 제목, 링크 그리기. (원본 index.html 의 #titleOverlay, #homeLink CSS 값 그대로)
+	fn draw_overlay(&mut self, graphic: &mut Graphic, window_size: Vector2) {
+		let engine = Engine::get_engine().unwrap();
+		let canvas_pixel_size = engine.get_view_manager().get_canvas_pixel_size();
+		let device_scale = if window_size.x > 0.0 { canvas_pixel_size.x / window_size.x } else { 1.0 };
+		let overlay_key = format!("{}x{}@{}", window_size.x, window_size.y, device_scale);
+		if overlay_key != self.overlay_key {
+			self.overlay_image_table.clear();
+			self.overlay_key = overlay_key;
+		}
+		let window_width = window_size.x;
+		let window_height = window_size.y;
+		let center_x = window_width * 0.5;
+
+		// 제목 배치. (#titleMain: clamp(26px, 5vw, 58px), 굵기 200, letter-spacing 0.5em, text-indent 0.5em)
+		let title_font_size = (window_width * 0.056).clamp(28.0, 68.0);
+		let title_font = format!("200 {}px {}", title_font_size, OVERLAY_LIGHT_FONT);
+		let title_letter_spacing = title_font_size * 0.5;
+		let (title_ascent, title_descent) = NeonHorizonScene::measure_normal_line_height(&mut self.overlay_measure_canvas, &title_font);
+		let title_line_height = title_ascent + title_descent;
+		let full_title = "NEON HORIZON";
+		let full_title_width = measure_spaced_text(&mut self.overlay_measure_canvas, full_title, &title_font, title_letter_spacing) + title_letter_spacing * 2.0;
+		let title_line_list: Vec<&str> = if full_title_width > window_width * 0.5 { vec!["NEON", "HORIZON"] } else { vec![full_title] };
+		let title_top = window_height * 0.13;
+		let divider_y = title_top + title_line_list.len() as f64 * title_line_height + 16.0;
+		let divider_width = 240.0f64.min(window_width * 0.4);
+		let sub_font_size = (window_width * 0.012).clamp(9.0, 12.0);
+		let sub_font = format!("300 {}px {}", sub_font_size, OVERLAY_LIGHT_FONT);
+		let sub_letter_spacing = sub_font_size * 0.85;
+		let (sub_ascent, sub_descent) = NeonHorizonScene::measure_normal_line_height(&mut self.overlay_measure_canvas, &sub_font);
+		let sub_top = divider_y + 1.0 + 14.0;
+		let title_bake_margin = 140.0;
+		let title_bake_rect = Rect::create((center_x - 520.0).max(0.0), title_top - title_bake_margin, (window_width).min(1040.0), (sub_top + sub_ascent + sub_descent) - title_top + title_bake_margin * 2.0);
+
+		// 링크 배치. (#homeLink: 굵기 300, letter-spacing 0.45em, 안쪽 여백 10px 22px, 테두리 1px)
+		let link_font_size = sub_font_size;
+		let link_font = format!("300 {}px {}", link_font_size, OVERLAY_SYSTEM_FONT);
+		let link_letter_spacing = link_font_size * 0.45;
+		let (link_ascent, link_descent) = NeonHorizonScene::measure_normal_line_height(&mut self.overlay_measure_canvas, &link_font);
+		let link_text = "VANILLAPUNCH.COM";
+		let link_text_width = measure_spaced_text(&mut self.overlay_measure_canvas, link_text, &link_font, link_letter_spacing) + link_letter_spacing * 2.0;
+		let link_box = Rect::create(0.0, 0.0, link_text_width + 44.0 + 2.0, link_ascent + link_descent + 20.0 + 2.0);
+		let link_box = Rect::create(center_x - link_box.size.x * 0.5, window_height - window_height * 0.065 - link_box.size.y, link_box.size.x, link_box.size.y);
+		self.link_hit_rect = link_box;
+		let link_bake_margin = 40.0;
+		let link_bake_rect = Rect::create(link_box.position.x - link_bake_margin, link_box.position.y - link_bake_margin, link_box.size.x + link_bake_margin * 2.0, link_box.size.y + link_bake_margin * 2.0);
+
+		// 등장. (titleEntrance 3.2초, cubic-bezier(0.16, 1, 0.3, 1): 투명도, 위에서 14px 내려옴, 번짐 8px 에서 0)
+		let entrance_ease = css_cubic_bezier(0.16, 1.0, 0.3, 1.0, (self.elapsed_time / 3.2).clamp(0.0, 1.0));
+		let blur_level = ((1.0 - entrance_ease) * 8.0).round() as i32;
+		let entrance_offset_y = -14.0 * (1.0 - entrance_ease);
+		let title_color = rgba(241.0, 233.0, 216.0, 1.0);
+		let sub_color = rgba(209.0, 193.0, 178.0, 0.75);
+		let shadow_dark = rgba(243.0, 229.0, 171.0, 0.4);
+
+		let title_key = format!("title|{}", blur_level);
+		if !self.overlay_image_table.contains_key(&title_key) {
+			let image = bake_overlay(title_bake_rect.size.x, title_bake_rect.size.y, device_scale, blur_level as f64, &|canvas| {
+				canvas.translate(-title_bake_rect.position.x, -title_bake_rect.position.y);
+				let title_shadow_list = [TextShadow { color: rgba(243.0, 229.0, 171.0, 0.4), offset_y: 0.0, blur: 28.0 }, TextShadow { color: rgba(255.0, 180.0, 90.0, 0.2), offset_y: 0.0, blur: 64.0 }];
+				for (line_index, line_text) in title_line_list.iter().enumerate() {
+					let baseline_y = title_top + line_index as f64 * title_line_height + title_ascent;
+					draw_css_text(canvas, device_scale, &[(line_text, title_color)], &title_font, title_letter_spacing, if line_index == 0 { center_x } else { center_x - title_letter_spacing * 0.5 }, baseline_y, &title_shadow_list);
+				}
+				let mut gradient = canvas.create_linear_gradient(center_x - divider_width * 0.5, 0.0, center_x + divider_width * 0.5, 0.0);
+				gradient.add_color_stop(0.0, rgba(243.0, 229.0, 171.0, 0.0));
+				gradient.add_color_stop(0.5, rgba(243.0, 229.0, 171.0, 0.7));
+				gradient.add_color_stop(1.0, rgba(243.0, 229.0, 171.0, 0.0));
+				canvas.set_fill_style(gradient);
+				canvas.fill_rect(center_x - divider_width * 0.5, divider_y.round(), divider_width, 1.0);
+				draw_css_text(canvas, device_scale, &[("VANILLA ENGINE", sub_color)], &sub_font, sub_letter_spacing, center_x, sub_top + sub_ascent, &[TextShadow { color: shadow_dark, offset_y: 0.0, blur: 10.0 }]);
+			});
+			self.overlay_image_table.insert(title_key.clone(), image);
+		}
+		let link_key = format!("link|{}", blur_level);
+		if !self.overlay_image_table.contains_key(&link_key) {
+			let image = bake_overlay(link_bake_rect.size.x, link_bake_rect.size.y, device_scale, blur_level as f64, &|canvas| {
+				canvas.translate(-link_bake_rect.position.x, -link_bake_rect.position.y);
+				let radius = link_box.size.y * 0.5;
+				let mut path = vanilla::Path2D::new();
+				path.round_rect((link_box.position.x + 0.5) as f32, (link_box.position.y + 0.5) as f32, (link_box.size.x - 1.0) as f32, (link_box.size.y - 1.0) as f32, &[radius - 0.5]);
+				canvas.set_fill_style(rgba(13.0, 7.0, 4.0, 0.45));
+				canvas.fill_path(&path, vanilla::CanvasFillRule::NonZero);
+				canvas.set_stroke_style(rgba(243.0, 229.0, 171.0, 0.3));
+				canvas.set_line_width(1.0);
+				canvas.stroke_path(&path);
+				draw_css_text(canvas, device_scale, &[(link_text, rgba(241.0, 233.0, 216.0, 0.75))], &link_font, link_letter_spacing, link_box.position.x + link_box.size.x * 0.5, link_box.position.y + 1.0 + 10.0 + link_ascent, &[TextShadow { color: shadow_dark, offset_y: 0.0, blur: 10.0 }]);
+			});
+			self.overlay_image_table.insert(link_key.clone(), image);
+		}
+		graphic.set_global_alpha(entrance_ease);
+		graphic.draw_image(&self.overlay_image_table[&title_key], Vector2::create(title_bake_rect.position.x, title_bake_rect.position.y + entrance_offset_y), title_bake_rect.size);
+		graphic.draw_image(&self.overlay_image_table[&link_key], Vector2::create(link_bake_rect.position.x, link_bake_rect.position.y + entrance_offset_y), link_bake_rect.size);
+		graphic.set_global_alpha(1.0);
+	}
+
 }
 
 impl Scene for NeonHorizonScene {
@@ -1268,8 +1531,12 @@ impl Scene for NeonHorizonScene {
 			self.pointer_target_x = (pointer_position.x / window_size.x) * 2.0 - 1.0;
 			self.pointer_target_y = (pointer_position.y / window_size.y) * 2.0 - 1.0;
 		}
+		let is_on_link = pointer_position.x >= self.link_hit_rect.position.x && pointer_position.x <= self.link_hit_rect.position.x + self.link_hit_rect.size.x && pointer_position.y >= self.link_hit_rect.position.y && pointer_position.y <= self.link_hit_rect.position.y + self.link_hit_rect.size.y;
 		if is_pressed {
-			if !self.handle_panel_press(pointer_position.x, pointer_position.y, window_size.x) {
+			// 원본은 사이트 링크 위의 누름을 부스트로 읽지 않는다. (링크가 받는다)
+			if is_on_link {
+			}
+			else if !self.handle_panel_press(pointer_position.x, pointer_position.y, window_size.x) {
 				self.is_boost_pressed = true;
 				self.drag_last_x = Some(pointer_position.x);
 			}
@@ -1346,53 +1613,10 @@ impl Scene for NeonHorizonScene {
 		let elapsed_time = self.elapsed_time;
 		graphic.set_text_baseline(TextBaseline::Middle);
 
-		// 제목. (원본 titleEntrance 3.2초, 위에서 14px 내려오며 나타남)
-		let entrance_progress = (elapsed_time / 3.2).clamp(0.0, 1.0);
-		let entrance_ease = 1.0 - (1.0 - entrance_progress).powi(5);
-		let title_alpha = entrance_ease;
-		let title_offset = -14.0 * (1.0 - entrance_ease);
-		let title_font_size = (window_size.x * 0.056).clamp(28.0, 68.0);
-		let sub_font_size = (window_size.x * 0.012).clamp(9.0, 12.0);
-		let title_top = window_size.y * 0.13 + title_offset;
-		let center_x = window_size.x * 0.5;
-		graphic.set_global_alpha(title_alpha);
-		graphic.set_font_string(&format!("{}px default", title_font_size.round()));
-		graphic.set_fill_color(rgba(241.0, 233.0, 216.0, 1.0));
-		let full_title = "NEON HORIZON";
-		let full_width: f64 = full_title.chars().map(|character| graphic.measure_text(&character.to_string()).width + title_font_size * 0.5).sum();
-		let line_pitch = title_font_size * 1.18;
-		let line_count;
-		if full_width > window_size.x * 0.5 {
-			line_count = 2.0;
-			NeonHorizonScene::draw_spaced_text(graphic, "NEON", center_x, title_top + title_font_size * 0.53, title_font_size * 0.5);
-			NeonHorizonScene::draw_spaced_text(graphic, "HORIZON", center_x, title_top + title_font_size * 0.53 + line_pitch, title_font_size * 0.5);
-		}
-		else {
-			line_count = 1.0;
-			NeonHorizonScene::draw_spaced_text(graphic, full_title, center_x, title_top + title_font_size * 0.53, title_font_size * 0.5);
-		}
-		let divider_width = 240.0f64.min(window_size.x * 0.4);
-		let divider_y = title_top + line_count * line_pitch + 16.0;
-		for step_index in 0..40 {
-			let step_ratio = step_index as f64 / 39.0;
-			let step_alpha = 0.7 * (1.0 - (step_ratio * 2.0 - 1.0).abs());
-			graphic.set_fill_color(rgba(243.0, 229.0, 171.0, step_alpha));
-			graphic.draw_rect(Rect::create(center_x - divider_width * 0.5 + divider_width * step_index as f64 / 40.0, divider_y, divider_width / 40.0 + 0.5, 1.0));
-		}
-		graphic.set_font_string(&format!("{}px default", sub_font_size.round()));
-		graphic.set_fill_color(rgba(209.0, 193.0, 178.0, 0.75));
-		NeonHorizonScene::draw_spaced_text(graphic, "VANILLA ENGINE", center_x, divider_y + 14.0 + sub_font_size * 0.67, sub_font_size * 0.85);
-
-		// 아래쪽 사이트 링크. (알약 모양 테두리)
-		let link_width = 245.0;
-		let link_height = 36.0;
-		let link_rect = Rect::create(center_x - link_width * 0.5, window_size.y * 0.935 - link_height, link_width, link_height);
-		graphic.set_fill_color(rgba(13.0, 7.0, 4.0, 0.45));
-		graphic.draw_round_rect(link_rect, link_height * 0.5);
-		graphic.set_stroke_color(rgba(243.0, 229.0, 171.0, 0.3));
-		graphic.draw_stroke_round_rect(link_rect, link_height * 0.5, 1.0);
-		graphic.set_fill_color(rgba(241.0, 233.0, 216.0, 0.75));
-		NeonHorizonScene::draw_spaced_text(graphic, "VANILLAPUNCH.COM", center_x, link_rect.position.y + link_height * 0.5 + 1.0, sub_font_size * 0.45);
+		// 제목, 아래쪽 사이트 링크. (원본 HTML 오버레이를 같은 CSS 값으로 구워 그린다)
+		self.draw_overlay(graphic, window_size);
+		graphic.set_global_alpha(1.0);
+		graphic.set_text_baseline(TextBaseline::Middle);
 
 		// 옵션 패널.
 		let intro_fade = ((elapsed_time - 0.2) / 2.4).clamp(0.0, 1.0);
@@ -1403,13 +1627,13 @@ impl Scene for NeonHorizonScene {
 		graphic.draw_round_rect(panel_rect, 14.0);
 		graphic.set_stroke_color(rgba(243.0, 229.0, 171.0, 0.25));
 		graphic.draw_stroke_round_rect(panel_rect, 14.0, 1.0);
-		graphic.set_font_string("11px default");
+		graphic.set_font_string(r#"300 11px "Segoe UI", "Apple SD Gothic Neo", sans-serif"#);
 		graphic.set_text_align(TextAlign::Left);
 		graphic.set_fill_color(rgba(243.0, 229.0, 171.0, 0.9));
 		graphic.draw_fill_text("O P T I O N S", panel_x + 16.0, panel_y + PANEL_HEADER_HEIGHT * 0.5 + 1.0);
 		graphic.set_text_align(TextAlign::Right);
 		graphic.set_fill_color(rgba(243.0, 229.0, 171.0, 0.6));
-		graphic.draw_fill_text(if self.is_panel_collapsed { ">" } else { "v" }, panel_x + PANEL_WIDTH - 16.0, panel_y + PANEL_HEADER_HEIGHT * 0.5 + 1.0);
+		graphic.draw_fill_text(if self.is_panel_collapsed { "\u{25b8}" } else { "\u{25be}" }, panel_x + PANEL_WIDTH - 16.0, panel_y + PANEL_HEADER_HEIGHT * 0.5 + 1.0);
 		if self.panel_collapse_blend > 0.05 {
 			let list_alpha = intro_fade * self.panel_collapse_blend;
 			for (row_index, option_definition) in OPTION_DEFINITION_LIST.iter().enumerate() {
@@ -1420,7 +1644,7 @@ impl Scene for NeonHorizonScene {
 				let row_middle_y = row_y + PANEL_ROW_HEIGHT * 0.5;
 				graphic.set_global_alpha(list_alpha);
 				graphic.set_text_align(TextAlign::Left);
-				graphic.set_font_string("11px default");
+				graphic.set_font_string(r#"300 11px "Segoe UI", "Apple SD Gothic Neo", sans-serif"#);
 				graphic.set_fill_color(rgba(241.0, 233.0, 216.0, 0.8));
 				graphic.draw_fill_text(option_definition.label, panel_x + 16.0, row_middle_y + 1.0);
 				if option_definition.is_slider {
