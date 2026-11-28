@@ -45,6 +45,8 @@ pub struct UIView {
 	background_color: Color,
 	/// 뒤 화면 흐림 반지름. (픽셀, 0 이면 끔)
 	backdrop_blur_radius: f64,
+	/// 뒤 화면 흐림과 바탕색의 둥근 모서리 반지름. (노드 좌표 단위, 0 이면 사각형)
+	backdrop_corner_radius: f64,
 	/// 뒤 화면을 흐릴 화면 효과. (처음 흐릴 때 만든다, 그리기는 &self 라 RefCell)
 	backdrop_screen_effect: RefCell<Option<ScreenEffect>>,
 }
@@ -63,6 +65,7 @@ impl UIView {
 			content_id: None,
 			background_color: Color::create(1.0, 1.0, 1.0, 0.0),
 			backdrop_blur_radius: 0.0,
+			backdrop_corner_radius: 0.0,
 			backdrop_screen_effect: RefCell::new(None),
 		}
 	}
@@ -91,11 +94,12 @@ impl UIView {
 	//==============================================================================
 	/// 뒤 화면 흐림 설정. (CSS backdrop-filter: blur(), 언리얼 UMG BackgroundBlur 와 같은 뜻, 원본 setBackdropBlur)
 	/// - 켜면 이 뷰가 그려질 때, 그보다 먼저 그려진 화면을 이 뷰의 내용 영역만 흐리고 그 위에 배경색(반투명)을 얹는다.
-	/// - 흐림은 ScreenEffect 의 blur 와 같은 가우스 근사다. 반지름은 그 blur 의 반지름(기기 픽셀)이다.
+	/// - 인자는 CSS backdrop-filter: blur(Npx) 의 N 과 같은 표준편차다. (노드 좌표 단위, 화면에서는 변환 배율을 곱한 기기 픽셀)
+	/// - 흐림은 ScreenEffect 의 GaussianBlur(분리형 가우스, 선형 샘플링, 3 시그마까지, 모서리는 거울 접기)다. 크롬의 backdrop-filter 와 같다.
 	/// - 화면에 그릴 때만 된다. (렌더 타겟에 그리는 중이면 흐리지 않는다) 켜진 동안은 기하 캐시를 쓰지 않는다. (매 그리기마다 화면을 읽는다)
 	///
 	/// # 인자
-	/// - `blur_radius`: 흐림 반지름. (기기 픽셀, 0 이하면 끈다, 기본 0)
+	/// - `blur_radius`: 흐림 표준편차. (CSS blur(Npx) 의 N, 노드 좌표 단위, 0 이하면 끈다, 기본 0)
 	///
 	/// # 예제
 	/// 반투명 패널 뒤를 흐리기
@@ -113,10 +117,43 @@ impl UIView {
 	}
 
 	//==============================================================================
+	/// 뒤 화면 흐림과 바탕색의 둥근 모서리 설정. (CSS border-radius 와 같은 뜻, 원본 setBackdropCornerRadius)
+	/// - 흐림이 켜져 있을 때 흐림 영역과 바탕색이 이 반지름의 둥근 사각형 안에만 깔린다. (모서리 바깥은 뒤 화면 그대로)
+	///
+	/// # 인자
+	/// - `corner_radius`: 모서리 반지름. (노드 좌표 단위, 0 이하면 사각형, 기본 0)
+	///
+	/// # 예제
+	/// 둥근 단추 모양으로 뒤 흐리기
+	/// ```rust
+	/// use vanilla::{Color, UIView};
+	///
+	/// let mut view = UIView::new();
+	/// view.set_background_color(Color::create(1.0, 1.0, 1.0, 0.25));
+	/// view.set_backdrop_blur(6.0);
+	/// view.set_backdrop_corner_radius(12.0);
+	/// assert_eq!(view.get_backdrop_corner_radius(), 12.0);
+	/// ```
+	//==============================================================================
+	pub fn set_backdrop_corner_radius(&mut self, corner_radius: f64) {
+		self.backdrop_corner_radius = corner_radius.max(0.0);
+	}
+
+	//==============================================================================
+	/// 뒤 화면 흐림의 둥근 모서리 반지름 반환.
+	///
+	/// # 돌려줌
+	/// 모서리 반지름. (노드 좌표 단위, 0 이면 사각형)
+	//==============================================================================
+	pub fn get_backdrop_corner_radius(&self) -> f64 {
+		self.backdrop_corner_radius
+	}
+
+	//==============================================================================
 	/// 뒤 화면 흐림 반지름 반환.
 	///
 	/// # 돌려줌
-	/// 흐림 반지름. (기기 픽셀, 0 이면 꺼짐)
+	/// 흐림 표준편차. (CSS blur(Npx) 의 N, 0 이면 꺼짐)
 	//==============================================================================
 	pub fn get_backdrop_blur(&self) -> f64 {
 		self.backdrop_blur_radius
@@ -199,6 +236,9 @@ impl UIView {
 			right_x = right_x.max(corner.x);
 			bottom_y = bottom_y.max(corner.y);
 		}
+		let unit_origin = transform_matrix.transform_point(0.0, 0.0);
+		let unit_x = transform_matrix.transform_point(1.0, 0.0);
+		let device_pixel_per_unit = (unit_x.x - unit_origin.x).hypot(unit_x.y - unit_origin.y);
 		let region_x = left_x.round();
 		let region_y = top_y.round();
 		let region_width = right_x.round() - region_x;
@@ -206,19 +246,20 @@ impl UIView {
 		if region_width <= 0.0 || region_height <= 0.0 {
 			return;
 		}
-		let blur_radius = self.backdrop_blur_radius;
+		let blur_radius = self.backdrop_blur_radius * device_pixel_per_unit;
+		let corner_radius = self.backdrop_corner_radius * device_pixel_per_unit;
 		let mut screen_effect_slot = self.backdrop_screen_effect.borrow_mut();
 		let screen_effect = screen_effect_slot.get_or_insert_with(|| {
 			let mut screen_effect = ScreenEffect::new();
-			screen_effect.set_enabled(ScreenEffectType::Blur, true);
+			screen_effect.set_enabled(ScreenEffectType::GaussianBlur, true);
 			screen_effect
 		});
 		graphic.run_external_graphic_pass(false, |pass_graphic| {
 			if pass_graphic.get_current_framebuffer().is_some() {
 				return;
 			}
-			screen_effect.set_parameters(ScreenEffectType::Blur, blur_radius, 0.0, 0.0, 0.0);
-			screen_effect.set_region(region_x, region_y, region_width, region_height, 0.0);
+			screen_effect.set_parameters(ScreenEffectType::GaussianBlur, blur_radius, 0.0, 0.0, 0.0);
+			screen_effect.set_region(region_x, region_y, region_width, region_height, corner_radius);
 			screen_effect.begin(pass_graphic);
 			screen_effect.end(pass_graphic);
 		});
@@ -251,6 +292,10 @@ impl UIView {
 		let content_size = transform.get_content_size();
 		let background_rect = Rect::create(0.0, 0.0, content_size.x, content_size.y);
 		graphic.set_fill_color(background_color);
+		if self.backdrop_corner_radius > 0.0 && self.backdrop_blur_radius > 0.0 {
+			graphic.draw_round_rect(background_rect, self.backdrop_corner_radius);
+			return;
+		}
 		graphic.draw_rect(background_rect);
 	}
 }
@@ -415,6 +460,11 @@ mod tests {
 		assert!(view.is_backdrop_blur_enabled());
 		view.set_backdrop_blur(-3.0);
 		assert_eq!(view.get_backdrop_blur(), 0.0);
+		assert_eq!(view.get_backdrop_corner_radius(), 0.0);
+		view.set_backdrop_corner_radius(12.0);
+		assert_eq!(view.get_backdrop_corner_radius(), 12.0);
+		view.set_backdrop_corner_radius(-1.0);
+		assert_eq!(view.get_backdrop_corner_radius(), 0.0);
 	}
 
 	//==============================================================================

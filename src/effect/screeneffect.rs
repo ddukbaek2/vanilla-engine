@@ -71,6 +71,8 @@ pub enum ScreenEffectType {
 	ZoomBlur,       // 중심으로 뻗는 방사 블러. (parameters = [중심 x, 중심 y, 길이])
 	/// 가우시안 블러. (parameters = `[반지름 픽셀]`)
 	Blur,           // 가우시안 블러. (parameters = [반지름 픽셀])
+	/// 표준편차 가우시안 블러. (parameters = `[표준편차 픽셀]`, CSS filter: blur() 와 같은 뜻, 분리형 선형 샘플링, 3 시그마까지)
+	GaussianBlur,   // 표준편차 가우시안 블러. (parameters = [표준편차 픽셀], CSS filter: blur() 와 같은 뜻, 분리형 선형 샘플링, 3 시그마까지)
 	/// 틸트 시프트. (parameters = `[초점 y, 초점 폭, 반지름 픽셀]`)
 	TiltShift,      // 틸트 시프트. (parameters = [초점 y, 초점 폭, 반지름 픽셀])
 	/// 빛줄기. (parameters = `[중심 x, 중심 y, 문턱, 감쇠]`, color = 빛 색)
@@ -164,9 +166,9 @@ pub enum ScreenEffectType {
 }
 
 /// 적용 차례. (형태 왜곡 → 흐림 → 글리치 → 색 → 무늬 → 전환)
-const EFFECT_ORDER: [ScreenEffectType; 58] = [
+const EFFECT_ORDER: [ScreenEffectType; 59] = [
 	ScreenEffectType::LensDistortion, ScreenEffectType::Bulge, ScreenEffectType::Swirl, ScreenEffectType::Kaleidoscope, ScreenEffectType::Mirror, ScreenEffectType::Ripple, ScreenEffectType::HeatHaze, ScreenEffectType::Jitter, ScreenEffectType::DoubleVision, ScreenEffectType::Pixelate, ScreenEffectType::Shockwave, ScreenEffectType::Wave,
-	ScreenEffectType::MotionBlur, ScreenEffectType::ZoomBlur, ScreenEffectType::Blur, ScreenEffectType::TiltShift, ScreenEffectType::GodRays, ScreenEffectType::Bloom, ScreenEffectType::Anamorphic,
+	ScreenEffectType::MotionBlur, ScreenEffectType::ZoomBlur, ScreenEffectType::Blur, ScreenEffectType::GaussianBlur, ScreenEffectType::TiltShift, ScreenEffectType::GodRays, ScreenEffectType::Bloom, ScreenEffectType::Anamorphic,
 	ScreenEffectType::Glitch, ScreenEffectType::Vhs, ScreenEffectType::Chromatic,
 	ScreenEffectType::WhiteBalance, ScreenEffectType::LiftGammaGain, ScreenEffectType::ColorGrade, ScreenEffectType::HueShift, ScreenEffectType::SplitToning, ScreenEffectType::Tonemap, ScreenEffectType::GradientMap, ScreenEffectType::Sepia, ScreenEffectType::Grayscale, ScreenEffectType::Posterize, ScreenEffectType::Dither, ScreenEffectType::Halftone, ScreenEffectType::Sharpen, ScreenEffectType::EdgeDetect, ScreenEffectType::OldFilm, ScreenEffectType::NightVision, ScreenEffectType::Invert,
 	ScreenEffectType::Scanline, ScreenEffectType::Grain, ScreenEffectType::Rain, ScreenEffectType::Fog, ScreenEffectType::Vignette, ScreenEffectType::Spotlight, ScreenEffectType::SpeedLines, ScreenEffectType::Letterbox,
@@ -174,7 +176,7 @@ const EFFECT_ORDER: [ScreenEffectType; 58] = [
 ];
 
 /// 효과별 원본 이름. (적용 차례)
-const EFFECT_NAME_TABLE: [(ScreenEffectType, &str); 58] = [
+const EFFECT_NAME_TABLE: [(ScreenEffectType, &str); 59] = [
 	(ScreenEffectType::LensDistortion, "lensDistortion"),
 	(ScreenEffectType::Bulge, "bulge"),
 	(ScreenEffectType::Swirl, "swirl"),
@@ -190,6 +192,7 @@ const EFFECT_NAME_TABLE: [(ScreenEffectType, &str); 58] = [
 	(ScreenEffectType::MotionBlur, "motionBlur"),
 	(ScreenEffectType::ZoomBlur, "zoomBlur"),
 	(ScreenEffectType::Blur, "blur"),
+	(ScreenEffectType::GaussianBlur, "gaussianBlur"),
 	(ScreenEffectType::TiltShift, "tiltShift"),
 	(ScreenEffectType::GodRays, "godRays"),
 	(ScreenEffectType::Bloom, "bloom"),
@@ -236,7 +239,7 @@ const EFFECT_NAME_TABLE: [(ScreenEffectType, &str); 58] = [
 ];
 
 /// 효과별 기본 파라미터. (적용 차례)
-const DEFAULT_PARAMETER_TABLE: [(ScreenEffectType, [f64; 4]); 58] = [
+const DEFAULT_PARAMETER_TABLE: [(ScreenEffectType, [f64; 4]); 59] = [
 	(ScreenEffectType::LensDistortion, [0.35, 0.0, 0.0, 0.0]),
 	(ScreenEffectType::Bulge, [0.5, 0.5, 0.5, 0.5]),
 	(ScreenEffectType::Swirl, [0.5, 0.5, 0.6, 0.5]),
@@ -252,6 +255,7 @@ const DEFAULT_PARAMETER_TABLE: [(ScreenEffectType, [f64; 4]); 58] = [
 	(ScreenEffectType::MotionBlur, [0.0, 24.0, 0.0, 0.0]),
 	(ScreenEffectType::ZoomBlur, [0.5, 0.5, 0.35, 0.0]),
 	(ScreenEffectType::Blur, [4.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::GaussianBlur, [4.0, 0.0, 0.0, 0.0]),
 	(ScreenEffectType::TiltShift, [0.5, 0.18, 6.0, 0.0]),
 	(ScreenEffectType::GodRays, [0.5, 0.35, 0.6, 0.94]),
 	(ScreenEffectType::Bloom, [0.65, 1.2, 4.0, 0.0]),
@@ -298,7 +302,7 @@ const DEFAULT_PARAMETER_TABLE: [(ScreenEffectType, [f64; 4]); 58] = [
 ];
 
 /// 효과별 파라미터 이름. (타임라인 속성 "효과.이름" 으로 접근, 적용 차례)
-pub const SCREEN_EFFECT_PARAMETER_NAMES: [(ScreenEffectType, &[&str]); 58] = [
+pub const SCREEN_EFFECT_PARAMETER_NAMES: [(ScreenEffectType, &[&str]); 59] = [
 	(ScreenEffectType::LensDistortion, &["intensity"]),
 	(ScreenEffectType::Bulge, &["centerX", "centerY", "intensity", "radius"]),
 	(ScreenEffectType::Swirl, &["centerX", "centerY", "turns", "radius"]),
@@ -314,6 +318,7 @@ pub const SCREEN_EFFECT_PARAMETER_NAMES: [(ScreenEffectType, &[&str]); 58] = [
 	(ScreenEffectType::MotionBlur, &["angle", "length"]),
 	(ScreenEffectType::ZoomBlur, &["centerX", "centerY", "length"]),
 	(ScreenEffectType::Blur, &["radius"]),
+	(ScreenEffectType::GaussianBlur, &["sigma"]),
 	(ScreenEffectType::TiltShift, &["focusY", "focusWidth", "radius"]),
 	(ScreenEffectType::GodRays, &["centerX", "centerY", "threshold", "decay"]),
 	(ScreenEffectType::Bloom, &["threshold", "intensity", "radius"]),
@@ -431,6 +436,10 @@ vec4 sampleScreen(vec2 screenUv) {
 	return texture(sourceTexture, vec2(clamped.x, 1.0 - clamped.y));
 }
 
+vec2 mirrorUv(vec2 point) {
+	return 1.0 - abs(1.0 - mod(point, 2.0));
+}
+
 float luminanceAt(vec2 uv) {
 	return dot(texture(sourceTexture, uv).rgb, vec3(0.299, 0.587, 0.114));
 }
@@ -448,7 +457,7 @@ const FRAGMENTSHADER_FOOTER: &str = "
 
 /// 패스별 프래그먼트 본문. (효과 이름 + 내부 패스 copy / bloomBright / bloomComposite / anamorphicComposite / regionComposite)
 /// - uv: 텍스처 좌표(아래가 0), screenUv: 화면 좌표(위가 0), color: 현재 색. sampleScreen(screenUv) 는 화면 좌표로 샘플.
-const EFFECT_BODY_TABLE: [(&str, &str); 61] = [
+const EFFECT_BODY_TABLE: [(&str, &str); 62] = [
 	("copy", ""),
 	("lensDistortion", "
 	vec2 centered = uv - 0.5;
@@ -564,6 +573,30 @@ const EFFECT_BODY_TABLE: [(&str, &str); 61] = [
 	sum += (texture(sourceTexture, uv + blurStep * 1.3846) + texture(sourceTexture, uv - blurStep * 1.3846)) * 0.3162162;
 	sum += (texture(sourceTexture, uv + blurStep * 3.2307) + texture(sourceTexture, uv - blurStep * 3.2307)) * 0.0702703;
 	color = sum;
+	"),
+	("gaussianBlur", "
+	float sigma = parameters.x * strength;
+	if (sigma >= 0.05) {
+		vec2 texelStep = parameters.zw / resolution;
+		float tapRadius = ceil(sigma * 3.0);
+		float inverseTwoVariance = -0.5 / (sigma * sigma);
+		vec4 sum = color;
+		float total = 1.0;
+		for (int pairIndex = 0; pairIndex < 128; ++pairIndex) {
+			float firstOffset = float(pairIndex * 2 + 1);
+			if (firstOffset > tapRadius) {
+				break;
+			}
+			float secondOffset = firstOffset + 1.0;
+			float firstWeight = exp(firstOffset * firstOffset * inverseTwoVariance);
+			float secondWeight = secondOffset <= tapRadius ? exp(secondOffset * secondOffset * inverseTwoVariance) : 0.0;
+			float pairWeight = firstWeight + secondWeight;
+			vec2 sampleStep = texelStep * ((firstOffset * firstWeight + secondOffset * secondWeight) / pairWeight);
+			sum += (texture(sourceTexture, mirrorUv(uv + sampleStep)) + texture(sourceTexture, mirrorUv(uv - sampleStep))) * pairWeight;
+			total += 2.0 * pairWeight;
+		}
+		color = sum / total;
+	}
 	"),
 	("tiltShift", "
 	float focusDistance = smoothstep(parameters.y * 0.5, parameters.y * 1.5, abs(screenUv.y - parameters.x));
@@ -1407,6 +1440,10 @@ impl ScreenEffect {
 				ScreenEffectType::Blur => {
 					self.step_list.push(create_pass_step("blur", state, [parameters[0], 0.0, 1.0, 0.0], PassStepTarget::PingPong, PassStepTexture::Previous, None));
 					self.step_list.push(create_pass_step("blur", state, [parameters[0], 0.0, 0.0, 1.0], PassStepTarget::PingPong, PassStepTexture::Previous, None));
+				}
+				ScreenEffectType::GaussianBlur => {
+					self.step_list.push(create_pass_step("gaussianBlur", state, [parameters[0], 0.0, 1.0, 0.0], PassStepTarget::PingPong, PassStepTexture::Previous, None));
+					self.step_list.push(create_pass_step("gaussianBlur", state, [parameters[0], 0.0, 0.0, 1.0], PassStepTarget::PingPong, PassStepTexture::Previous, None));
 				}
 				ScreenEffectType::Bloom => {
 					self.step_list.push(create_pass_step("bloomBright", state, parameters, PassStepTarget::HalfA, PassStepTexture::Previous, None));
