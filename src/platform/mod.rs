@@ -59,6 +59,53 @@ pub use desktop::open_url;
 #[cfg(target_arch = "wasm32")]
 pub use web::open_url;
 
+// 현지 시각 읽기. (Engine::read_local_time, 웹은 Date, 맥과 리눅스는 localtime_r, 윈도우는 SystemTimeToTzSpecificLocalTime)
+#[cfg(not(target_arch = "wasm32"))]
+pub use desktop::read_local_time;
+#[cfg(target_arch = "wasm32")]
+pub use web::read_local_time;
+
+//==============================================================================
+/// 현지 시각. (이 기계의 시간대로 본 달력 시각, 원본 Engine.readLocalTime 이 돌려주는 {year, month, day, hour, minute, second, weekday} 와 같다)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LocalTime {
+	/// 해. (예: 2026)
+	pub year: i32,
+	/// 달. (1 에서 12)
+	pub month: u32,
+	/// 날. (1 에서 31)
+	pub day: u32,
+	/// 시. (0 에서 23)
+	pub hour: u32,
+	/// 분. (0 에서 59)
+	pub minute: u32,
+	/// 초. (0 에서 59)
+	pub second: u32,
+	/// 요일. (0 이 일요일, 6 이 토요일)
+	pub weekday: u32,
+}
+
+//==============================================================================
+/// 에포크 초를 달력으로. (협정 세계시 기준, 윈도우 현지 시각 바꾸기와 시험이 쓴다. 1970-01-01 이 목요일)
+//==============================================================================
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn civil_from_epoch_seconds(epoch_seconds: i64) -> LocalTime {
+	let days = epoch_seconds.div_euclid(86400);
+	let seconds_of_day = epoch_seconds.rem_euclid(86400);
+	// Howard Hinnant 의 civil_from_days.
+	let shifted_days = days + 719468;
+	let era = shifted_days.div_euclid(146097);
+	let day_of_era = shifted_days.rem_euclid(146097);
+	let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146096) / 365;
+	let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+	let month_index = (5 * day_of_year + 2) / 153;
+	let day = (day_of_year - (153 * month_index + 2) / 5 + 1) as u32;
+	let month = if month_index < 10 { month_index + 3 } else { month_index - 9 } as u32;
+	let year = (year_of_era + era * 400 + if month <= 2 { 1 } else { 0 }) as i32;
+	LocalTime { year, month, day, hour: (seconds_of_day / 3600) as u32, minute: ((seconds_of_day / 60) % 60) as u32, second: (seconds_of_day % 60) as u32, weekday: (days + 4).rem_euclid(7) as u32 }
+}
+
 //==============================================================================
 /// 열 수 있는 주소인지. (http, https, mailto, tel 만, 원본 Engine.openUrl 과 같은 검사. file: 이나 javascript: 같은 꼴이 운영체제 프로그램을 띄우지 못하게 한다)
 //==============================================================================
@@ -84,3 +131,16 @@ pub(crate) use web::request_clipboard_paste;
 pub(crate) use web::read_renderbuffer_sample_counts;
 #[cfg(not(target_arch = "wasm32"))]
 pub use desktop::systemfont::{find_fallback_font_file, find_family_font_file};
+
+#[cfg(test)]
+mod local_time_tests {
+	use super::*;
+
+	#[test]
+	fn civil_from_epoch_seconds_matches_known_instants() {
+		assert_eq!(civil_from_epoch_seconds(0), LocalTime { year: 1970, month: 1, day: 1, hour: 0, minute: 0, second: 0, weekday: 4 });
+		assert_eq!(civil_from_epoch_seconds(1_000_000_000), LocalTime { year: 2001, month: 9, day: 9, hour: 1, minute: 46, second: 40, weekday: 0 });
+		assert_eq!(civil_from_epoch_seconds(-1), LocalTime { year: 1969, month: 12, day: 31, hour: 23, minute: 59, second: 59, weekday: 3 });
+		assert_eq!(civil_from_epoch_seconds(1_709_164_800), LocalTime { year: 2024, month: 2, day: 29, hour: 0, minute: 0, second: 0, weekday: 4 });
+	}
+}

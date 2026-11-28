@@ -234,6 +234,7 @@ pub use crate::misc::loadingprogress::LoadingProgress;
 pub use crate::game::gamescene::LoadingDrawer;
 pub use crate::misc::buildinfo::{BuildInfo, BuildInfoLoadFuture, BuildInfoLoadHandle};
 pub use crate::platform::document::Document;
+pub use crate::platform::LocalTime;
 pub use crate::graphics3d::toon::toonscreenoutline::{read_jump_flood_steps, ToonLineDrawOptions, ToonOutlinePath, ToonOutlineWidthUnit, ToonScreenOutline, TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID};
 pub use crate::graphics3d::toon::toonvfx::{ToonBeamOptions, ToonDecalOptions, ToonFireballOptions, ToonGlintOptions, ToonLightningOptions, ToonParticleOptions, ToonPlumeOptions, ToonRibbonOptions, ToonShockwaveOptions, ToonVfx, ToonVfxCounts, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange, ToonVfxShape, ToonVfxSlot, TOON_VFX_DEFAULT_PARTICLE_CAPACITY, TOON_VFX_MAXIMUM_RAMPS};
 pub use crate::ui::uiscale::{UIScale, UIScaleOptions};

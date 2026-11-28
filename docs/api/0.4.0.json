@@ -31609,6 +31609,50 @@
 						},
 						{
 							"kind": "method",
+							"name": "read_local_time",
+							"signature": "pub fn read_local_time(&self, minute_offset: f64) -> platform::LocalTime",
+							"params": [
+								{
+									"name": "minute_offset",
+									"type": "f64",
+									"description": {
+										"ko": "지금에 더할 분. (음수는 과거, 0 이면 지금)",
+										"en": "Minutes to add to now. (negative is the past, 0 is now)"
+									}
+								}
+							],
+							"returns": {
+								"type": "platform::LocalTime",
+								"description": {
+									"ko": "현지 시각. (해, 달 1 에서 12, 날, 시, 분, 초, 요일 0 이 일요일)",
+									"en": "Local time. (year, month 1 to 12, day, hour, minute, second, weekday with 0 as Sunday)"
+								}
+							},
+							"description": {
+								"ko": "현지 시각 읽기. (원본 Engine.readLocalTime, 지금에서 분 오프셋만큼 더한 때를 이 기계의 시간대로 본 달력 시각)\n- 웹은 Date, 맥과 리눅스는 localtime_r, 윈도우는 SystemTimeToTzSpecificLocalTime 이다. 더한 때의 일광 절약 시간까지 반영한다.",
+								"en": "Read the local time. (same as the original Engine.readLocalTime, the calendar time of now plus a minute offset in this machine's time zone)\n- On the web it reads with Date, on Mac and Linux with localtime_r, and on Windows with SystemTimeToTzSpecificLocalTime. Daylight saving time at the shifted moment is applied. (same as the original's new Date(Date.now() + offset))"
+							},
+							"since": "0.4.0",
+							"source": "src/core/engine.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/engine",
+								"class": "Engine",
+								"name": "readLocalTime"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "한 시간 뒤는 한 시간 앞과 두 시간 차이",
+										"en": "Two hours ahead differs from two hours behind"
+									},
+									"code": "use vanilla::{Engine, EngineConfiguration};\n\nlet engine = Engine::new(EngineConfiguration::new());\nlet now = engine.read_local_time(0.0);\nassert!(now.hour < 24 && now.minute < 60 && (1..=12).contains(&now.month));\nlet later = engine.read_local_time(120.0);\nlet earlier = engine.read_local_time(-120.0);\nassert_ne!((later.day, later.hour), (earlier.day, earlier.hour));",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
 							"name": "is_exit_requested",
 							"signature": "pub fn is_exit_requested(&self) -> bool",
 							"params": [],
@@ -160332,7 +160376,159 @@
 				"ko": "플랫폼 층.\n- 창(또는 캔버스), GL 컨텍스트, 입력 이벤트, 프레임 루프, 화면 넘기기를 맡는다.\n- 엔진 본체(core::engine::EngineRunner)는 플랫폼을 모른다. 플랫폼마다 아래 것들을 같은 이름으로 낸다.\n  run(엔진 실행자), set_cursor_visible, set_cursor(커서 모양), is_coarse_pointer(주된 손이 손가락인지), set_title, request_asset_bytes(애셋 바이트 읽기), PlatformWindow(엔진이 들고 있는 창 손잡이),\n  write_clipboard_text / read_clipboard_text(시스템 클립보드)\n  read_page_query_value(페이지 주소의 쿼리 값), read_safe_area_insets(CSS env 세이프 에어리어 인셋)\n  read_canvas_client_position(화면 좌표에서 캔버스의 왼쪽 위), read_client_native_size(페이지 전체 크기, 데스크탑은 None)\n  save_capture_file(검증용 화면 저장, 데스크탑은 파일, 웹은 내려받기)\n- 웹만 is_gl_binding_present(GL 의 묶인 것이 있는지, glow 웹이 null 을 읽으면 패닉해서)를 낸다. (core::graphic 의 read_*_binding 이 쓴다)\n- 맥만 vibrate_gamepads / release_disconnected_gamepad_haptics(게임패드 진동, desktop/gamepadhaptics.rs)를 낸다.\n- 데스크탑만 desktop::read_heap_usage(시스템 할당자의 힙 사용량, 개발자 도구의 메모리 칸)를 낸다. (웹은 원본처럼 performance.memory 를 읽는다)\n- 안드로이드, iOS 는 여기에 모듈을 더한다. (아직 없음)",
 				"en": "Platform layer.\n- Handles the window (or canvas), GL context, input events, frame loop and buffer swapping.\n- The engine core (core::engine::EngineRunner) does not know the platform. Each platform exposes the following under the same names.\n  run (engine runner), set_cursor_visible, set_cursor (cursor shape), is_coarse_pointer (whether the primary pointer is a finger), set_title, request_asset_bytes (reading asset bytes), PlatformWindow (the window handle the engine holds),\n  write_clipboard_text / read_clipboard_text (system clipboard)\n  read_page_query_value (a query value of the page URL), read_safe_area_insets (CSS env safe area insets)\n  read_canvas_client_position (the top-left of the canvas in screen coordinates), read_client_native_size (the whole page size, None on desktop)\n  save_capture_file (saving a screenshot for verification, a file on desktop, a download on the web)\n- Only the web exposes is_gl_binding_present (whether something is bound in GL, because glow on the web panics when it reads null). (used by read_*_binding in core::graphic)\n- Only macOS exposes vibrate_gamepads / release_disconnected_gamepad_haptics (gamepad vibration, desktop/gamepadhaptics.rs).\n- Only desktop exposes desktop::read_heap_usage (heap usage of the system allocator, the memory field of the developer tools). (the web reads performance.memory as in the original)\n- Android and iOS add modules here. (not yet)"
 			},
-			"classes": [],
+			"classes": [
+				{
+					"name": "LocalTime",
+					"kind": "struct",
+					"summary": {
+						"ko": "현지 시각. (이 기계의 시간대로 본 달력 시각, 원본 Engine.readLocalTime 이 돌려주는 {year, month, day, hour, minute, second, weekday} 와 같다)",
+						"en": "Local time. (the calendar time in this machine's time zone, same as the {year, month, day, hour, minute, second, weekday} that the original Engine.readLocalTime returns)"
+					},
+					"traits": [
+						"Clone",
+						"Copy",
+						"Debug",
+						"PartialEq",
+						"Eq"
+					],
+					"source": "src/platform/mod.rs",
+					"members": [
+						{
+							"kind": "field",
+							"name": "year",
+							"signature": "pub year: i32",
+							"params": [],
+							"returns": {
+								"type": "i32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "해. (예: 2026)",
+								"en": "Year. (for example 2026)"
+							},
+							"since": "0.4.0",
+							"source": "src/platform/mod.rs"
+						},
+						{
+							"kind": "field",
+							"name": "month",
+							"signature": "pub month: u32",
+							"params": [],
+							"returns": {
+								"type": "u32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "달. (1 에서 12)",
+								"en": "Month. (1 to 12)"
+							},
+							"since": "0.4.0",
+							"source": "src/platform/mod.rs"
+						},
+						{
+							"kind": "field",
+							"name": "day",
+							"signature": "pub day: u32",
+							"params": [],
+							"returns": {
+								"type": "u32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "날. (1 에서 31)",
+								"en": "Day. (1 to 31)"
+							},
+							"since": "0.4.0",
+							"source": "src/platform/mod.rs"
+						},
+						{
+							"kind": "field",
+							"name": "hour",
+							"signature": "pub hour: u32",
+							"params": [],
+							"returns": {
+								"type": "u32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "시. (0 에서 23)",
+								"en": "Hour. (0 to 23)"
+							},
+							"since": "0.4.0",
+							"source": "src/platform/mod.rs"
+						},
+						{
+							"kind": "field",
+							"name": "minute",
+							"signature": "pub minute: u32",
+							"params": [],
+							"returns": {
+								"type": "u32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "분. (0 에서 59)",
+								"en": "Minute. (0 to 59)"
+							},
+							"since": "0.4.0",
+							"source": "src/platform/mod.rs"
+						},
+						{
+							"kind": "field",
+							"name": "second",
+							"signature": "pub second: u32",
+							"params": [],
+							"returns": {
+								"type": "u32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "초. (0 에서 59)",
+								"en": "Second. (0 to 59)"
+							},
+							"since": "0.4.0",
+							"source": "src/platform/mod.rs"
+						},
+						{
+							"kind": "field",
+							"name": "weekday",
+							"signature": "pub weekday: u32",
+							"params": [],
+							"returns": {
+								"type": "u32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "요일. (0 이 일요일, 6 이 토요일)",
+								"en": "Weekday. (0 is Sunday, 6 is Saturday)"
+							},
+							"since": "0.4.0",
+							"source": "src/platform/mod.rs"
+						}
+					]
+				}
+			],
 			"functions": [],
 			"enums": []
 		},
@@ -161108,7 +161304,7 @@
 							"type": "&str",
 							"description": {
 								"ko": "열 주소. (http, https, mailto, tel 꼴)",
-								"en": ""
+								"en": "URL to open. (http, https, mailto or tel)"
 							}
 						}
 					],
@@ -161122,6 +161318,34 @@
 					"description": {
 						"ko": "바깥 주소 열기. (원본 Engine.openUrl, 운영체제의 기본 프로그램으로 연다)\n- 맥은 LaunchServices 를 쓰는 `open`, 윈도우는 ShellExecuteW, 그 밖의 유닉스는 xdg-open 이다.\n- 열 수 있는 것은 http, https, mailto, tel 뿐이다. (is_openable_url) 그 밖의 꼴은 열지 않고 false.",
 						"en": "Opens an outside URL. (original Engine.openUrl, opens with the OS default program)\n- macOS uses `open`, which goes through LaunchServices; Windows uses ShellExecuteW; other Unix uses xdg-open.\n- Only http, https, mailto and tel can be opened. (is_openable_url) Other forms are not opened and return false."
+					},
+					"since": "0.4.0",
+					"source": "src/platform/desktop.rs"
+				},
+				{
+					"kind": "method",
+					"name": "read_local_time",
+					"signature": "pub fn read_local_time(minute_offset: f64) -> crate::platform::LocalTime",
+					"params": [
+						{
+							"name": "minute_offset",
+							"type": "f64",
+							"description": {
+								"ko": "지금에 더할 분. (음수는 과거, 0 이면 지금)",
+								"en": "Minutes to add to now. (negative is the past, 0 is now)"
+							}
+						}
+					],
+					"returns": {
+						"type": "crate::platform::LocalTime",
+						"description": {
+							"ko": "",
+							"en": ""
+						}
+					},
+					"description": {
+						"ko": "현지 시각 읽기. (원본 Engine.readLocalTime, 지금에서 분 오프셋만큼 더한 때를 이 기계의 시간대로 본 달력 시각)\n- 맥과 리눅스는 localtime_r, 윈도우는 SystemTimeToTzSpecificLocalTime 이다. 더한 때의 일광 절약 시간까지 반영한다. (원본 new Date(Date.now() + 오프셋) 과 같다)",
+						"en": "Read the local time. (same as the original Engine.readLocalTime, the calendar time of now plus a minute offset in this machine's time zone)\n- Mac and Linux use localtime_r, Windows uses SystemTimeToTzSpecificLocalTime. Daylight saving time at the shifted moment is applied. (same as the original's new Date(Date.now() + offset))"
 					},
 					"since": "0.4.0",
 					"source": "src/platform/desktop.rs"
@@ -162784,7 +163008,7 @@
 							"type": "&str",
 							"description": {
 								"ko": "열 주소. (http, https, mailto, tel 꼴)",
-								"en": ""
+								"en": "URL to open. (http, https, mailto or tel)"
 							}
 						}
 					],
@@ -162792,12 +163016,40 @@
 						"type": "bool",
 						"description": {
 							"ko": "브라우저에 열기를 넘겼으면 true.",
-							"en": ""
+							"en": "True if the open was handed to the browser."
 						}
 					},
 					"description": {
 						"ko": "바깥 주소 열기. (원본 Engine.openUrl, window.open(주소, \"_blank\", \"noopener\") 로 새 탭에 연다)\n- 사용자 입력(누름, 탭, 키) 처리 안에서 부를 때만 열린다. 브라우저의 팝업 차단 규칙이다.\n- 열 수 있는 것은 http, https, mailto, tel 뿐이다. (is_openable_url) 그 밖의 꼴은 열지 않고 false.",
 						"en": "Opens an outside URL. (original Engine.openUrl, opens a new tab with window.open(url, \"_blank\", \"noopener\"))\n- It opens only when called inside user input (click, tap, key) handling. This is the browser's popup-blocking rule.\n- Only http, https, mailto and tel can be opened. (is_openable_url) Other forms are not opened and return false."
+					},
+					"since": "0.4.0",
+					"source": "src/platform/web.rs"
+				},
+				{
+					"kind": "method",
+					"name": "read_local_time",
+					"signature": "pub fn read_local_time(minute_offset: f64) -> crate::platform::LocalTime",
+					"params": [
+						{
+							"name": "minute_offset",
+							"type": "f64",
+							"description": {
+								"ko": "지금에 더할 분. (음수는 과거, 0 이면 지금)",
+								"en": "Minutes to add to now. (negative is the past, 0 is now)"
+							}
+						}
+					],
+					"returns": {
+						"type": "crate::platform::LocalTime",
+						"description": {
+							"ko": "",
+							"en": ""
+						}
+					},
+					"description": {
+						"ko": "현지 시각 읽기. (원본 Engine.readLocalTime, new Date(Date.now() + 오프셋 분) 의 현지 달력 시각)",
+						"en": "Read the local time. (same as the original Engine.readLocalTime, the local calendar time of new Date(Date.now() + offset minutes))"
 					},
 					"since": "0.4.0",
 					"source": "src/platform/web.rs"

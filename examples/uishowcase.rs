@@ -112,45 +112,11 @@ fn create_theme_table() -> Vec<Theme> {
 }
 
 //==============================================================================
-// 현지 시각의 시와 분. (원본 Date 의 getHours, getMinutes. 분 오프셋을 더한다)
+// 현지 시각의 시와 분. (엔진 Engine::read_local_time, 분 오프셋을 더한다)
 //==============================================================================
-#[cfg(target_arch = "wasm32")]
 fn local_hour_minute(minute_offset: i64) -> (u32, u32) {
-	let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(js_sys::Date::now() + minute_offset as f64 * 60000.0));
-	(date.get_hours(), date.get_minutes())
-}
-
-#[cfg(all(unix, not(target_arch = "wasm32")))]
-fn local_hour_minute(minute_offset: i64) -> (u32, u32) {
-	#[repr(C)]
-	struct Tm {
-		tm_sec: i32,
-		tm_min: i32,
-		tm_hour: i32,
-		tm_mday: i32,
-		tm_mon: i32,
-		tm_year: i32,
-		tm_wday: i32,
-		tm_yday: i32,
-		tm_isdst: i32,
-		tm_gmtoff: i64,
-		tm_zone: *const u8,
-	}
-	extern "C" {
-		fn localtime_r(time: *const i64, result: *mut Tm) -> *mut Tm;
-	}
-	let epoch_seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_secs() as i64).unwrap_or(0) + minute_offset * 60;
-	let mut local_time = Tm { tm_sec: 0, tm_min: 0, tm_hour: 0, tm_mday: 0, tm_mon: 0, tm_year: 0, tm_wday: 0, tm_yday: 0, tm_isdst: 0, tm_gmtoff: 0, tm_zone: std::ptr::null() };
-	unsafe {
-		localtime_r(&epoch_seconds, &mut local_time);
-	}
-	(local_time.tm_hour as u32, local_time.tm_min as u32)
-}
-
-#[cfg(all(not(unix), not(target_arch = "wasm32")))]
-fn local_hour_minute(minute_offset: i64) -> (u32, u32) {
-	let epoch_seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_secs() as i64).unwrap_or(0) + minute_offset * 60;
-	(((epoch_seconds / 3600) % 24) as u32, ((epoch_seconds / 60) % 60) as u32)
+	let local_time = Engine::get_engine().unwrap().read_local_time(minute_offset as f64);
+	(local_time.hour, local_time.minute)
 }
 
 //==============================================================================
@@ -242,7 +208,6 @@ struct Ui {
 	applied_view_size: Vector2,
 	main_width: f64,
 	random: SeededRandom,
-	pending_theme_index: Option<usize>,
 	pending_tweens: Vec<Tween>,
 	long_press_button_id: Option<NodeId>,
 	mini_chart_phase: f64,
@@ -841,9 +806,15 @@ fn rebuild_dropdowns(tree: &mut NodeTree, shared: &Shared) {
 		tree.with_component_mut::<UIDropdown, _>(dropdown_id, |dropdown, dropdown_tree| {
 			dropdown.set_option_list(dropdown_tree, &option_list);
 			dropdown.set_selected_index(dropdown_tree, previous_theme_index);
-			dropdown.set_changed_event(Box::new(move |dropdown: &mut UIDropdown, _context: &mut ComponentContext| {
-				// 드롭다운 자신을 지우고 다시 만드는 일이라 이 알림 밖(다음 갱신)에서 한다.
-				shared_for_change.borrow_mut().pending_theme_index = Some(dropdown.get_selected_index());
+			dropdown.set_changed_event(Box::new(move |dropdown: &mut UIDropdown, context: &mut ComponentContext| {
+				// 원본처럼 고른 그 자리에서 바꾼다. (드롭다운을 다시 만들어도 노드는 트리 밖으로 떼일 뿐 알림이 끝나면 정리된다)
+				let theme_index = dropdown.get_selected_index();
+				apply_theme(context.get_node_tree_mut(), &shared_for_change, theme_index);
+				let (toast_id, theme_label) = {
+					let ui = shared_for_change.borrow();
+					(ui.toast_id, ui.theme_table[theme_index].label)
+				};
+				show_toast(context.get_node_tree_mut(), toast_id, &format!("Theme: {}", theme_label));
 			}));
 		});
 		apply_font_to_tree(tree, dropdown_id);
@@ -1572,16 +1543,6 @@ fn apply_fluid_components(tree: &mut NodeTree, components_id: NodeId, main_width
 // 갱신. (실시간 지표, 팝업 전환, 타자기, 로딩, 반응형 자리)
 //==============================================================================
 fn update(tree: &mut NodeTree, shared: &Shared, engine: &Engine, time_delta: f64) {
-	// 드롭다운이 맡긴 테마 전환.
-	let pending_theme_index = shared.borrow_mut().pending_theme_index.take();
-	if let Some(theme_index) = pending_theme_index {
-		apply_theme(tree, shared, theme_index);
-		let (toast_id, theme_label) = {
-			let ui = shared.borrow();
-			(ui.toast_id, ui.theme_table[theme_index].label)
-		};
-		show_toast(tree, toast_id, &format!("Theme: {}", theme_label));
-	}
 	shared.borrow_mut().elapsed_seconds += time_delta;
 	let view_size = engine.get_view_manager().get_view_size();
 	apply_responsive_layout(tree, shared, view_size);
@@ -1930,7 +1891,6 @@ impl Scene for ShowcaseScene {
 			applied_view_size: Vector2::create(0.0, 0.0),
 			main_width: 884.0,
 			random,
-			pending_theme_index: None,
 			pending_tweens: Vec::new(),
 			long_press_button_id: None,
 			mini_chart_phase: 0.0,

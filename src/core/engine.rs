@@ -1388,6 +1388,33 @@ impl Engine {
 	}
 
 	//==============================================================================
+	/// 현지 시각 읽기. (원본 Engine.readLocalTime, 지금에서 분 오프셋만큼 더한 때를 이 기계의 시간대로 본 달력 시각)
+	/// - 웹은 Date, 맥과 리눅스는 localtime_r, 윈도우는 SystemTimeToTzSpecificLocalTime 이다. 더한 때의 일광 절약 시간까지 반영한다.
+	///
+	/// # 인자
+	/// - `minute_offset`: 지금에 더할 분. (음수는 과거, 0 이면 지금)
+	///
+	/// # 돌려줌
+	/// 현지 시각. (해, 달 1 에서 12, 날, 시, 분, 초, 요일 0 이 일요일)
+	///
+	/// # 예제
+	/// 한 시간 뒤는 한 시간 앞과 두 시간 차이
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let now = engine.read_local_time(0.0);
+	/// assert!(now.hour < 24 && now.minute < 60 && (1..=12).contains(&now.month));
+	/// let later = engine.read_local_time(120.0);
+	/// let earlier = engine.read_local_time(-120.0);
+	/// assert_ne!((later.day, later.hour), (earlier.day, earlier.hour));
+	/// ```
+	//==============================================================================
+	pub fn read_local_time(&self, minute_offset: f64) -> platform::LocalTime {
+		platform::read_local_time(minute_offset)
+	}
+
+	//==============================================================================
 	/// 종료 요청 여부.
 	///
 	/// # 돌려줌

@@ -868,6 +868,68 @@ pub fn open_url(url: &str) -> bool {
 }
 
 //==============================================================================
+/// 현지 시각 읽기. (원본 Engine.readLocalTime, 지금에서 분 오프셋만큼 더한 때를 이 기계의 시간대로 본 달력 시각)
+/// - 맥과 리눅스는 localtime_r, 윈도우는 SystemTimeToTzSpecificLocalTime 이다. 더한 때의 일광 절약 시간까지 반영한다. (원본 new Date(Date.now() + 오프셋) 과 같다)
+///
+/// # 인자
+/// - `minute_offset`: 지금에 더할 분. (음수는 과거, 0 이면 지금)
+//==============================================================================
+pub fn read_local_time(minute_offset: f64) -> crate::platform::LocalTime {
+	let now_milliseconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_millis() as i64).unwrap_or(0);
+	let epoch_seconds = (now_milliseconds + (minute_offset * 60000.0).round() as i64).div_euclid(1000);
+	#[cfg(target_os = "windows")]
+	{
+		#[repr(C)]
+		struct SystemTime {
+			year: u16,
+			month: u16,
+			day_of_week: u16,
+			day: u16,
+			hour: u16,
+			minute: u16,
+			second: u16,
+			milliseconds: u16,
+		}
+		#[link(name = "kernel32")]
+		extern "system" {
+			fn SystemTimeToTzSpecificLocalTime(time_zone: *const u8, universal_time: *const SystemTime, local_time: *mut SystemTime) -> i32;
+		}
+		let universal = crate::platform::civil_from_epoch_seconds(epoch_seconds);
+		let universal_time = SystemTime { year: universal.year as u16, month: universal.month as u16, day_of_week: universal.weekday as u16, day: universal.day as u16, hour: universal.hour as u16, minute: universal.minute as u16, second: universal.second as u16, milliseconds: 0 };
+		let mut local_time = SystemTime { year: 0, month: 0, day_of_week: 0, day: 0, hour: 0, minute: 0, second: 0, milliseconds: 0 };
+		if unsafe { SystemTimeToTzSpecificLocalTime(std::ptr::null(), &universal_time, &mut local_time) } != 0 {
+			return crate::platform::LocalTime { year: local_time.year as i32, month: local_time.month as u32, day: local_time.day as u32, hour: local_time.hour as u32, minute: local_time.minute as u32, second: local_time.second as u32, weekday: local_time.day_of_week as u32 };
+		}
+		return universal;
+	}
+	#[cfg(not(target_os = "windows"))]
+	{
+		#[repr(C)]
+		struct Tm {
+			tm_sec: i32,
+			tm_min: i32,
+			tm_hour: i32,
+			tm_mday: i32,
+			tm_mon: i32,
+			tm_year: i32,
+			tm_wday: i32,
+			tm_yday: i32,
+			tm_isdst: i32,
+			tm_gmtoff: i64,
+			tm_zone: *const u8,
+		}
+		extern "C" {
+			fn localtime_r(time: *const i64, result: *mut Tm) -> *mut Tm;
+		}
+		let mut local_time = Tm { tm_sec: 0, tm_min: 0, tm_hour: 0, tm_mday: 1, tm_mon: 0, tm_year: 70, tm_wday: 4, tm_yday: 0, tm_isdst: 0, tm_gmtoff: 0, tm_zone: std::ptr::null() };
+		unsafe {
+			localtime_r(&epoch_seconds, &mut local_time);
+		}
+		return crate::platform::LocalTime { year: local_time.tm_year + 1900, month: (local_time.tm_mon + 1) as u32, day: local_time.tm_mday as u32, hour: local_time.tm_hour as u32, minute: local_time.tm_min as u32, second: local_time.tm_sec as u32, weekday: local_time.tm_wday as u32 };
+	}
+}
+
+//==============================================================================
 /// 창 제목 설정.
 ///
 /// # 인자
