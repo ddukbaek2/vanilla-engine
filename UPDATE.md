@@ -365,6 +365,7 @@
 - ParticleSystem 의 바뀐 동작: 그림을 넣으면 늘 그림으로 그리던 것을 원본처럼 렌더 모양이 image 일 때만 그림으로 그린다. 서술의 edge 를 위로 퍼지는 납작한 사각형으로 읽던 것을 원본처럼 아래로 낸다. 입자마다 흔들림 위상을 뽑아 씨앗을 고정한 파티클(타임라인)의 입자 자리가 전과 다르다. circle 은 원본처럼 돌리지 않은 쿼드로, 크기는 0.1 아래로, 알파는 0 ~ 1 밖으로 가지 않는다
 - EmitterShape, ParticleRenderShape 를 크레이트 맨 위에서 내보낸다
 - 예제 effectgallery: 아래 오른쪽에 ParticleSystem 칸 여덟(circle 분수, rect 색종이, streak 불티, image 별, 끌개 소용돌이, 흔들림 물방울, edge 눈, 월드 공간 자국)을 두었다. 아래 트레일은 왼쪽만 오간다
+- 예제 particleeffects, spriteeffects, uisample: 원본 예제와 같은 장면으로 옮겼다. particleeffects 는 파티클 이펙트 열여덟(목록, 사용 코드 패널과 COPY, 통계 패널), spriteeffects 는 스프라이트 셰이더, 화면 효과, 연출 스물다섯 목록, uisample 은 UIDocument 로 uiasset 을 읽어 단추와 진행 막대를 붙인다. 환경 변수 VANILLA_EXAMPLE_MODE 로 처음 모드를 고른다. spriteeffects 의 주인공 시트 애니메이션은 SpriteAnimator 가 ShaderSprite 안의 Sprite 를 찾지 못해 예제가 직접 돌린다
 - Format(base/format.rs, 원본 base/format.js): format_number(로캘 천 단위 표기), format_number_with_unit, format_compact_number(1.2K, 5.6M, 1.3B), format_padded_number(범위 자르기와 0 채우기), format_minutes_seconds(분:초). 반올림, 음수와 -0, 단위 경계, NaN 과 무한대, String(수)의 지수 꼴까지 원본과 같은 글을 낸다. 로캘은 Intl 대신 node 25(ICU 78.3)에서 뽑은 표(121 줄: 소수점, 천 단위 기호, 음수 앞붙이, 숫자 모양, 인도식 묶음, 최소 묶음 자리, NaN 글)로 쓰고, 표에 없는 태그는 en-US 다. (원본은 브라우저 기본 로캘, 틀린 태그는 RangeError) 원본 format.js 를 node 로 돌린 값 2 만 4 천 건과 같다
 - Version: branch 필드와 create_with_branch. 브랜치가 있으면 to_string 이 "major.minor.patch-branch" 를 낸다. (원본 base/version.js) 브랜치가 글이라 Version 은 이제 Copy 가 아니다
 - Platform: is_desktop_web(). 모바일이 아니고, 맥이라고 알리면서 손가락 입력이 여럿(navigator.maxTouchPoints > 1)인 아이패드도 아니면 true. 데스크탑 빌드는 늘 true (원본 base/platform.js)
