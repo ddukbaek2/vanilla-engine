@@ -52,6 +52,8 @@ const EXAMPLE_LIST = [
 	{ name: "toonview", frames: "60" },
 	{ name: "toonshading", frames: "300" },
 	{ name: "modelviewer", frames: "60,180", timeoutSeconds: 900 },
+	{ name: "ancientmountain", frames: "300", timeoutSeconds: 900 },
+	{ name: "neonhorizon", frames: "300", timeoutSeconds: 900 },
 ];
 // 예제 하나의 제한 시간(초). 멈춤은 STALL_SECONDS 가 잡고, 이것은 느린 기계에서 작업 시간(180 분)을 지키는 상한이다.
 // - 근거(2026-11-26): 인텔 맥 CI(macos-26-intel)에서 toonmaterial 이 30 프레임에 262 초(프레임당 8.7 초), toonstyle, toonfx 는 300 초.

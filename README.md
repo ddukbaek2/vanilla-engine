@@ -348,6 +348,8 @@ VANILLA_CAPTURE_PATH=shots/uigallery_{frame}.png VANILLA_CAPTURE_FRAMES=60 VANIL
 | `cameratour` | Camera2D 회전 둘러보기: 천천히 도는 카메라, 끌어 팬, 커서 고정 휠 줌, 흔들림, 노드 배율 트윈, Indicator (원본 examples/cameratour) |
 | `timelineshowcase` | 타임라인 문서 재생 |
 | `modelviewer` | 스키닝 3D(glTF, FBX), 그림자, 블룸 |
+| `ancientmountain` | 3인칭 산 오르기: 절차 지형과 3중 텍스처, 마네킹 달리기, 점프, 등반, 뛰어내리기, 여우 여섯, 정상 깃발, 섀도우 맵, 블룸, 모션 블러, 옵션 패널 |
+| `neonhorizon` | 네온 그리드 지형 달리기: 별과 유성, 함대, 부스트 빛살, 먼지 파티클, 블룸, 색수차, 필름 그레인, 필믹 톤맵, 옵션 패널 |
 | `engineextras` | 테, 진행 고리, 부드러운 그늘, 마우스 커서, 카메라 손짓, 마우스 단추와 손가락 입력 (직접 눌러 본다) |
 | `devtoolsshowcase` | 개발자 도구(F2): 하이어라키, 인스펙터, 통계, 로컬 스토리지, 설정 |
 | `toonshowcase` | 툰 3D: 기본 도형과 바깥선, GLB 모형의 뼈대 움직임, 셀 셰이딩, 바위 2 천 개 인스턴싱과 화면 밖 거르기, 그림자, HDR 블룸 |
@@ -374,7 +376,7 @@ cargo run --example uigallery
 cargo run --release --example modelviewer
 ```
 
-`modelviewer`, `toonshowcase`, `toonshading`, `timelineshowcase`, `loadingshowcase`, `scenedocument` 는 vanilla.js 의 예제 애셋을 씁니다. vanilla.js 저장소를 이 저장소 옆에 받아 두면 됩니다. (`Github/vanilla.js`, `Github/vanilla-engine`)
+`modelviewer`, `ancientmountain`, `toonshowcase`, `toonshading`, `timelineshowcase`, `loadingshowcase`, `scenedocument` 는 vanilla.js 의 예제 애셋을 씁니다. vanilla.js 저장소를 이 저장소 옆에 받아 두면 됩니다. (`Github/vanilla.js`, `Github/vanilla-engine`)
 
 ## 기술 노트
 

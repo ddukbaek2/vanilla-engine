@@ -128,6 +128,8 @@ cargo run --release --example modelviewer
 | `cameratour` | Camera2D 회전 둘러보기: 천천히 도는 카메라, 끌어 팬, 커서 고정 휠 줌, 흔들림, 노드 배율 트윈, Indicator |
 | `timelineshowcase` | 타임라인 문서 재생 |
 | `modelviewer` | 스키닝 3D(glTF, FBX), 그림자, 블룸 |
+| `ancientmountain` | 3인칭 산 오르기: 절차 지형과 3중 텍스처, 마네킹 달리기, 점프, 등반, 뛰어내리기, 여우 여섯, 정상 깃발, 섀도우 맵, 블룸, 모션 블러, 옵션 패널 |
+| `neonhorizon` | 네온 그리드 지형 달리기: 별과 유성, 함대, 부스트 빛살, 먼지 파티클, 블룸, 색수차, 필름 그레인, 필믹 톤맵, 옵션 패널 |
 | `engineextras` | 테, 진행 고리, 부드러운 그늘, 마우스 커서, 카메라 손짓, 마우스 단추와 손가락 입력 |
 | `devtoolsshowcase` | 개발자 도구(F2): 하이어라키, 인스펙터, 통계, 로컬 스토리지, 설정 |
 | `toonshowcase` | 툰 3D: 기본 도형과 바깥선, GLB 모형의 뼈대 움직임, 셀 셰이딩, 인스턴싱과 화면 밖 거르기, 그림자, HDR 블룸 |
@@ -149,7 +151,7 @@ cargo run --release --example modelviewer
 | `textshaping` | 오른쪽에서 왼쪽 글, 가짜 기울임과 굵게, 한중일 낱말 줄바꿈, `DynamicFont` |
 | `scenedocument` | vanilla.js 비주얼 에디터 꼴의 씬 파일(`.scene.json`)을 읽어 노드 트리를 짓고 다시 내보내 견주기 |
 
-- `modelviewer`, `toonshowcase`, `toonshading`, `timelineshowcase`, `loadingshowcase`, `scenedocument` 는 vanilla.js 의 예제 애셋을 씁니다. vanilla.js 저장소를 엔진 저장소 옆에 받아 둡니다. (`vanilla.js` 와 `vanilla-engine` 폴더가 나란히)
+- `modelviewer`, `ancientmountain`, `toonshowcase`, `toonshading`, `timelineshowcase`, `loadingshowcase`, `scenedocument` 는 vanilla.js 의 예제 애셋을 씁니다. vanilla.js 저장소를 엔진 저장소 옆에 받아 둡니다. (`vanilla.js` 와 `vanilla-engine` 폴더가 나란히)
 - 예제는 애셋 경로를 저장소 루트 기준으로 적어 두었으므로 저장소 루트에서 실행합니다.
 - 무거운 3D 예제는 `--release` 로 돌립니다. (Cargo 의 dev 빌드는 최적화를 하지 않습니다)
 
