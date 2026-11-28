@@ -294,10 +294,12 @@ fn auto_instancing_matches_original_instance_counts() {
 	let transparent_matrix = Matrix4::create_translation(0.4, 0.6, 0.6);
 	let ground_matrix = Matrix4::create_identity();
 	let mut results: Vec<(Vec<i32>, u32, Vec<u8>)> = Vec::new();
+	let mut upload_frames: Vec<[u32; 5]> = Vec::new();
 	for is_reference in [false, true] {
 		let mut frame_results = Vec::new();
 		for _frame in 0..3 {
 			let _ = crate::core::glstatecache::take_draw_record();
+			let upload_before = UPLOAD_COUNTS.with(|counts| counts.get());
 			let mut queue = ToonDrawQueue::new();
 			queue.set_screen_outline(Some(&mut outline));
 			queue.add_mesh(&ground_mesh, &ground_matrix, ToonDrawOptions { line_id: Some(1), has_screen_outline: false, ..ToonDrawOptions::default() });
@@ -315,6 +317,10 @@ fn auto_instancing_matches_original_instance_counts() {
 			queue.draw_shadows(gl, &mut renderer, &shadow_map);
 			target.clear();
 			queue.draw(gl, &mut renderer, &camera);
+			let upload_after = UPLOAD_COUNTS.with(|counts| counts.get());
+			if !is_reference {
+				upload_frames.push([upload_after[0] - upload_before[0], upload_after[1] - upload_before[1], upload_after[2] - upload_before[2], upload_after[3] - upload_before[3], upload_after[4] - upload_before[4]]);
+			}
 			let (plain_count, mut instance_counts) = crate::core::glstatecache::take_draw_record();
 			instance_counts.sort_by(|first, second| second.cmp(first));
 			frame_results.push((instance_counts, plain_count, target.read_pixels()));
@@ -327,6 +333,10 @@ fn auto_instancing_matches_original_instance_counts() {
 	let expected = vec![11, 6, 6, 6, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2];
 	eprintln!("자동 인스턴싱(원본 장면): 인스턴스 수 {:?}, 보통 그리기 묶음 {} 묶지 않음 {}", results[0].0, results[0].1, results[1].1);
 	print_hash("autoinstance_original_scene", &results[0].2);
+	eprintln!("자동 인스턴싱(원본 장면): 프레임마다 올림 [몸과 그림자 묶음 자리, 블록 버퍼, 블록 묶기, 선의 판 묶음 자리, 선의 판 드로 콜] {:?}", upload_frames);
+	assert_eq!(upload_frames[1][0], 0, "멈춘 프레임은 몸과 그림자 묶음 자리를 올리지 않는다");
+	assert_eq!(upload_frames[1][3], 0, "멈춘 프레임은 선의 판 묶음 자리를 올리지 않는다");
+	assert_eq!(upload_frames[2][0], 0);
 	assert_eq!(results[0].0, expected, "같은 모형과 재질 값만 묶는다");
 	assert!(results[1].0.is_empty(), "비교 쪽은 묶지 않는다 ({:?})", results[1].0);
 	assert!(results[0].1 + (results[0].0.len() as u32) < results[1].1, "그리기 수가 준다");
