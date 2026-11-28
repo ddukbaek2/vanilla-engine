@@ -1733,6 +1733,7 @@ fn local_seed() -> u64 {
 struct ShowcaseScene {
 	scene_base: SceneBase,
 	touch_recognizer: TouchRecognizer,
+	test_frame: u32,
 	document_assets: Vec<TextAsset>,
 	shared: Option<Shared>,
 	start_screen_index: usize,
@@ -1748,10 +1749,72 @@ impl ShowcaseScene {
 		ShowcaseScene {
 			scene_base: SceneBase::new(),
 			touch_recognizer: TouchRecognizer::new(),
+			test_frame: 0,
 			document_assets: ASSET_FILE_NAMES.iter().map(|_| TextAsset::new()).collect(),
 			shared: None,
 			start_screen_index,
 			background_color: Color::create(0.078, 0.09, 0.118, 1.0),
+		}
+	}
+}
+
+//==============================================================================
+// 확인용 입력 주입. (데스크탑 창이 마우스 이벤트를 받을 때와 같은 일을 엔진 입력 관리자에 한다)
+//==============================================================================
+fn inject_pointer(engine: &Engine, view_position: Vector2, action: &str) {
+	let view_size = engine.get_view_manager().get_view_size();
+	let native_size = engine.get_view_manager().get_canvas_native_size();
+	let native_position = Vector2::create(view_position.x * native_size.x / view_size.x, view_position.y * native_size.y / view_size.y);
+	let mut input_manager = engine.get_input_manager_mut();
+	input_manager.set_canvas_native_input_position(native_position);
+	input_manager.set_view_input_position(view_position);
+	input_manager.set_touch_input(false);
+	match action {
+		"down" => {
+			input_manager.set_mouse_button_down(MouseButton::Left, true);
+			input_manager.set_touch_pressed(true);
+			input_manager.set_touch_moved(true);
+			input_manager.set_touch_down(true);
+		}
+		"up" => {
+			input_manager.set_mouse_button_down(MouseButton::Left, false);
+			input_manager.set_touch_moved(false);
+			input_manager.set_touch_released(true);
+			input_manager.set_touch_down(false);
+		}
+		_ => {
+		}
+	}
+}
+
+fn drive_theme_pick(engine: &Engine, tree: &NodeTree, shared: &Shared, test_frame: u32, option_index: usize) {
+	let dropdown_id = match shared.borrow().theme_dropdown_id {
+		Some(dropdown_id) => dropdown_id,
+		None => {
+			return;
+		}
+	};
+	let center_of = |node_id: NodeId| {
+		let size = tree[node_id].get_content_size();
+		tree.calculate_world_matrix(node_id).transform_point(size.x * 0.5, size.y * 0.5)
+	};
+	let row_id = tree[dropdown_id].get_component::<UIDropdown>().and_then(|dropdown| dropdown.get_option_nodes().get(option_index).copied());
+	match test_frame {
+		35 => {
+			inject_pointer(engine, center_of(dropdown_id), "move");
+		}
+		36 => {
+			inject_pointer(engine, center_of(dropdown_id), "down");
+		}
+		37 => {
+			inject_pointer(engine, center_of(dropdown_id), "up");
+		}
+		50..=55 => {
+			if let Some(row_id) = row_id {
+				inject_pointer(engine, center_of(row_id), match test_frame { 52 => "down", 53 => "up", _ => "move" });
+			}
+		}
+		_ => {
 		}
 	}
 }
@@ -1936,6 +1999,11 @@ impl Scene for ShowcaseScene {
 			Some(shared) => shared.clone(),
 			None => return,
 		};
+		// 확인용: VANILLA_UISHOWCASE_PICK_THEME=번호 이면 실제 마우스 입력과 같은 길(엔진 입력 관리자의 위치와 단추)로 테마 드롭다운을 열고 그 번호를 고른다. (화면 저장으로 바뀐 프레임을 찍을 때)
+		self.test_frame += 1;
+		if let Some(option_index) = std::env::var("VANILLA_UISHOWCASE_PICK_THEME").ok().and_then(|text| text.parse::<usize>().ok()) {
+			drive_theme_pick(engine, self.scene_base.get_node_tree(), &shared, self.test_frame, option_index);
+		}
 		update(self.scene_base.get_node_tree_mut(), &shared, engine, time_delta);
 		let pending_tween_list: Vec<Tween> = std::mem::take(&mut shared.borrow_mut().pending_tweens);
 		for pending_tween in pending_tween_list {
