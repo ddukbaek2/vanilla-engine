@@ -586,6 +586,10 @@ struct WebApplication {
 /// 프레임 콜백을 걸었으면 Ok. 캔버스나 WebGL2 컨텍스트를 얻지 못했거나 사건 리스너를 달지 못했으면 Err(까닭 글).
 //==============================================================================
 pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
+	// 패닉 글을 브라우저 콘솔에 남긴다. (없으면 wasm 이 "unreachable" 만 내서 까닭을 알 수 없다)
+	std::panic::set_hook(Box::new(|panic_info| {
+		web_sys::console::error_1(&wasm_bindgen::JsValue::from_str(&format!("panic: {}", panic_info)));
+	}));
 	let web_application_cell = Rc::new(RefCell::new(WebApplication {
 		engine_runner,
 		window_state: None,
@@ -1322,6 +1326,11 @@ impl WebApplication {
 			let margin_top = canvas_top.map(|canvas_top| format!("{}px", canvas_top)).unwrap_or_default();
 			let _ = canvas_style.set_property("margin-left", &margin_left);
 			let _ = canvas_style.set_property("margin-top", &margin_top);
+		}
+		else if canvas_style.get_property_value("width").map(|value| value.is_empty()).unwrap_or(false) {
+			// 페이지가 CSS 크기를 안 준 캔버스는 화소 크기가 그대로 CSS 크기가 되어, 화소 수를 정할 때마다 배율만큼 커진다(프레임마다 자라 몇만 화소가 된다). 처음 읽은 CSS 크기로 고정한다.
+			let _ = canvas_style.set_property("width", &format!("{}px", canvas_width));
+			let _ = canvas_style.set_property("height", &format!("{}px", canvas_height));
 		}
 		let canvas_pixel_width = (canvas_width * device_pixel_ratio).round() as u32;
 		let canvas_pixel_height = (canvas_height * device_pixel_ratio).round() as u32;

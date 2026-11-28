@@ -334,7 +334,7 @@ impl Scene for ModelViewerScene {
 				return;
 			}
 		};
-		let load_start_instant = std::time::Instant::now();
+		let load_start_instant = web_time::Instant::now();
 		match self.create_resources(engine, graphic.get_gl()) {
 			Ok(resources) => {
 				self.load_seconds = (load_start_instant.elapsed().as_secs_f32()) as f64;
@@ -463,7 +463,7 @@ fn measure_asset_cache(gl: &GlContext, load_handle: &SkinnedModelLoadHandle, ski
 	let measure_load = |use_cache: bool| -> Result<(f64, usize, usize), String> {
 		SkinnedModelAsset::clear_cache();
 		let mut model_list = Vec::with_capacity(MODEL_COUNT);
-		let start_time = std::time::Instant::now();
+		let start_time = web_time::Instant::now();
 		for _ in 0..MODEL_COUNT {
 			if !use_cache {
 				SkinnedModelAsset::clear_cache();
