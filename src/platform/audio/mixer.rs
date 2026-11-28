@@ -25,7 +25,7 @@ use super::pannermath::PannerSettings;
 use super::decode::DECODE_SAMPLE_RATE;
 use super::streaming::StreamRingReader;
 use super::{ListenerParam, PannerParam};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
@@ -141,6 +141,8 @@ pub(crate) enum MixerCommand {
 pub(crate) struct MixerShared {
 	rendered_seconds_bits: AtomicU64,
 	sample_rate_bits: AtomicU64,
+	/// 소리 스레드가 멈춤 명령을 받아 시계를 세웠는지. (원본 suspend() 약속이 풀린 뒤의 "suspended" 상태, 멈춘 뒤에는 시계가 더 나아가지 않는다)
+	is_suspended_acknowledged: AtomicBool,
 }
 
 impl MixerShared {
@@ -151,7 +153,15 @@ impl MixerShared {
 		MixerShared {
 			rendered_seconds_bits: AtomicU64::new(0f64.to_bits()),
 			sample_rate_bits: AtomicU64::new(sample_rate.to_bits()),
+			is_suspended_acknowledged: AtomicBool::new(false),
 		}
+	}
+
+	//==============================================================================
+	/// 소리 스레드가 멈춤을 받아 시계를 세웠는지. (재개 명령을 받으면 거짓)
+	//==============================================================================
+	pub(crate) fn is_suspended_acknowledged(&self) -> bool {
+		self.is_suspended_acknowledged.load(Ordering::Acquire)
 	}
 
 	//==============================================================================
@@ -858,9 +868,11 @@ impl MixerRenderer {
 				}
 				MixerCommand::Suspend => {
 					self.is_suspended = true;
+					self.shared.is_suspended_acknowledged.store(true, Ordering::Release);
 				}
 				MixerCommand::Resume => {
 					self.is_suspended = false;
+					self.shared.is_suspended_acknowledged.store(false, Ordering::Release);
 				}
 			}
 		}

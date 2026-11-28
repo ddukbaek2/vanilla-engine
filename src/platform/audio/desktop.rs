@@ -540,6 +540,11 @@ pub fn suspend_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 	}
 	if let Some(mixer_link) = &platform_state.mixer_link {
 		mixer_link.send(MixerCommand::Suspend);
+		// 원본 suspend() 는 약속이 풀린 뒤(소리 스레드가 멈춘 뒤)에 currentTime 이 선다. 소리 스레드가 멈춤을 받을 때까지 기다린다. (다음 퀀텀 경계까지, 장치가 콜백을 안 주면 바로 포기)
+		let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
+		while !mixer_link.shared.is_suspended_acknowledged() && std::time::Instant::now() < deadline {
+			std::thread::sleep(std::time::Duration::from_millis(1));
+		}
 	}
 	platform_state.is_audio_context_suspended = true;
 }
