@@ -14,10 +14,11 @@
 //==============================================================================
 
 use serde_json::Value;
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use vanilla::{
-	AmbientOcclusionEffect, GlContext, BlobAsset, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, Graphic, HumanSkinRenderer, ImageDescription, ImageDescriptionOptions, KeyCode, Material, Matrix4, MouseButton, Rect, RenderTarget, RenderTargetOptions, Scene, SceneBase, SeededRandom, ShadowMap, SkinnedModel, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector2, Vector3, SKIN_SHADING_EYE, SKIN_SHADING_FACIALHAIR, SKIN_SHADING_FLUID, SKIN_SHADING_HAIR, SKIN_SHADING_OCCLUSION, SKIN_SHADING_SKIN, SKIN_TEXTURE_UNIT_DETAILHEIGHT, SKIN_TEXTURE_UNIT_LAYERCOLOR, SKIN_TEXTURE_UNIT_LAYERNORMAL, SKIN_TEXTURE_UNIT_MASKATLAS, SKIN_TEXTURE_UNIT_MICRO,
+	AmbientOcclusionEffect, GlContext, BlobAsset, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, Graphic, HumanSkinRenderer, ImageDescription, ImageDescriptionOptions, KeyCode, Material, Matrix4, MouseButton, RenderTarget, RenderTargetOptions, Scene, SceneBase, SeededRandom, ComponentContext, NodeId, NodeTree, Paint, Pivot, TouchRecognizer, UIButton, UILabel, ShadowMap, SkinnedModel, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector2, Vector3, SKIN_SHADING_EYE, SKIN_SHADING_FACIALHAIR, SKIN_SHADING_FLUID, SKIN_SHADING_HAIR, SKIN_SHADING_OCCLUSION, SKIN_SHADING_SKIN, SKIN_TEXTURE_UNIT_DETAILHEIGHT, SKIN_TEXTURE_UNIT_LAYERCOLOR, SKIN_TEXTURE_UNIT_LAYERNORMAL, SKIN_TEXTURE_UNIT_MASKATLAS, SKIN_TEXTURE_UNIT_MICRO,
 };
 
 //==============================================================================
@@ -25,8 +26,18 @@ use vanilla::{
 //==============================================================================
 // 예제 애셋 폴더. (MetaHuman 자산은 Epic Games 의 것으로 언리얼 엔진 EULA 를 따르고, 이 데모 안에서만 쓴다. 라이선스는 폴더의 ASSETS_LICENSE.md)
 const EXAMPLE_ASSET_DIRECTORY: &str = "examples/oldface_assets";
-/// 화면 아래 저작권 고지.
-const ATTRIBUTION_TEXT: &str = "MetaHuman, Epic Games, 데모 전용, https://www.metahuman.com/ , https://www.metahuman.com/en-US/license";
+
+// 화면 위 UI. (원본 index.html 의 CSS 값을 1280x720 화면 기준 픽셀로 옮긴 것)
+// 표정 단추 너비. (원본 단추는 글자 사이를 띄운 글자 너비 + 안쪽 여백이라 1280 화면에서 잰 값)
+const EXPRESSION_BUTTON_WIDTHS: [f64; 9] = [86.0, 70.0, 60.0, 84.0, 72.0, 86.0, 102.0, 73.0, 98.0];
+const EXPRESSION_BUTTON_HEIGHT: f64 = 27.0;
+const EXPRESSION_BUTTON_GAP: f64 = 6.0;
+const EXPRESSION_ROW_LENGTH: usize = 7;
+const FOOTER_LINES: [&str; 3] = [
+	"DRAG TO ORBIT, WHEEL OR PINCH TO ZOOM",
+	"CHARACTER: EPIC METAHUMAN (WALTER PRESET, EXPRESSION WRINKLE MAPS, RIGLOGIC BAKED TO ARKIT SHAPES, GROOM CARDS), EXPRESSIONS: ARKIT BLENDSHAPE PRESETS",
+	"METAHUMAN, EPIC GAMES, DEMO ONLY: METAHUMAN.COM / LICENSE",
+];
 
 // 카메라. (원본 값)
 const CAMERA_FIELD_OF_VIEW: f64 = 0.44;
@@ -312,6 +323,164 @@ struct OldFaceScene {
 	camera_target_pitch: f64,
 	camera_target_distance: f64,
 	last_pointer_position: Option<Vector2>,
+	touch_recognizer: TouchRecognizer,
+	ui: Option<OldFaceUi>,
+	pending_expression_index: Rc<Cell<Option<usize>>>,
+}
+
+//==============================================================================
+// 화면 위 UI 노드 모음. (원본 index.html 의 titleOverlay, optionPanel, expressionPanel, footerNote, homeLink)
+//==============================================================================
+struct OldFaceUi {
+	title_id: NodeId,
+	divider_id: NodeId,
+	subtitle_id: NodeId,
+	options_id: NodeId,
+	expression_button_ids: Vec<NodeId>,
+	expression_fill_ids: Vec<NodeId>,
+	home_id: NodeId,
+	footer_ids: Vec<NodeId>,
+}
+
+fn create_color(red: f64, green: f64, blue: f64, alpha: f64) -> Color {
+	Color::create(red / 255.0, green / 255.0, blue / 255.0, alpha)
+}
+
+fn create_box_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, size: Vector2) -> NodeId {
+	let node_id = node_tree.create_child(parent_id, name);
+	let node = &mut node_tree[node_id];
+	node.set_pivot(Pivot::TOP_LEFT);
+	node.set_content_size(size);
+	node_id
+}
+
+fn create_label_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, size: Vector2, text: &str, font_size: f64, color: Color, text_align: TextAlign) -> NodeId {
+	let label_id = create_box_node(node_tree, parent_id, name, size);
+	let label = node_tree.add_component(label_id, UILabel::create_with_text(text, font_size)).expect("label");
+	label.set_text_color(color);
+	label.set_text_align(text_align);
+	label.set_text_baseline(TextBaseline::Middle);
+	label_id
+}
+
+// 테두리 있는 둥근 단추. (바깥 Paint 가 테두리 색, 안쪽 자식 Paint 가 바탕색. 바탕 노드를 돌려준다)
+fn create_pill_button(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, size: Vector2, text: &str, font_size: f64, text_color: Color, border_color: Color, fill_color: Color, round_size: f64) -> (NodeId, NodeId) {
+	let button_id = create_box_node(node_tree, parent_id, name, size);
+	let border_paint = node_tree[button_id].add_component(Paint::create_with_color(border_color));
+	border_paint.set_round_size(round_size);
+	let fill_size = Vector2::create(size.x - 2.0, size.y - 2.0);
+	let fill_id = create_box_node(node_tree, button_id, "fill", fill_size);
+	node_tree[fill_id].set_local_position(Vector2::create(1.0, 1.0));
+	let fill_paint = node_tree[fill_id].add_component(Paint::create_with_color(fill_color));
+	fill_paint.set_round_size(round_size - 1.0);
+	let label_id = create_label_node(node_tree, fill_id, "text", fill_size, text, font_size, text_color, TextAlign::Center);
+	let _ = label_id;
+	node_tree.add_component(button_id, UIButton::new());
+	(button_id, fill_id)
+}
+
+impl OldFaceScene {
+	//==============================================================================
+	// UI 만들기. (원본 CSS 의 자리, 크기, 색을 따라 노드로 놓는다)
+	//==============================================================================
+	fn create_ui(&mut self) {
+		let pending_expression_index = self.pending_expression_index.clone();
+		let node_tree = self.scene_base.get_node_tree_mut();
+		let root_id = node_tree.get_root_id();
+		let light = create_color(242.0, 236.0, 226.0, 0.95);
+		let title_id = create_label_node(node_tree, root_id, "title", Vector2::create(900.0, 80.0), "O\u{2002}L\u{2002}D\u{2002}\u{2002}\u{2002}F\u{2002}A\u{2002}C\u{2002}E", 58.0, create_color(242.0, 236.0, 226.0, 1.0), TextAlign::Center);
+		let divider_id = create_box_node(node_tree, root_id, "divider", Vector2::create(240.0, 1.0));
+		node_tree[divider_id].add_component(Paint::create_with_color(create_color(242.0, 236.0, 226.0, 0.55)));
+		let subtitle_id = create_label_node(node_tree, root_id, "subtitle", Vector2::create(600.0, 20.0), "V A N I L L A   E N G I N E", 12.0, create_color(230.0, 226.0, 220.0, 0.78), TextAlign::Center);
+		let (options_id, _) = create_pill_button(node_tree, root_id, "options", Vector2::create(122.0, 34.0), "OPTIONS", 10.0, create_color(232.0, 201.0, 138.0, 0.95), create_color(60.0, 57.0, 59.0, 1.0), create_color(30.0, 28.0, 30.0, 0.9), 12.0);
+		let mut expression_button_ids = Vec::new();
+		let mut expression_fill_ids = Vec::new();
+		for (expression_index, definition) in EXPRESSION_DEFINITIONS.iter().enumerate() {
+			let size = Vector2::create(EXPRESSION_BUTTON_WIDTHS[expression_index], EXPRESSION_BUTTON_HEIGHT);
+			let (button_id, fill_id) = create_pill_button(node_tree, root_id, definition.0, size, definition.1, 10.0, create_color(242.0, 236.0, 226.0, 0.85), create_color(70.0, 67.0, 68.0, 1.0), create_color(30.0, 28.0, 30.0, 0.85), size.y * 0.5);
+			let pending = pending_expression_index.clone();
+			if let Some(button) = node_tree[button_id].get_component_mut::<UIButton>() {
+				button.set_click_event(Box::new(move |_button: &mut UIButton, _context: &mut ComponentContext| {
+					pending.set(Some(expression_index));
+				}));
+			}
+			expression_button_ids.push(button_id);
+			expression_fill_ids.push(fill_id);
+		}
+		let (home_id, _) = create_pill_button(node_tree, root_id, "home", Vector2::create(244.0, 34.0), "VANILLAPUNCH.COM", 12.0, light, create_color(80.0, 77.0, 76.0, 1.0), create_color(78.0, 72.0, 66.0, 0.75), 17.0);
+		let mut footer_ids = Vec::new();
+		for (line_index, line) in FOOTER_LINES.iter().enumerate() {
+			footer_ids.push(create_label_node(node_tree, root_id, &format!("footer{}", line_index), Vector2::create(1200.0, 18.0), line, 9.5, create_color(242.0, 236.0, 226.0, 0.5), TextAlign::Left));
+		}
+		self.ui = Some(OldFaceUi { title_id, divider_id, subtitle_id, options_id, expression_button_ids, expression_fill_ids, home_id, footer_ids });
+		self.refresh_expression_buttons();
+	}
+
+	//==============================================================================
+	// UI 자리 잡기. (화면 크기가 바뀌어도 원본처럼 가운데, 아래, 오른쪽 위 기준)
+	//==============================================================================
+	fn layout_ui(&mut self, canvas_size: Vector2) {
+		let ui = match &self.ui {
+			Some(ui) => ui,
+			None => {
+				return;
+			}
+		};
+		let node_tree = self.scene_base.get_node_tree_mut();
+		let center_x = canvas_size.x * 0.5;
+		let title_font = (canvas_size.x * 0.05).clamp(26.0, 58.0);
+		let sub_font = (canvas_size.x * 0.012).clamp(9.0, 12.0);
+		node_tree[ui.title_id].set_local_position(Vector2::create(center_x - 450.0, canvas_size.y * 0.07 - 5.0));
+		if let Some(label) = node_tree[ui.title_id].get_component_mut::<UILabel>() {
+			label.set_font_size(title_font);
+		}
+		node_tree[ui.divider_id].set_local_position(Vector2::create(center_x - 120.0, canvas_size.y * 0.07 - 5.0 + 80.0 - 5.0));
+		node_tree[ui.subtitle_id].set_local_position(Vector2::create(center_x - 300.0, canvas_size.y * 0.07 - 5.0 + 80.0 + 14.0));
+		if let Some(label) = node_tree[ui.subtitle_id].get_component_mut::<UILabel>() {
+			label.set_font_size(sub_font);
+		}
+		node_tree[ui.options_id].set_local_position(Vector2::create(canvas_size.x - 18.0 - 122.0, 18.0));
+		// 표정 단추 두 줄. (가운데 맞춤, 아래 쪽 줄의 아래 끝이 화면 아래에서 5.5% + 56px)
+		let bottom_y = canvas_size.y - (canvas_size.y * 0.055 + 56.0);
+		let row_ranges = [(0, EXPRESSION_ROW_LENGTH), (EXPRESSION_ROW_LENGTH, EXPRESSION_BUTTON_WIDTHS.len())];
+		for (row_index, (start, end)) in row_ranges.iter().enumerate() {
+			let row_width: f64 = EXPRESSION_BUTTON_WIDTHS[*start..*end].iter().sum::<f64>() + EXPRESSION_BUTTON_GAP * ((end - start - 1) as f64);
+			let mut x = center_x - row_width * 0.5;
+			let y = bottom_y - EXPRESSION_BUTTON_HEIGHT - (1 - row_index) as f64 * (EXPRESSION_BUTTON_HEIGHT + EXPRESSION_BUTTON_GAP);
+			for button_index in *start..*end {
+				node_tree[ui.expression_button_ids[button_index]].set_local_position(Vector2::create(x, y));
+				x += EXPRESSION_BUTTON_WIDTHS[button_index] + EXPRESSION_BUTTON_GAP;
+			}
+		}
+		node_tree[ui.home_id].set_local_position(Vector2::create(center_x - 122.0, canvas_size.y - canvas_size.y * 0.055 - 34.0));
+		for (line_index, footer_id) in ui.footer_ids.iter().enumerate() {
+			node_tree[*footer_id].set_local_position(Vector2::create(18.0, canvas_size.y - 16.0 - 18.0 * (FOOTER_LINES.len() - line_index) as f64));
+		}
+	}
+
+	//==============================================================================
+	// 고른 표정 단추를 노란 바탕으로. (원본 .expressionButton.active)
+	//==============================================================================
+	fn refresh_expression_buttons(&mut self) {
+		let active_index = self.active_expression_index;
+		let ui = match &self.ui {
+			Some(ui) => ui,
+			None => {
+				return;
+			}
+		};
+		let node_tree = self.scene_base.get_node_tree_mut();
+		for (expression_index, fill_id) in ui.expression_fill_ids.iter().enumerate() {
+			let is_active = expression_index == active_index;
+			if let Some(paint) = node_tree[*fill_id].get_component_mut::<Paint>() {
+				paint.set_color(if is_active { create_color(232.0, 201.0, 138.0, 0.95) } else { create_color(30.0, 28.0, 30.0, 0.85) });
+			}
+			let text_id = node_tree[*fill_id].get_child(0).expect("text");
+			if let Some(label) = node_tree[text_id].get_component_mut::<UILabel>() {
+				label.set_text_color(if is_active { create_color(42.0, 32.0, 22.0, 1.0) } else { create_color(242.0, 236.0, 226.0, 0.85) });
+			}
+		}
+	}
 }
 
 impl OldFaceScene {
@@ -362,6 +531,9 @@ impl OldFaceScene {
 			camera_target_pitch: CAMERA_DEFAULT_PITCH,
 			camera_target_distance: CAMERA_DEFAULT_DISTANCE,
 			last_pointer_position: None,
+			touch_recognizer: TouchRecognizer::new(),
+			ui: None,
+			pending_expression_index: Rc::new(Cell::new(None)),
 		}
 	}
 
@@ -590,7 +762,10 @@ impl OldFaceScene {
 				selected_index = Some(key_index);
 			}
 		}
-		if input_manager.is_mouse_button_down(MouseButton::Left) {
+		if let Some(pending_index) = self.pending_expression_index.take() {
+			selected_index = Some(pending_index);
+		}
+		if input_manager.is_mouse_button_down(MouseButton::Left) && !self.is_pointer_over_ui(engine) {
 			let pointer_position = input_manager.get_canvas_native_input_position();
 			if let Some(last_pointer_position) = self.last_pointer_position {
 				let delta_x = pointer_position.x - last_pointer_position.x;
@@ -622,8 +797,28 @@ impl OldFaceScene {
 	//==============================================================================
 	// 표정 바꾸기.
 	//==============================================================================
+	fn is_pointer_over_ui(&self, engine: &Engine) -> bool {
+		let ui = match &self.ui {
+			Some(ui) => ui,
+			None => {
+				return false;
+			}
+		};
+		let pointer_position = engine.get_input_manager().get_canvas_native_input_position();
+		let node_tree = self.scene_base.get_node_tree();
+		let mut button_id_list = ui.expression_button_ids.clone();
+		button_id_list.push(ui.options_id);
+		button_id_list.push(ui.home_id);
+		button_id_list.iter().any(|button_id| {
+			let position = node_tree[*button_id].get_local_position();
+			let size = node_tree[*button_id].get_content_size();
+			pointer_position.x >= position.x && pointer_position.x <= position.x + size.x && pointer_position.y >= position.y && pointer_position.y <= position.y + size.y
+		})
+	}
+
 	fn change_expression(&mut self, expression_index: usize) {
 		self.active_expression_index = expression_index;
+		self.refresh_expression_buttons();
 		if let Some(resources) = &mut self.resources {
 			select_expression(resources, EXPRESSION_DEFINITIONS[expression_index].0);
 		}
@@ -887,6 +1082,7 @@ impl Scene for OldFaceScene {
 	// 생성. (애셋 바이트 요청, 데스크탑은 그 자리에서 읽힌다)
 	//==============================================================================
 	fn load(&mut self, engine: &Engine) {
+		self.create_ui();
 		for (file_name, blob_asset) in self.asset_file_names.iter().zip(self.asset_list.iter_mut()) {
 			blob_asset.load(engine, file_name);
 		}
@@ -926,6 +1122,11 @@ impl Scene for OldFaceScene {
 	//==============================================================================
 	fn tick(&mut self, time_delta: f64) {
 		let engine = Engine::get_engine().unwrap();
+		let view_size = engine.get_view_manager().get_view_size();
+		self.scene_base.get_root_mut().set_content_size(view_size);
+		self.layout_ui(view_size);
+		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
+		self.touch_recognizer.tick_touch(self.scene_base.get_node_tree_mut(), engine);
 		if self.resources.is_none() {
 			return;
 		}
@@ -979,27 +1180,18 @@ impl Scene for OldFaceScene {
 	//==============================================================================
 	fn draw(&mut self, graphic: &mut Graphic) {
 		let engine = Engine::get_engine().unwrap();
+		engine.get_view_manager().apply_view_rect(graphic);
+		self.scene_base.draw(graphic);
 		engine.get_view_manager().apply_canvas_native_rect(graphic);
-		let status_line = match &self.resources {
-			Some(_) => {
-				format!("{}  (1-9 EXPRESSION, DRAG ORBIT, WHEEL ZOOM)  t {:.1}s", EXPRESSION_DEFINITIONS[self.active_expression_index].1, self.elapsed_time)
-			}
-			None => {
-				self.load_error_message.clone().unwrap_or_else(|| String::from("LOADING"))
-			}
-		};
-		let canvas_native_size = engine.get_view_manager().get_canvas_native_size();
-		graphic.set_fill_color(Color::create(0.0, 0.0, 0.0, 0.45));
-		graphic.draw_rect(Rect::create(12.0, canvas_native_size.y - 40.0, 520.0, 28.0));
-		graphic.set_font_string("14px default");
-		graphic.set_text_align(TextAlign::Left);
-		graphic.set_text_baseline(TextBaseline::Middle);
-		graphic.set_fill_color(Color::create(0.95, 0.92, 0.86, 0.85));
-		graphic.draw_fill_text(&status_line, 22.0, canvas_native_size.y - 26.0);
-		// MetaHuman 고지.
-		graphic.set_font_string("11px default");
-		graphic.set_fill_color(Color::create(0.95, 0.92, 0.86, 0.6));
-		graphic.draw_fill_text(ATTRIBUTION_TEXT, 14.0, canvas_native_size.y - 52.0);
+		if self.resources.is_none() {
+			let canvas_native_size = engine.get_view_manager().get_canvas_native_size();
+			let status_line = self.load_error_message.clone().unwrap_or_else(|| String::from("LOADING"));
+			graphic.set_font_string("14px default");
+			graphic.set_text_align(TextAlign::Center);
+			graphic.set_text_baseline(TextBaseline::Middle);
+			graphic.set_fill_color(Color::create(0.95, 0.92, 0.86, 0.6));
+			graphic.draw_fill_text(&status_line, canvas_native_size.x * 0.5, canvas_native_size.y * 0.5);
+		}
 	}
 }
 
