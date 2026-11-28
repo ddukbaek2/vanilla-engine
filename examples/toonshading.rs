@@ -762,7 +762,7 @@ struct ToonShadingScene {
 	last_face_blend: f64,
 	last_hair_blend: f64,
 	#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-	last_frame_instant: Option<std::time::Instant>,
+	last_frame_instant: Option<web_time::Instant>,
 	drag_is_right: bool,
 	tick_milliseconds: f64,
 	pass_timer: PassTimer,
@@ -2680,7 +2680,7 @@ impl Scene for ToonShadingScene {
 			self.load_stage += 1;
 			if self.load_stage == 2 {
 				if let Some(graphic) = engine.get_graphic() {
-					let load_start_instant = std::time::Instant::now();
+					let load_start_instant = web_time::Instant::now();
 					match self.create_resources(graphic.get_gl()) {
 						Ok(resources) => {
 							println!("toonshading: 준비 {:.2}초, 드로어블 {}, 노드 {}", load_start_instant.elapsed().as_secs_f64(), resources.drawable_info_list.len(), resources.model.get_node_list().len());
@@ -2703,7 +2703,7 @@ impl Scene for ToonShadingScene {
 			return;
 		}
 		self.update_pinch(engine);
-		let cpu_frame_start = std::time::Instant::now();
+		let cpu_frame_start = web_time::Instant::now();
 		// 프레임 제한. (FRAME RATE 슬라이더, 데스크탑만)
 		#[cfg(not(target_arch = "wasm32"))]
 		{
@@ -2714,7 +2714,7 @@ impl Scene for ToonShadingScene {
 					std::thread::sleep(std::time::Duration::from_secs_f64(remaining));
 				}
 			}
-			self.last_frame_instant = Some(std::time::Instant::now());
+			self.last_frame_instant = Some(web_time::Instant::now());
 		}
 		// 숫자 키로 옵션 전환. (앞 9개)
 		{
@@ -2812,7 +2812,7 @@ impl Scene for ToonShadingScene {
 		graphic.flush_batch();
 		let canvas_pixel_size = engine.get_view_manager().get_canvas_pixel_size();
 		if self.resources.is_some() {
-			let render_start = std::time::Instant::now();
+			let render_start = web_time::Instant::now();
 			let gl = graphic.get_gl();
 			if let Err(error) = self.render_scene(gl, canvas_pixel_size.x as i32, canvas_pixel_size.y as i32) {
 				eprintln!("toonshading: {}", error);
@@ -3168,6 +3168,8 @@ fn main() {
 	engine_configuration.auto_resize_on_window_resize = true;
 	engine_configuration.window_size = Vector2::create(1280.0, 720.0);
 	let engine = Engine::new(engine_configuration);
+	// 렌더 배율 상한 2. (원본 index.html 의 Math.min(devicePixelRatio, 2))
+	engine.get_view_manager_mut().set_max_render_pixel_ratio(2.0);
 	if let Err(error) = engine.run(Box::new(ToonShadingScene::new())) {
 		eprintln!("toonshading: {}", error);
 		std::process::exit(1);

@@ -84,8 +84,11 @@ impl Scene for BackdropBlurScene {
 		let engine = Engine::get_engine().unwrap();
 		if let Some(capture_frame_number) = self.capture_frame_number {
 			if engine.get_frame_number() > capture_frame_number {
-				engine.exit_application();
-				return;
+				// 웹은 스스로 끝내지 않는다. (끝내면 탭이 닫혀 실기기 확인 도구의 창이 죽는다)
+				if !cfg!(target_arch = "wasm32") {
+					engine.exit_application();
+					return;
+				}
 			}
 		}
 		self.drawn_frame_count += 1;
