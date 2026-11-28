@@ -2379,6 +2379,10 @@ impl AncientMountainScene {
 				let mut path = vanilla::Path2D::new();
 				path.round_rect((link_box.position.x + 0.5) as f32, (link_box.position.y + 0.5) as f32, (link_box.size.x - 1.0) as f32, (link_box.size.y - 1.0) as f32, &[radius - 0.5]);
 				// 올려 둔 때: 글자 흰색, 테두리 금빛, 바탕 밝게. (원본 #homeLink:hover)
+				// 올려 둔 때의 광채. (원본 #homeLink:hover box-shadow, 바깥 광채는 테두리 상자 안을 비우고 그린다)
+				if is_link_hovered {
+					draw_css_box_shadow(canvas, device_scale, link_box, link_box.size.y * 0.5, 22.0, rgba(255.0, 236.0, 180.0, 0.3), false);
+				}
 				canvas.set_fill_style(if is_link_hovered { rgba(38.0, 52.0, 70.0, 0.55) } else { rgba(16.0, 26.0, 38.0, 0.4) });
 				canvas.fill_path(&path, vanilla::CanvasFillRule::NonZero);
 				canvas.set_stroke_style(if is_link_hovered { rgba(255.0, 236.0, 180.0, 0.85) } else { rgba(247.0, 243.0, 232.0, 0.32) });
@@ -2427,19 +2431,17 @@ impl AncientMountainScene {
 				self.link_hit_list.push((Rect::create(line_start_x + label_width, line_top, link_width, credit_ascent_descent), *url));
 			}
 		}
-		// 알약 뒤 흐림. (원본 backdrop-filter: blur(8px), 둥근 모서리 안만. 엔진 흐림을 두 번 거치고 반지름은 표준편차를 맞춰 8 / 2.32, 기기 픽셀)
+		// 알약 뒤 흐림. (원본 backdrop-filter: blur(8px), border-radius: 999px. 인자는 CSS 와 같은 표준편차 8 에 기기 픽셀 비를 곱한 값, 둥근 모서리 안만)
 		{
 			let pill_rect = Rect::create(link_box.position.x, link_box.position.y + entrance_offset_y, link_box.size.x, link_box.size.y);
-			self.backdrop_view.set_backdrop_blur(8.0 / 2.32 * device_scale);
+			self.backdrop_view.set_backdrop_blur(8.0 * device_scale);
+			self.backdrop_view.set_backdrop_corner_radius(pill_rect.size.y * 0.5);
 			let mut transform = NodeTransform::new();
 			transform.set_content_size(pill_rect.size);
-			graphic.begin_clip_rect(pill_rect, pill_rect.size.y * 0.5);
 			graphic.push_state();
 			graphic.translate(pill_rect.position.x, pill_rect.position.y);
 			self.backdrop_view.draw_background(&transform, graphic);
-			self.backdrop_view.draw_background(&transform, graphic);
 			graphic.pop_state();
-			graphic.end_clip_rect();
 		}
 		graphic.set_global_alpha(entrance_ease);
 		graphic.draw_image(&self.overlay_image_table[&title_key], Vector2::create(title_bake_rect.position.x, title_bake_rect.position.y + entrance_offset_y), title_bake_rect.size);
@@ -2598,6 +2600,30 @@ fn blur_image_data(image_data: &mut vanilla::ImageData, sigma: f64) {
 }
 
 // 오버레이 굽기 한 장. (draw_function 이 Canvas2D 에 CSS 픽셀 좌표로 그린다, 시그마가 0 보다 크면 흐린다)
+// CSS box-shadow 한 겹 그리기. (알약 둘레 광채: 바깥 광채는 테두리 상자 안을 비워 두고, inset 은 상자 안만 칠한다. 블러 반지름은 CSS 값 그대로, 기기 픽셀 비를 곱해 캔버스 그림자 블러로 넘긴다)
+fn draw_css_box_shadow(canvas: &mut Canvas2D, device_scale: f64, box_rect: Rect, corner_radius: f64, blur: f64, color: Color, is_inset: bool) {
+	let mut box_path = vanilla::Path2D::new();
+	box_path.round_rect(box_rect.position.x as f32, box_rect.position.y as f32, box_rect.size.x as f32, box_rect.size.y as f32, &[corner_radius]);
+	let mut frame_path = vanilla::Path2D::new();
+	frame_path.rect(box_rect.position.x - 400.0, box_rect.position.y - 400.0, box_rect.size.x + 800.0, box_rect.size.y + 800.0);
+	frame_path.round_rect(box_rect.position.x as f32, box_rect.position.y as f32, box_rect.size.x as f32, box_rect.size.y as f32, &[corner_radius]);
+	canvas.save();
+	canvas.set_shadow_color(color);
+	canvas.set_shadow_blur(blur * device_scale);
+	canvas.set_shadow_offset_x(0.0);
+	canvas.set_shadow_offset_y(0.0);
+	canvas.set_fill_style(rgba(0.0, 0.0, 0.0, 1.0));
+	if is_inset {
+		canvas.clip_path(&box_path, vanilla::CanvasFillRule::NonZero);
+		canvas.fill_path(&frame_path, vanilla::CanvasFillRule::EvenOdd);
+	}
+	else {
+		canvas.clip_path(&frame_path, vanilla::CanvasFillRule::EvenOdd);
+		canvas.fill_path(&box_path, vanilla::CanvasFillRule::NonZero);
+	}
+	canvas.restore();
+}
+
 fn bake_overlay(width: f64, height: f64, device_scale: f64, blur_sigma: f64, draw_function: &dyn Fn(&mut Canvas2D)) -> Rc<Image> {
 	let mut canvas = Canvas2D::new((width * device_scale).ceil() as u32, (height * device_scale).ceil() as u32);
 	canvas.scale(device_scale, device_scale);

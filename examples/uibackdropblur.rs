@@ -1,7 +1,8 @@
 //==============================================================================
-// UIView 뒤 화면 흐림(set_backdrop_blur) 확인. (원본 tests/ui/uibackdropblurchrome.test.mjs 와 같은 장면)
-// - 흰 줄과 검은 줄(폭 10)이 번갈아 깔린 화면 위에 흐림 반지름 UIBACKDROPBLUR_RADIUS(기본 6)의 투명 뷰(200, 100, 240 x 160)를 얹어 열째로 그려진 프레임을 찍는다.
-// - 원본 시험과 같은 자리의 화소(y 180 줄)를 견주어 두 엔진의 흐림이 같은지 본다.
+// UIView 뒤 화면 흐림(set_backdrop_blur, set_backdrop_corner_radius) 확인. (원본 tests/ui/uibackdropblurcss.test.mjs 와 같은 장면)
+// - 흰 줄과 검은 줄(폭 10), 색 사각형 셋, 비스듬한 노란 점이 깔린 화면 위에 흐림 표준편차 UIBACKDROPBLUR_RADIUS(기본 6, CSS blur(Npx) 의 N)와
+//   모서리 반지름 UIBACKDROPBLUR_CORNER(기본 0)의 투명 뷰(200, 100, 240 x 160)를 얹어 열째로 그려진 프레임을 찍는다.
+// - 원본 엔진 장면과 화소를 견주어 두 엔진의 흐림이 같은지 본다.
 // - 실행: UIBACKDROPBLUR_OUTPUT=shots/blur.png VANILLA_CAPTURE_PATH=shots/unused.png cargo run --example uibackdropblur
 //   (VANILLA_CAPTURE_PATH 는 창을 숨기려고 건다, 찍는 프레임은 이 예제가 정한다)
 //==============================================================================
@@ -30,6 +31,7 @@ fn create_box_node(node_tree: &mut NodeTree, parent_id: NodeId, position: Vector
 struct BackdropBlurScene {
 	scene_base: SceneBase,
 	blur_radius: f64,
+	corner_radius: f64,
 	drawn_frame_count: u32,
 	capture_frame_number: Option<u64>,
 	output_path: Option<String>,
@@ -61,8 +63,18 @@ impl Scene for BackdropBlurScene {
 				Color::create_from_hex("#000000")
 			});
 		}
+		let mut box_list = vec![(150.0, 60.0, 120.0, 80.0, "#e03030"), (330.0, 200.0, 160.0, 90.0, "#2060e0"), (260.0, 140.0, 100.0, 100.0, "#30c050")];
+		for line_index in 0..12 {
+			box_list.push((205.0 + line_index as f64 * 18.0, 105.0 + line_index as f64 * 12.0, 6.0, 6.0, "#ffd000"));
+		}
+		for (x, y, width, height, hex) in box_list {
+			let box_id = create_box_node(node_tree, root_id, Vector2::create(x, y), Vector2::create(width, height));
+			node_tree.add_component(box_id, UIView::new()).expect("view").set_background_color(Color::create_from_hex(hex));
+		}
 		let panel_id = create_box_node(node_tree, root_id, Vector2::create(200.0, 100.0), Vector2::create(240.0, 160.0));
-		node_tree.add_component(panel_id, UIView::new()).expect("view").set_backdrop_blur(self.blur_radius);
+		let panel_view = node_tree.add_component(panel_id, UIView::new()).expect("view");
+		panel_view.set_backdrop_blur(self.blur_radius);
+		panel_view.set_backdrop_corner_radius(self.corner_radius);
 	}
 
 	//==============================================================================
@@ -100,6 +112,7 @@ impl Scene for BackdropBlurScene {
 //==============================================================================
 fn main() {
 	let blur_radius = std::env::var("UIBACKDROPBLUR_RADIUS").ok().and_then(|value| value.parse::<f64>().ok()).unwrap_or(6.0);
+	let corner_radius = std::env::var("UIBACKDROPBLUR_CORNER").ok().and_then(|value| value.parse::<f64>().ok()).unwrap_or(0.0);
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("뒤 화면 흐림");
 	engine_configuration.window_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
@@ -110,6 +123,7 @@ fn main() {
 	let scene = BackdropBlurScene {
 		scene_base: SceneBase::new(),
 		blur_radius,
+		corner_radius,
 		drawn_frame_count: 0,
 		capture_frame_number: None,
 		output_path: std::env::var("UIBACKDROPBLUR_OUTPUT").ok(),

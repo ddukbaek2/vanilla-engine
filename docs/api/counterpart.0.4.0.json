@@ -38983,6 +38983,30 @@
 			"vanilla-engine": {
 				"module": "ui/uiview",
 				"class": "UIView",
+				"name": "set_backdrop_corner_radius"
+			},
+			"vanilla.js": {
+				"module": "ui/uiview",
+				"class": "UIView",
+				"name": "setBackdropCornerRadius"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiview",
+				"class": "UIView",
+				"name": "get_backdrop_corner_radius"
+			},
+			"vanilla.js": {
+				"module": "ui/uiview",
+				"class": "UIView",
+				"name": "getBackdropCornerRadius"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiview",
+				"class": "UIView",
 				"name": "get_backdrop_blur"
 			},
 			"vanilla.js": {

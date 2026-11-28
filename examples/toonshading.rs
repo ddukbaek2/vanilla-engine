@@ -13,7 +13,9 @@
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 use vanilla::{
+	Canvas2D, CanvasFillRule, Image, Path2D,
 	BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, GlContext, Graphic, Material, Matrix4, MouseButton, Quaternion, Rect, RenderTarget, RenderTargetOptions, NodeTransform, Scene, SceneBase, ShaderProgram, ShadowMap, SkinnedModel, SkinnedModelRenderer,
 	TextAlign, TextBaseline, TouchPhase, UIView, Vector2, Vector3, MORPH_GLSL,
 };
@@ -766,6 +768,8 @@ struct ToonShadingScene {
 	pass_timer: PassTimer,
 	process_memory_bytes: f64,
 	backdrop_view: UIView,
+	/// 링크에 마우스를 올렸을 때의 광채 그림. (폭, 높이, 배율의 비트로 같은 값이면 다시 쓴다)
+	link_glow_image: Option<([u64; 3], Rc<Image>)>,
 	link_rect: Rect,
 	is_link_pressed: bool,
 	is_pinching: bool,
@@ -853,6 +857,7 @@ impl ToonShadingScene {
 			pass_timer: PassTimer { is_supported: false, pending_list: Vec::new(), current: None, milliseconds: Vec::new() },
 			process_memory_bytes: 0.0,
 			backdrop_view: UIView::new(),
+			link_glow_image: None,
 			link_rect: Rect::create(0.0, 0.0, 0.0, 0.0),
 			is_link_pressed: false,
 			is_pinching: false,
@@ -1405,22 +1410,19 @@ impl ToonShadingScene {
 
 	//==============================================================================
 	// 뒤 화면 흐림. (원본 CSS backdrop-filter: blur(반지름 px), 둥근 모서리 안만. 이미 그린 것을 이 자리만 흐린 뒤 바탕을 그린다)
-	// - UIView 의 뒤 화면 흐림(set_backdrop_blur)을 둥근 자르기 안에서 부른다. 반지름은 1280 폭 기준 CSS 픽셀.
+	// - UIView 의 뒤 화면 흐림(set_backdrop_blur)을 둥근 모서리(set_backdrop_corner_radius) 안에서 부른다. 표준편차는 1280 폭 기준 CSS 픽셀.
 	//==============================================================================
 	fn blur_backdrop(view: &mut UIView, graphic: &mut Graphic, rect: Rect, round_size: f64, css_blur: f64) {
-		// 흐림 반지름은 기기 픽셀이다. (1280 폭을 CSS 폭으로 본 값에 기기 픽셀 비를 곱한다)
+		// 인자는 CSS blur(Npx) 와 같은 표준편차다. (1280 폭을 CSS 폭으로 본 값에 기기 픽셀 비를 곱한 기기 픽셀, 원본 CSS 값 그대로)
 		let canvas_pixel_width = Engine::get_engine().unwrap().get_view_manager().get_canvas_pixel_size().x;
-		// 엔진 흐림은 5 점 가우시안을 한 번 거치는 꼴이라 반지름이 크면 겹그림이 남는다. 두 번 거치고, 한 번의 표준편차 약 1.64 * 반지름이 CSS blur 의 표준편차(= 반지름 값)와 같아지게 반지름을 줄인다. (1.64 * 1.414 = 2.32)
-		view.set_backdrop_blur(css_blur / 2.32 * canvas_pixel_width / 1280.0);
+		view.set_backdrop_blur(css_blur * canvas_pixel_width / 1280.0);
+		view.set_backdrop_corner_radius(round_size);
 		let mut transform = NodeTransform::new();
 		transform.set_content_size(rect.size);
-		graphic.begin_clip_rect(rect, round_size);
 		graphic.push_state();
 		graphic.translate(rect.position.x, rect.position.y);
 		view.draw_background(&transform, graphic);
-		view.draw_background(&transform, graphic);
 		graphic.pop_state();
-		graphic.end_clip_rect();
 	}
 
 	//==============================================================================
@@ -2916,6 +2918,28 @@ impl Scene for ToonShadingScene {
 		self.link_rect = link_rect;
 		let is_link_hovered = rect_contains(link_rect, Engine::get_engine().unwrap().get_input_manager().get_canvas_native_input_position());
 		ToonShadingScene::blur_backdrop(&mut self.backdrop_view, graphic, link_rect, link_height * 0.5, 8.0);
+		// 올려 둔 때의 광채. (원본 #homeLink:hover box-shadow: 0 0 22px rgba(255, 226, 180, 0.3), 바깥 광채라 알약 안은 비운다)
+		if is_link_hovered {
+			let glow_margin = (22.0 * scale * 2.0).ceil();
+			let glow_key = [link_rect.size.x.to_bits(), link_rect.size.y.to_bits(), scale.to_bits()];
+			if self.link_glow_image.as_ref().map(|cached| cached.0) != Some(glow_key) {
+				let mut canvas = Canvas2D::new((link_rect.size.x + glow_margin * 2.0).ceil() as u32, (link_rect.size.y + glow_margin * 2.0).ceil() as u32);
+				let mut box_path = Path2D::new();
+				box_path.round_rect(glow_margin as f32, glow_margin as f32, link_rect.size.x as f32, link_rect.size.y as f32, &[link_height * 0.5]);
+				let mut frame_path = Path2D::new();
+				frame_path.rect(0.0, 0.0, link_rect.size.x + glow_margin * 2.0, link_rect.size.y + glow_margin * 2.0);
+				frame_path.round_rect(glow_margin as f32, glow_margin as f32, link_rect.size.x as f32, link_rect.size.y as f32, &[link_height * 0.5]);
+				canvas.set_shadow_color(Color::create(1.0, 0.886, 0.706, 0.3));
+				canvas.set_shadow_blur(22.0 * scale);
+				canvas.clip_path(&frame_path, CanvasFillRule::EvenOdd);
+				canvas.set_fill_style(Color::create(0.0, 0.0, 0.0, 1.0));
+				canvas.fill_path(&box_path, CanvasFillRule::NonZero);
+				self.link_glow_image = Some((glow_key, canvas.to_image()));
+			}
+			if let Some((_, glow_image)) = &self.link_glow_image {
+				graphic.draw_image(glow_image, Vector2::create(link_rect.position.x - glow_margin, link_rect.position.y - glow_margin), Vector2::create(link_rect.size.x + glow_margin * 2.0, link_rect.size.y + glow_margin * 2.0));
+			}
+		}
 		// 올려 둔 때: 글자 흰색, 테두리 금빛, 바탕 짙게. (원본 #homeLink:hover)
 		graphic.set_fill_color(if is_link_hovered { Color::create(0.157, 0.133, 0.118, 0.6) } else { Color::create(0.055, 0.047, 0.055, 0.45) });
 		graphic.draw_round_rect(link_rect, link_height * 0.5);
