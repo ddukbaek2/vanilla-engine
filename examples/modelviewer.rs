@@ -334,7 +334,7 @@ impl Scene for ModelViewerScene {
 				return;
 			}
 		};
-		let load_start_instant = std::time::Instant::now();
+		let load_start_instant = web_time::Instant::now();
 		match self.create_resources(engine, graphic.get_gl()) {
 			Ok(resources) => {
 				self.load_seconds = (load_start_instant.elapsed().as_secs_f32()) as f64;
@@ -358,7 +358,7 @@ impl Scene for ModelViewerScene {
 		let engine = Engine::get_engine().unwrap();
 		let delta_time = FIXED_TIME_STEP;
 		self.elapsed_time += delta_time;
-		if self.elapsed_time >= EXIT_SECONDS {
+		if self.elapsed_time >= EXIT_SECONDS && !cfg!(target_arch = "wasm32") {
 			engine.exit_application();
 		}
 		let resources = match &mut self.resources {
@@ -463,7 +463,7 @@ fn measure_asset_cache(gl: &GlContext, load_handle: &SkinnedModelLoadHandle, ski
 	let measure_load = |use_cache: bool| -> Result<(f64, usize, usize), String> {
 		SkinnedModelAsset::clear_cache();
 		let mut model_list = Vec::with_capacity(MODEL_COUNT);
-		let start_time = std::time::Instant::now();
+		let start_time = web_time::Instant::now();
 		for _ in 0..MODEL_COUNT {
 			if !use_cache {
 				SkinnedModelAsset::clear_cache();

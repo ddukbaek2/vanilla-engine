@@ -192,7 +192,7 @@ impl Scene for InsideCullScene {
 		let engine = Engine::get_engine().unwrap();
 		self.drawn_frame_count += 1;
 		let frame_number = self.drawn_frame_count;
-		if frame_number > LAST_FRAME {
+		if frame_number > LAST_FRAME && !cfg!(target_arch = "wasm32") {
 			self.write_output();
 			engine.exit_application();
 			return;
