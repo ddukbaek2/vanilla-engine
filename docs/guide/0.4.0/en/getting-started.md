@@ -123,6 +123,7 @@ cargo run --release --example modelviewer
 | `misctour` | Camera, path finding, dialogue system, screen shake, floating text |
 | `timelineshowcase` | Timeline document playback |
 | `modelviewer` | Skinned 3D (glTF, FBX), shadows, bloom |
+| `oldface` | Human skin renderer (skin, eyes, hair), shadows, AO, SSS, bloom, expression morphs and wrinkle maps |
 | `engineextras` | Outlines, progress ring, soft shade, mouse cursor, camera gestures, mouse buttons and finger input |
 | `devtoolsshowcase` | Developer tools (F2): hierarchy, inspector, statistics, local storage, settings |
 | `toonshowcase` | Toon 3D: basic shapes and outlines, skeletal animation of a GLB model, cel shading, instancing and off-screen culling, shadows, HDR bloom |
@@ -143,7 +144,7 @@ cargo run --release --example modelviewer
 | `textshaping` | Right-to-left text, synthetic italic and bold, CJK word wrapping, `DynamicFont` |
 | `scenedocument` | Reads a scene file in the vanilla.js visual editor format (`.scene.json`) into a node tree, exports it again and compares |
 
-- `modelviewer`, `toonshowcase`, `timelineshowcase`, `loadingshowcase` and `scenedocument` use example assets from vanilla.js. Clone the vanilla.js repository next to the engine repository. (The `vanilla.js` and `vanilla-engine` folders side by side)
+- `modelviewer`, `oldface`, `toonshowcase`, `timelineshowcase`, `loadingshowcase` and `scenedocument` use example assets from vanilla.js. Clone the vanilla.js repository next to the engine repository. (The `vanilla.js` and `vanilla-engine` folders side by side)
 - The examples write asset paths relative to the repository root, so run them from the repository root.
 - Run heavy 3D examples with `--release`. (Cargo's dev build does not optimize)
 

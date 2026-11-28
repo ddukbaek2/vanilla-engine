@@ -574,6 +574,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ````
+### Example Assets (MetaHuman, not in this repository)
+
+- `examples/oldface.rs` reads a character model and textures (`examples/oldface_assets`, ignored by git) that come from MetaHuman, (c) Epic Games, Inc. The assets are subject to the Unreal Engine End User License Agreement (EULA). They are NOT included in this repository and are not redistributed here. The example is a technology demo of the engine's skin renderer; the running demo can be seen on the vanillapunch.com website.
+- MetaHuman, Epic Games and Unreal Engine are trademarks or registered trademarks of Epic Games, Inc. This project is not affiliated with or endorsed by Epic Games. The example shows the notice "MetaHuman, Epic Games" on screen.
+
 ### Public domain and CC0 code
 
 No notice is required for these. They are listed so that the origin of the code is clear.

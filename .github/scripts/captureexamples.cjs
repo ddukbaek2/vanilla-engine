@@ -50,13 +50,14 @@ const EXAMPLE_LIST = [
 	{ name: "toonshowcase", frames: "60" },
 	{ name: "toonview", frames: "60" },
 	{ name: "modelviewer", frames: "60,180", timeoutSeconds: 900 },
+	{ name: "oldface", frames: "61", timeoutSeconds: 2700 },
 ];
 // 예제 하나의 제한 시간(초). 멈춤은 STALL_SECONDS 가 잡고, 이것은 느린 기계에서 작업 시간(180 분)을 지키는 상한이다.
-// - 근거(2026-11-26): 인텔 맥 CI(macos-26-intel)에서 toonmaterial 이 30 프레임에 262 초(프레임당 8.7 초), toonstyle, toonfx 는 300 초.
-//   같은 x86_64 디버그 빌드를 애플 실리콘의 로제타와 하드웨어 GL 로 돌리면 toonstyle 5.6 초, toonfx 6.2 초, 라 시간은 엔진이 아니라 러너의 GL 에서 든다.
-//   (리눅스, 윈도우의 메사 llvmpipe 는 toonstyle 4, 7 초) 그래서 300 초의 세 배를 기본으로 둔다.
+// - 근거(2026-11-26): 인텔 맥 CI(macos-26-intel)에서 toonmaterial 이 30 프레임에 262 초(프레임당 8.7 초), toonstyle, toonfx 는 300 초, oldface 는 900 초를 넘겼다.
+//   같은 x86_64 디버그 빌드를 애플 실리콘의 로제타와 하드웨어 GL 로 돌리면 toonstyle 5.6 초, toonfx 6.2 초, oldface 7.7 초라 시간은 엔진이 아니라 러너의 GL 에서 든다.
+//   (리눅스, 윈도우의 메사 llvmpipe 는 toonstyle 4, 7 초, oldface 67, 96 초) 그래서 300 초의 세 배를 기본, oldface 는 900 초의 세 배를 둔다.
 const DEFAULT_TIMEOUT_SECONDS = 900;
-// 진행 줄 사이를 기다리는 가장 긴 시간(초). 첫 진행 줄 앞의 준비(인텔 맥 디버그 빌드의 준비)와 가장 느린 프레임보다 넉넉히.
+// 진행 줄 사이를 기다리는 가장 긴 시간(초). 첫 진행 줄 앞의 준비(인텔 맥 디버그 빌드의 oldface 30 초)와 가장 느린 프레임보다 넉넉히.
 const STALL_SECONDS = 180;
 const PROGRESS_PREFIX = "Engine: 찍기 진행 ";
 const RENDERER_PREFIX = "Engine: 찍기 GL 렌더러 ";

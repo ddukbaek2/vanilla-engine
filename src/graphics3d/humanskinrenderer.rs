@@ -779,6 +779,7 @@ pub fn create_cutout_depth_vertex_shader_source() -> String {
 /// 	}
 /// }
 /// ```
+/// <!-- image: old-face.webp -->
 //==============================================================================
 pub struct HumanSkinRenderer {
 	skinned_model_renderer: SkinnedModelRenderer,
@@ -1694,7 +1695,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 눈 셰이딩은 홍채 색을 13 번(layerColorTexture), 홍채 노멀을 12 번(layerNormalTexture)에서 읽는다.
+	/// 눈 셰이딩은 홍채 색을 13 번(layerColorTexture), 홍채 노멀을 12 번(layerNormalTexture)에서 읽는다. (예제 oldface 가 묶는 차례와 같다)
 	//==============================================================================
 	#[test]
 	fn eye_iris_reads_color_from_layer_color_unit() {
