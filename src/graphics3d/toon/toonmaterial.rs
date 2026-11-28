@@ -21,6 +21,8 @@
 //! - ToonInstanceLayout: 인스턴스 하나의 어트리뷰트 차례. (ToonRenderer::create_instance_buffer 와 draw_mesh_instance_buffer 가 쓴다)
 //!   어트리뷰트마다 (이름, 크기). 이름이 instanceMatrix(16) 면 모형 행렬, instanceTint(4) 면 곱하는 색으로 엔진이 읽는다.
 //!   instanceMatrix 는 아핀 3x4 로 읽고 아래 줄 네 칸(원소 3, 7, 11, 15)은 그 인스턴스의 빛남(sRGB r, g, b 와 선형 세기, vertex.emissive)이다. Matrix4 원소를 그대로 담으면 빛남이 없다.
+//!   instanceLineId(1) 는 화면 공간 바깥선의 인스턴스마다 선 번호다. (ToonScreenOutline::draw_mesh_instance_buffer, ToonDrawQueue::add_mesh_instance_buffer)
+//!   사용자 어트리뷰트의 마지막 자리(TOON_INSTANCE_LINE_ID_LOCATION)를 쓰므로 이것이 있으면 사용자 어트리뷰트는 하나 적게 넣는다. 정점 조각도 그 이름으로 읽을 수 있다.
 //!   그 밖의 이름은 사용자 어트리뷰트다. TOON_MAXIMUM_INSTANCE_ATTRIBUTES 개까지, 크기 1 ~ 4. 정점 조각이 그 이름의 in 으로 읽는다. (자리 13 부터)
 //!   instanceMatrix 가 없으면 모형 행렬은 단위 행렬이다. 정점 조각이 vertex.modelMatrix 를 지어 넣는다. instanceTint 가 없으면 틴트는 1 이다.
 //! - 원본은 머티리얼을 꼴 객체({ uniformChunk, ... })로 짓는다. 러스트 판은 ToonMaterialChunks 를 넘긴다.
@@ -76,6 +78,12 @@ pub const TOON_INSTANCE_MATRIX_NAME: &str = "instanceMatrix";
 
 /// 인스턴스 꼴에서 엔진이 곱하는 색으로 읽는 이름. (수 4)
 pub const TOON_INSTANCE_TINT_NAME: &str = "instanceTint";
+
+/// 인스턴스 꼴에서 화면 공간 바깥선이 인스턴스마다의 선 번호로 읽는 이름. (수 1, 1 ~ TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID)
+pub const TOON_INSTANCE_LINE_ID_NAME: &str = "instanceLineId";
+
+/// 선 번호 어트리뷰트의 자리. (사용자 어트리뷰트의 마지막 자리, 선의 판 셰이더가 이 자리에서 읽는다)
+pub const TOON_INSTANCE_LINE_ID_LOCATION: u32 = TOON_FIRST_INSTANCE_ATTRIBUTE_LOCATION + TOON_MAXIMUM_INSTANCE_ATTRIBUTES as u32 - 1;
 
 /// 머티리얼과 인스턴스 꼴마다 다른 번호를 주는 셈. (렌더러의 프로그램 캐시 열쇠, 0 은 기본)
 static NEXT_MATERIAL_ID: AtomicU32 = AtomicU32::new(1);
@@ -275,7 +283,7 @@ pub struct ToonInstanceAttribute {
 	pub size: usize,
 	/// 인스턴스 하나 안에서의 자리. (수 단위)
 	pub offset: usize,
-	/// 어트리뷰트 자리. (사용자 어트리뷰트만 Some, TOON_FIRST_INSTANCE_ATTRIBUTE_LOCATION 부터 차례로)
+	/// 어트리뷰트 자리. (사용자 어트리뷰트와 instanceLineId 만 Some, 사용자 어트리뷰트는 TOON_FIRST_INSTANCE_ATTRIBUTE_LOCATION 부터 차례로)
 	pub location: Option<u32>,
 }
 
@@ -307,6 +315,7 @@ pub struct ToonInstanceLayout {
 	float_count: usize,
 	has_matrix: bool,
 	has_tint: bool,
+	has_line_id: bool,
 }
 
 //==============================================================================
@@ -341,6 +350,8 @@ impl ToonInstanceLayout {
 		let mut has_tint = false;
 		let mut name_set = HashSet::new();
 		let mut custom_count = 0usize;
+		let has_line_id = attributes.iter().any(|(name, _)| *name == TOON_INSTANCE_LINE_ID_NAME);
+		let maximum_custom_count = if has_line_id { TOON_MAXIMUM_INSTANCE_ATTRIBUTES - 1 } else { TOON_MAXIMUM_INSTANCE_ATTRIBUTES };
 		for (name, size) in attributes.iter().copied() {
 			if !is_shader_name(name) || !name_set.insert(name) {
 				return Err(format!("인스턴스 어트리뷰트 이름이 맞지 않는다: {}", name));
@@ -358,12 +369,18 @@ impl ToonInstanceLayout {
 				}
 				has_tint = true;
 			}
+			else if name == TOON_INSTANCE_LINE_ID_NAME {
+				if size != 1 {
+					return Err(String::from("instanceLineId 의 크기는 1 이다."));
+				}
+				location = Some(TOON_INSTANCE_LINE_ID_LOCATION);
+			}
 			else {
 				if !(1..=4).contains(&size) {
 					return Err(format!("인스턴스 어트리뷰트 {} 의 크기는 1 ~ 4 이다.", name));
 				}
-				if custom_count >= TOON_MAXIMUM_INSTANCE_ATTRIBUTES {
-					return Err(format!("사용자 인스턴스 어트리뷰트는 {} 개까지다.", TOON_MAXIMUM_INSTANCE_ATTRIBUTES));
+				if custom_count >= maximum_custom_count {
+					return Err(format!("사용자 인스턴스 어트리뷰트는 {} 개까지다. (instanceLineId 가 있으면 하나 적다)", maximum_custom_count));
 				}
 				location = Some(TOON_FIRST_INSTANCE_ATTRIBUTE_LOCATION + custom_count as u32);
 				custom_count += 1;
@@ -371,7 +388,7 @@ impl ToonInstanceLayout {
 			attribute_list.push(ToonInstanceAttribute { name: String::from(name), size, offset: float_count, location });
 			float_count += size;
 		}
-		Ok(ToonInstanceLayout { id: NEXT_INSTANCE_LAYOUT_ID.fetch_add(1, Ordering::Relaxed), attribute_list, float_count, has_matrix, has_tint })
+		Ok(ToonInstanceLayout { id: NEXT_INSTANCE_LAYOUT_ID.fetch_add(1, Ordering::Relaxed), attribute_list, float_count, has_matrix, has_tint, has_line_id })
 	}
 
 	//==============================================================================
@@ -425,6 +442,16 @@ impl ToonInstanceLayout {
 	}
 
 	//==============================================================================
+	/// 인스턴스마다의 선 번호가 있는지.
+	///
+	/// # 돌려줌
+	/// instanceLineId 가 있으면 true.
+	//==============================================================================
+	pub fn has_line_id(&self) -> bool {
+		self.has_line_id
+	}
+
+	//==============================================================================
 	/// 사용자 어트리뷰트의 셰이더 선언. (in float / vec2 / vec3 / vec4 이름;)
 	///
 	/// # 돌려줌
@@ -465,5 +492,23 @@ mod tests {
 		assert!(ToonInstanceLayout::new(&[("first", 1), ("second", 1), ("third", 1), ("fourth", 1)]).is_err());
 		assert!(ToonInstanceLayout::new(&[("1bad", 1)]).is_err());
 		assert!(ToonInstanceLayout::new(&[("twice", 1), ("twice", 2)]).is_err());
+	}
+
+	//==============================================================================
+	/// 선 번호 어트리뷰트의 자리, 크기 검사, 사용자 어트리뷰트 상한 보기. (원본 ToonInstanceLayout 의 instanceLineId 와 같다)
+	//==============================================================================
+	#[test]
+	fn instance_layout_places_line_id_at_last_location() {
+		let layout = ToonInstanceLayout::new(&[("instanceMatrix", 16), ("instanceTint", 4), ("instanceLineId", 1), ("instanceShape", 2)]).unwrap();
+		assert!(layout.has_line_id());
+		assert_eq!(layout.get_float_count(), 23);
+		assert_eq!(TOON_INSTANCE_LINE_ID_LOCATION, 15);
+		assert_eq!(layout.get_attributes()[2].location, Some(15));
+		assert_eq!(layout.get_attributes()[3].location, Some(13));
+		assert_eq!(layout.read_declaration_source(), "in float instanceLineId;\nin vec2 instanceShape;\n");
+		assert!(!ToonInstanceLayout::new(&[("instanceMatrix", 16)]).unwrap().has_line_id());
+		assert!(ToonInstanceLayout::new(&[("instanceLineId", 2)]).is_err());
+		assert!(ToonInstanceLayout::new(&[("instanceLineId", 1), ("first", 1), ("second", 1), ("third", 1)]).is_err());
+		assert!(ToonInstanceLayout::new(&[("instanceLineId", 1), ("first", 1), ("second", 1)]).is_ok());
 	}
 }

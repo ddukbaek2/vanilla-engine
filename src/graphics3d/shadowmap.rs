@@ -92,7 +92,7 @@ pub(crate) enum ShadowRenderTarget {
 //==============================================================================
 /// 드리우개 하나의 앞 프레임 기록. (원본 writeCasterRecord 의 기록, ToonDrawQueue 가 쓰고 견준다)
 /// - header 는 인스턴스 수, 번호 시작, 번호 수, 거르기, 뒤집기, 관절 행렬 길이를 정수 그대로 둔다. (원본은 Float32Array 에 fround 로 넣는다, 값이 같으면 판정이 같다)
-/// - values 는 모형 행렬이나 인스턴스 행렬마다 16 수와 관절 행렬 값이다.
+/// - values 는 모형 행렬이나 인스턴스 행렬마다 16 수와 관절 행렬 값이다. (인스턴스 버퍼로 담은 것은 행렬 대신 그릴 인스턴스 수 하나)
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ShadowCasterRecord {
@@ -101,6 +101,8 @@ pub(crate) struct ShadowCasterRecord {
 	/// 재질 번호. (None 은 재질 없음)
 	pub(crate) material_id: Option<u32>,
 	pub(crate) header: [i64; 6],
+	/// 인스턴스 버퍼의 (번호, 고친 횟수). (인스턴스 버퍼로 담은 것만 Some, 고치면 다시 굽는다)
+	pub(crate) instance_buffer: Option<(u64, u64)>,
 	pub(crate) values: Vec<f32>,
 	/// 그대로였던 프레임 수.
 	pub(crate) stable_frame_count: u32,

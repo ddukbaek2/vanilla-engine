@@ -17,3 +17,5 @@ pub mod toonlightset;
 pub mod toonmaterial;
 #[cfg(all(test, target_os = "macos"))]
 mod toonbatchtests;
+#[cfg(all(test, target_os = "macos"))]
+mod tooninstancebuffertests;
