@@ -3107,6 +3107,8 @@ fn main() {
 	engine_configuration.maximum_frame_per_second = FRAME_RATE;
 	engine_configuration.asset_directory_paths = vec![PathBuf::from(EXAMPLE_ASSET_DIRECTORY)];
 	let engine = Engine::new(engine_configuration);
+	// 렌더 배율 상한 2. (원본 index.html 의 Math.min(devicePixelRatio, 2))
+	engine.get_view_manager_mut().set_max_render_pixel_ratio(2.0);
 	if let Err(error) = engine.run(Box::new(OldFaceScene::new())) {
 		eprintln!("{}", error);
 	}

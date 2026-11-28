@@ -1304,7 +1304,9 @@ impl AncientMountainScene {
 					engine_texture
 				}
 				None => {
-					let image_description = self.texture_description_handle_list[texture_index].get_image_description().ok_or_else(|| format!("텍스처를 아직 받는 중: {}", texture_name))??;
+					// 웹에서 그림을 못 받았거나(주소가 없음) 풀지 못했으면 설명 손잡이가 없다. 패닉 대신 까닭을 돌려준다.
+					let description_handle = self.texture_description_handle_list.get(texture_index).ok_or_else(|| format!("텍스처를 받지 못함: {}", texture_name))?;
+					let image_description = description_handle.get_image_description().ok_or_else(|| format!("텍스처를 아직 받는 중: {}", texture_name))??;
 					Material::create_texture(gl, Some(&image_description), [128, 128, 128, 255])?
 				}
 			};
@@ -3474,6 +3476,8 @@ fn main() {
 		engine_configuration.asset_directory_paths.push(PathBuf::from(home_directory).join("Github/vanilla.js/examples/ancientmountain/assets"));
 	}
 	let engine = Engine::new(engine_configuration);
+	// 렌더 배율 상한 2. (원본 index.html 의 Math.min(devicePixelRatio, 2))
+	engine.get_view_manager_mut().set_max_render_pixel_ratio(2.0);
 	if let Err(error) = engine.run(Box::new(AncientMountainScene::new())) {
 		eprintln!("{}", error);
 	}

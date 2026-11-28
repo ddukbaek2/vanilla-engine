@@ -1753,6 +1753,8 @@ fn main() {
 	engine_configuration.window_size = vanilla::Vector2::create(1280.0, 720.0);
 	engine_configuration.asset_directory_paths = vec![PathBuf::from(EXAMPLE_ASSET_DIRECTORY)];
 	let engine = Engine::new(engine_configuration);
+	// 렌더 배율 상한 2. (원본 index.html 의 Math.min(devicePixelRatio, 2), 배율 3 인 폰에서 화소가 2.25 배로 불어 프레임이 1초씩 멎는 것을 막는다)
+	engine.get_view_manager_mut().set_max_render_pixel_ratio(2.0);
 	if let Err(error) = engine.run(Box::new(NeonHorizonScene::new())) {
 		eprintln!("{}", error);
 	}
