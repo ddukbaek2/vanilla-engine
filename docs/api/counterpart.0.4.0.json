@@ -38971,6 +38971,30 @@
 			"vanilla-engine": {
 				"module": "ui/uiview",
 				"class": "UIView",
+				"name": "set_backdrop_blur"
+			},
+			"vanilla.js": {
+				"module": "ui/uiview",
+				"class": "UIView",
+				"name": "setBackdropBlur"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiview",
+				"class": "UIView",
+				"name": "get_backdrop_blur"
+			},
+			"vanilla.js": {
+				"module": "ui/uiview",
+				"class": "UIView",
+				"name": "getBackdropBlur"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "ui/uiview",
+				"class": "UIView",
 				"name": "get_content"
 			},
 			"vanilla.js": {
@@ -39013,30 +39037,6 @@
 				"module": "ui/uiview",
 				"class": "UIView",
 				"name": "getEngine"
-			}
-		},
-		{
-			"vanilla-engine": {
-				"module": "ui/uiview",
-				"class": "UIView",
-				"name": "set_backdrop_blur"
-			},
-			"vanilla.js": {
-				"module": "ui/uiview",
-				"class": "UIView",
-				"name": "setBackdropBlur"
-			}
-		},
-		{
-			"vanilla-engine": {
-				"module": "ui/uiview",
-				"class": "UIView",
-				"name": "get_backdrop_blur"
-			},
-			"vanilla.js": {
-				"module": "ui/uiview",
-				"class": "UIView",
-				"name": "getBackdropBlur"
 			}
 		},
 		{
