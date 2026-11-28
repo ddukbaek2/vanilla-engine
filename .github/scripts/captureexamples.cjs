@@ -36,6 +36,7 @@ const EXAMPLE_LIST = [
 	{ name: "blendmodes", frames: "30,90" },
 	{ name: "effectgallery", frames: "30,150" },
 	{ name: "misctour", frames: "120" },
+	{ name: "cameratour", frames: "90" },
 	{ name: "scenedocument", frames: "60" },
 	{ name: "asyncawait", frames: "120" },
 	{ name: "loadingshowcase", frames: "120" },
@@ -49,6 +50,7 @@ const EXAMPLE_LIST = [
 	{ name: "toonpost", frames: "60" },
 	{ name: "toonshowcase", frames: "60" },
 	{ name: "toonview", frames: "60" },
+	{ name: "toonshading", frames: "300" },
 	{ name: "modelviewer", frames: "60,180", timeoutSeconds: 900 },
 ];
 // 예제 하나의 제한 시간(초). 멈춤은 STALL_SECONDS 가 잡고, 이것은 느린 기계에서 작업 시간(180 분)을 지키는 상한이다.

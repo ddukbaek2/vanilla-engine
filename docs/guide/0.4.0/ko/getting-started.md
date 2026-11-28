@@ -125,11 +125,13 @@ cargo run --release --example modelviewer
 | `uisample` | UIDocument 로 uiasset 읽기 |
 | `uishowcase` | 대시보드 앱 한 벌(uiasset 여섯, 테마, 팝업, 반응형) |
 | `misctour` | 카메라, 길찾기, 대화 시스템, 화면 흔들림, 플로팅 텍스트 |
+| `cameratour` | Camera2D 회전 둘러보기: 천천히 도는 카메라, 끌어 팬, 커서 고정 휠 줌, 흔들림, 노드 배율 트윈, Indicator |
 | `timelineshowcase` | 타임라인 문서 재생 |
 | `modelviewer` | 스키닝 3D(glTF, FBX), 그림자, 블룸 |
 | `engineextras` | 테, 진행 고리, 부드러운 그늘, 마우스 커서, 카메라 손짓, 마우스 단추와 손가락 입력 |
 | `devtoolsshowcase` | 개발자 도구(F2): 하이어라키, 인스펙터, 통계, 로컬 스토리지, 설정 |
 | `toonshowcase` | 툰 3D: 기본 도형과 바깥선, GLB 모형의 뼈대 움직임, 셀 셰이딩, 인스턴싱과 화면 밖 거르기, 그림자, HDR 블룸 |
+| `toonshading` | VRM 1.0 캐릭터 셀 셰이딩: 램프, 얼굴 구면 노멀, 앞머리 그림자와 비침, 림 라이트, 블룸, FXAA, 표정 단추, 동작 옮기기, 노드 제약, 궤도 카메라 |
 | `toonview` | 노드 사각형 안 툰(`ToonView3D`), `Camera3D` 로 3D 점 위에 얹은 2D |
 | `toonfx` | 툰 화면 공간 바깥선과 GPU 효과 |
 | `toonpost` | 툰 HDR 마무리 세 판 |
@@ -147,7 +149,7 @@ cargo run --release --example modelviewer
 | `textshaping` | 오른쪽에서 왼쪽 글, 가짜 기울임과 굵게, 한중일 낱말 줄바꿈, `DynamicFont` |
 | `scenedocument` | vanilla.js 비주얼 에디터 꼴의 씬 파일(`.scene.json`)을 읽어 노드 트리를 짓고 다시 내보내 견주기 |
 
-- `modelviewer`, `toonshowcase`, `timelineshowcase`, `loadingshowcase`, `scenedocument` 는 vanilla.js 의 예제 애셋을 씁니다. vanilla.js 저장소를 엔진 저장소 옆에 받아 둡니다. (`vanilla.js` 와 `vanilla-engine` 폴더가 나란히)
+- `modelviewer`, `toonshowcase`, `toonshading`, `timelineshowcase`, `loadingshowcase`, `scenedocument` 는 vanilla.js 의 예제 애셋을 씁니다. vanilla.js 저장소를 엔진 저장소 옆에 받아 둡니다. (`vanilla.js` 와 `vanilla-engine` 폴더가 나란히)
 - 예제는 애셋 경로를 저장소 루트 기준으로 적어 두었으므로 저장소 루트에서 실행합니다.
 - 무거운 3D 예제는 `--release` 로 돌립니다. (Cargo 의 dev 빌드는 최적화를 하지 않습니다)
 
