@@ -18,8 +18,11 @@ use serde_json::Value;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
+use vanilla::graphics3d::material::decode_image_bytes;
+
+type GlTexture = <glow::Context as glow::HasContext>::Texture;
 use vanilla::{
-	AmbientOcclusionEffect, GlContext, BlobAsset, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, Graphic, HumanSkinRenderer, ImageDescription, ImageDescriptionOptions, KeyCode, Material, Matrix4, MouseButton, RenderTarget, RenderTargetOptions, create_bezier_easing, Scene, SceneBase, SeededRandom, ComponentContext, NodeId, NodeTree, Paint, Pivot, TouchRecognizer, UIButton, UILabel, UIScrollView, UISlider, ShadowMap, SkinnedModel, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector2, Vector3, SKIN_SHADING_EYE, SKIN_SHADING_FACIALHAIR, SKIN_SHADING_FLUID, SKIN_SHADING_HAIR, SKIN_SHADING_OCCLUSION, SKIN_SHADING_SKIN, SKIN_TEXTURE_UNIT_DETAILHEIGHT, SKIN_TEXTURE_UNIT_LAYERCOLOR, SKIN_TEXTURE_UNIT_LAYERNORMAL, SKIN_TEXTURE_UNIT_MASKATLAS, SKIN_TEXTURE_UNIT_MICRO,
+	AmbientOcclusionEffect, AssetLoadHandle, GlContext, ImageSource, Rect, UIContextMenu, UIContextMenuItem, UIContextMenuOptions, BlobAsset, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, Graphic, HumanSkinRenderer, ImageDescription, ImageDescriptionOptions, KeyCode, Material, Matrix4, MouseButton, RenderTarget, RenderTargetOptions, create_bezier_easing, Scene, SceneBase, SeededRandom, ComponentContext, NodeId, NodeTree, Paint, Pivot, TouchRecognizer, UIButton, UILabel, UIScrollView, UISlider, ShadowMap, SkinnedModel, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector2, Vector3, SKIN_SHADING_EYE, SKIN_SHADING_FACIALHAIR, SKIN_SHADING_FLUID, SKIN_SHADING_HAIR, SKIN_SHADING_OCCLUSION, SKIN_SHADING_SKIN, SKIN_TEXTURE_UNIT_DETAILHEIGHT, SKIN_TEXTURE_UNIT_LAYERCOLOR, SKIN_TEXTURE_UNIT_LAYERNORMAL, SKIN_TEXTURE_UNIT_MASKATLAS, SKIN_TEXTURE_UNIT_MICRO,
 };
 
 //==============================================================================
@@ -50,6 +53,32 @@ const TOGGLE_BLOOM: usize = 3;
 const TOGGLE_OCCLUSION: usize = 4;
 const TOGGLE_WRINKLE: usize = 5;
 const TOGGLE_WIREFRAME: usize = 6;
+const TOGGLE_GRAPH: usize = 7;
+const TOGGLE_HUD: usize = 8;
+// 머티리얼 그래프 꼴. (원본 GRAPH_ 상수, 그래픽 설정 패널과 같은 규격)
+const GRAPH_PANEL_MARGIN: f64 = 18.0;
+const GRAPH_PANEL_WIDTH: f64 = 372.0;
+const GRAPH_TITLE_HEIGHT: f64 = 34.0;
+const GRAPH_PADDING: f64 = 12.0;
+const GRAPH_NODE_PADDING: f64 = 10.0;
+const GRAPH_NODE_GAP: f64 = 8.0;
+const GRAPH_IMAGE_THUMBNAIL_SIZE: f64 = 72.0;
+const GRAPH_BUFFER_THUMBNAIL_WIDTH: f64 = 104.0;
+const GRAPH_LINE_HEIGHT: f64 = 20.0;
+const GRAPH_TITLE_FONT: &str = "600 10px default";
+const GRAPH_TITLE_SPACING: f64 = 3.2;
+const GRAPH_NODE_TITLE_FONT: &str = "600 9px default";
+const GRAPH_NODE_TITLE_SPACING: f64 = 2.7;
+const GRAPH_TEXT_FONT: &str = "400 10.5px default";
+const GRAPH_TEXT_SPACING: f64 = 1.26;
+const GRAPH_LABEL_FONT: &str = "400 9px default";
+const GRAPH_LABEL_SPACING: f64 = 1.6;
+// 그래프 썸네일에 쓰는 그림. (이름, 파일. 원본 createThumbnail 의 일곱 장, 96x96 으로 줄인다)
+const THUMBNAIL_FILES: [(&str, &str); 7] = [("albedo", "head_albedo.jpg"), ("normal", "head_normal.jpg"), ("detail", "skin_detail.jpg"), ("hair", "hair.png"), ("eye", "eye_iris.png"), ("teeth", "teeth_albedo.jpg"), ("eyelash", "eyelash.png")];
+const THUMBNAIL_SIZE: usize = 96;
+const CONTEXT_MENU_LABELS: [&str; 3] = ["RESET VIEW", "RESET OPTIONS", "TOGGLE MATERIAL GRAPH"];
+const CONTEXT_MENU_ITEM_HEIGHT: f64 = 29.0;
+const BLOOM_ITERATION_COUNT: u32 = 3;
 const SLIDER_COUNT: usize = 38;
 const SLIDER_FRAME_RATE: usize = 0;
 const SLIDER_RENDER_BASE: usize = 1;
@@ -202,17 +231,69 @@ impl OptionValues {
 	}
 }
 
-// 모델 읽어 캐시에 넣기. (이미 있으면 그대로. 예제 폴더에서 바로 읽고 머티리얼을 붙인다)
-fn load_cached_model(gl: &GlContext, resources: &mut FaceResources, file_name: &str) -> Result<(), String> {
-	if resources.model_cache.iter().any(|(name, _)| name == file_name) {
-		return Ok(());
+// 그림 줄이기. (원본 createThumbnail 의 96x96 drawImage, 알파를 곱해 평균 낸 뒤 되돌린다)
+fn downscale_pixels(width: usize, height: usize, pixels: &[u8]) -> Vec<u8> {
+	let mut result = vec![0u8; THUMBNAIL_SIZE * THUMBNAIL_SIZE * 4];
+	for target_y in 0..THUMBNAIL_SIZE {
+		let source_y_start = target_y * height / THUMBNAIL_SIZE;
+		let source_y_end = (((target_y + 1) * height + THUMBNAIL_SIZE - 1) / THUMBNAIL_SIZE).max(source_y_start + 1).min(height);
+		for target_x in 0..THUMBNAIL_SIZE {
+			let source_x_start = target_x * width / THUMBNAIL_SIZE;
+			let source_x_end = (((target_x + 1) * width + THUMBNAIL_SIZE - 1) / THUMBNAIL_SIZE).max(source_x_start + 1).min(width);
+			let mut sum = [0.0f64; 4];
+			for source_y in source_y_start..source_y_end {
+				for source_x in source_x_start..source_x_end {
+					let index = (source_y * width + source_x) * 4;
+					let alpha = pixels[index + 3] as f64;
+					sum[0] += pixels[index] as f64 * alpha;
+					sum[1] += pixels[index + 1] as f64 * alpha;
+					sum[2] += pixels[index + 2] as f64 * alpha;
+					sum[3] += alpha;
+				}
+			}
+			let count = ((source_y_end - source_y_start) * (source_x_end - source_x_start)) as f64;
+			let target_index = (target_y * THUMBNAIL_SIZE + target_x) * 4;
+			if sum[3] > 0.0 {
+				result[target_index] = (sum[0] / sum[3]).round() as u8;
+				result[target_index + 1] = (sum[1] / sum[3]).round() as u8;
+				result[target_index + 2] = (sum[2] / sum[3]).round() as u8;
+			}
+			result[target_index + 3] = (sum[3] / count).round() as u8;
+		}
 	}
-	let bytes = std::fs::read(PathBuf::from(EXAMPLE_ASSET_DIRECTORY).join(file_name)).map_err(|error| format!("{}: {}", file_name, error))?;
-	let mut model = SkinnedModel::load_from_bytes(gl, &bytes, &resources.skin_renderer)?;
-	assign_materials(&mut model, &resources.material_list)?;
-	model.update(0.0);
-	resources.model_cache.push((file_name.to_string(), model));
-	Ok(())
+	result
+}
+
+// 천 단위 쉼표. (원본 toLocaleString("en-US"))
+fn format_with_commas(value: u64) -> String {
+	let digits = value.to_string();
+	let mut result = String::new();
+	for (index, character) in digits.chars().enumerate() {
+		if index > 0 && (digits.len() - index) % 3 == 0 {
+			result.push(',');
+		}
+		result.push(character);
+	}
+	result
+}
+
+// 메시 바이트. (원본 estimateGpuMemoryBytes 의 정점, 인덱스 배열 합, 값 하나를 JS 배열 칸 크기로 셈)
+fn mesh_array_bytes(model: &SkinnedModel) -> f64 {
+	let mut bytes = 0.0;
+	for drawable in model.get_drawable_list().iter() {
+		let mesh = &drawable.mesh_description;
+		bytes += mesh.positions.len() as f64 * 4.0;
+		bytes += mesh.normals.as_ref().map(|values| values.len()).unwrap_or(0) as f64 * 4.0;
+		bytes += mesh.texture_coordinates.as_ref().map(|values| values.len()).unwrap_or(0) as f64 * 4.0;
+		bytes += mesh.joints.len() as f64 * 2.0;
+		bytes += mesh.weights.len() as f64 * 4.0;
+		bytes += match &mesh.indices {
+			Some(vanilla::graphics3d::skinnedmodel::IndexArray::UnsignedShort(values)) => values.len() as f64 * 2.0,
+			Some(vanilla::graphics3d::skinnedmodel::IndexArray::UnsignedInt(values)) => values.len() as f64 * 4.0,
+			None => 0.0,
+		};
+	}
+	bytes
 }
 
 // 활성 모델. (머리, 머리카락 차례. 캐시에서 이름으로 찾는다)
@@ -464,6 +545,177 @@ void main() {
 //==============================================================================
 // initialize 에서 만드는 GL 리소스.
 //==============================================================================
+// 버퍼 미리보기. (머티리얼 그래프 패널, 중간 버퍼를 작은 뷰포트에 톤 매핑해 표시)
+const PREVIEW_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
+precision highp float;
+in vec2 fragmentTextureCoordinate;
+uniform sampler2D sourceTexture;
+uniform float displayScale;
+uniform int useCoverage;
+out vec4 outputColor;
+
+void main() {
+	vec4 sourceSample = texture(sourceTexture, fragmentTextureCoordinate);
+	vec3 color = sourceSample.rgb * displayScale;
+	color = color / (1.0 + color);
+	if (useCoverage == 1) {
+		color = mix(vec3(0.05, 0.05, 0.06), color, sourceSample.a);
+	}
+	outputColor = vec4(pow(color, vec3(1.0 / 2.2)), 1.0);
+}";
+
+// 그림 썸네일. (원본은 2D 캔버스 drawImage, 줄인 그림을 위 행부터 그대로 알파 합성)
+const THUMBNAIL_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
+precision highp float;
+in vec2 fragmentTextureCoordinate;
+uniform sampler2D sourceTexture;
+uniform float alphaScale;
+out vec4 outputColor;
+
+void main() {
+	vec4 sourceSample = texture(sourceTexture, vec2(fragmentTextureCoordinate.x, 1.0 - fragmentTextureCoordinate.y));
+	outputColor = vec4(sourceSample.rgb * sourceSample.a, sourceSample.a) * alphaScale;
+}";
+
+// 패스별 GPU 시간. (원본 EXT_disjoint_timer_query_webgl2, 결과는 몇 프레임 뒤에 도착하므로 대기 목록을 매 프레임 확인)
+struct PassTimer {
+	is_supported: bool,
+	pending_list: Vec<(&'static str, glow::Query)>,
+	current: Option<(&'static str, glow::Query)>,
+	milliseconds: Vec<(&'static str, f64)>,
+}
+
+impl PassTimer {
+	fn new(gl: &GlContext) -> PassTimer {
+		let is_supported = gl.supported_extensions().iter().any(|extension_name| extension_name.contains("timer_query"));
+		PassTimer { is_supported, pending_list: Vec::new(), current: None, milliseconds: Vec::new() }
+	}
+
+	fn begin_pass(&mut self, gl: &GlContext, pass_name: &'static str) {
+		if !self.is_supported || self.current.is_some() {
+			return;
+		}
+		unsafe {
+			if let Ok(query) = gl.create_query() {
+				gl.begin_query(glow::TIME_ELAPSED, query);
+				self.current = Some((pass_name, query));
+			}
+		}
+	}
+
+	fn end_pass(&mut self, gl: &GlContext) {
+		if let Some(current) = self.current.take() {
+			unsafe {
+				gl.end_query(glow::TIME_ELAPSED);
+			}
+			self.pending_list.push(current);
+		}
+	}
+
+	fn poll(&mut self, gl: &GlContext) {
+		if !self.is_supported {
+			return;
+		}
+		let mut remaining_list = Vec::new();
+		for (pass_name, query) in self.pending_list.drain(..) {
+			let is_available = unsafe {
+				gl.get_query_parameter_u32(query, glow::QUERY_RESULT_AVAILABLE) != 0
+			};
+			if !is_available {
+				remaining_list.push((pass_name, query));
+				continue;
+			}
+			let nanoseconds = unsafe {
+				gl.get_query_parameter_u32(query, glow::QUERY_RESULT)
+			};
+			let measured = nanoseconds as f64 / 1e6;
+			match self.milliseconds.iter_mut().find(|(name, _)| *name == pass_name) {
+				Some(entry) => {
+					entry.1 = entry.1 * 0.9 + measured * 0.1;
+				}
+				None => {
+					self.milliseconds.push((pass_name, measured));
+				}
+			}
+			unsafe {
+				gl.delete_query(query);
+			}
+		}
+		self.pending_list = remaining_list;
+	}
+
+	fn format(&self, pass_name: &str) -> String {
+		match self.milliseconds.iter().find(|(name, _)| *name == pass_name) {
+			Some((_, milliseconds)) => {
+				format!("{:.2} ms", milliseconds)
+			}
+			None => {
+				String::from("n/a")
+			}
+		}
+	}
+}
+
+// 렌더링 정보 값. (원본 statistics)
+struct RenderStatistics {
+	smoothed_frame_seconds: f64,
+	draw_call_count: u32,
+	hud_top: f64,
+	cpu_frame_milliseconds: f64,
+	memory_sample_instant: Option<web_time::Instant>,
+	gpu_memory_bytes: f64,
+	gpu_memory_text: String,
+	triangle_count: f64,
+	vertex_count: usize,
+	morph_target_count: usize,
+	scene_draw_call_count: u32,
+}
+
+// 머티리얼 그래프 스크롤과 자리. (원본 materialGraphState)
+struct GraphState {
+	scroll_offset: f64,
+	maximum_scroll: f64,
+	left: f64,
+	top: f64,
+	right: f64,
+	bottom: f64,
+	is_dragging: bool,
+	last_pointer_y: f64,
+}
+
+struct GraphThumbnail {
+	label: &'static str,
+	image_index: Option<usize>,
+	buffer_index: Option<usize>,
+	display_scale: f64,
+	use_coverage: i32,
+	x: f64,
+	y: f64,
+	width: f64,
+	height: f64,
+}
+
+struct GraphNode {
+	title: &'static str,
+	is_active: bool,
+	lines: Vec<String>,
+	thumbnail_list: Vec<GraphThumbnail>,
+	x: f64,
+	y: f64,
+	width: f64,
+	height: f64,
+	text_y: f64,
+}
+
+// 모델 비동기 읽기. (원본 loadModelFile().then, 다 읽히면 해석해 캐시에 넣고 그때까지 이전 모델을 유지)
+struct PendingModel {
+	file_name: String,
+	blob_asset: BlobAsset,
+	load_handle: AssetLoadHandle,
+	is_head: bool,
+	value: f64,
+}
+
 struct FaceResources {
 	skin_renderer: HumanSkinRenderer,
 	model_cache: Vec<(String, SkinnedModel)>,
@@ -492,6 +744,11 @@ struct FaceResources {
 	target_weights: Vec<f64>,
 	current_weights: Vec<f64>,
 	is_first_frame_checked: bool,
+	preview_pass: FullscreenPass,
+	thumbnail_pass: FullscreenPass,
+	thumbnail_texture_list: Vec<GlTexture>,
+	image_byte_total: f64,
+	retained_image_byte_total: f64,
 }
 
 //==============================================================================
@@ -528,6 +785,19 @@ struct OldFaceScene {
 	pointer_position: Option<Vector2>,
 	has_pointer_moved: bool,
 	intro_start: web_time::Instant,
+	statistics: RenderStatistics,
+	graph: GraphState,
+	pass_timer: PassTimer,
+	preview_texture_list: [Option<GlTexture>; 5],
+	pending_model_list: Vec<PendingModel>,
+	pending_head_value: Option<f64>,
+	pending_hair_value: Option<f64>,
+	image_record_list: RefCell<Vec<(String, u32, u32, usize)>>,
+	thumbnail_pixel_list: RefCell<Vec<(String, Vec<u8>)>>,
+	pending_menu_action: Rc<Cell<Option<usize>>>,
+	frame_start_instant: web_time::Instant,
+	last_tick_instant: Option<web_time::Instant>,
+	menu_test_frame: u32,
 }
 
 //==============================================================================
@@ -552,6 +822,8 @@ struct OldFaceUi {
 	expression_fill_ids: Vec<NodeId>,
 	home_id: NodeId,
 	footer_ids: Vec<NodeId>,
+	slider_ids: Vec<NodeId>,
+	menu_id: NodeId,
 }
 
 fn create_color(red: f64, green: f64, blue: f64, alpha: f64) -> Color {
@@ -684,6 +956,7 @@ impl OldFaceScene {
 			content_y += 28.0;
 		}
 		let mut slider_value_ids = Vec::new();
+		let mut slider_ids = Vec::new();
 		let mut previous_group = "";
 		for (slider_index, definition) in SLIDER_DEFINITIONS.iter().enumerate() {
 			if definition.group != previous_group {
@@ -702,12 +975,22 @@ impl OldFaceScene {
 			node_tree[label_id].set_local_position(Vector2::create(12.0, 0.0));
 			let slider_id = create_box_node(node_tree, row_id, "slider", Vector2::create(132.0, 12.0));
 			node_tree[slider_id].set_local_position(Vector2::create(134.0, 7.0));
+			slider_ids.push(slider_id);
+			// 손잡이. (원본 ::-webkit-slider-thumb 지름 10, 금색 바탕 위에 어두운 테두리 1px rgba(20, 16, 12, 0.8))
+			let thumb_id = create_box_node(node_tree, slider_id, "thumb", Vector2::create(10.0, 10.0));
+			node_tree[thumb_id].add_component(Paint::create_with_color(create_color(212.0, 176.0, 106.0, 1.0))).set_round_size(5.0);
+			let thumb_border_id = create_box_node(node_tree, thumb_id, "thumbBorder", Vector2::create(10.0, 10.0));
+			node_tree[thumb_border_id].add_component(Paint::create_with_color(create_color(20.0, 16.0, 12.0, 0.8))).set_round_size(5.0);
+			let thumb_fill_id = create_box_node(node_tree, thumb_border_id, "thumbFill", Vector2::create(8.0, 8.0));
+			node_tree[thumb_fill_id].set_local_position(Vector2::create(1.0, 1.0));
+			node_tree[thumb_fill_id].add_component(Paint::create_with_color(create_color(212.0, 176.0, 106.0, 1.0))).set_round_size(4.0);
 			{
 				let slider = node_tree.add_component(slider_id, UISlider::new()).expect("slider");
 				slider.set_range(definition.minimum, definition.maximum);
 				slider.set_value(definition.value);
 				slider.set_track_thickness(2.0);
 				slider.set_thumb_radius(5.0);
+				slider.set_thumb_node(Some(thumb_id));
 				slider.set_track_color(create_color(242.0, 236.0, 226.0, 0.18));
 				slider.set_fill_color(create_color(242.0, 236.0, 226.0, 0.18));
 				slider.set_thumb_color(create_color(212.0, 176.0, 106.0, 1.0));
@@ -733,7 +1016,9 @@ impl OldFaceScene {
 			scroll_view.set_scroll_content_size(Vector2::create(370.0, options_content_height));
 		}
 		node_tree[options_scroll_id].set_visible(false);
-		self.ui = Some(OldFaceUi { title_id, divider_id, subtitle_id, options_id, options_fill_id, options_title_id, options_hit_id, options_divider_id, options_scroll_id, options_content_height, toggle_state_ids, slider_value_ids, value_texts: vec![String::new(); SLIDER_COUNT + 9], laid_out_panel: (true, 0.0, 0.0), expression_button_ids, expression_fill_ids, home_id, footer_ids });
+		// 우클릭 메뉴. (원본 #contextMenu, 맨 위에 둔다)
+		let menu_id = UIContextMenu::create(node_tree, root_id, UIContextMenuOptions { menu_width: 182.0, item_height: CONTEXT_MENU_ITEM_HEIGHT, font_size: 10.0, panel_color: create_color(14.0, 12.0, 14.0, 0.72), text_color: create_color(242.0, 236.0, 226.0, 0.86) });
+		self.ui = Some(OldFaceUi { title_id, divider_id, subtitle_id, options_id, options_fill_id, options_title_id, options_hit_id, options_divider_id, options_scroll_id, options_content_height, toggle_state_ids, slider_value_ids, value_texts: vec![String::new(); SLIDER_COUNT + 9], laid_out_panel: (true, 0.0, 0.0), expression_button_ids, expression_fill_ids, home_id, footer_ids, slider_ids, menu_id });
 		self.refresh_expression_buttons();
 	}
 
@@ -742,6 +1027,7 @@ impl OldFaceScene {
 	//==============================================================================
 	fn layout_ui(&mut self, canvas_size: Vector2) {
 		let is_collapsed = self.option_values.borrow().is_collapsed;
+		let hud_top = if self.statistics.hud_top > 0.0 { self.statistics.hud_top } else { canvas_size.y - 18.0 };
 		let ui = match &mut self.ui {
 			Some(ui) => ui,
 			None => {
@@ -765,7 +1051,7 @@ impl OldFaceScene {
 		let is_narrow = canvas_size.x <= 720.0;
 		let panel_width = if is_collapsed { 122.0 } else if is_narrow { 318.0 } else { 374.0 };
 		let panel_margin = if is_narrow { 10.0 } else { 18.0 };
-		let panel_height = if is_collapsed { 34.0 } else { (34.0 + 1.0 + ui.options_content_height + 1.0).min((canvas_size.y - 48.0).max(120.0) + 2.0) };
+		let panel_height = if is_collapsed { 34.0 } else { (34.0 + 1.0 + ui.options_content_height + 1.0).min((hud_top - 30.0).max(120.0) + 2.0) };
 		node_tree[ui.options_id].set_local_position(Vector2::create(canvas_size.x - panel_margin - panel_width, panel_margin));
 		if ui.laid_out_panel != (is_collapsed, panel_width, panel_height) {
 			ui.laid_out_panel = (is_collapsed, panel_width, panel_height);
@@ -844,6 +1130,24 @@ impl OldFaceScene {
 		let values = self.option_values.borrow().clone();
 		let applied = self.applied_sliders;
 		self.applied_sliders = values.sliders;
+		if values.sliders[SLIDER_HEAD_LOD] != applied[SLIDER_HEAD_LOD] {
+			let value = values.sliders[SLIDER_HEAD_LOD];
+			self.request_model(engine, HEAD_LOD_FILES[2 - value as usize], true, value);
+		}
+		if values.sliders[SLIDER_HAIR_QUALITY] != applied[SLIDER_HAIR_QUALITY] {
+			let value = values.sliders[SLIDER_HAIR_QUALITY];
+			match HAIR_LEVEL_DEFINITIONS[value as usize].1 {
+				Some(file_name) => {
+					self.request_model(engine, file_name, false, value);
+				}
+				None => {
+					self.pending_hair_value = Some(value);
+					if let Some(resources) = &mut self.resources {
+						resources.hair_file = None;
+					}
+				}
+			}
+		}
 		let resources = match &mut self.resources {
 			Some(resources) => {
 				resources
@@ -863,34 +1167,6 @@ impl OldFaceScene {
 		let gl = graphic.get_gl();
 		if values.sliders[SLIDER_FRAME_RATE] != applied[SLIDER_FRAME_RATE] {
 			engine.set_maximum_frame_per_second(FRAME_RATE_OPTIONS[values.sliders[SLIDER_FRAME_RATE] as usize]);
-		}
-		if values.sliders[SLIDER_HEAD_LOD] != applied[SLIDER_HEAD_LOD] {
-			let file_name = HEAD_LOD_FILES[2 - values.sliders[SLIDER_HEAD_LOD] as usize];
-			match load_cached_model(gl, resources, file_name) {
-				Ok(()) => {
-					resources.head_file = file_name.to_string();
-				}
-				Err(error) => {
-					eprintln!("oldface: {}", error);
-				}
-			}
-		}
-		if values.sliders[SLIDER_HAIR_QUALITY] != applied[SLIDER_HAIR_QUALITY] {
-			match HAIR_LEVEL_DEFINITIONS[values.sliders[SLIDER_HAIR_QUALITY] as usize].1 {
-				Some(file_name) => {
-					match load_cached_model(gl, resources, file_name) {
-						Ok(()) => {
-							resources.hair_file = Some(file_name.to_string());
-						}
-						Err(error) => {
-							eprintln!("oldface: {}", error);
-						}
-					}
-				}
-				None => {
-					resources.hair_file = None;
-				}
-			}
 		}
 		if values.sliders[SLIDER_TEXTURE_SIZE] != applied[SLIDER_TEXTURE_SIZE] {
 			// 모든 머티리얼 텍스처의 최소 밉 레벨을 올려 실효 해상도를 낮춘다.
@@ -1062,6 +1338,19 @@ impl OldFaceScene {
 			pointer_position: None,
 			has_pointer_moved: false,
 			intro_start: web_time::Instant::now(),
+			statistics: RenderStatistics { smoothed_frame_seconds: 1.0 / 60.0, draw_call_count: 0, hud_top: 0.0, cpu_frame_milliseconds: 0.0, memory_sample_instant: None, gpu_memory_bytes: 0.0, gpu_memory_text: String::new(), triangle_count: 0.0, vertex_count: 0, morph_target_count: 0, scene_draw_call_count: 0 },
+			graph: GraphState { scroll_offset: 0.0, maximum_scroll: 0.0, left: 0.0, top: 0.0, right: 0.0, bottom: 0.0, is_dragging: false, last_pointer_y: 0.0 },
+			pass_timer: PassTimer { is_supported: false, pending_list: Vec::new(), current: None, milliseconds: Vec::new() },
+			preview_texture_list: [None; 5],
+			pending_model_list: Vec::new(),
+			pending_head_value: None,
+			pending_hair_value: None,
+			image_record_list: RefCell::new(Vec::new()),
+			thumbnail_pixel_list: RefCell::new(Vec::new()),
+			pending_menu_action: Rc::new(Cell::new(None)),
+			frame_start_instant: web_time::Instant::now(),
+			last_tick_instant: None,
+			menu_test_frame: 0,
 		}
 	}
 
@@ -1090,6 +1379,14 @@ impl OldFaceScene {
 			}
 		};
 		let bytes = self.read_bytes(file_name)?;
+		// 한 번 풀어 크기를 적어 둔다. (GPU 메모리 셈과 그래프 썸네일에 쓰고, 푼 픽셀은 그대로 텍스처가 된다)
+		let (width, height, pixels) = decode_image_bytes(bytes.as_ref())?;
+		if !self.image_record_list.borrow().iter().any(|(name, _, _, _)| name == file_name) {
+			self.image_record_list.borrow_mut().push((file_name.to_string(), width, height, bytes.len()));
+		}
+		if THUMBNAIL_FILES.iter().any(|(_, thumbnail_file)| *thumbnail_file == file_name) && !self.thumbnail_pixel_list.borrow().iter().any(|(name, _)| name == file_name) {
+			self.thumbnail_pixel_list.borrow_mut().push((file_name.to_string(), downscale_pixels(width as usize, height as usize, &pixels)));
+		}
 		let mime_type = if file_name.ends_with(".png") {
 			String::from("image/png")
 		}
@@ -1097,7 +1394,9 @@ impl OldFaceScene {
 			String::from("image/jpeg")
 		};
 		let options = ImageDescriptionOptions { flip_y: false, is_color_data: false, anisotropy: 8.0 };
-		Ok(Some(Material::create_image_description(bytes.as_ref().clone(), Some(mime_type), Some(options))))
+		let mut description = Material::create_image_description(bytes.as_ref().clone(), Some(mime_type), Some(options));
+		description.source = Some(Rc::new(ImageSource { width, height, pixels }));
+		Ok(Some(description))
 	}
 
 	//==============================================================================
@@ -1119,6 +1418,8 @@ impl OldFaceScene {
 		let background_pass = FullscreenPass::new(gl, BACKGROUND_FRAGMENTSHADER_SOURCE)?;
 		let composite_pass = FullscreenPass::new(gl, COMPOSITE_FRAGMENTSHADER_SOURCE)?;
 		let antialias_pass = FullscreenPass::new(gl, FXAA_FRAGMENTSHADER_SOURCE)?;
+		let preview_pass = FullscreenPass::new(gl, PREVIEW_FRAGMENTSHADER_SOURCE)?;
+		let thumbnail_pass = FullscreenPass::new(gl, THUMBNAIL_FRAGMENTSHADER_SOURCE)?;
 
 		// 생성 때 기본값. (원본 예제와 같다, 나머지는 프레임마다 슬라이더 기본값으로 넣는다)
 		skin_renderer.set_detail_texel_size(1.0 / DETAIL_TEXTURE_SIZE);
@@ -1205,6 +1506,16 @@ impl OldFaceScene {
 			}
 		}
 		let unit_count = expression_unit_names.len();
+		// 그래프 썸네일 텍스처와 메모리 셈 바탕. (원본 imageDescriptionCache 의 크기 합, 읽은 그림 바이트 합)
+		let mut thumbnail_texture_list = Vec::new();
+		for (_name, file_name) in THUMBNAIL_FILES.iter() {
+			let pixels = self.thumbnail_pixel_list.borrow().iter().find(|(name, _)| name == file_name).map(|(_, pixels)| pixels.clone()).ok_or_else(|| format!("{} 썸네일 없음", file_name))?;
+			let mut description = Material::create_image_description(Vec::new(), None, None);
+			description.source = Some(Rc::new(ImageSource { width: THUMBNAIL_SIZE as u32, height: THUMBNAIL_SIZE as u32, pixels }));
+			thumbnail_texture_list.push(Material::create_texture(gl, Some(&description), [0, 0, 0, 0])?);
+		}
+		let image_byte_total: f64 = self.image_record_list.borrow().iter().map(|(_, width, height, _)| *width as f64 * *height as f64 * 4.0 * 1.3333).sum();
+		let retained_image_byte_total: f64 = self.image_record_list.borrow().iter().map(|(_, _, _, byte_count)| *byte_count as f64).sum();
 		let mut resources = FaceResources {
 			skin_renderer,
 			model_cache: vec![(HEAD_MODEL_FILE.to_string(), head_model), (HAIR_MODEL_FILE.to_string(), hair_model)],
@@ -1233,6 +1544,11 @@ impl OldFaceScene {
 			target_weights: vec![0.0; unit_count],
 			current_weights: vec![0.0; unit_count],
 			is_first_frame_checked: false,
+			preview_pass,
+			thumbnail_pass,
+			thumbnail_texture_list,
+			image_byte_total,
+			retained_image_byte_total,
 		};
 		select_expression(&mut resources, EXPRESSION_DEFINITIONS[0].0);
 		Ok(resources)
@@ -1304,7 +1620,25 @@ impl OldFaceScene {
 			self.has_pointer_moved = true;
 		}
 		self.pointer_position = Some(current_pointer_position);
-		if input_manager.is_mouse_button_down(MouseButton::Left) && !self.is_pointer_over_ui(engine) {
+		// 머티리얼 그래프 위 끌기와 휠은 그래프를 스크롤한다. (원본 pointerdown / wheel)
+		if input_manager.is_mouse_button_just_pressed(MouseButton::Left) && self.is_pointer_on_graph(current_pointer_position) {
+			self.graph.is_dragging = true;
+			self.graph.last_pointer_y = current_pointer_position.y;
+		}
+		if self.graph.is_dragging {
+			if input_manager.is_mouse_button_down(MouseButton::Left) {
+				self.graph.scroll_offset = (self.graph.scroll_offset - (current_pointer_position.y - self.graph.last_pointer_y)).clamp(0.0, self.graph.maximum_scroll);
+				self.graph.last_pointer_y = current_pointer_position.y;
+			}
+			else {
+				self.graph.is_dragging = false;
+			}
+		}
+		// 우클릭 메뉴. (옵션 패널과 표정 패널 위에서는 열지 않는다)
+		if input_manager.is_mouse_button_just_pressed(MouseButton::Right) && !self.is_pointer_over_panel(current_pointer_position) {
+			self.open_context_menu(current_pointer_position);
+		}
+		if input_manager.is_mouse_button_down(MouseButton::Left) && !self.graph.is_dragging && !self.is_pointer_over_ui(engine) && !self.is_context_menu_showing() {
 			let pointer_position = input_manager.get_canvas_native_input_position();
 			if let Some(last_pointer_position) = self.last_pointer_position {
 				let delta_x = pointer_position.x - last_pointer_position.x;
@@ -1318,7 +1652,10 @@ impl OldFaceScene {
 			self.last_pointer_position = None;
 		}
 		let wheel_delta_y = input_manager.get_wheel_delta_y();
-		if wheel_delta_y != 0.0 && !self.is_pointer_over_ui(engine) {
+		if wheel_delta_y != 0.0 && self.is_pointer_on_graph(current_pointer_position) {
+			self.graph.scroll_offset = (self.graph.scroll_offset + wheel_delta_y).clamp(0.0, self.graph.maximum_scroll);
+		}
+		else if wheel_delta_y != 0.0 && !self.is_pointer_over_ui(engine) {
 			self.camera_target_distance = (self.camera_target_distance * (1.0 + wheel_delta_y * 0.0012)).clamp(CAMERA_MINIMUM_DISTANCE, CAMERA_MAXIMUM_DISTANCE);
 		}
 		if let Some(selected_index) = selected_index {
@@ -1458,7 +1795,9 @@ impl OldFaceScene {
 		model_matrix.multiply(&Matrix4::create_translation(-head_pivot.x, -head_pivot.y, -head_pivot.z));
 		let model_elements = *model_matrix.get_elements();
 
+		let mut draw_call_count: u32 = 0;
 		// 1. 섀도우 깊이 패스. (키 라이트)
+		self.pass_timer.begin_pass(gl, "shadow");
 		unsafe {
 			gl.enable(glow::CULL_FACE);
 			gl.cull_face(glow::BACK);
@@ -1471,13 +1810,16 @@ impl OldFaceScene {
 			resources.shadow_map.begin_render(gl);
 			for model in collect_active(&mut resources.model_cache, &resources.head_file, resources.hair_file.as_deref()) {
 				resources.skin_renderer.draw_depth(gl, model, &light_view_projection_elements, &model_elements);
+				draw_call_count += model.get_drawable_list().len() as u32;
 			}
 		}
+		self.pass_timer.end_pass(gl);
 		let shadow_depth_texture = resources.shadow_map.get_depth_texture();
 		resources.skin_renderer.set_shadow_map(Some(shadow_depth_texture), Some(&light_view_projection_elements), 1.0 / resources.shadow_resolution as f64);
 		resources.skin_renderer.set_shadow_strength(if values.toggles[TOGGLE_SHADOW] { slider[SLIDER_SHADOW_STRENGTH] } else { 0.0 });
 
 		// 2. 피부 MRT 패스. (배경 → 조도 / 알베도 / 스펙큘러 / 노멀 + 깊이)
+		self.pass_timer.begin_pass(gl, "scene");
 		resources.scene_render_target.bind(gl);
 		unsafe {
 			gl.enable(glow::DEPTH_TEST);
@@ -1494,8 +1836,10 @@ impl OldFaceScene {
 		unsafe {
 			gl.enable(glow::DEPTH_TEST);
 		}
+		draw_call_count += 1;
 		for model in collect_active(&mut resources.model_cache, &resources.head_file, resources.hair_file.as_deref()) {
 			resources.skin_renderer.draw(gl, model, &view_projection_elements, &model_elements, camera_x, camera_y, camera_z);
+			draw_call_count += model.get_drawable_list().len() as u32;
 		}
 
 		// 2b. 블렌드 패스. (머리카락 프린지 / 눈꺼풀 차폐 / 눈물선 / 침, 깊이 쓰기 없이 어태치먼트별 알파 블렌드)
@@ -1513,6 +1857,8 @@ impl OldFaceScene {
 			gl.depth_mask(true);
 			gl.disable(glow::BLEND);
 		}
+		draw_call_count += 6;
+		self.pass_timer.end_pass(gl);
 
 		// 3. 화면 공간 앰비언트 오클루전 / 서브서피스 스캐터링.
 		let irradiance_texture = resources.scene_render_target.get_color_texture(0);
@@ -1520,18 +1866,23 @@ impl OldFaceScene {
 		let specular_texture = resources.scene_render_target.get_color_texture(2);
 		let normal_texture = resources.scene_render_target.get_color_texture(3);
 		let scene_depth_texture = resources.scene_render_target.get_depth_texture();
+		self.pass_timer.begin_pass(gl, "scatter");
 		let mut occlusion_result_texture = albedo_texture;
 		if values.toggles[TOGGLE_OCCLUSION] {
 			resources.ambient_occlusion_effect.render(gl, scene_depth_texture, normal_texture, view_matrix.get_elements(), CAMERA_FIELD_OF_VIEW, aspect_ratio, CAMERA_NEAR_DISTANCE, CAMERA_FAR_DISTANCE);
 			occlusion_result_texture = resources.ambient_occlusion_effect.get_result_texture();
+			draw_call_count += 3;
 		}
 		let mut scattered_irradiance_texture = irradiance_texture;
 		if values.toggles[TOGGLE_SUBSURFACE] {
 			resources.subsurface_effect.render(gl, irradiance_texture, scene_depth_texture, CAMERA_FIELD_OF_VIEW, aspect_ratio, CAMERA_NEAR_DISTANCE, CAMERA_FAR_DISTANCE);
 			scattered_irradiance_texture = resources.subsurface_effect.get_result_texture();
+			draw_call_count += 2;
 		}
+		self.pass_timer.end_pass(gl);
 
 		// 4. 합성 → HDR. (조도 x 알베도 + 스펙큘러 + 배경)
+		self.pass_timer.begin_pass(gl, "post");
 		resources.hdr_render_target.bind(gl);
 		let combine_pass = &resources.combine_pass;
 		unsafe {
@@ -1556,6 +1907,7 @@ impl OldFaceScene {
 			gl.active_texture(glow::TEXTURE0);
 		}
 		combine_pass.draw(gl);
+		draw_call_count += 1;
 		unsafe {
 			for texture_unit in 1..4 {
 				gl.active_texture(glow::TEXTURE0 + texture_unit);
@@ -1568,6 +1920,7 @@ impl OldFaceScene {
 		let hdr_color_texture = resources.hdr_render_target.get_color_texture(0);
 		if values.toggles[TOGGLE_BLOOM] {
 			resources.bloom_effect.render(gl, hdr_color_texture);
+			draw_call_count += 1 + BLOOM_ITERATION_COUNT * 2;
 		}
 
 		// 6. 톤 매핑 합성 → LDR(FXAA 켜짐) 또는 화면.
@@ -1599,6 +1952,7 @@ impl OldFaceScene {
 			gl.active_texture(glow::TEXTURE0);
 		}
 		composite_pass.draw(gl);
+		draw_call_count += 1;
 
 		// 7. FXAA(와 샤픈) → 화면.
 		if use_antialias {
@@ -1618,7 +1972,9 @@ impl OldFaceScene {
 				gl.bind_texture(glow::TEXTURE_2D, resources.ldr_render_target.get_color_texture(0));
 			}
 			antialias_pass.draw(gl);
+			draw_call_count += 1;
 		}
+		self.pass_timer.end_pass(gl);
 
 		// 8. 와이어프레임. (화면 깊이 프리패스로 앞면 모서리만)
 		if values.toggles[TOGGLE_WIREFRAME] {
@@ -1652,10 +2008,15 @@ impl OldFaceScene {
 				gl.depth_func(glow::LESS);
 				gl.disable(glow::DEPTH_TEST);
 			}
+			if self.statistics.triangle_count > 0.0 {
+				draw_call_count += collect_active(&mut resources.model_cache, &resources.head_file, resources.hair_file.as_deref()).len() as u32 * 2;
+			}
 		}
 		unsafe {
 			gl.disable(glow::CULL_FACE);
 		}
+		self.statistics.scene_draw_call_count = draw_call_count;
+		self.preview_texture_list = [irradiance_texture, albedo_texture, specular_texture, scattered_irradiance_texture, hdr_color_texture];
 
 		// 첫 프레임에 GL 오류를 한 번 본다.
 		if !resources.is_first_frame_checked {
@@ -1666,6 +2027,612 @@ impl OldFaceScene {
 			println!("oldface: 첫 3D 프레임 GL 오류 코드 0x{:X}, 렌더 {}x{}", error_code, render_width, render_height);
 		}
 		Ok(())
+	}
+}
+
+impl OldFaceScene {
+	//==============================================================================
+	// 모델 읽기 요청. (원본 loadModelFile, 캐시에 있으면 바로 쓰고 없으면 비동기로 읽는다. 읽는 동안 화면은 이전 모델로 돈다)
+	//==============================================================================
+	fn request_model(&mut self, engine: &Engine, file_name: &str, is_head: bool, value: f64) {
+		if is_head {
+			self.pending_head_value = Some(value);
+		}
+		else {
+			self.pending_hair_value = Some(value);
+		}
+		let is_cached = self.resources.as_ref().map(|resources| resources.model_cache.iter().any(|(name, _)| name == file_name)).unwrap_or(false);
+		if is_cached {
+			self.apply_model(file_name, is_head, value);
+			return;
+		}
+		if let Some(pending) = self.pending_model_list.iter_mut().find(|pending| pending.file_name == file_name) {
+			pending.is_head = is_head;
+			pending.value = value;
+			return;
+		}
+		let mut blob_asset = BlobAsset::new();
+		let load_handle = blob_asset.load(engine, file_name);
+		self.pending_model_list.push(PendingModel { file_name: file_name.to_string(), blob_asset, load_handle, is_head, value });
+	}
+
+	// 읽은 모델 쓰기. (원본 pendingHeadLod === value 확인, 그 사이 슬라이더가 또 바뀌었으면 쓰지 않는다)
+	fn apply_model(&mut self, file_name: &str, is_head: bool, value: f64) {
+		let resources = match &mut self.resources {
+			Some(resources) => {
+				resources
+			}
+			None => {
+				return;
+			}
+		};
+		if is_head {
+			if self.pending_head_value == Some(value) {
+				resources.head_file = file_name.to_string();
+			}
+		}
+		else if self.pending_hair_value == Some(value) {
+			resources.hair_file = Some(file_name.to_string());
+		}
+	}
+
+	// 다 읽힌 모델 해석. (한 프레임에 하나씩)
+	fn poll_pending_models(&mut self, engine: &Engine) {
+		let graphic = match engine.get_graphic() {
+			Some(graphic) => {
+				graphic
+			}
+			None => {
+				return;
+			}
+		};
+		let position = match self.pending_model_list.iter().position(|pending| pending.load_handle.is_loaded() || pending.load_handle.is_failed()) {
+			Some(position) => {
+				position
+			}
+			None => {
+				return;
+			}
+		};
+		let pending = self.pending_model_list.remove(position);
+		let bytes = match pending.blob_asset.get_blob() {
+			Some(bytes) => {
+				bytes
+			}
+			None => {
+				eprintln!("oldface: {} 읽기 실패", pending.file_name);
+				return;
+			}
+		};
+		let resources = match &mut self.resources {
+			Some(resources) => {
+				resources
+			}
+			None => {
+				return;
+			}
+		};
+		match SkinnedModel::load_from_bytes(graphic.get_gl(), &bytes, &resources.skin_renderer) {
+			Ok(mut model) => {
+				if let Err(error) = assign_materials(&mut model, &resources.material_list) {
+					eprintln!("oldface: {}", error);
+					return;
+				}
+				model.update(0.0);
+				resources.model_cache.push((pending.file_name.clone(), model));
+				self.apply_model(&pending.file_name, pending.is_head, pending.value);
+			}
+			Err(error) => {
+				eprintln!("oldface: {}: {}", pending.file_name, error);
+			}
+		}
+	}
+
+	// 통계 합계. (원본 refreshStatistics, 활성 모델 전체)
+	fn refresh_statistics(&mut self) {
+		let resources = match &mut self.resources {
+			Some(resources) => {
+				resources
+			}
+			None => {
+				return;
+			}
+		};
+		let mut triangle_count = 0.0;
+		let mut vertex_count = 0;
+		let mut morph_target_count = 0;
+		for model in collect_active(&mut resources.model_cache, &resources.head_file, resources.hair_file.as_deref()) {
+			for drawable in model.get_drawable_list().iter() {
+				triangle_count += if drawable.is_indexed { drawable.index_count as f64 / 3.0 } else { drawable.vertex_count as f64 / 3.0 };
+				vertex_count += drawable.vertex_count;
+				morph_target_count = morph_target_count.max(drawable.morph_target_list.len());
+			}
+		}
+		self.statistics.triangle_count = triangle_count;
+		self.statistics.vertex_count = vertex_count;
+		self.statistics.morph_target_count = morph_target_count;
+	}
+
+	// GPU 메모리 추정. (원본 estimateGpuMemoryBytes, 텍스처 밉 포함 + 읽은 모델의 정점, 인덱스, 모프 텍스처 + 렌더 타겟 + 섀도우 맵)
+	fn estimate_gpu_memory_bytes(&self) -> f64 {
+		let resources = match &self.resources {
+			Some(resources) => {
+				resources
+			}
+			None => {
+				return 0.0;
+			}
+		};
+		let mut bytes = resources.image_byte_total;
+		for (_name, model) in resources.model_cache.iter() {
+			bytes += mesh_array_bytes(model);
+			for drawable in model.get_drawable_list().iter() {
+				if drawable.morph_texture.is_some() {
+					bytes += drawable.morph_texture_width as f64 * drawable.morph_rows_per_target as f64 * 2.0 * drawable.morph_target_list.len() as f64 * 16.0;
+				}
+			}
+		}
+		let render_pixels = resources.scene_render_target.get_width() as f64 * resources.scene_render_target.get_height() as f64;
+		bytes += render_pixels * (4.0 * 8.0 + 4.0);
+		bytes += render_pixels * 8.0;
+		bytes += render_pixels * 4.0;
+		bytes += render_pixels * 8.0 * 2.0;
+		bytes += render_pixels * 0.25 * 8.0 * 3.0;
+		bytes += render_pixels * 8.0 * 0.4;
+		bytes += resources.shadow_resolution as f64 * resources.shadow_resolution as f64 * 4.0;
+		bytes
+	}
+
+	//==============================================================================
+	// 우클릭 메뉴와 시점, 옵션 되돌리기. (원본 CONTEXT_MENU_ITEMS, resetView, resetOptions)
+	//==============================================================================
+	fn is_pointer_on_graph(&self, position: Vector2) -> bool {
+		self.option_values.borrow().toggles[TOGGLE_GRAPH] && position.x >= self.graph.left && position.x < self.graph.right && position.y >= self.graph.top && position.y < self.graph.bottom
+	}
+
+	fn is_context_menu_showing(&self) -> bool {
+		match &self.ui {
+			Some(ui) => {
+				self.scene_base.get_node_tree()[ui.menu_id].get_component::<UIContextMenu>().map(|menu| menu.is_showing()).unwrap_or(false)
+			}
+			None => {
+				false
+			}
+		}
+	}
+
+	// 옵션 패널과 표정 패널 위인지. (원본 closest("#optionPanel"), closest("#expressionPanel"))
+	fn is_pointer_over_panel(&self, position: Vector2) -> bool {
+		let ui = match &self.ui {
+			Some(ui) => ui,
+			None => {
+				return false;
+			}
+		};
+		let node_tree = self.scene_base.get_node_tree();
+		let options_position = node_tree[ui.options_id].get_local_position();
+		let options_size = node_tree[ui.options_id].get_content_size();
+		if position.x >= options_position.x && position.x <= options_position.x + options_size.x && position.y >= options_position.y && position.y <= options_position.y + options_size.y {
+			return true;
+		}
+		let mut minimum = Vector2::create(f64::MAX, f64::MAX);
+		let mut maximum = Vector2::create(f64::MIN, f64::MIN);
+		for button_id in ui.expression_button_ids.iter() {
+			let button_position = node_tree[*button_id].get_local_position();
+			let button_size = node_tree[*button_id].get_content_size();
+			minimum = Vector2::create(minimum.x.min(button_position.x), minimum.y.min(button_position.y));
+			maximum = Vector2::create(maximum.x.max(button_position.x + button_size.x), maximum.y.max(button_position.y + button_size.y));
+		}
+		position.x >= minimum.x && position.x <= maximum.x && position.y >= minimum.y && position.y <= maximum.y
+	}
+
+	fn open_context_menu(&mut self, pointer_position: Vector2) {
+		let menu_id = match &self.ui {
+			Some(ui) => ui.menu_id,
+			None => {
+				return;
+			}
+		};
+		let view_size = Engine::get_engine().unwrap().get_view_manager().get_view_size();
+		let menu_width = 182.0;
+		let menu_height = CONTEXT_MENU_LABELS.len() as f64 * CONTEXT_MENU_ITEM_HEIGHT + 8.0;
+		let position = Vector2::create(pointer_position.x.min(view_size.x - menu_width - 8.0), pointer_position.y.min(view_size.y - menu_height - 8.0));
+		let mut item_list = Vec::new();
+		for (item_index, label) in CONTEXT_MENU_LABELS.iter().enumerate() {
+			let pending_action = self.pending_menu_action.clone();
+			item_list.push(UIContextMenuItem::create(label, Box::new(move |_context: &mut ComponentContext| {
+				pending_action.set(Some(item_index));
+			})));
+		}
+		self.scene_base.get_node_tree_mut().with_component_mut::<UIContextMenu, _>(menu_id, |context_menu, tree| {
+			context_menu.show(tree, position, item_list);
+		});
+	}
+
+	fn handle_menu_action(&mut self) {
+		match self.pending_menu_action.take() {
+			Some(0) => {
+				self.camera_target_yaw = 0.0;
+				self.camera_target_pitch = CAMERA_DEFAULT_PITCH;
+				self.camera_target_distance = CAMERA_DEFAULT_DISTANCE;
+			}
+			Some(1) => {
+				self.reset_options();
+			}
+			Some(2) => {
+				let mut values = self.option_values.borrow_mut();
+				values.toggles[TOGGLE_GRAPH] = !values.toggles[TOGGLE_GRAPH];
+			}
+			_ => {}
+		}
+		// 확인용: VANILLA_OLDFACE_MENU="x,y" 이면 8 프레임째에 그 자리로 메뉴를 연다. (화면 저장으로 메뉴를 찍을 때)
+		self.menu_test_frame += 1;
+		if self.menu_test_frame == 8 {
+			if let Ok(text) = std::env::var("VANILLA_OLDFACE_MENU") {
+				let numbers: Vec<f64> = text.split(',').filter_map(|part| part.parse::<f64>().ok()).collect();
+				if numbers.len() == 2 {
+					self.open_context_menu(Vector2::create(numbers[0], numbers[1]));
+				}
+			}
+		}
+	}
+
+	// 옵션 되돌리기. (토글과 슬라이더를 기본값으로, 슬라이더 노드 값도 같이)
+	fn reset_options(&mut self) {
+		{
+			let mut values = self.option_values.borrow_mut();
+			values.toggles = TOGGLE_DEFAULTS;
+			for (index, definition) in SLIDER_DEFINITIONS.iter().enumerate() {
+				values.sliders[index] = definition.value;
+			}
+		}
+		let slider_ids = match &self.ui {
+			Some(ui) => ui.slider_ids.clone(),
+			None => {
+				return;
+			}
+		};
+		let node_tree = self.scene_base.get_node_tree_mut();
+		for (index, slider_id) in slider_ids.iter().enumerate() {
+			if let Some(slider) = node_tree[*slider_id].get_component_mut::<UISlider>() {
+				slider.set_value(SLIDER_DEFINITIONS[index].value);
+			}
+		}
+	}
+
+	//==============================================================================
+	// 화면 위 그림. (머티리얼 그래프와 렌더링 정보. 3D 가 그려진 화면 위, UI 노드 아래)
+	//==============================================================================
+	fn draw_overlays(&mut self, graphic: &mut Graphic, engine: &Engine) {
+		let view_size = engine.get_view_manager().get_view_size();
+		let pixel_size = engine.get_view_manager().get_canvas_pixel_size();
+		let values = self.option_values.borrow().clone();
+		graphic.set_global_alpha(1.0);
+		let mut preview_draw_call_count = 0;
+		if values.toggles[TOGGLE_GRAPH] {
+			preview_draw_call_count = self.draw_material_graph(graphic, view_size, pixel_size);
+		}
+		self.statistics.draw_call_count = self.statistics.scene_draw_call_count + preview_draw_call_count;
+		if values.toggles[TOGGLE_HUD] {
+			self.draw_hud(graphic, view_size, pixel_size);
+		}
+		else {
+			self.statistics.hud_top = view_size.y - 18.0;
+		}
+	}
+
+	// 자간 있는 텍스트. (원본 drawSpacedText, 글자마다 간격을 더한다)
+	fn draw_spaced_text(graphic: &mut Graphic, text: &str, x: f64, y: f64, spacing: f64) -> f64 {
+		let mut cursor_x = x;
+		for character in text.chars() {
+			let character_text = character.to_string();
+			graphic.draw_fill_text(&character_text, cursor_x, y);
+			cursor_x += graphic.measure_text(&character_text).width + spacing;
+		}
+		cursor_x - x - spacing
+	}
+
+	fn build_graph_nodes(&self) -> Vec<GraphNode> {
+		let values = self.option_values.borrow().clone();
+		let slider = values.sliders;
+		let resources = self.resources.as_ref().expect("resources");
+		let active_unit_count = resources.current_weights.iter().filter(|weight| **weight > 0.02).count();
+		let make_node = |title: &'static str, is_active: bool, lines: Vec<String>, thumbnail_list: Vec<GraphThumbnail>| GraphNode { title, is_active, lines, thumbnail_list, x: 0.0, y: 0.0, width: 0.0, height: 0.0, text_y: 0.0 };
+		let image = |label: &'static str, image_index: usize| GraphThumbnail { label, image_index: Some(image_index), buffer_index: None, display_scale: 1.0, use_coverage: 0, x: 0.0, y: 0.0, width: 0.0, height: 0.0 };
+		let buffer = |label: &'static str, buffer_index: usize, display_scale: f64, use_coverage: i32| GraphThumbnail { label, image_index: None, buffer_index: Some(buffer_index), display_scale, use_coverage, x: 0.0, y: 0.0, width: 0.0, height: 0.0 };
+		vec![
+			make_node("SKIN TEXTURES", true, vec![], vec![image("ALBEDO", 0), image("NORMAL", 1), image("CAVITY", 2)]),
+			make_node("EYES, TEETH, LASHES AND GROOM", true, vec![String::from("refractive cornea, iris parallax and normal, eyelid occlusion shell"), String::from("kajiya-kay dual lobe hair cards, cutout + blended fringe")], vec![image("EYE", 4), image("TEETH", 5), image("LASHES", 6), image("HAIR", 3)]),
+			make_node("SURFACE", true, vec![String::from("normal = metahuman normal x 1.5 + wrinkle maps x mask weights + micro normal x38"), String::from("cavity = height - blur(height) x micro cavity, roughness from cavity"), String::from("skin F0 0.028, eyes 0.04 glossy")], vec![]),
+			make_node("LIGHTING", true, vec![format!("key 2.6 warm, shadow {}, fill 0.85 cool, rim 1.4", if values.toggles[TOGGLE_SHADOW] { "on" } else { "off" }), String::from("hemisphere ambient, dual-lobe GGX, sheen, env BRDF")], vec![]),
+			make_node("G-BUFFER (MRT RGBA16F)", true, vec![], vec![buffer("IRRADIANCE", 0, 0.5, 1), buffer("ALBEDO", 1, 1.6, 1), buffer("SPECULAR", 2, 3.0, 1)]),
+			make_node("SUBSURFACE AND COMBINE", values.toggles[TOGGLE_SUBSURFACE], vec![String::from("separable SSS, width 8 mm, depth aware"), String::from("irradiance x albedo + specular + background")], vec![buffer("SCATTERED", 3, 0.5, 1), buffer("HDR", 4, 0.72, 0)]),
+			make_node("EXPRESSION", true, vec![format!("preset {}, {} ARKit shapes baked from RigLogic, {} active", EXPRESSION_DEFINITIONS[self.active_expression_index].0, self.statistics.morph_target_count, active_unit_count), String::from("blink from eye blink shapes")], vec![]),
+			make_node("POST", true, vec![format!("bloom {}, exposure {:.2}, ACES, vignette, grain", if values.toggles[TOGGLE_BLOOM] { format!("{:.2}", slider[SLIDER_BLOOM_STRENGTH]) } else { String::from("off") }, slider[SLIDER_EXPOSURE]), format!("resolution scale {}%, {}, {} hair, head lod {}", (slider[SLIDER_RENDER_SCALE] * 100.0).round() as i64, ANTIALIAS_LABELS[slider[SLIDER_ANTIALIAS] as usize].to_lowercase(), HAIR_LEVEL_DEFINITIONS[slider[SLIDER_HAIR_QUALITY] as usize].0.to_lowercase(), 2 - slider[SLIDER_HEAD_LOD] as i64)], vec![]),
+		]
+	}
+
+	// 노드 배치. (패널 좌표계, 내용 영역의 y 는 제목 바 아래 0 부터)
+	fn layout_graph_nodes(graphic: &mut Graphic, node_list: &mut [GraphNode], panel_width: f64, aspect_ratio: f64) -> f64 {
+		let content_width = panel_width - GRAPH_PADDING * 2.0;
+		let text_width = content_width - GRAPH_NODE_PADDING * 2.0;
+		let mut cursor_y = GRAPH_PADDING;
+		for node in node_list.iter_mut() {
+			// 설명을 노드 폭에 맞춰 단어 단위로 줄바꿈한다. (실제 글꼴로 측정)
+			graphic.set_font_string(GRAPH_TEXT_FONT);
+			let mut wrapped_lines = Vec::new();
+			for line in node.lines.iter() {
+				let mut current_line = String::new();
+				for word in line.split(' ') {
+					let candidate = if !current_line.is_empty() { format!("{} {}", current_line, word) } else { word.to_string() };
+					let candidate_width = graphic.measure_text(&candidate).width + candidate.chars().count() as f64 * GRAPH_TEXT_SPACING;
+					if candidate_width > text_width && !current_line.is_empty() {
+						wrapped_lines.push(current_line);
+						current_line = word.to_string();
+					}
+					else {
+						current_line = candidate;
+					}
+				}
+				if !current_line.is_empty() {
+					wrapped_lines.push(current_line);
+				}
+			}
+			node.lines = wrapped_lines;
+			node.x = GRAPH_PADDING;
+			node.y = cursor_y;
+			let mut content_y = node.y + 28.0;
+			if !node.thumbnail_list.is_empty() {
+				let is_image_row = node.thumbnail_list[0].image_index.is_some();
+				let thumbnail_width = if is_image_row { GRAPH_IMAGE_THUMBNAIL_SIZE } else { GRAPH_BUFFER_THUMBNAIL_WIDTH };
+				let thumbnail_height = if is_image_row { GRAPH_IMAGE_THUMBNAIL_SIZE } else { (GRAPH_BUFFER_THUMBNAIL_WIDTH / aspect_ratio).round() };
+				let spacing = ((text_width - node.thumbnail_list.len() as f64 * thumbnail_width) / ((node.thumbnail_list.len() as f64 - 1.0).max(1.0))).clamp(6.0, 30.0);
+				let node_x = node.x;
+				for (thumbnail_index, thumbnail) in node.thumbnail_list.iter_mut().enumerate() {
+					thumbnail.x = node_x + GRAPH_NODE_PADDING + thumbnail_index as f64 * (thumbnail_width + spacing);
+					thumbnail.y = content_y;
+					thumbnail.width = thumbnail_width;
+					thumbnail.height = thumbnail_height;
+				}
+				content_y += thumbnail_height + 20.0;
+			}
+			node.text_y = content_y;
+			content_y += node.lines.len() as f64 * GRAPH_LINE_HEIGHT;
+			node.width = content_width;
+			node.height = content_y - node.y + GRAPH_NODE_PADDING;
+			cursor_y = node.y + node.height + GRAPH_NODE_GAP;
+		}
+		cursor_y - GRAPH_NODE_GAP + GRAPH_PADDING
+	}
+
+	// 머티리얼 그래프. (원본 renderMaterialGraph, 좌측에 텍스처 입력부터 합성, 포스트까지의 흐름을 노드로 표시)
+	// - 텍스처는 축소본 그림, 중간 버퍼는 매 프레임 GL 블릿으로 실시간 표시한다.
+	fn draw_material_graph(&mut self, graphic: &mut Graphic, view_size: Vector2, pixel_size: Vector2) -> u32 {
+		let pixel_ratio = pixel_size.x / view_size.x.max(1.0);
+		let aspect_ratio = pixel_size.x / pixel_size.y.max(1.0);
+		let is_narrow = view_size.x < 640.0;
+		let margin = if is_narrow { 10.0 } else { GRAPH_PANEL_MARGIN };
+		let panel_width = if is_narrow { view_size.x - margin * 2.0 } else { GRAPH_PANEL_WIDTH };
+		let panel_y = if is_narrow { margin + 34.0 + 8.0 } else { margin };
+		let hud_top = if self.statistics.hud_top > 0.0 { self.statistics.hud_top } else { view_size.y - 18.0 };
+		let maximum_height = (GRAPH_TITLE_HEIGHT + 60.0).max(view_size.y.min(hud_top) - panel_y - 12.0);
+		let frame_x = margin;
+		let mut node_list = self.build_graph_nodes();
+		let content_height = OldFaceScene::layout_graph_nodes(graphic, &mut node_list, panel_width, aspect_ratio);
+		let panel_height = (GRAPH_TITLE_HEIGHT + content_height).min(maximum_height);
+		let view_height = panel_height - GRAPH_TITLE_HEIGHT;
+		self.graph.maximum_scroll = (content_height - view_height).max(0.0);
+		self.graph.scroll_offset = self.graph.scroll_offset.clamp(0.0, self.graph.maximum_scroll);
+		self.graph.left = frame_x;
+		self.graph.top = panel_y;
+		self.graph.right = frame_x + panel_width;
+		self.graph.bottom = panel_y + panel_height;
+		let content_top = panel_y + GRAPH_TITLE_HEIGHT;
+		let origin_y = content_top - self.graph.scroll_offset;
+		let content_rect = Rect::create(frame_x, content_top, panel_width, view_height);
+		let active_title_color = create_color(232.0, 201.0, 138.0, 0.95);
+		let inactive_title_color = create_color(232.0, 201.0, 138.0, 0.38);
+		let active_text_color = create_color(242.0, 236.0, 226.0, 0.74);
+		let inactive_text_color = create_color(242.0, 236.0, 226.0, 0.32);
+		let label_color = create_color(242.0, 236.0, 226.0, 0.5);
+
+		// 1. 패널, 제목 바, 노드 배경. (내용은 제목 아래 영역으로 자른다)
+		let panel_rect = Rect::create(frame_x, panel_y, panel_width, panel_height);
+		graphic.set_fill_color(create_color(14.0, 12.0, 14.0, 0.5));
+		graphic.draw_round_rect(panel_rect, 12.0);
+		graphic.set_stroke_color(create_color(242.0, 236.0, 226.0, 0.14));
+		graphic.draw_stroke_round_rect(panel_rect, 12.0, 1.0);
+		graphic.set_text_baseline(TextBaseline::Middle);
+		graphic.set_text_align(TextAlign::Left);
+		graphic.set_font_string(GRAPH_TITLE_FONT);
+		graphic.set_fill_color(active_title_color);
+		OldFaceScene::draw_spaced_text(graphic, "MATERIAL GRAPH", frame_x + 16.0, panel_y + GRAPH_TITLE_HEIGHT * 0.5 + 1.0, GRAPH_TITLE_SPACING);
+		if self.graph.maximum_scroll > 0.0 {
+			graphic.set_font_string(GRAPH_LABEL_FONT);
+			graphic.set_fill_color(label_color);
+			let hint_text = "SCROLL";
+			let hint_width = graphic.measure_text(hint_text).width + hint_text.len() as f64 * GRAPH_LABEL_SPACING;
+			OldFaceScene::draw_spaced_text(graphic, hint_text, frame_x + panel_width - 16.0 - hint_width, panel_y + GRAPH_TITLE_HEIGHT * 0.5 + 1.0, GRAPH_LABEL_SPACING);
+		}
+		graphic.set_stroke_color(create_color(242.0, 236.0, 226.0, 0.1));
+		graphic.draw_line(&[Vector2::create(frame_x, content_top), Vector2::create(frame_x + panel_width, content_top)], 1.0);
+		graphic.begin_clip_rect(content_rect, 0.0);
+		for node in node_list.iter() {
+			let node_rect = Rect::create(frame_x + node.x, origin_y + node.y, node.width, node.height);
+			graphic.set_fill_color(if node.is_active { create_color(255.0, 255.0, 255.0, 0.045) } else { create_color(255.0, 255.0, 255.0, 0.02) });
+			graphic.draw_round_rect(node_rect, 8.0);
+			for thumbnail in node.thumbnail_list.iter() {
+				graphic.set_fill_color(create_color(0.0, 0.0, 0.0, 0.4));
+				graphic.draw_rect(Rect::create(frame_x + thumbnail.x, origin_y + thumbnail.y, thumbnail.width, thumbnail.height));
+			}
+		}
+		graphic.end_clip_rect();
+
+		// 2. 중간 버퍼 블릿과 그림 썸네일. (뷰포트를 썸네일 사각형으로 제한, 버퍼는 내용 영역 안에 온전히 들어온 것만, 그림은 내용 영역으로 자른다)
+		let canvas_width = pixel_size.x as i32;
+		let canvas_height = pixel_size.y as i32;
+		let mut buffer_blit_list: Vec<(GlTexture, [i32; 4], f64, i32)> = Vec::new();
+		let mut image_blit_list: Vec<(GlTexture, [i32; 4])> = Vec::new();
+		let resources = self.resources.as_ref().expect("resources");
+		for node in node_list.iter() {
+			for thumbnail in node.thumbnail_list.iter() {
+				let thumbnail_top = origin_y + thumbnail.y;
+				let viewport = [((frame_x + thumbnail.x) * pixel_ratio).round() as i32, (pixel_size.y - (thumbnail_top + thumbnail.height) * pixel_ratio).round() as i32, (thumbnail.width * pixel_ratio).round() as i32, (thumbnail.height * pixel_ratio).round() as i32];
+				if let Some(buffer_index) = thumbnail.buffer_index {
+					if thumbnail_top < content_top || thumbnail_top + thumbnail.height > content_top + view_height {
+						continue;
+					}
+					if let Some(texture) = self.preview_texture_list[buffer_index] {
+						buffer_blit_list.push((texture, viewport, thumbnail.display_scale, thumbnail.use_coverage));
+					}
+				}
+				else if let Some(image_index) = thumbnail.image_index {
+					if thumbnail_top + thumbnail.height < content_top || thumbnail_top > content_top + view_height {
+						continue;
+					}
+					image_blit_list.push((resources.thumbnail_texture_list[image_index], viewport));
+				}
+			}
+		}
+		let scissor = [(frame_x * pixel_ratio).round() as i32, (pixel_size.y - (content_top + view_height) * pixel_ratio).round() as i32, (panel_width * pixel_ratio).round() as i32, (view_height * pixel_ratio).round() as i32];
+		let preview_draw_call_count = graphic.run_external_pass(false, |gl| {
+			let mut drawn_count = 0;
+			unsafe {
+				gl.disable(glow::BLEND);
+				resources.preview_pass.use_program(gl);
+				gl.uniform_1_i32(resources.preview_pass.get_uniform_location(gl, "sourceTexture").as_ref(), 0);
+				gl.active_texture(glow::TEXTURE0);
+				for (texture, viewport, display_scale, use_coverage) in buffer_blit_list.iter() {
+					gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+					gl.uniform_1_f32(resources.preview_pass.get_uniform_location(gl, "displayScale").as_ref(), *display_scale as f32);
+					gl.uniform_1_i32(resources.preview_pass.get_uniform_location(gl, "useCoverage").as_ref(), *use_coverage);
+					gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+					resources.preview_pass.draw(gl);
+					drawn_count += 1;
+				}
+				gl.enable(glow::BLEND);
+				gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+				gl.enable(glow::SCISSOR_TEST);
+				gl.scissor(scissor[0], scissor[1], scissor[2], scissor[3]);
+				resources.thumbnail_pass.use_program(gl);
+				gl.uniform_1_i32(resources.thumbnail_pass.get_uniform_location(gl, "sourceTexture").as_ref(), 0);
+				gl.uniform_1_f32(resources.thumbnail_pass.get_uniform_location(gl, "alphaScale").as_ref(), 1.0);
+				for (texture, viewport) in image_blit_list.iter() {
+					gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+					gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+					resources.thumbnail_pass.draw(gl);
+				}
+				gl.disable(glow::SCISSOR_TEST);
+				gl.disable(glow::BLEND);
+				gl.bind_texture(glow::TEXTURE_2D, None);
+				gl.viewport(0, 0, canvas_width, canvas_height);
+			}
+			drawn_count
+		});
+
+		// 3. 테두리, 제목, 설명, 연결선. (자른다)
+		Engine::get_engine().unwrap().get_view_manager().apply_view_rect(graphic);
+		graphic.set_global_alpha(1.0);
+		graphic.set_text_baseline(TextBaseline::Middle);
+		graphic.set_text_align(TextAlign::Left);
+		graphic.begin_clip_rect(content_rect, 0.0);
+		for (node_index, node) in node_list.iter().enumerate() {
+			let node_x = frame_x + node.x;
+			let node_y = origin_y + node.y;
+			for thumbnail in node.thumbnail_list.iter() {
+				let thumbnail_x = frame_x + thumbnail.x;
+				let thumbnail_y = origin_y + thumbnail.y;
+				graphic.set_stroke_color(create_color(242.0, 236.0, 226.0, 0.18));
+				graphic.draw_stroke_rect(Rect::create(thumbnail_x, thumbnail_y, thumbnail.width, thumbnail.height), 1.0);
+				graphic.set_font_string(GRAPH_LABEL_FONT);
+				graphic.set_fill_color(label_color);
+				OldFaceScene::draw_spaced_text(graphic, thumbnail.label, thumbnail_x, thumbnail_y + thumbnail.height + 9.0, GRAPH_LABEL_SPACING);
+			}
+			graphic.set_font_string(GRAPH_NODE_TITLE_FONT);
+			graphic.set_fill_color(if node.is_active { active_title_color } else { inactive_title_color });
+			OldFaceScene::draw_spaced_text(graphic, node.title, node_x + GRAPH_NODE_PADDING, node_y + 14.0, GRAPH_NODE_TITLE_SPACING);
+			graphic.set_font_string(GRAPH_TEXT_FONT);
+			graphic.set_fill_color(if node.is_active { active_text_color } else { inactive_text_color });
+			for (line_index, line) in node.lines.iter().enumerate() {
+				OldFaceScene::draw_spaced_text(graphic, line, node_x + GRAPH_NODE_PADDING, origin_y + node.text_y + line_index as f64 * GRAPH_LINE_HEIGHT + 9.0, GRAPH_TEXT_SPACING);
+			}
+			if node_index < node_list.len() - 1 {
+				let connector_x = node_x + 22.0;
+				let connector_top = node_y + node.height;
+				graphic.set_stroke_color(create_color(232.0, 201.0, 138.0, 0.5));
+				graphic.draw_line(&[Vector2::create(connector_x, connector_top), Vector2::create(connector_x, connector_top + GRAPH_NODE_GAP)], 1.0);
+				graphic.set_fill_color(create_color(232.0, 201.0, 138.0, 0.8));
+				graphic.draw_circle(Vector2::create(connector_x, connector_top + GRAPH_NODE_GAP * 0.5), 1.8);
+			}
+		}
+		graphic.end_clip_rect();
+		preview_draw_call_count
+	}
+
+	// 렌더링 정보. (원본 renderHud, 우측 하단. 홈 링크와 겹치면 그 위로)
+	fn draw_hud(&mut self, graphic: &mut Graphic, view_size: Vector2, pixel_size: Vector2) {
+		// 메모리 수치는 1초에 한 번 표본을 읽고, 직전 표시값 대비 5% 넘게 변할 때만 바꾼다.
+		if self.statistics.memory_sample_instant.map(|instant| instant.elapsed().as_secs_f64() >= 1.0).unwrap_or(true) {
+			self.statistics.memory_sample_instant = Some(web_time::Instant::now());
+			let gpu_memory_bytes = self.estimate_gpu_memory_bytes();
+			if (gpu_memory_bytes - self.statistics.gpu_memory_bytes).abs() > self.statistics.gpu_memory_bytes * 0.05 {
+				self.statistics.gpu_memory_bytes = gpu_memory_bytes;
+				self.statistics.gpu_memory_text = format!("{:.0} MB", gpu_memory_bytes / 1048576.0);
+			}
+		}
+		let resources = self.resources.as_ref().expect("resources");
+		let row_height = 16.0;
+		let mut row_list: Vec<(String, String)> = vec![
+			(String::from("fps"), format!("{}", (1.0 / self.statistics.smoothed_frame_seconds.max(0.0001)).round() as i64)),
+			(String::from("display"), format!("{} x {}", pixel_size.x as i64, pixel_size.y as i64)),
+			(String::from("render buffer"), format!("{} x {}", resources.scene_render_target.get_width(), resources.scene_render_target.get_height())),
+			(String::from("triangles"), format_with_commas(self.statistics.triangle_count.round() as u64)),
+			(String::from("vertices"), format_with_commas(self.statistics.vertex_count as u64)),
+			(String::from("draw calls"), self.statistics.draw_call_count.to_string()),
+			(String::from("morph targets"), self.statistics.morph_target_count.to_string()),
+			(String::from("cpu frame"), format!("{:.2} ms", self.statistics.cpu_frame_milliseconds)),
+		];
+		// 읽을 수 없는 값의 행은 아예 만들지 않는다. (GPU 타이머가 없으면 패스 시간, 러스트에는 JS 힙이 없다)
+		if self.pass_timer.is_supported {
+			row_list.push((String::from("gpu shadow"), self.pass_timer.format("shadow")));
+			row_list.push((String::from("gpu scene"), self.pass_timer.format("scene")));
+			row_list.push((String::from("gpu sss + ao"), self.pass_timer.format("scatter")));
+			row_list.push((String::from("gpu post"), self.pass_timer.format("post")));
+		}
+		row_list.push((String::from("gpu memory (est.)"), self.statistics.gpu_memory_text.clone()));
+		let is_narrow_screen = view_size.x < 640.0;
+		if is_narrow_screen {
+			row_list.truncate(4);
+		}
+		let panel_width = if is_narrow_screen { 150.0 } else { 214.0 };
+		let panel_height = row_list.len() as f64 * row_height + 18.0;
+		let panel_x = view_size.x - panel_width - 18.0;
+		let mut panel_y = view_size.y - panel_height - 18.0;
+		if let Some(ui) = &self.ui {
+			let node_tree = self.scene_base.get_node_tree();
+			let home_position = node_tree[ui.home_id].get_local_position();
+			let home_size = node_tree[ui.home_id].get_content_size();
+			if home_position.x + home_size.x > panel_x && home_position.y < panel_y + panel_height {
+				panel_y = home_position.y - panel_height - 12.0;
+			}
+		}
+		self.statistics.hud_top = panel_y;
+		let panel_rect = Rect::create(panel_x, panel_y, panel_width, panel_height);
+		graphic.set_fill_color(create_color(14.0, 12.0, 14.0, 0.55));
+		graphic.draw_round_rect(panel_rect, 10.0);
+		graphic.set_stroke_color(create_color(242.0, 236.0, 226.0, 0.14));
+		graphic.draw_stroke_round_rect(panel_rect, 10.0, 1.0);
+		graphic.set_font_string("400 10.5px default");
+		graphic.set_text_baseline(TextBaseline::Middle);
+		for (row_index, (name, value)) in row_list.iter().enumerate() {
+			let row_y = panel_y + 9.0 + row_height * row_index as f64 + row_height * 0.5;
+			graphic.set_text_align(TextAlign::Left);
+			graphic.set_fill_color(create_color(242.0, 236.0, 226.0, 0.45));
+			graphic.draw_fill_text(name, panel_x + 14.0, row_y);
+			graphic.set_text_align(TextAlign::Right);
+			graphic.set_fill_color(create_color(242.0, 236.0, 226.0, 0.88));
+			graphic.draw_fill_text(value, panel_x + panel_width - 14.0, row_y);
+		}
 	}
 }
 
@@ -1707,6 +2674,7 @@ impl Scene for OldFaceScene {
 		match self.create_resources(graphic.get_gl()) {
 			Ok(resources) => {
 				self.load_seconds = load_start_instant.elapsed().as_secs_f64();
+				self.pass_timer = PassTimer::new(graphic.get_gl());
 				println!("oldface: 준비 {:.2}초, 모델 {}", self.load_seconds, resources.model_cache.len());
 				self.resources = Some(resources);
 			}
@@ -1722,6 +2690,7 @@ impl Scene for OldFaceScene {
 	//==============================================================================
 	fn tick(&mut self, time_delta: f64) {
 		let engine = Engine::get_engine().unwrap();
+		self.frame_start_instant = web_time::Instant::now();
 		let view_size = engine.get_view_manager().get_view_size();
 		self.scene_base.get_root_mut().set_content_size(view_size);
 		self.layout_ui(view_size);
@@ -1739,7 +2708,9 @@ impl Scene for OldFaceScene {
 		};
 		self.elapsed_time += delta_time;
 		let elapsed_time = self.elapsed_time;
+		self.statistics.smoothed_frame_seconds = self.statistics.smoothed_frame_seconds * 0.92 + delta_time * 0.08;
 		self.handle_input(engine);
+		self.handle_menu_action();
 
 		// 카메라. (목표값 지수 접근)
 		let camera_approach = (delta_time * 5.0).min(1.0);
@@ -1762,6 +2733,11 @@ impl Scene for OldFaceScene {
 		self.head_pitch += (wander_pitch.clamp(-0.35, 0.35) - self.head_pitch) * head_approach;
 
 		self.apply_option_changes(engine);
+		self.poll_pending_models(engine);
+		self.refresh_statistics();
+		if let Some(graphic) = engine.get_graphic() {
+			self.pass_timer.poll(graphic.get_gl());
+		}
 		self.refresh_option_labels();
 		let values = self.option_values.borrow().clone();
 		if let Some(resources) = &mut self.resources {
@@ -1792,7 +2768,12 @@ impl Scene for OldFaceScene {
 	fn draw(&mut self, graphic: &mut Graphic) {
 		let engine = Engine::get_engine().unwrap();
 		engine.get_view_manager().apply_view_rect(graphic);
+		if self.resources.is_some() {
+			self.draw_overlays(graphic, engine);
+			engine.get_view_manager().apply_view_rect(graphic);
+		}
 		self.scene_base.draw(graphic);
+		self.statistics.cpu_frame_milliseconds = self.statistics.cpu_frame_milliseconds * 0.9 + self.frame_start_instant.elapsed().as_secs_f64() * 1000.0 * 0.1;
 		engine.get_view_manager().apply_canvas_native_rect(graphic);
 		if self.resources.is_none() {
 			let canvas_native_size = engine.get_view_manager().get_canvas_native_size();
