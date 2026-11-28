@@ -343,6 +343,7 @@ VANILLA_CAPTURE_PATH=shots/uigallery_{frame}.png VANILLA_CAPTURE_FRAMES=60 VANIL
 | `particleeffects` | 파티클 이펙트 열여덟(불, 분수, 눈, 비, 색종이, 폭발, 불꽃놀이, 별가루, 불씨, 거품, 소용돌이, 마법 궤적, 유성우, 번개, 은하, 군집, 화산, 워프) |
 | `spriteeffects` | 스프라이트 셰이더, 화면 효과, 연출 스물다섯을 목록에서 골라 보기 |
 | `uisample` | UIDocument 로 uiasset(JSON) 읽어 화면 짓기 |
+| `uishowcase` | VANILLA CONSOLE 대시보드 앱(대시보드, 스토어, 설정, 컴포넌트 네 화면, 테마 바꾸기, 팝업, 토스트, 문맥 메뉴, 끌기 칩, 반응형 배치) |
 | `misctour` | 카메라, 길찾기, 대화 시스템, 화면 흔들림, 플로팅 텍스트 |
 | `timelineshowcase` | 타임라인 문서 재생 |
 | `modelviewer` | 스키닝 3D(glTF, FBX), 그림자, 블룸 |

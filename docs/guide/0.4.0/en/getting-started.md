@@ -123,6 +123,7 @@ cargo run --release --example modelviewer
 | `particleeffects` | Eighteen particle effects |
 | `spriteeffects` | Sprite shaders, screen effects and staging |
 | `uisample` | Load a uiasset with UIDocument |
+| `uishowcase` | A dashboard app (six uiassets, themes, popups, responsive layout) |
 | `misctour` | Camera, path finding, dialogue system, screen shake, floating text |
 | `timelineshowcase` | Timeline document playback |
 | `modelviewer` | Skinned 3D (glTF, FBX), shadows, bloom |
