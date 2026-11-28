@@ -1954,6 +1954,8 @@ thread_local! {
 	/// 시험이 병렬 컴파일 확장 없이도 맡기는 길로 미리 짓게 할 때.
 	pub(crate) static FORCE_DEFERRED_PREWARM: Cell<bool> = const { Cell::new(false) };
 	pub(crate) static BUILT_FEATURE_VARIANTS: Cell<u32> = const { Cell::new(0) };
+	/// 시험이 미리 짓기가 GPU 로 명령을 보낸(flush) 횟수를 셀 때.
+	pub(crate) static PREWARM_FLUSH_COUNT: Cell<u32> = const { Cell::new(0) };
 }
 
 // 시험이 세는 올림 하나 더하기.
@@ -3563,6 +3565,10 @@ impl ToonRenderer {
 				unit_list.push(PendingKey::Variant(variant_key));
 			}
 		}
+		if !unit_list.is_empty() {
+			// 맡긴 컴파일과 링크 명령을 GPU 로 보낸다. (그리지 않는 프레임에는 명령이 저절로 흘러가지 않아 병렬 짓기가 시작되지 않을 수 있다)
+			ToonRenderer::flush_prewarm(gl);
+		}
 		let mut prewarm = ToonProgramPrewarm { unit_list, is_ready: false };
 		prewarm.step(gl, self);
 		prewarm
@@ -3574,6 +3580,17 @@ impl ToonRenderer {
 	#[cfg(test)]
 	pub(crate) fn get_pending_build_count(&self) -> usize {
 		self.pending_build_table.borrow().len()
+	}
+
+	//==============================================================================
+	/// 맡긴 컴파일과 링크 명령을 GPU 로 보내기. (flush, 기다리지 않는다)
+	//==============================================================================
+	fn flush_prewarm(gl: &crate::GlContext) {
+		#[cfg(test)]
+		PREWARM_FLUSH_COUNT.with(|count| count.set(count.get() + 1));
+		unsafe {
+			gl.flush();
+		}
 	}
 
 	//==============================================================================
@@ -3678,6 +3695,10 @@ impl ToonRenderer {
 			else {
 				index += 1;
 			}
+		}
+		if !unit_list.is_empty() {
+			// 그리지 않는 프레임에도 맡긴 짓기가 나아가게 명령을 보낸다.
+			ToonRenderer::flush_prewarm(gl);
 		}
 		unit_list.is_empty()
 	}
