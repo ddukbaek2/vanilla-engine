@@ -713,6 +713,7 @@ fn measure_spaced_text(canvas: &mut Canvas2D, text: &str, font: &str, letter_spa
 
 // CSS 처럼 그림자를 먼저 깔고 글을 올려 한 줄을 가운데 맞춤으로 그린다. (기준선은 alphabetic, 좌표는 CSS 픽셀, 글 조각마다 색이 다를 수 있다)
 fn draw_css_text(canvas: &mut Canvas2D, device_scale: f64, run_list: &[(&str, Color)], font: &str, letter_spacing: f64, center_x: f64, baseline_y: f64, shadow_list: &[TextShadow]) {
+	let baseline_y = baseline_y.round();
 	canvas.set_font(font);
 	canvas.set_text_align(CanvasTextAlign::Left);
 	canvas.set_text_baseline(CanvasTextBaseline::Alphabetic);
@@ -1424,12 +1425,14 @@ impl NeonHorizonScene {
 					let baseline_y = title_top + line_index as f64 * title_line_height + title_ascent;
 					draw_css_text(canvas, device_scale, &[(line_text, title_color)], &title_font, title_letter_spacing, if line_index == 0 { center_x } else { center_x - title_letter_spacing * 0.5 }, baseline_y, &title_shadow_list);
 				}
-				let mut gradient = canvas.create_linear_gradient(center_x - divider_width * 0.5, 0.0, center_x + divider_width * 0.5, 0.0);
-				gradient.add_color_stop(0.0, rgba(243.0, 229.0, 171.0, 0.0));
-				gradient.add_color_stop(0.5, rgba(243.0, 229.0, 171.0, 0.7));
-				gradient.add_color_stop(1.0, rgba(243.0, 229.0, 171.0, 0.0));
-				canvas.set_fill_style(gradient);
-				canvas.fill_rect(center_x - divider_width * 0.5, divider_y.round(), divider_width, 1.0);
+				// CSS linear-gradient(90deg, transparent, 색, transparent): 기기 픽셀 한 칸씩 알파를 깐다.
+				let divider_step_count = (divider_width * device_scale).round().max(1.0) as i32;
+				for step_index in 0..divider_step_count {
+					let step_ratio = (step_index as f64 + 0.5) / divider_step_count as f64;
+					let step_alpha = 0.7 * (1.0 - (step_ratio * 2.0 - 1.0).abs());
+					canvas.set_fill_style(rgba(243.0, 229.0, 171.0, step_alpha));
+					canvas.fill_rect(center_x - divider_width * 0.5 + step_index as f64 / device_scale, divider_y.round(), 1.0 / device_scale, 1.0);
+				}
 				draw_css_text(canvas, device_scale, &[("VANILLA ENGINE", sub_color)], &sub_font, sub_letter_spacing, center_x, sub_top + sub_ascent, &[TextShadow { color: shadow_dark, offset_y: 0.0, blur: 10.0 }]);
 			});
 			self.overlay_image_table.insert(title_key.clone(), image);

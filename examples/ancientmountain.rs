@@ -20,7 +20,7 @@ use std::rc::Rc;
 use vanilla::core::fullscreenpass::FullscreenPass;
 use vanilla::core::graphic::{GlTexture, GlVertexArray};
 use vanilla::core::shaderprogram::ShaderProgram;
-use vanilla::{BlobAsset, BloomEffect, Canvas2D, CanvasTextAlign, CanvasTextBaseline, Color, Engine, EngineConfiguration, GlContext, Graphic, Image, ImageDescription, ImageSource, Material, Matrix4, MouseButton, Rect, RenderTarget, Scene, SceneBase, ShadowMap, SkinnedModel, SkinnedModelLoadHandle, SkinnedModelRenderer, TextAlign, TextBaseline, TouchPhase, Vector2, Vector3, VirtualPad};
+use vanilla::{BloomEffect, Canvas2D, CanvasTextAlign, CanvasTextBaseline, Color, Engine, EngineConfiguration, GlContext, Graphic, Image, ImageAsset, ImageDescription, ImageSource, Material, Matrix4, MouseButton, Rect, RenderTarget, Scene, SceneBase, ShadowMap, SkinnedModel, SkinnedModelLoadHandle, SkinnedModelRenderer, TextAlign, TextBaseline, TouchPhase, Vector2, Vector3, VirtualPad};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -880,7 +880,7 @@ struct AncientMountainScene {
 	scene_base: SceneBase,
 	character_load_handle: Option<SkinnedModelLoadHandle>,
 	fox_load_handle: Option<SkinnedModelLoadHandle>,
-	texture_blob_list: Vec<BlobAsset>,
+	texture_asset_list: Vec<ImageAsset>,
 	resources: Option<MountainResources>,
 	load_error_message: Option<String>,
 	world: World,
@@ -983,7 +983,7 @@ impl AncientMountainScene {
 			scene_base: SceneBase::new(),
 			character_load_handle: None,
 			fox_load_handle: None,
-			texture_blob_list: Vec::new(),
+			texture_asset_list: Vec::new(),
 			resources: None,
 			load_error_message: None,
 			rock_list: Vec::new(),
@@ -1132,7 +1132,7 @@ impl AncientMountainScene {
 	//==============================================================================
 	// GL 리소스 만들기. (프로그램, 지형 메시, 큐브, 바위, 블롭 그림자, 텍스처, 모델, 렌더 타겟)
 	//==============================================================================
-	fn create_resources(&mut self, engine: &Engine, gl: &GlContext) -> Result<MountainResources, String> {
+	fn create_resources(&mut self, engine: &Engine, gl: &GlContext, engine_texture_list: &[Option<GlTexture>]) -> Result<MountainResources, String> {
 		let sky_pass = FullscreenPass::new(gl, SKY_FRAGMENTSHADER_SOURCE)?;
 		let composite_pass = FullscreenPass::new(gl, COMPOSITE_FRAGMENTSHADER_SOURCE)?;
 		let terrain_fragment_source = format!("{}{}{}", TERRAIN_FRAGMENTSHADER_HEAD, SHADOW_SAMPLING_GLSL, TERRAIN_FRAGMENTSHADER_BODY);
@@ -1287,13 +1287,20 @@ impl AncientMountainScene {
 		};
 
 		// 텍스처. (미러 반복 랩 모드, 어떤 이미지든 이음매 없이 타일링)
-		// - 머티리얼의 이미지 해석 길은 JPEG 를 풀지 못하므로(image 크레이트에 jpeg 기능이 꺼져 있다) 엔진 Image 의 JPEG 해독기로 풀어 픽셀로 넘긴다.
+		// - 머티리얼의 이미지 해석 길은 JPEG 를 풀지 못하므로(image 크레이트에 jpeg 기능이 꺼져 있다) 엔진 ImageAsset 이 푼 그림(데스크탑은 엔진 JPEG 해독기, 웹은 브라우저)의 픽셀로 넘긴다.
 		let mut texture_list: Vec<GlTexture> = Vec::new();
 		for (texture_index, texture_name) in TEXTURE_NAME_LIST.iter().enumerate() {
-			let texture_bytes = self.texture_blob_list[texture_index].get_blob().ok_or_else(|| format!("텍스처를 아직 받는 중: {}", texture_name))?;
-			let decoded_image = Image::load_from_memory(&texture_bytes)?;
-			let image_description = ImageDescription { source: Some(Rc::new(ImageSource { width: decoded_image.get_width(), height: decoded_image.get_height(), pixels: decoded_image.get_pixels().to_vec() })), ..ImageDescription::default() };
-			let texture = Material::create_texture(gl, Some(&image_description), [128, 128, 128, 255])?;
+			let texture = match engine_texture_list[texture_index] {
+				// 웹: 브라우저가 푼 그림은 화소를 엔진이 들고 있지 않으니(GPU 에 올린 뒤 놓는다) 엔진이 올린 텍스처를 그대로 쓴다.
+				Some(engine_texture) => {
+					engine_texture
+				}
+				None => {
+					let decoded_image = self.texture_asset_list[texture_index].get_image().ok_or_else(|| format!("텍스처를 아직 받는 중: {}", texture_name))?;
+					let image_description = ImageDescription { source: Some(Rc::new(ImageSource { width: decoded_image.get_width(), height: decoded_image.get_height(), pixels: decoded_image.get_pixels().to_vec() })), ..ImageDescription::default() };
+					Material::create_texture(gl, Some(&image_description), [128, 128, 128, 255])?
+				}
+			};
 			unsafe {
 				gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::MIRRORED_REPEAT as i32);
@@ -2333,12 +2340,14 @@ impl AncientMountainScene {
 					let baseline_y = title_top + line_index as f64 * title_line_height + title_ascent;
 					draw_css_text(canvas, device_scale, &[(line_text, title_color)], &title_font, title_letter_spacing, if line_index == 0 { center_x } else { center_x - title_letter_spacing * 0.5 }, baseline_y, &title_shadow_list);
 				}
-				let mut gradient = canvas.create_linear_gradient(center_x - divider_width * 0.5, 0.0, center_x + divider_width * 0.5, 0.0);
-				gradient.add_color_stop(0.0, rgba(247.0, 243.0, 232.0, 0.0));
-				gradient.add_color_stop(0.5, rgba(247.0, 243.0, 232.0, 0.75));
-				gradient.add_color_stop(1.0, rgba(247.0, 243.0, 232.0, 0.0));
-				canvas.set_fill_style(gradient);
-				canvas.fill_rect(center_x - divider_width * 0.5, divider_y.round(), divider_width, 1.0);
+				// CSS linear-gradient(90deg, transparent, 색, transparent): 기기 픽셀 한 칸씩 알파를 깐다.
+				let divider_step_count = (divider_width * device_scale).round().max(1.0) as i32;
+				for step_index in 0..divider_step_count {
+					let step_ratio = (step_index as f64 + 0.5) / divider_step_count as f64;
+					let step_alpha = 0.75 * (1.0 - (step_ratio * 2.0 - 1.0).abs());
+					canvas.set_fill_style(rgba(247.0, 243.0, 232.0, step_alpha));
+					canvas.fill_rect(center_x - divider_width * 0.5 + step_index as f64 / device_scale, divider_y.round(), 1.0 / device_scale, 1.0);
+				}
 				draw_css_text(canvas, device_scale, &[("VANILLA ENGINE", sub_color)], &sub_font, sub_letter_spacing, center_x, sub_top + sub_ascent, &[TextShadow { color: shadow_dark, offset_y: 1.0, blur: 8.0 }]);
 			});
 			self.overlay_image_table.insert(title_key.clone(), image);
@@ -2428,6 +2437,7 @@ fn measure_spaced_text(canvas: &mut Canvas2D, text: &str, font: &str, letter_spa
 
 // CSS 처럼 그림자를 먼저 깔고 글을 올려 한 줄을 가운데 맞춤으로 그린다. (기준선은 alphabetic, 좌표는 CSS 픽셀, 글 조각마다 색이 다를 수 있다)
 fn draw_css_text(canvas: &mut Canvas2D, device_scale: f64, run_list: &[(&str, Color)], font: &str, letter_spacing: f64, center_x: f64, baseline_y: f64, shadow_list: &[TextShadow]) {
+	let baseline_y = baseline_y.round();
 	canvas.set_font(font);
 	canvas.set_text_align(CanvasTextAlign::Left);
 	canvas.set_text_baseline(CanvasTextBaseline::Alphabetic);
@@ -2615,10 +2625,10 @@ impl Scene for AncientMountainScene {
 		self.character_load_handle = Some(character_load_handle);
 		self.fox_load_handle = Some(fox_load_handle);
 		for texture_name in TEXTURE_NAME_LIST {
-			let mut texture_blob = BlobAsset::new();
-			let texture_load_handle = texture_blob.load(engine, texture_name);
+			let mut texture_asset = ImageAsset::new();
+			let texture_load_handle = texture_asset.load(engine, texture_name);
 			self.scene_base.track_load_handle(&texture_load_handle);
-			self.texture_blob_list.push(texture_blob);
+			self.texture_asset_list.push(texture_asset);
 		}
 	}
 
@@ -2626,7 +2636,7 @@ impl Scene for AncientMountainScene {
 	// 초기화. (다 받은 뒤 GL 리소스를 만든다)
 	//==============================================================================
 	fn initialize(&mut self, engine: &Engine) {
-		let graphic = match engine.get_graphic() {
+		let mut graphic = match engine.get_graphic_mut() {
 			Some(graphic) => {
 				graphic
 			}
@@ -2634,7 +2644,12 @@ impl Scene for AncientMountainScene {
 				return;
 			}
 		};
-		match self.create_resources(engine, graphic.get_gl()) {
+		let mut engine_texture_list: Vec<Option<GlTexture>> = Vec::new();
+		for texture_index in 0..TEXTURE_NAME_LIST.len() {
+			let engine_texture = if cfg!(target_arch = "wasm32") { self.texture_asset_list[texture_index].get_image().and_then(|image| graphic.get_image_texture(&image)) } else { None };
+			engine_texture_list.push(engine_texture);
+		}
+		match self.create_resources(engine, graphic.get_gl(), &engine_texture_list) {
 			Ok(resources) => {
 				self.resources = Some(resources);
 			}
