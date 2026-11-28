@@ -1645,6 +1645,10 @@ impl ScreenEffect {
 			}
 			Err(error) => {
 				eprintln!("ScreenEffect: pass \"{}\" failed: {}", pass_name, error);
+				// 컨텍스트를 잃은 탓이면 알리지도 기억하지도 않는다. (되살린 뒤 다시 짓는다)
+				if !crate::core::shaderprogram::report_shader_build_failure(gl, &format!("ScreenEffect.{}", pass_name), &error) {
+					return;
+				}
 				None
 			}
 		};

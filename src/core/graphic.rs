@@ -1842,56 +1842,9 @@ impl Graphic {
 		crate::core::glstatecache::attach(&gl);
 		// 읽은 그림을 미리 올릴 수 있는 주인으로 알린다. (원본 DecodedImageStore.registerOwner)
 		crate::core::decodedimagestore::register_owner(&gl);
-		// 셰이더 프로그램.
-		let shader_program = ShaderProgram::new(GlContext::from_context(&gl), VERTEXSHADER_SOURCE, FRAGMENTSHADER_SOURCE)?;
-
-		// 버텍스 어레이 / 버텍스 버퍼. (스트리밍, 인터리브 x/y/u/v)
+		// 기본 셰이더, 버텍스 어레이, 버텍스 버퍼, 흰 텍스처, 고정 렌더 상태.
 		let vertex_data = vec![0.0f32; VERTEX_CAPACITY * FLOATS_PER_VERTEX];
-		let (vertex_array, vertex_buffer, white_texture) = unsafe {
-			let vertex_array = crate::core::glstatecache::create_vertex_array(&gl)?;
-			let vertex_buffer = crate::core::glstatecache::create_buffer(&gl)?;
-			crate::core::glstatecache::bind_vertex_array(&gl, Some(vertex_array));
-			crate::core::glstatecache::bind_buffer(&gl, glow::ARRAY_BUFFER, Some(vertex_buffer));
-			gl.buffer_data_size(glow::ARRAY_BUFFER, (vertex_data.len() * 4) as i32, glow::DYNAMIC_DRAW);
-			let stride_bytes = (FLOATS_PER_VERTEX * 4) as i32;
-			let vertex_position_location = shader_program.get_attribute_location(GlContext::from_context(&gl), "vertexPosition");
-			let vertex_texture_coordinate_location = shader_program.get_attribute_location(GlContext::from_context(&gl), "vertexTextureCoordinate");
-			if let Some(vertex_position_location) = vertex_position_location {
-				gl.enable_vertex_attrib_array(vertex_position_location);
-				gl.vertex_attrib_pointer_f32(vertex_position_location, 2, glow::FLOAT, false, stride_bytes, 0);
-			}
-			if let Some(vertex_texture_coordinate_location) = vertex_texture_coordinate_location {
-				gl.enable_vertex_attrib_array(vertex_texture_coordinate_location);
-				gl.vertex_attrib_pointer_f32(vertex_texture_coordinate_location, 2, glow::FLOAT, false, stride_bytes, 8);
-			}
-			crate::core::glstatecache::bind_vertex_array(&gl, None);
-
-			// 단색 도형용 1x1 흰색 텍스처.
-			let white_texture = crate::core::glstatecache::create_texture(&gl)?;
-			crate::core::glstatecache::bind_texture(&gl, glow::TEXTURE_2D, Some(white_texture));
-			let white_pixel: [u8; 4] = [255, 255, 255, 255];
-			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, 1, 1, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&white_pixel)));
-			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
-			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
-
-			// 고정 렌더 상태.
-			crate::core::glstatecache::enable(&gl, glow::BLEND);
-			crate::core::glstatecache::blend_func(&gl, glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
-			crate::core::glstatecache::disable(&gl, glow::DEPTH_TEST);
-			crate::core::glstatecache::disable(&gl, glow::CULL_FACE);
-
-			(vertex_array, vertex_buffer, white_texture)
-		};
-
-		// 텍스처 유닛 고정.
-		shader_program.use_program(GlContext::from_context(&gl));
-		let main_texture_location = shader_program.get_uniform_location(GlContext::from_context(&gl), "mainTexture");
-		let texture_lod_bias_location = shader_program.get_uniform_location(GlContext::from_context(&gl), "textureLodBias");
-		unsafe {
-			gl.uniform_1_i32(main_texture_location.as_ref(), 0);
-			gl.uniform_1_f64(texture_lod_bias_location.as_ref(), 0.0);
-			crate::core::glstatecache::active_texture(&gl, glow::TEXTURE0);
-		}
+		let (shader_program, vertex_array, vertex_buffer, white_texture) = Graphic::create_core_resources(&gl, &vertex_data)?;
 
 		Ok(Graphic {
 			gl,
@@ -2019,6 +1972,70 @@ impl Graphic {
 			retained_batch_count: 0,
 			last_frame_retained_batch_count: 0,
 		})
+	}
+
+	//==============================================================================
+	/// 기본 자원 짓기. (기본 셰이더, 버텍스 어레이와 버퍼, 흰 텍스처, 고정 렌더 상태. 생성과 컨텍스트 되살림이 같은 길로 짓는다, 원본 createCoreResources)
+	///
+	/// # 인자
+	/// - `gl`: 그릴 GL 컨텍스트.
+	/// - `vertex_data`: 버텍스 버퍼 크기를 정하는 버텍스 배열.
+	///
+	/// # 돌려줌
+	/// (기본 셰이더, 버텍스 어레이, 버텍스 버퍼, 흰 텍스처). 짓지 못하면 그 오류 글.
+	//==============================================================================
+	fn create_core_resources(gl: &Rc<glow::Context>, vertex_data: &[f32]) -> Result<(ShaderProgram, GlVertexArray, GlBuffer, GlTexture), String> {
+		// 셰이더 프로그램.
+		let shader_program = ShaderProgram::new(GlContext::from_context(&gl), VERTEXSHADER_SOURCE, FRAGMENTSHADER_SOURCE)?;
+
+		// 버텍스 어레이 / 버텍스 버퍼. (스트리밍, 인터리브 x/y/u/v)
+		let (vertex_array, vertex_buffer, white_texture) = unsafe {
+			let vertex_array = crate::core::glstatecache::create_vertex_array(&gl)?;
+			let vertex_buffer = crate::core::glstatecache::create_buffer(&gl)?;
+			crate::core::glstatecache::bind_vertex_array(&gl, Some(vertex_array));
+			crate::core::glstatecache::bind_buffer(&gl, glow::ARRAY_BUFFER, Some(vertex_buffer));
+			gl.buffer_data_size(glow::ARRAY_BUFFER, (vertex_data.len() * 4) as i32, glow::DYNAMIC_DRAW);
+			let stride_bytes = (FLOATS_PER_VERTEX * 4) as i32;
+			let vertex_position_location = shader_program.get_attribute_location(GlContext::from_context(&gl), "vertexPosition");
+			let vertex_texture_coordinate_location = shader_program.get_attribute_location(GlContext::from_context(&gl), "vertexTextureCoordinate");
+			if let Some(vertex_position_location) = vertex_position_location {
+				gl.enable_vertex_attrib_array(vertex_position_location);
+				gl.vertex_attrib_pointer_f32(vertex_position_location, 2, glow::FLOAT, false, stride_bytes, 0);
+			}
+			if let Some(vertex_texture_coordinate_location) = vertex_texture_coordinate_location {
+				gl.enable_vertex_attrib_array(vertex_texture_coordinate_location);
+				gl.vertex_attrib_pointer_f32(vertex_texture_coordinate_location, 2, glow::FLOAT, false, stride_bytes, 8);
+			}
+			crate::core::glstatecache::bind_vertex_array(&gl, None);
+
+			// 단색 도형용 1x1 흰색 텍스처.
+			let white_texture = crate::core::glstatecache::create_texture(&gl)?;
+			crate::core::glstatecache::bind_texture(&gl, glow::TEXTURE_2D, Some(white_texture));
+			let white_pixel: [u8; 4] = [255, 255, 255, 255];
+			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, 1, 1, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&white_pixel)));
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+
+			// 고정 렌더 상태.
+			crate::core::glstatecache::enable(&gl, glow::BLEND);
+			crate::core::glstatecache::blend_func(&gl, glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+			crate::core::glstatecache::disable(&gl, glow::DEPTH_TEST);
+			crate::core::glstatecache::disable(&gl, glow::CULL_FACE);
+
+			(vertex_array, vertex_buffer, white_texture)
+		};
+
+		// 텍스처 유닛 고정.
+		shader_program.use_program(GlContext::from_context(&gl));
+		let main_texture_location = shader_program.get_uniform_location(GlContext::from_context(&gl), "mainTexture");
+		let texture_lod_bias_location = shader_program.get_uniform_location(GlContext::from_context(&gl), "textureLodBias");
+		unsafe {
+			gl.uniform_1_i32(main_texture_location.as_ref(), 0);
+			gl.uniform_1_f64(texture_lod_bias_location.as_ref(), 0.0);
+			crate::core::glstatecache::active_texture(&gl, glow::TEXTURE0);
+		}
+
+		Ok((shader_program, vertex_array, vertex_buffer, white_texture))
 	}
 
 	//==============================================================================
@@ -6976,6 +6993,10 @@ impl Graphic {
 			}
 			Err(error) => {
 				eprintln!("Graphic: shader program \"{}.{}\" failed: {}", program_group_name, program_name, error);
+				// 컨텍스트를 잃은 탓이면 알리지도 기억하지도 않는다. (되살린 뒤 다시 짓는다)
+				if !crate::core::shaderprogram::report_shader_build_failure(GlContext::from_context(&self.gl), &format!("{}.{}", program_group_name, program_name), &error) {
+					return None;
+				}
 				None
 			}
 		};
@@ -7176,6 +7197,107 @@ impl Graphic {
 	//==============================================================================
 	pub fn reset_gl_state_cache(&self) {
 		crate::core::glstatecache::reset(&self.gl);
+	}
+
+	//==============================================================================
+	/// WebGL 컨텍스트를 잃은 상태인지. (원본 isContextLost, 웹이 webglcontextlost 에서 참이 되고 엔진이 기본 자원을 다시 지은 뒤 거짓이 된다)
+	/// - 잃은 동안 엔진은 그리지 않고 씬 갱신만 한다. 데스크탑은 컨텍스트를 잃지 않아 늘 false 다.
+	///
+	/// # 돌려줌
+	/// 잃은 동안 true.
+	///
+	/// # 예제
+	/// 잃은 동안 게임이 하던 그리기 건너뛰기
+	/// ```rust,no_run
+	/// use vanilla::{Colors, Graphic, Rect};
+	///
+	/// fn draw(graphic: &mut Graphic) {
+	/// 	if graphic.is_context_lost() {
+	/// 		return;
+	/// 	}
+	/// 	graphic.set_fill_color(Colors::WHITE);
+	/// 	graphic.draw_rect(Rect::create(8.0, 8.0, 32.0, 32.0));
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn is_context_lost(&self) -> bool {
+		GlContext::from_context(&self.gl).is_context_lost()
+	}
+
+	//==============================================================================
+	/// 컨텍스트 되살림에 기본 자원 다시 짓기. (원본 restoreContextResources, 웹 플랫폼이 webglcontextrestored 에서 부른다)
+	/// - 기본 셰이더, 버텍스 어레이, 흰 텍스처, 묶어 그리기, 파티클, 섞기 프로그램, 오프스크린 판, 그림 텍스처 캐시, 글자 캐시를 비우거나 다시 짓는다.
+	///   게임이 지은 GL 객체(툰 렌더러, 메시, 그림자 지도, 자기 셰이더, 렌더 타겟)는 엔진이 다시 못 짓는다. 게임이 Restored 에서 다시 짓는다.
+	///
+	/// # 돌려줌
+	/// 짓지 못하면 그 오류 글. (그리기는 멈춘 채)
+	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	pub(crate) fn restore_context_resources(&mut self) -> Result<(), String> {
+		crate::core::glstatecache::reset(&self.gl);
+		self.forget_geometry();
+		let (shader_program, vertex_array, vertex_buffer, white_texture) = Graphic::create_core_resources(&self.gl, &self.vertex_data)?;
+		self.shader_program = shader_program;
+		self.vertex_array = vertex_array;
+		self.vertex_buffer = vertex_buffer;
+		self.white_texture = white_texture;
+		self.shader_program_override = None;
+		self.shader_program_cache_table.clear();
+		self.uniform_location_program = None;
+		self.model_matrix_location = None;
+		self.main_color_location = None;
+		self.tint_color_location = None;
+		self.global_alpha_location = None;
+		self.is_uploaded_uniform_known = false;
+		self.particle_shader_program = None;
+		self.particle_vertex_array = None;
+		self.particle_vertex_buffer = None;
+		self.soft_disc_texture = None;
+		self.batch_shader_program = None;
+		self.batch_vertex_array = None;
+		self.batch_vertex_buffer = None;
+		self.blend_shader_program = None;
+		self.particle_blend_shader_program = None;
+		self.backdrop_target_table.clear();
+		self.framebuffer_format_table.clear();
+		self.layer_target = None;
+		self.opacity_layer_stack.clear();
+		self.opacity_layer_target_pool.clear();
+		self.applied_viewport_width = 0;
+		self.applied_viewport_height = 0;
+		self.image_texture_cache = ImageTextureCache::new();
+		self.text_string_texture_cache = TextStringTextureCache::new();
+		self.clear_batch_textures();
+		self.apply_image_mipmap_bias(&self.shader_program);
+		if self.is_batching_enabled {
+			self.ensure_batch_resources()?;
+		}
+		Ok(())
+	}
+
+	//==============================================================================
+	/// 기하 캐시와 남긴 묶음 잊기. (컨텍스트를 잃거나 되살릴 때, 원본 forgetGeometry)
+	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	pub(crate) fn forget_geometry(&mut self) {
+		self.geometry_cache_generation += 1;
+		for retained_flush in self.batch_retained_flush_list.iter_mut() {
+			retained_flush.vertex_array = None;
+			retained_flush.vertex_buffer = None;
+			retained_flush.buffer_vertex_count = 0;
+			retained_flush.is_valid = false;
+		}
+	}
+
+	//==============================================================================
+	/// 컨텍스트를 잃었을 때 쌓인 묶음 비우기. (원본 webglcontextlost 핸들러, 잃은 동안 그리지 않으니 쌓인 것을 버린다)
+	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	pub(crate) fn discard_batch_for_context_loss(&mut self) {
+		self.batch_vertex_count = 0;
+		self.clear_batch_textures();
+		self.is_batch_segment_deferring = false;
+		self.forget_geometry();
 	}
 
 	//==============================================================================

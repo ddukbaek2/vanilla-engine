@@ -1004,14 +1004,24 @@ fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Res
 fn add_context_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
 	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.borrow().clone().ok_or_else(|| String::from("캔버스 없음"))?;
 	let web_application_cell_for_context = web_application_cell.clone();
-	let context_change_callback: Closure<dyn FnMut()> = Closure::new(move || {
+	// 잃음: 되살릴 수 있게 기본 동작을 막고(preventDefault), 엔진이 그리기를 멈추고 리스너에 알린다. (원본 Graphic 의 webglcontextlost)
+	let context_lost_callback: Closure<dyn FnMut(web_sys::Event)> = Closure::new(move |event: web_sys::Event| {
+		event.prevent_default();
 		if let Ok(web_application) = web_application_cell_for_context.try_borrow() {
-			web_application.engine_runner.reset_gl_state_cache();
+			web_application.engine_runner.handle_context_lost();
 		}
 	});
-	canvas.add_event_listener_with_callback("webglcontextlost", context_change_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
-	canvas.add_event_listener_with_callback("webglcontextrestored", context_change_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
-	context_change_callback.forget();
+	canvas.add_event_listener_with_callback("webglcontextlost", context_lost_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	context_lost_callback.forget();
+	// 되살림: 엔진이 기본 자원을 다시 짓고 리스너에 알린다. (원본 Graphic 의 webglcontextrestored)
+	let web_application_cell_for_restore = web_application_cell.clone();
+	let context_restored_callback: Closure<dyn FnMut()> = Closure::new(move || {
+		if let Ok(web_application) = web_application_cell_for_restore.try_borrow() {
+			web_application.engine_runner.handle_context_restored();
+		}
+	});
+	canvas.add_event_listener_with_callback("webglcontextrestored", context_restored_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	context_restored_callback.forget();
 	Ok(())
 }
 

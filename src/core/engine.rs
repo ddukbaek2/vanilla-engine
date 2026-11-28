@@ -262,6 +262,45 @@ pub enum PageEvent {
 /// 페이지 이벤트 리스너. (엔진은 약한 참조로 들어, 리스너를 버리면 더 부르지 않는다)
 pub type PageEventListener = Rc<RefCell<dyn FnMut(PageEvent)>>;
 
+//==============================================================================
+/// 그래픽 컨텍스트 이벤트. (원본 GraphicContextEvent, 엔진이 리스너에 그 자리에서 넘긴다)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GraphicContextEvent {
+	/// GL 컨텍스트를 잃음. (GPU 메모리 부족, 드라이버 재설정, 백그라운드 회수. 잃은 동안 엔진은 그리지 않고 씬 갱신만 한다)
+	Lost,
+	/// 컨텍스트가 되살아나 엔진이 기본 자원을 다시 지음. (게임이 지은 GL 객체와 3D 렌더러, 렌더 타겟은 죽었으니 이때 다시 짓는다)
+	Restored,
+}
+
+/// 그래픽 컨텍스트 이벤트 리스너. (엔진은 약한 참조로 들어, 리스너를 버리면 더 부르지 않는다)
+pub type GraphicContextEventListener = Rc<RefCell<dyn FnMut(GraphicContextEvent)>>;
+
+//==============================================================================
+/// 그래픽 오류 갈래. (원본 GraphicErrorKind, GraphicError 의 kind)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GraphicErrorKind {
+	/// 셰이더 프로그램을 짓지 못함. (컴파일이나 링크 실패, 같은 프로그램은 다시 알리지 않고 짓지도 않는다. 컨텍스트를 잃은 탓의 실패는 알리지 않는다)
+	ShaderBuildFailed,
+}
+
+//==============================================================================
+/// 그래픽 오류. (원본의 { kind, name, error })
+//==============================================================================
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GraphicError {
+	/// 오류 갈래.
+	pub kind: GraphicErrorKind,
+	/// 짓지 못한 것의 이름. (툰 렌더러는 "ToonRenderer.머티리얼 이름", 화면 효과는 "ScreenEffect.패스 이름")
+	pub name: String,
+	/// 실패한 까닭. (셰이더 정보 로그)
+	pub error: String,
+}
+
+/// 그래픽 오류 리스너. (엔진은 약한 참조로 들어, 리스너를 버리면 더 부르지 않는다)
+pub type GraphicErrorListener = Rc<RefCell<dyn FnMut(&GraphicError)>>;
+
 /// 검증용 화면 저장을 받는 함수. (그 프레임을 다 그린 화면의 PNG 바이트, 원본은 PNG data URL)
 pub type FrameCaptureHandler = Box<dyn FnOnce(&[u8])>;
 
@@ -364,6 +403,8 @@ pub struct Engine {
 	loaded_scene_id_list: RefCell<Vec<SceneId>>,
 	is_page_hidden: Cell<bool>,
 	page_event_listener_list: RefCell<Vec<Weak<RefCell<dyn FnMut(PageEvent)>>>>,
+	graphic_context_event_listener_list: RefCell<Vec<Weak<RefCell<dyn FnMut(GraphicContextEvent)>>>>,
+	graphic_error_listener_list: RefCell<Vec<Weak<RefCell<dyn for<'a> FnMut(&'a GraphicError)>>>>,
 	/// 떠 있거나 기다리는 질문 창. (맨 앞 것이 떠 있다)
 	modal_dialog_list: RefCell<std::collections::VecDeque<crate::core::modaldialog::ModalDialog>>,
 	/// 개발자 도구에서 고를 노드. (크롬 문맥 메뉴의 검사 자리, 그 노드를 가진 씬의 DevTools 가 꺼낸다)
@@ -420,6 +461,8 @@ impl Engine {
 			loaded_scene_id_list: RefCell::new(Vec::new()),
 			is_page_hidden: Cell::new(false),
 			page_event_listener_list: RefCell::new(Vec::new()),
+			graphic_context_event_listener_list: RefCell::new(Vec::new()),
+			graphic_error_listener_list: RefCell::new(Vec::new()),
 			modal_dialog_list: RefCell::new(std::collections::VecDeque::new()),
 			dev_tools_inspect_request: std::cell::Cell::new(None),
 			task_executor: TaskExecutor::new(),
@@ -1963,6 +2006,169 @@ impl Engine {
 	}
 
 	//==============================================================================
+	/// 그래픽 컨텍스트 이벤트 리스너 더하기. (원본 addGraphicContextEventListener, 리스너를 버리면 더 부르지 않는다)
+	/// - 컨텍스트를 잃으면 Lost, 되살아나 엔진이 기본 자원을 다시 지으면 Restored 를 넘긴다. 잃은 동안 엔진은 그리지 않고 씬 갱신만 한다.
+	///
+	/// # 인자
+	/// - `graphic_context_event_listener`: 더할 리스너. (엔진은 약한 참조로 든다, 부른 쪽이 살려 둔다)
+	///
+	/// # 예제
+	/// 컨텍스트를 되살리면 게임의 GL 객체 다시 짓기
+	/// ```rust
+	/// use std::cell::RefCell;
+	/// use std::rc::Rc;
+	/// use vanilla::{Engine, EngineConfiguration, GraphicContextEvent, GraphicContextEventListener};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let received_list: Rc<RefCell<Vec<GraphicContextEvent>>> = Rc::new(RefCell::new(Vec::new()));
+	/// let listener_received_list = received_list.clone();
+	/// let graphic_context_event_listener: GraphicContextEventListener = Rc::new(RefCell::new(move |graphic_context_event: GraphicContextEvent| {
+	/// 	listener_received_list.borrow_mut().push(graphic_context_event);
+	/// }));
+	/// engine.add_graphic_context_event_listener(&graphic_context_event_listener);
+	/// engine.dispatch_graphic_context_event(GraphicContextEvent::Lost);
+	/// engine.dispatch_graphic_context_event(GraphicContextEvent::Restored);
+	/// assert_eq!(*received_list.borrow(), vec![GraphicContextEvent::Lost, GraphicContextEvent::Restored]);
+	/// ```
+	//==============================================================================
+	pub fn add_graphic_context_event_listener(&self, graphic_context_event_listener: &GraphicContextEventListener) {
+		self.graphic_context_event_listener_list.borrow_mut().push(Rc::downgrade(graphic_context_event_listener));
+	}
+
+	//==============================================================================
+	/// 그래픽 컨텍스트 이벤트 리스너 빼기. (원본 removeGraphicContextEventListener, 버린 리스너도 빠진다)
+	///
+	/// # 인자
+	/// - `graphic_context_event_listener`: 뺄 리스너. (add_graphic_context_event_listener 에 넘긴 것)
+	///
+	/// # 예제
+	/// 더한 리스너 빼기
+	/// ```rust
+	/// use std::cell::RefCell;
+	/// use std::rc::Rc;
+	/// use vanilla::{Engine, EngineConfiguration, GraphicContextEvent, GraphicContextEventListener};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let count = Rc::new(RefCell::new(0));
+	/// let listener_count = count.clone();
+	/// let graphic_context_event_listener: GraphicContextEventListener = Rc::new(RefCell::new(move |_graphic_context_event: GraphicContextEvent| {
+	/// 	*listener_count.borrow_mut() += 1;
+	/// }));
+	/// engine.add_graphic_context_event_listener(&graphic_context_event_listener);
+	/// engine.remove_graphic_context_event_listener(&graphic_context_event_listener);
+	/// engine.dispatch_graphic_context_event(GraphicContextEvent::Lost);
+	/// assert_eq!(*count.borrow(), 0);
+	/// ```
+	//==============================================================================
+	pub fn remove_graphic_context_event_listener(&self, graphic_context_event_listener: &GraphicContextEventListener) {
+		let target_listener = Rc::downgrade(graphic_context_event_listener);
+		self.graphic_context_event_listener_list.borrow_mut().retain(|weak_listener| weak_listener.strong_count() > 0 && !weak_listener.ptr_eq(&target_listener));
+	}
+
+	//==============================================================================
+	/// 그래픽 컨텍스트 이벤트 알리기. (플랫폼이 부른다, 살아 있는 리스너에 그 자리에서 넘긴다)
+	/// - 리스너가 다른 일로 빌려져 있으면 그 리스너는 이번 이벤트를 건너뛴다.
+	///
+	/// # 인자
+	/// - `graphic_context_event`: 알릴 이벤트.
+	//==============================================================================
+	pub fn dispatch_graphic_context_event(&self, graphic_context_event: GraphicContextEvent) {
+		let listener_list: Vec<GraphicContextEventListener> = {
+			let mut graphic_context_event_listener_list = self.graphic_context_event_listener_list.borrow_mut();
+			graphic_context_event_listener_list.retain(|weak_listener| weak_listener.strong_count() > 0);
+			graphic_context_event_listener_list.iter().filter_map(|weak_listener| weak_listener.upgrade()).collect()
+		};
+		for graphic_context_event_listener in listener_list {
+			if let Ok(mut listener) = graphic_context_event_listener.try_borrow_mut() {
+				(*listener)(graphic_context_event);
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 그래픽 오류 리스너 더하기. (원본 addGraphicErrorListener, 리스너를 버리면 더 부르지 않는다)
+	/// - 엔진이 셰이더 프로그램을 짓지 못했을 때(툰 렌더러의 머티리얼, 화면 효과의 패스, resolve_shader_program 의 프로그램) 한 번 알린다.
+	///   짓지 못한 프로그램은 다시 짓지 않고 건너뛰어 그리므로, 게임은 이 알림으로 대체 그리기나 오류 보고를 정한다.
+	///   컨텍스트를 잃은 탓의 실패는 셰이더 탓이 아니라 알리지 않고, 기억하지도 않는다.
+	///
+	/// # 인자
+	/// - `graphic_error_listener`: 더할 리스너. (엔진은 약한 참조로 든다, 부른 쪽이 살려 둔다)
+	///
+	/// # 예제
+	/// 셰이더 짓기 실패를 받아 기록하기
+	/// ```rust
+	/// use std::cell::RefCell;
+	/// use std::rc::Rc;
+	/// use vanilla::{Engine, EngineConfiguration, GraphicError, GraphicErrorKind, GraphicErrorListener};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let failed_name_list: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+	/// let listener_failed_name_list = failed_name_list.clone();
+	/// let graphic_error_listener: GraphicErrorListener = Rc::new(RefCell::new(move |graphic_error: &GraphicError| {
+	/// 	if graphic_error.kind == GraphicErrorKind::ShaderBuildFailed {
+	/// 		listener_failed_name_list.borrow_mut().push(graphic_error.name.clone());
+	/// 	}
+	/// }));
+	/// engine.add_graphic_error_listener(&graphic_error_listener);
+	/// engine.dispatch_graphic_error(&GraphicError { kind: GraphicErrorKind::ShaderBuildFailed, name: String::from("stripe"), error: String::from("compile failed") });
+	/// assert_eq!(*failed_name_list.borrow(), vec![String::from("stripe")]);
+	/// ```
+	//==============================================================================
+	pub fn add_graphic_error_listener(&self, graphic_error_listener: &GraphicErrorListener) {
+		self.graphic_error_listener_list.borrow_mut().push(Rc::downgrade(graphic_error_listener));
+	}
+
+	//==============================================================================
+	/// 그래픽 오류 리스너 빼기. (원본 removeGraphicErrorListener, 버린 리스너도 빠진다)
+	///
+	/// # 인자
+	/// - `graphic_error_listener`: 뺄 리스너. (add_graphic_error_listener 에 넘긴 것)
+	///
+	/// # 예제
+	/// 더한 오류 리스너 빼기
+	/// ```rust
+	/// use std::cell::RefCell;
+	/// use std::rc::Rc;
+	/// use vanilla::{Engine, EngineConfiguration, GraphicError, GraphicErrorKind, GraphicErrorListener};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let count = Rc::new(RefCell::new(0));
+	/// let listener_count = count.clone();
+	/// let graphic_error_listener: GraphicErrorListener = Rc::new(RefCell::new(move |_graphic_error: &GraphicError| {
+	/// 	*listener_count.borrow_mut() += 1;
+	/// }));
+	/// engine.add_graphic_error_listener(&graphic_error_listener);
+	/// engine.remove_graphic_error_listener(&graphic_error_listener);
+	/// engine.dispatch_graphic_error(&GraphicError { kind: GraphicErrorKind::ShaderBuildFailed, name: String::from("stripe"), error: String::new() });
+	/// assert_eq!(*count.borrow(), 0);
+	/// ```
+	//==============================================================================
+	pub fn remove_graphic_error_listener(&self, graphic_error_listener: &GraphicErrorListener) {
+		let target_listener = Rc::downgrade(graphic_error_listener);
+		self.graphic_error_listener_list.borrow_mut().retain(|weak_listener| weak_listener.strong_count() > 0 && !weak_listener.ptr_eq(&target_listener));
+	}
+
+	//==============================================================================
+	/// 그래픽 오류 알리기. (엔진이 부른다, 살아 있는 리스너에 그 자리에서 넘긴다)
+	/// - 리스너가 다른 일로 빌려져 있으면 그 리스너는 이번 오류를 건너뛴다.
+	///
+	/// # 인자
+	/// - `graphic_error`: 알릴 오류. (kind, name, error)
+	//==============================================================================
+	pub fn dispatch_graphic_error(&self, graphic_error: &GraphicError) {
+		let listener_list: Vec<GraphicErrorListener> = {
+			let mut graphic_error_listener_list = self.graphic_error_listener_list.borrow_mut();
+			graphic_error_listener_list.retain(|weak_listener| weak_listener.strong_count() > 0);
+			graphic_error_listener_list.iter().filter_map(|weak_listener| weak_listener.upgrade()).collect()
+		};
+		for graphic_error_listener in listener_list {
+			if let Ok(mut listener) = graphic_error_listener.try_borrow_mut() {
+				(*listener)(graphic_error);
+			}
+		}
+	}
+
+	//==============================================================================
 	/// 지금 프레임의 번호. (원본처럼 첫 프레임이 1, 검증용 화면 저장의 프레임 번호도 이것)
 	///
 	/// # 돌려줌
@@ -2228,14 +2434,37 @@ impl EngineRunner {
 	}
 
 	//==============================================================================
-	/// 그래픽의 GL 상태 기억 잊기. (웹 플랫폼이 GL 컨텍스트를 잃거나 되살릴 때, 원본 WebGLStateCache 의 webglcontextlost / webglcontextrestored)
-	/// - Graphic 은 묶음과 2D 상태를 따로 기억하지 않고 상태 캐시에 견주므로 상태 캐시만 잊는다. (원본 Graphic 도 묶음 기억을 따로 잊지 않는다)
+	/// 컨텍스트를 잃음. (웹 플랫폼이 webglcontextlost 에서 부른다, 원본 Graphic 의 webglcontextlost 핸들러와 Engine 의 알림)
+	/// - 잃은 깃발을 세우고, 쌓인 묶음을 버리고, GL 상태 기억을 잊고, 엔진 오류 길(표준 오류)로 한 번 알리고, 리스너에 Lost 를 넘긴다.
 	//==============================================================================
 	#[cfg(target_arch = "wasm32")]
-	pub(crate) fn reset_gl_state_cache(&self) {
-		if let Some(graphic) = self.engine.get_graphic() {
+	pub(crate) fn handle_context_lost(&self) {
+		crate::core::glcontext::GlContext::set_context_lost(true);
+		if let Some(mut graphic) = self.engine.get_graphic_mut() {
+			graphic.discard_batch_for_context_loss();
 			graphic.reset_gl_state_cache();
 		}
+		eprintln!("Engine: WebGL2 context lost. Drawing is paused until the context is restored.");
+		self.engine.dispatch_graphic_context_event(GraphicContextEvent::Lost);
+	}
+
+	//==============================================================================
+	/// 컨텍스트를 되살림. (웹 플랫폼이 webglcontextrestored 에서 부른다)
+	/// - 기본 자원을 다시 짓고 잃은 깃발을 내린 뒤 리스너에 Restored 를 넘긴다. 못 지으면 오류를 내고 그리기는 멈춘 채 둔다.
+	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	pub(crate) fn handle_context_restored(&self) {
+		if let Some(mut graphic) = self.engine.get_graphic_mut() {
+			graphic.forget_geometry();
+			if let Err(error) = graphic.restore_context_resources() {
+				eprintln!("{}", error);
+				eprintln!("Graphic: WebGL2 context restored, but the engine failed to rebuild its resources. Drawing stays stopped.");
+				return;
+			}
+		}
+		crate::core::glcontext::GlContext::set_context_lost(false);
+		eprintln!("Engine: WebGL2 context restored. Engine resources were rebuilt, rebuild game-owned GL objects now.");
+		self.engine.dispatch_graphic_context_event(GraphicContextEvent::Restored);
 	}
 
 	//==============================================================================
@@ -2586,10 +2815,12 @@ impl EngineRunner {
 	/// - `is_tick_enabled`: false 면 씬을 갱신하지 않고 그리기만 한다. (질문 창이 떠 있거나 GPU 처리량을 재는 중)
 	/// - `loading_time`: 로딩 중인 씬을 진행할 때의 (씬 불러오기 시계 초, 그림 올리기 시간 한도 밀리초). None 이면 로딩 화면만 그린다.
 	//==============================================================================
-	fn tick_and_draw_scenes(&mut self, time_delta: f64, is_tick_enabled: bool, loading_time: Option<(f64, f64)>) {
+	fn tick_and_draw_scenes(&mut self, time_delta: f64, is_tick_enabled: bool, loading_time: Option<(f64, f64)>, is_context_lost: bool) {
 		// 그리기 통계. (지난 프레임 값을 넘겨 두고 이번 프레임을 새로 센다)
-		if let Some(mut graphic) = self.engine.get_graphic_mut() {
-			graphic.begin_frame_statistics();
+		if !is_context_lost {
+			if let Some(mut graphic) = self.engine.get_graphic_mut() {
+				graphic.begin_frame_statistics();
+			}
 		}
 
 		// 씬 처리.
@@ -2605,10 +2836,12 @@ impl EngineRunner {
 				}
 			}
 			if !scene.get_scene_base().is_loaded() {
-				self.engine.with_graphic(|engine, graphic| {
-					engine.view_manager.borrow_mut().apply_view_rect(graphic);
-					scene.draw_on_load(graphic);
-				});
+				if !is_context_lost {
+					self.engine.with_graphic(|engine, graphic| {
+						engine.view_manager.borrow_mut().apply_view_rect(graphic);
+						scene.draw_on_load(graphic);
+					});
+				}
 				continue;
 			}
 
@@ -2618,7 +2851,10 @@ impl EngineRunner {
 				dispatch_scene_touch(self.engine, scene.as_mut());
 			}
 
-			// 출력.
+			// 출력. (컨텍스트를 잃은 동안은 건너뛴다)
+			if is_context_lost {
+				continue;
+			}
 			self.engine.with_graphic(|engine, graphic| {
 				engine.view_manager.borrow_mut().apply_view_rect(graphic);
 				scene.pre_draw(graphic);
@@ -2635,14 +2871,14 @@ impl EngineRunner {
 		self.scene_list = scene_list;
 
 		// 개발 정보 출력.
-		if self.engine.get_engine_configuration().use_statistics {
+		if !is_context_lost && self.engine.get_engine_configuration().use_statistics {
 			self.engine.with_graphic(|engine, graphic| {
 				draw_statistics(engine, graphic);
 			});
 		}
 
 		// 질문 창. (모든 것 위에, 창 안쪽 논리 좌표)
-		if self.engine.is_modal_dialog_open() {
+		if !is_context_lost && self.engine.is_modal_dialog_open() {
 			self.engine.with_graphic(|engine, graphic| {
 				engine.view_manager.borrow_mut().apply_canvas_native_rect(graphic);
 				crate::core::modaldialog::draw_modal_dialog(engine, graphic);
@@ -2680,7 +2916,7 @@ impl EngineRunner {
 		}
 		let start_instant = Instant::now();
 		for _ in 0..chunk_frame_count {
-			self.tick_and_draw_scenes(time_delta, false, None);
+			self.tick_and_draw_scenes(time_delta, false, None, false);
 			if let Some(mut graphic) = self.engine.get_graphic_mut() {
 				graphic.end_frame();
 			}
@@ -2725,11 +2961,16 @@ impl EngineRunner {
 		// 바이트가 온 글꼴 등록.
 		self.register_pending_fonts();
 
+		// 컨텍스트를 잃은 동안은 그리지 않고 씬 갱신만 한다. (원본 Engine.updateEngine 의 isContextLost)
+		let is_context_lost = self.engine.get_graphic().map(|graphic| graphic.is_context_lost()).unwrap_or(false);
+
 		// 렌더러 처리.
 		let canvas_pixel_size = self.engine.get_view_manager().get_canvas_pixel_size();
 		match self.engine.get_graphic_mut() {
 			Some(mut graphic) => {
-				graphic.apply_settings(canvas_pixel_size.x as i32, canvas_pixel_size.y as i32);
+				if !is_context_lost {
+					graphic.apply_settings(canvas_pixel_size.x as i32, canvas_pixel_size.y as i32);
+				}
 			}
 			None => {
 				return;
@@ -2788,7 +3029,7 @@ impl EngineRunner {
 		}
 
 		// 씬 갱신과 그리기. (엔진 프레임과 GPU 처리량 재기가 같은 길로 그린다)
-		self.tick_and_draw_scenes(time_delta, !is_modal_dialog_open, Some((scene_load_seconds, image_upload_time_limit_milliseconds)));
+		self.tick_and_draw_scenes(time_delta, !is_modal_dialog_open, Some((scene_load_seconds, image_upload_time_limit_milliseconds)), is_context_lost);
 
 		// 마우스 커서. (켜져 있고 바뀌었을 때만 플랫폼에 넘긴다)
 		let is_coarse_pointer = platform::is_coarse_pointer();
@@ -2806,9 +3047,11 @@ impl EngineRunner {
 		input_manager.get_text_input_mut().finish_frame();
 		drop(input_manager);
 
-		// 프레임 마무리. (묶음을 내보내고, 검증용 화면 저장은 플랫폼이 화면을 넘기기 전에 한다)
-		if let Some(mut graphic) = self.engine.get_graphic_mut() {
-			graphic.end_frame();
+		// 프레임 마무리. (묶음을 내보내고, 검증용 화면 저장은 플랫폼이 화면을 넘기기 전에 한다, 잃은 동안은 내보낼 것이 없다)
+		if !is_context_lost {
+			if let Some(mut graphic) = self.engine.get_graphic_mut() {
+				graphic.end_frame();
+			}
 		}
 		self.capture_frame_if_requested();
 		// 찍기 모드에서 실제 시간이 드는 불러오기(애셋 받기) 중인 씬이 있으면 프레임 번호를 올리지 않는다. (시계도 서고, 다 받은 뒤부터 센다. 원본 찍기 모드와 같다)

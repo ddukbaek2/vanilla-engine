@@ -641,7 +641,13 @@ float readShadeLevel(vec3 rampColor, float cosine) {
 	}
 	else {
 		bottom = readLuminance(shadeStopColors[0]);
-		top = readLuminance(shadeStopColors[shadeStopCount - 1]);
+		// 마지막 칸은 고리로 찾는다. (색 칸이 0 개일 때 동적 첨자 shadeStopColors[shadeStopCount - 1] 읽기가 아이폰 SE2 (A13) 의 GPU 프로세스를 죽였다)
+		top = readLuminance(shadeStopColors[0]);
+		for (int index = 1; index < 8; ++index) {
+			if (index < shadeStopCount) {
+				top = readLuminance(shadeStopColors[index]);
+			}
+		}
 	}
 	return clamp((readLuminance(rampColor) - bottom) / max(top - bottom, 0.0001), 0.0, 1.0);
 }
@@ -2589,6 +2595,10 @@ impl ToonRenderer {
 			Err(error) => {
 				let name = material.map(|material| String::from(material.get_name())).filter(|name| !name.is_empty()).unwrap_or_else(|| format!("{}/{}", key.0, key.1));
 				eprintln!("[ToonRenderer] 머티리얼 {} 의 모서리 어둠 셰이더를 짓지 못해 모서리 어둠 없이 그린다. {}", name, error);
+				// 컨텍스트를 잃은 탓이면 알리지도 기억하지도 않는다. (되살린 뒤 다시 짓는다)
+				if !crate::core::shaderprogram::report_shader_build_failure(gl, &format!("ToonRenderer.{}/ao", name), &error) {
+					return;
+				}
 				None
 			}
 		};
@@ -2610,6 +2620,10 @@ impl ToonRenderer {
 			Err(error) => {
 				let name = material.map(|material| String::from(material.get_name())).filter(|name| !name.is_empty()).unwrap_or_else(|| format!("{}/{}", key.0, key.1));
 				eprintln!("[ToonRenderer] 머티리얼 {} 의 셰이더를 짓지 못했다. {}", name, error);
+				// 셰이더 탓이면 게임에 한 번 알리고 기억한다. 컨텍스트를 잃은 탓이면 알리지도 기억하지도 않고, 되살린 뒤 다시 짓는다.
+				if !crate::core::shaderprogram::report_shader_build_failure(gl, &format!("ToonRenderer.{}", name), &error) {
+					return false;
+				}
 				None
 			}
 		};

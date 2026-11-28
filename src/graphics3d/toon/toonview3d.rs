@@ -356,8 +356,11 @@ impl ToonView3D {
 			}
 			Err(error) => {
 				eprintln!("[ToonView3D] 툰 렌더러를 짓지 못해 대체 그리기로 갑니다. {}", error);
-				self.is_renderer_failed = true;
 				self.renderer = None;
+				// 셰이더 탓이면 게임에 한 번 알리고 다시 짓지 않는다. 컨텍스트를 잃은 탓이면 알리지도 기억하지도 않고, 되살린 뒤 다시 짓는다.
+				if crate::core::shaderprogram::report_shader_build_failure(graphic.get_tracked_gl(), "ToonRenderer", &error) {
+					self.is_renderer_failed = true;
+				}
 			}
 		}
 		graphic.restore_render_state();
