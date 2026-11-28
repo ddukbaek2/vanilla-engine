@@ -238,7 +238,7 @@ fn line_batching_keeps_pixels_and_stops_uploads() {
 
 //==============================================================================
 /// 원본 toonautoinstancechrome 과 같은 장면: 같은 모형과 재질 값만 묶고 머티리얼, 모형, 틴트, 뒤집은 감기가 다르면 묶지 않는다.
-/// - 그림자, 몸, 바깥선 껍데기는 [상자 같은 꼴 6, 상자 빨강 3, 공 3, 상자 머티리얼 2], 선의 판은 [상자 11, 공 3] 이라 인스턴스 수 목록이 원본과 같다.
+/// - 그림자, 몸, 바깥선 껍데기는 [상자 같은 꼴 6, 상자 빨강 3, 공 3, 상자 머티리얼 2, 상자 뒤집은 감기 3], 선의 판은 [상자 11, 공 3, 상자 뒤집은 감기 3 (뒤집은 것은 뒤집은 것끼리 묶음)] 이라 인스턴스 수 목록이 원본과 같다.
 //==============================================================================
 #[test]
 fn auto_instancing_matches_original_instance_counts() {
@@ -281,6 +281,8 @@ fn auto_instancing_matches_original_instance_counts() {
 	}
 	entry_list.push((false, plain, true, false));
 	entry_list.push((false, plain, true, false));
+	entry_list.push((false, plain, false, true));
+	entry_list.push((false, plain, false, true));
 	entry_list.push((false, plain, false, true));
 	let mut matrix_list: Vec<Matrix4> = Vec::new();
 	for (index, entry) in entry_list.iter().enumerate() {
@@ -330,7 +332,7 @@ fn auto_instancing_matches_original_instance_counts() {
 		let first_pixels = results.last().unwrap().2.clone();
 		assert!(first_pixels == last_pixels, "프레임을 되풀이해도 같은 화면");
 	}
-	let expected = vec![11, 6, 6, 6, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2];
+	let expected = vec![11, 6, 6, 6, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2];
 	eprintln!("자동 인스턴싱(원본 장면): 인스턴스 수 {:?}, 보통 그리기 묶음 {} 묶지 않음 {}", results[0].0, results[0].1, results[1].1);
 	print_hash("autoinstance_original_scene", &results[0].2);
 	eprintln!("자동 인스턴싱(원본 장면): 프레임마다 올림 [몸과 그림자 묶음 자리, 블록 버퍼, 블록 묶기, 선의 판 묶음 자리, 선의 판 드로 콜] {:?}", upload_frames);
