@@ -313,6 +313,8 @@ pub struct ShadowMap {
 	depth_bias: f64,
 	/// 노멀 치우침. (그림자 텍셀 단위)
 	normal_bias: f64,
+	/// 초점을 끊어 옮기는 월드 칸. (원본 focusStep, 0 이면 끊지 않고 텍셀 맞춤만)
+	focus_step: f64,
 	/// 갱신 방식과 구운 판. (원본 createShadowCache)
 	shadow_cache: RefCell<ShadowCache>,
 }
@@ -331,7 +333,7 @@ impl ShadowMap {
 	//==============================================================================
 	pub fn new(gl: &crate::GlContext, resolution: i32) -> Result<ShadowMap, String> {
 		let (framebuffer, depth_texture) = create_depth_target(gl, resolution)?;
-		Ok(ShadowMap { framebuffer, depth_texture, resolution, light_view_projection_matrix: Matrix4::create_identity(), depth_bias: DEFAULT_SHADOW_DEPTH_BIAS, normal_bias: DEFAULT_SHADOW_NORMAL_BIAS, shadow_cache: RefCell::new(ShadowCache::new(resolution)) })
+		Ok(ShadowMap { framebuffer, depth_texture, resolution, light_view_projection_matrix: Matrix4::create_identity(), depth_bias: DEFAULT_SHADOW_DEPTH_BIAS, normal_bias: DEFAULT_SHADOW_NORMAL_BIAS, focus_step: 0.0, shadow_cache: RefCell::new(ShadowCache::new(resolution)) })
 	}
 
 	//==============================================================================
@@ -361,10 +363,27 @@ impl ShadowMap {
 	//==============================================================================
 	pub fn update_light_matrix(&mut self, focus_position: Vector3, light_direction: Vector3, extent: f64, near_distance: f64, far_distance: f64) {
 		let normalized_direction = light_direction.normalize();
+		let up_direction = read_light_up_direction(normalized_direction);
+
+		// 초점 끊어 옮기기. (focus_step > 0 일 때만, 초점을 월드 칸의 배수로 옮겨 칸 안에서는 행렬을 그대로 둔다. 어긋남은 축마다 칸의 절반이라 빛 공간으로는 칸의 0.87 배 안, 덮는 너비와 깊이에 칸만큼 여유)
+		let focus_step = self.focus_step;
+		let mut focus_position = focus_position;
+		let mut extent = extent;
+		let mut near_distance = near_distance;
+		let mut far_distance = far_distance;
+		if focus_step > 0.0 {
+			focus_position = Vector3::create(
+				round_half_up(focus_position.x / focus_step) * focus_step,
+				round_half_up(focus_position.y / focus_step) * focus_step,
+				round_half_up(focus_position.z / focus_step) * focus_step,
+			);
+			extent += focus_step;
+			far_distance += focus_step;
+			near_distance = (near_distance - focus_step).max(near_distance * 0.1);
+		}
 		let eye_distance = (near_distance + far_distance) * 0.5;
 		let eye_offset = normalized_direction.multiply_scalar(-eye_distance);
 		let eye_position = focus_position.add(eye_offset);
-		let up_direction = read_light_up_direction(normalized_direction);
 		let mut view_matrix = Matrix4::create_look_at(eye_position, focus_position, up_direction);
 
 		// 텍셀 스냅. (광원 공간 이동 성분을 텍셀 크기로 양자화, 떨림 방지)
@@ -538,6 +557,44 @@ impl ShadowMap {
 	//==============================================================================
 	pub fn get_normal_bias(&self) -> f64 {
 		self.normal_bias
+	}
+
+	//==============================================================================
+	/// 초점을 끊어 옮기는 월드 칸 정하기. (해 그림자 캐시용, 기본 0 은 끊지 않고 텍셀 맞춤만)
+	/// - 카메라를 따라 초점이 움직이면 텍셀 하나만 넘어도 빛 행렬이 바뀌어 ShadowUpdateMode::OnChange 캐시가 프레임마다 다시 그린다.
+	/// - 칸을 주면 초점을 월드 칸(x, y, z 각각)의 배수에 맞춰 옮겨, 한 칸 안에서는 행렬이 같아 구운 판을 다시 쓴다. 덮는 너비와 깊이에 칸만큼 여유를 더해 초점 둘레가 판 밖으로 나가지 않는다.
+	/// - 유니티와 언리얼의 캐시드 섀도, 가상 섀도 맵의 고정 칸에 초점을 붙이는 꼴과 같은 생각이다. (원문은 읽지 못해 짐작)
+	/// - 텍셀 맞춤은 그 위에 그대로 걸린다. 여유가 늘어 텍셀 하나의 월드 크기는 조금 커진다.
+	///
+	/// # 인자
+	/// - `world_step`: 월드 칸. (월드 단위, 0 이하면 끔)
+	///
+	/// # 예제
+	/// 초점을 1 미터 칸으로 끊어 옮기기
+	/// ```rust,no_run
+	/// use vanilla::{GlContext, ShadowMap, Vector3};
+	///
+	/// fn snap_focus(gl: &GlContext) {
+	/// 	let mut shadow_map = ShadowMap::new(gl, 1024).unwrap();
+	/// 	shadow_map.set_focus_step(1.0);
+	/// 	shadow_map.update_light_matrix(Vector3::create(0.2, 0.0, 0.0), Vector3::create(-0.4, -1.0, -0.3), 20.0, 0.5, 100.0);
+	/// 	println!("{}", shadow_map.get_focus_step());
+	/// 	shadow_map.destroy(gl);
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn set_focus_step(&mut self, world_step: f64) {
+		self.focus_step = if world_step > 0.0 { world_step } else { 0.0 };
+	}
+
+	//==============================================================================
+	/// 초점을 끊어 옮기는 월드 칸 반환.
+	///
+	/// # 돌려줌
+	/// 월드 칸. (0 이면 끔)
+	//==============================================================================
+	pub fn get_focus_step(&self) -> f64 {
+		self.focus_step
 	}
 
 	//==============================================================================
@@ -1067,6 +1124,64 @@ mod tests {
 		assert_eq!(round_half_up(-2.5), -2.0);
 		assert_eq!(round_half_up(-2.6), -3.0);
 		assert_eq!(round_half_up(1.49), 1.0);
+	}
+
+	//==============================================================================
+	/// 해 그림자 초점 칸. (원본 shadowfocusstepchrome 시험과 같은 내용: 기본 0, 정한 칸이 getter 에 보임, 칸 안에서는 행렬이 같고 칸을 넘으면 바뀜,
+	/// 칸 0 은 끊지 않고 텍셀 맞춤만, 칸을 준 행렬이 초점 둘레를 판 안에 덮음, 0 이하는 끔)
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	#[test]
+	fn focus_step_keeps_matrix_inside_a_cell() {
+		let Some(gl) = crate::core::glstatecache::tests::create_surfaceless_context() else {
+			eprintln!("shadowmap: 창 없는 GL 컨텍스트를 짓지 못해 건너뜀");
+			return;
+		};
+		let gl: &crate::GlContext = crate::GlContext::from_context(&gl);
+		let mut every_map = ShadowMap::new(gl, 1024).unwrap();
+		let mut step_map = ShadowMap::new(gl, 1024).unwrap();
+		assert_eq!(every_map.get_focus_step(), 0.0, "기본 칸은 0");
+		step_map.set_focus_step(2.0);
+		assert_eq!(step_map.get_focus_step(), 2.0);
+		step_map.set_focus_step(-1.0);
+		assert_eq!(step_map.get_focus_step(), 0.0, "0 이하는 끔");
+		step_map.set_focus_step(2.0);
+		let sun_direction = Vector3::create(-0.5, -1.0, -0.4);
+		let mut matrix_list: Vec<[f32; 16]> = Vec::new();
+		let mut zero_matrix_list: Vec<[f32; 16]> = Vec::new();
+		for frame in 0..120 {
+			let focus = Vector3::create(-3.0 + frame as f64 * 0.05, 0.0, 0.0);
+			step_map.update_light_matrix(focus, sun_direction, 4.0, 0.1, 30.0);
+			matrix_list.push(*step_map.get_light_view_projection_matrix().get_elements());
+			every_map.update_light_matrix(focus, sun_direction, 4.0, 0.1, 30.0);
+			zero_matrix_list.push(*every_map.get_light_view_projection_matrix().get_elements());
+		}
+		let changed_count = (1..matrix_list.len()).filter(|index| matrix_list[*index] != matrix_list[*index - 1]).count();
+		let zero_changed_count = (1..zero_matrix_list.len()).filter(|index| zero_matrix_list[*index] != zero_matrix_list[*index - 1]).count();
+		assert!(changed_count <= 4, "칸 2 는 초점이 6 미터 걷는 동안 칸을 넘을 때만 바뀐다 ({})", changed_count);
+		assert!(zero_changed_count > 60, "칸 0 은 따라 움직일 때 거의 매 프레임 바뀐다 ({})", zero_changed_count);
+		// 칸을 준 행렬은 초점(칸에 맞춘 자리와 반 칸 어긋난 실제 자리)을 모두 판 안(-1 ~ 1)에 둔다.
+		let focus = Vector3::create(0.9, 0.0, 0.0);
+		step_map.update_light_matrix(focus, sun_direction, 4.0, 0.1, 30.0);
+		let step_matrix = step_map.get_light_view_projection_matrix();
+		let point = step_matrix.transform_point(0.9, 0.0, 0.0);
+		assert!(point.x.abs() < 0.5 && point.y.abs() < 0.5 && point.z.abs() < 1.0, "초점이 판 안: {} {} {}", point.x, point.y, point.z);
+		// 칸에 맞춘 초점이 같으면(0.9 와 1.1 은 둘 다 칸 2 에서 2 쪽이 아니라 0 쪽, 0.9 와 1.0 은 반올림 경계 1.0 앞뒤) 같은 행렬이다.
+		step_map.update_light_matrix(Vector3::create(0.5, 0.0, 0.0), sun_direction, 4.0, 0.1, 30.0);
+		let first_elements = *step_map.get_light_view_projection_matrix().get_elements();
+		step_map.update_light_matrix(Vector3::create(-0.9, 0.0, 0.0), sun_direction, 4.0, 0.1, 30.0);
+		assert_eq!(first_elements, *step_map.get_light_view_projection_matrix().get_elements(), "같은 칸 안은 같은 행렬");
+		step_map.update_light_matrix(Vector3::create(1.1, 0.0, 0.0), sun_direction, 4.0, 0.1, 30.0);
+		assert_ne!(first_elements, *step_map.get_light_view_projection_matrix().get_elements(), "칸을 넘으면 다른 행렬");
+		// 칸 0 은 끊지 않고 텍셀 맞춤만: 같은 인자로 칸 없는 판을 새로 만들어도 같다.
+		let mut plain_map = ShadowMap::new(gl, 1024).unwrap();
+		plain_map.update_light_matrix(Vector3::create(0.2, 0.0, 0.0), sun_direction, 4.0, 0.1, 30.0);
+		every_map.set_focus_step(0.0);
+		every_map.update_light_matrix(Vector3::create(0.2, 0.0, 0.0), sun_direction, 4.0, 0.1, 30.0);
+		assert_eq!(*plain_map.get_light_view_projection_matrix().get_elements(), *every_map.get_light_view_projection_matrix().get_elements());
+		every_map.destroy(gl);
+		step_map.destroy(gl);
+		plain_map.destroy(gl);
 	}
 
 	//==============================================================================
