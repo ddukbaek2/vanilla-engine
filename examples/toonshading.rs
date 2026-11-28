@@ -14,8 +14,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use vanilla::{
-	BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, GlContext, Graphic, Material, Matrix4, MouseButton, Quaternion, Rect, RenderTarget, RenderTargetOptions, Scene, SceneBase, ShaderProgram, ShadowMap, SkinnedModel, SkinnedModelRenderer,
-	TextAlign, TextBaseline, Vector2, Vector3, MORPH_GLSL,
+	BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, GlContext, Graphic, Material, Matrix4, MouseButton, Quaternion, Rect, RenderTarget, RenderTargetOptions, NodeTransform, Scene, SceneBase, ShaderProgram, ShadowMap, SkinnedModel, SkinnedModelRenderer,
+	TextAlign, TextBaseline, TouchPhase, UIView, Vector2, Vector3, MORPH_GLSL,
 };
 
 //==============================================================================
@@ -594,6 +594,116 @@ struct CameraState {
 }
 
 //==============================================================================
+// 패스별 GPU 시간. (원본 EXT_disjoint_timer_query_webgl2, 결과는 몇 프레임 뒤에 도착하므로 대기 목록을 매 프레임 확인)
+//==============================================================================
+struct PassTimer {
+	is_supported: bool,
+	pending_list: Vec<(&'static str, glow::Query)>,
+	current: Option<(&'static str, glow::Query)>,
+	milliseconds: Vec<(&'static str, f64)>,
+}
+
+impl PassTimer {
+	fn new(gl: &GlContext) -> PassTimer {
+		let is_supported = gl.supported_extensions().iter().any(|extension_name| extension_name.contains("timer_query"));
+		PassTimer { is_supported, pending_list: Vec::new(), current: None, milliseconds: Vec::new() }
+	}
+
+	fn begin_pass(&mut self, gl: &GlContext, pass_name: &'static str) {
+		if !self.is_supported || self.current.is_some() {
+			return;
+		}
+		unsafe {
+			if let Ok(query) = gl.create_query() {
+				gl.begin_query(glow::TIME_ELAPSED, query);
+				self.current = Some((pass_name, query));
+			}
+		}
+	}
+
+	fn end_pass(&mut self, gl: &GlContext) {
+		if let Some(current) = self.current.take() {
+			unsafe {
+				gl.end_query(glow::TIME_ELAPSED);
+			}
+			self.pending_list.push(current);
+		}
+	}
+
+	fn poll(&mut self, gl: &GlContext) {
+		if !self.is_supported {
+			return;
+		}
+		let mut remaining_list = Vec::new();
+		for (pass_name, query) in self.pending_list.drain(..) {
+			let is_available = unsafe { gl.get_query_parameter_u32(query, glow::QUERY_RESULT_AVAILABLE) != 0 };
+			if !is_available {
+				remaining_list.push((pass_name, query));
+				continue;
+			}
+			let nanoseconds = unsafe { gl.get_query_parameter_u32(query, glow::QUERY_RESULT) };
+			let measured = nanoseconds as f64 / 1e6;
+			match self.milliseconds.iter_mut().find(|(name, _)| *name == pass_name) {
+				Some(entry) => {
+					entry.1 = entry.1 * 0.9 + measured * 0.1;
+				}
+				None => {
+					self.milliseconds.push((pass_name, measured));
+				}
+			}
+			unsafe {
+				gl.delete_query(query);
+			}
+		}
+		self.pending_list = remaining_list;
+	}
+
+	fn format(&self, pass_name: &str) -> String {
+		match self.milliseconds.iter().find(|(name, _)| *name == pass_name) {
+			Some((_, milliseconds)) => format!("{:.2} ms", milliseconds),
+			None => String::from("n/a"),
+		}
+	}
+}
+
+//==============================================================================
+// 프로세스가 쓰는 메모리 바이트. (원본 'js heap' 줄 자리, 원본은 performance.memory 의 usedJSHeapSize.
+// 맥은 mach task_info 의 resident_size, 리눅스는 /proc/self/statm, 웹은 wasm 선형 메모리 크기, 그 밖은 None)
+//==============================================================================
+fn read_process_memory_bytes() -> Option<f64> {
+	#[cfg(target_os = "macos")]
+	{
+		extern "C" {
+			fn mach_task_self() -> u32;
+			fn task_info(target_task: u32, flavor: u32, task_info_out: *mut i32, task_info_out_count: *mut u32) -> i32;
+		}
+		let mut info = [0i32; 12];
+		let mut count: u32 = 12;
+		let result = unsafe { task_info(mach_task_self(), 20, info.as_mut_ptr(), &mut count) };
+		if result != 0 {
+			return None;
+		}
+		// mach_task_basic_info: virtual_size(u64), resident_size(u64) ...
+		let resident = (info[2] as u32 as u64) | ((info[3] as u32 as u64) << 32);
+		Some(resident as f64)
+	}
+	#[cfg(target_os = "linux")]
+	{
+		let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+		let pages = statm.split_whitespace().nth(1)?.parse::<f64>().ok()?;
+		Some(pages * 4096.0)
+	}
+	#[cfg(target_arch = "wasm32")]
+	{
+		Some((core::arch::wasm32::memory_size(0) * 65536) as f64)
+	}
+	#[cfg(not(any(target_os = "macos", target_os = "linux", target_arch = "wasm32")))]
+	{
+		None
+	}
+}
+
+//==============================================================================
 // 툰 셰이딩 씬.
 //==============================================================================
 struct ToonShadingScene {
@@ -653,6 +763,14 @@ struct ToonShadingScene {
 	last_frame_instant: Option<std::time::Instant>,
 	drag_is_right: bool,
 	tick_milliseconds: f64,
+	pass_timer: PassTimer,
+	process_memory_bytes: f64,
+	backdrop_view: UIView,
+	link_rect: Rect,
+	is_link_pressed: bool,
+	is_pinching: bool,
+	pinch_last_distance: f64,
+	pinch_last_center_y: f64,
 }
 
 impl ToonShadingScene {
@@ -732,6 +850,14 @@ impl ToonShadingScene {
 			last_frame_instant: None,
 			drag_is_right: false,
 			tick_milliseconds: 0.0,
+			pass_timer: PassTimer { is_supported: false, pending_list: Vec::new(), current: None, milliseconds: Vec::new() },
+			process_memory_bytes: 0.0,
+			backdrop_view: UIView::new(),
+			link_rect: Rect::create(0.0, 0.0, 0.0, 0.0),
+			is_link_pressed: false,
+			is_pinching: false,
+			pinch_last_distance: 0.0,
+			pinch_last_center_y: 0.0,
 		}
 	}
 
@@ -1229,6 +1355,75 @@ impl ToonShadingScene {
 	}
 
 	//==============================================================================
+	// 닿아 있는 손가락 자리. (1280 폭 기준 CSS 픽셀)
+	//==============================================================================
+	fn active_touch_positions(engine: &Engine, scale: f64) -> Vec<Vector2> {
+		engine
+			.get_input_manager()
+			.get_touch_points()
+			.iter()
+			.filter(|touch_point| touch_point.phase != TouchPhase::Ended && touch_point.phase != TouchPhase::Cancelled)
+			.map(|touch_point| Vector2::create(touch_point.canvas_native_position.x / scale, touch_point.canvas_native_position.y / scale))
+			.collect()
+	}
+
+	//==============================================================================
+	// 두 손가락 줌과 팬. (원본 pointermove: 거리 비로 줌, 가운데 높이 이동이 0.5 를 넘으면 위아래 팬)
+	//==============================================================================
+	fn update_pinch(&mut self, engine: &Engine) {
+		let scale = engine.get_view_manager().get_canvas_native_size().x / 1280.0;
+		let touch_list = ToonShadingScene::active_touch_positions(engine, scale);
+		if touch_list.len() < 2 {
+			self.is_pinching = false;
+			self.pinch_last_distance = 0.0;
+			return;
+		}
+		let delta_x = touch_list[0].x - touch_list[1].x;
+		let delta_y = touch_list[0].y - touch_list[1].y;
+		let distance = (delta_x * delta_x + delta_y * delta_y).sqrt();
+		let center_y = (touch_list[0].y + touch_list[1].y) * 0.5;
+		if !self.is_pinching {
+			self.is_pinching = true;
+			self.pinch_last_distance = distance;
+			self.pinch_last_center_y = center_y;
+			self.drag_position = None;
+			self.is_panning = false;
+			self.active_slider = None;
+			return;
+		}
+		if self.pinch_last_distance > 0.0 {
+			let zoom_ratio = self.pinch_last_distance / distance.max(1.0);
+			self.set_target_distance(self.camera_state.target_distance * zoom_ratio);
+			if (center_y - self.pinch_last_center_y).abs() > 0.5 {
+				self.camera_state.is_manual_focus = true;
+				self.camera_state.target_focus_height = clamp_value(self.camera_state.target_focus_height + (center_y - self.pinch_last_center_y) * 0.0022 * self.camera_state.target_distance, FOCUS_HEIGHT_MINIMUM, FOCUS_HEIGHT_MAXIMUM);
+			}
+		}
+		self.pinch_last_distance = distance;
+		self.pinch_last_center_y = center_y;
+	}
+
+	//==============================================================================
+	// 뒤 화면 흐림. (원본 CSS backdrop-filter: blur(반지름 px), 둥근 모서리 안만. 이미 그린 것을 이 자리만 흐린 뒤 바탕을 그린다)
+	// - UIView 의 뒤 화면 흐림(set_backdrop_blur)을 둥근 자르기 안에서 부른다. 반지름은 1280 폭 기준 CSS 픽셀.
+	//==============================================================================
+	fn blur_backdrop(view: &mut UIView, graphic: &mut Graphic, rect: Rect, round_size: f64, css_blur: f64) {
+		// 흐림 반지름은 기기 픽셀이다. (1280 폭을 CSS 폭으로 본 값에 기기 픽셀 비를 곱한다)
+		let canvas_pixel_width = Engine::get_engine().unwrap().get_view_manager().get_canvas_pixel_size().x;
+		// 엔진 흐림은 5 점 가우시안을 한 번 거치는 꼴이라 반지름이 크면 겹그림이 남는다. 두 번 거치고, 한 번의 표준편차 약 1.64 * 반지름이 CSS blur 의 표준편차(= 반지름 값)와 같아지게 반지름을 줄인다. (1.64 * 1.414 = 2.32)
+		view.set_backdrop_blur(css_blur / 2.32 * canvas_pixel_width / 1280.0);
+		let mut transform = NodeTransform::new();
+		transform.set_content_size(rect.size);
+		graphic.begin_clip_rect(rect, round_size);
+		graphic.push_state();
+		graphic.translate(rect.position.x, rect.position.y);
+		view.draw_background(&transform, graphic);
+		view.draw_background(&transform, graphic);
+		graphic.pop_state();
+		graphic.end_clip_rect();
+	}
+
+	//==============================================================================
 	// 글자 사이를 띄운 폭 재기.
 	//==============================================================================
 	fn measure_spaced(graphic: &Graphic, text: &str, spacing: f64) -> f64 {
@@ -1337,6 +1532,8 @@ impl ToonShadingScene {
 		resources.model.upload_pending_morph_targets(gl);
 
 		// 1. 섀도우 깊이 패스(키 라이트)와 머리카락 깊이 패스(카메라).
+		self.pass_timer.poll(gl);
+		self.pass_timer.begin_pass(gl, "shadow");
 		unsafe {
 			gl.disable(glow::CULL_FACE);
 			gl.disable(glow::BLEND);
@@ -1382,7 +1579,10 @@ impl ToonShadingScene {
 			}
 		}
 
+		self.pass_timer.end_pass(gl);
+
 		// 2. 씬 MRT. (배경 → 바닥 → 셀 셰이딩 → 아웃라인 → 앞머리 비침)
+		self.pass_timer.begin_pass(gl, "scene");
 		resources.scene_render_target.bind(gl);
 		unsafe {
 			gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
@@ -1467,7 +1667,10 @@ impl ToonShadingScene {
 			gl.disable(glow::DEPTH_TEST);
 		}
 
+		self.pass_timer.end_pass(gl);
+
 		// 3. 블룸.
+		self.pass_timer.begin_pass(gl, "post");
 		let scene_color_texture = resources.scene_render_target.get_color_texture(0);
 		let use_bloom = settings.option("bloom");
 		resources.bloom_effect.set_threshold(settings.slider("bloom_threshold"), settings.slider("bloom_threshold") + 0.85);
@@ -1548,6 +1751,8 @@ impl ToonShadingScene {
 			antialias_pass.draw(gl);
 			draw_call_count += 1;
 		}
+
+		self.pass_timer.end_pass(gl);
 
 		// 6. 와이어프레임. (화면 깊이 프리패스로 앞면 모서리만, 모프와 스키닝 반영)
 		if settings.option("wireframe") {
@@ -1901,6 +2106,7 @@ impl ToonShadingScene {
 		let maximum_scroll = (PANEL_TITLE_HEIGHT + content_height - view_height).max(0.0);
 		self.panel_scroll = if self.is_panel_collapsed { 0.0 } else { clamp_value(self.panel_scroll, 0.0, maximum_scroll) };
 		let title_offset = -self.panel_scroll * scale;
+		ToonShadingScene::blur_backdrop(&mut self.backdrop_view, graphic, panel_rect, 12.0 * scale, 10.0);
 		graphic.set_fill_color(Color::create(0.055, 0.047, 0.055, 0.5));
 		graphic.draw_round_rect(panel_rect, 12.0 * scale);
 		graphic.set_stroke_color(Color::create(0.949, 0.925, 0.886, 0.14));
@@ -2004,6 +2210,7 @@ impl ToonShadingScene {
 		self.context_menu_rect = Some(menu_rect);
 		let engine = Engine::get_engine().unwrap();
 		let pointer = engine.get_input_manager().get_canvas_native_input_position();
+		ToonShadingScene::blur_backdrop(&mut self.backdrop_view, graphic, menu_rect, 10.0 * scale, 10.0);
 		graphic.set_fill_color(Color::create(0.055, 0.047, 0.055, 0.72));
 		graphic.draw_round_rect(menu_rect, 10.0 * scale);
 		graphic.set_stroke_color(Color::create(0.949, 0.925, 0.886, 0.14));
@@ -2047,8 +2254,15 @@ impl ToonShadingScene {
 			("morph targets", resources.morph_target_count.to_string()),
 			("spring joints", resources.spring_joint_list.len().to_string()),
 			("cpu frame", format!("{:.2} ms", self.cpu_frame_milliseconds)),
-			("gpu memory (est.)", format!("{:.0} MB", self.gpu_memory_bytes / 1048576.0)),
 		];
+		if self.pass_timer.is_supported {
+			row_list.push(("gpu shadow + hair", self.pass_timer.format("shadow")));
+			row_list.push(("gpu scene", self.pass_timer.format("scene")));
+			row_list.push(("gpu post", self.pass_timer.format("post")));
+		}
+		row_list.push(("gpu memory (est.)", format!("{:.0} MB", self.gpu_memory_bytes / 1048576.0)));
+		// 원본 'js heap' 줄 자리. (러스트는 프로세스가 쓰는 메모리, 못 읽는 기계는 n/a)
+		row_list.push(("process memory", if self.process_memory_bytes > 0.0 { format!("{:.0} MB", self.process_memory_bytes / 1048576.0) } else { String::from("n/a") }));
 		let is_narrow = css_width < 640.0;
 		if is_narrow {
 			row_list.truncate(4);
@@ -2477,6 +2691,7 @@ impl Scene for ToonShadingScene {
 					match self.create_resources(graphic.get_gl()) {
 						Ok(resources) => {
 							println!("toonshading: 준비 {:.2}초, 드로어블 {}, 노드 {}", load_start_instant.elapsed().as_secs_f64(), resources.drawable_info_list.len(), resources.model.get_node_list().len());
+							self.pass_timer = PassTimer::new(graphic.get_gl());
 							self.resources = Some(resources);
 							self.ready_seconds = Some(0.0);
 							self.last_face_blend = self.settings.slider("face_flatten");
@@ -2494,6 +2709,7 @@ impl Scene for ToonShadingScene {
 			}
 			return;
 		}
+		self.update_pinch(engine);
 		let cpu_frame_start = std::time::Instant::now();
 		// 프레임 제한. (FRAME RATE 슬라이더, 데스크탑만)
 		#[cfg(not(target_arch = "wasm32"))]
@@ -2582,7 +2798,15 @@ impl Scene for ToonShadingScene {
 		// 렌더링 정보. (GPU 메모리 추정은 1 초마다)
 		if self.elapsed_seconds - self.gpu_memory_sample_seconds >= 1.0 {
 			self.gpu_memory_sample_seconds = self.elapsed_seconds;
-			self.gpu_memory_bytes = ToonShadingScene::estimate_gpu_memory_bytes(resources);
+			let gpu_memory_bytes = ToonShadingScene::estimate_gpu_memory_bytes(resources);
+			if (gpu_memory_bytes - self.gpu_memory_bytes).abs() > self.gpu_memory_bytes * 0.05 {
+				self.gpu_memory_bytes = gpu_memory_bytes;
+			}
+			if let Some(process_memory_bytes) = read_process_memory_bytes() {
+				if (process_memory_bytes - self.process_memory_bytes).abs() > self.process_memory_bytes * 0.05 {
+					self.process_memory_bytes = process_memory_bytes;
+				}
+			}
 		}
 		self.tick_milliseconds = cpu_frame_start.elapsed().as_secs_f64() * 1000.0;
 	}
@@ -2663,6 +2887,7 @@ impl Scene for ToonShadingScene {
 			else {
 				graphic.set_fill_color(Color::create(0.055, 0.047, 0.055, 0.5));
 			}
+			ToonShadingScene::blur_backdrop(&mut self.backdrop_view, graphic, *rect, rect.size.y * 0.5, 8.0);
 			graphic.draw_round_rect(*rect, rect.size.y * 0.5);
 			if is_active {
 				graphic.set_stroke_color(Color::create(0.91, 0.788, 0.541, 1.0));
@@ -2688,11 +2913,15 @@ impl Scene for ToonShadingScene {
 		let link_width = ToonShadingScene::measure_spaced(graphic, link_text, link_spacing) + 44.0 * scale;
 		let link_height = link_font_size * 1.2 + 20.0 * scale;
 		let link_rect = Rect::create(title_center_x - link_width * 0.5, native_size.y - native_size.y * 0.055 - link_height, link_width, link_height);
-		graphic.set_fill_color(Color::create(0.055, 0.047, 0.055, 0.45));
+		self.link_rect = link_rect;
+		let is_link_hovered = rect_contains(link_rect, Engine::get_engine().unwrap().get_input_manager().get_canvas_native_input_position());
+		ToonShadingScene::blur_backdrop(&mut self.backdrop_view, graphic, link_rect, link_height * 0.5, 8.0);
+		// 올려 둔 때: 글자 흰색, 테두리 금빛, 바탕 짙게. (원본 #homeLink:hover)
+		graphic.set_fill_color(if is_link_hovered { Color::create(0.157, 0.133, 0.118, 0.6) } else { Color::create(0.055, 0.047, 0.055, 0.45) });
 		graphic.draw_round_rect(link_rect, link_height * 0.5);
-		graphic.set_stroke_color(Color::create(0.949, 0.925, 0.886, 0.3));
+		graphic.set_stroke_color(if is_link_hovered { Color::create(1.0, 0.886, 0.706, 0.85) } else { Color::create(0.949, 0.925, 0.886, 0.3) });
 		graphic.draw_stroke_round_rect(link_rect, link_height * 0.5, scale.max(1.0));
-		graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.8));
+		graphic.set_fill_color(if is_link_hovered { Color::create(1.0, 1.0, 1.0, 1.0) } else { Color::create(0.949, 0.925, 0.886, 0.8) });
 		ToonShadingScene::draw_spaced_text(graphic, link_text, title_center_x, link_rect.position.y + link_height * 0.5, link_spacing, true);
 
 		// 크레딧. (왼쪽 아래, 저작권 있는 자산)
@@ -2740,6 +2969,16 @@ impl Scene for ToonShadingScene {
 		}
 		let native_position = engine.get_input_manager().get_canvas_native_input_position();
 		let scale = engine.get_view_manager().get_canvas_native_size().x / 1280.0;
+		// 두 손가락이 닿은 동안은 끌기를 시작하지 않는다. (원본 pointerdown 의 두 번째 포인터)
+		if self.is_pinching || ToonShadingScene::active_touch_positions(engine, scale).len() >= 2 {
+			self.drag_position = None;
+			return;
+		}
+		self.is_link_pressed = false;
+		if self.context_menu_position.is_none() && rect_contains(self.link_rect, native_position) {
+			self.is_link_pressed = true;
+			return;
+		}
 		let (is_right, is_shift) = {
 			let input_manager = engine.get_input_manager();
 			(input_manager.is_mouse_button_down(MouseButton::Right), input_manager.is_key_pressed("ShiftLeft") || input_manager.is_key_pressed("ShiftRight"))
@@ -2840,6 +3079,9 @@ impl Scene for ToonShadingScene {
 		let engine = Engine::get_engine().unwrap();
 		let native_position = engine.get_input_manager().get_canvas_native_input_position();
 		let scale = engine.get_view_manager().get_canvas_native_size().x / 1280.0;
+		if self.is_pinching {
+			return;
+		}
 		if let Some(slider_index) = self.active_slider {
 			self.set_slider_from_position(slider_index, native_position.x, scale);
 			return;
@@ -2868,6 +3110,14 @@ impl Scene for ToonShadingScene {
 	fn touch_release(&mut self, _view_input_position: Vector2) {
 		let engine = Engine::get_engine().unwrap();
 		self.active_slider = None;
+		// 사이트 링크. (누른 자리에서 떼면 새 창으로 연다, 원본 <a target="_blank">)
+		if self.is_link_pressed {
+			self.is_link_pressed = false;
+			if rect_contains(self.link_rect, engine.get_input_manager().get_canvas_native_input_position()) {
+				engine.open_url("https://vanillapunch.com/tools/");
+			}
+			return;
+		}
 		if self.drag_position.is_some() && self.drag_is_right && !self.has_panned {
 			self.context_menu_position = Some(engine.get_input_manager().get_canvas_native_input_position());
 		}

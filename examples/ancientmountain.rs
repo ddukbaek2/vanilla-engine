@@ -20,7 +20,7 @@ use std::rc::Rc;
 use vanilla::core::fullscreenpass::FullscreenPass;
 use vanilla::core::graphic::{GlTexture, GlVertexArray};
 use vanilla::core::shaderprogram::ShaderProgram;
-use vanilla::{BloomEffect, Canvas2D, CanvasTextAlign, CanvasTextBaseline, Color, Engine, EngineConfiguration, GlContext, Graphic, Image, ImageAsset, ImageDescription, ImageSource, Material, Matrix4, MouseButton, Rect, RenderTarget, Scene, SceneBase, ShadowMap, SkinnedModel, SkinnedModelLoadHandle, SkinnedModelRenderer, TextAlign, TextBaseline, TouchPhase, Vector2, Vector3, VirtualPad};
+use vanilla::{BloomEffect, Canvas2D, CanvasTextAlign, CanvasTextBaseline, Color, Engine, EngineConfiguration, GlContext, Graphic, Image, ImageAsset, ImageDescriptionLoadHandle, ImageDescriptionOptions, Material, Matrix4, MouseButton, Rect, RenderTarget, Scene, SceneBase, ShadowMap, SkinnedModel, SkinnedModelLoadHandle, SkinnedModelRenderer, NodeTransform, TextAlign, TextBaseline, TouchPhase, UIView, Vector2, Vector3, VirtualPad};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -881,6 +881,7 @@ struct AncientMountainScene {
 	character_load_handle: Option<SkinnedModelLoadHandle>,
 	fox_load_handle: Option<SkinnedModelLoadHandle>,
 	texture_asset_list: Vec<ImageAsset>,
+	texture_description_handle_list: Vec<ImageDescriptionLoadHandle>,
 	resources: Option<MountainResources>,
 	load_error_message: Option<String>,
 	world: World,
@@ -904,6 +905,9 @@ struct AncientMountainScene {
 	// 원본 HTML 오버레이(제목, 링크, 저작자 표기)를 구운 그림. (창 크기, 번짐 단계마다)
 	overlay_image_table: HashMap<String, Rc<Image>>,
 	overlay_key: String,
+	backdrop_view: UIView,
+	link_hit_list: Vec<(Rect, &'static str)>,
+	pressed_link_index: Option<usize>,
 	overlay_measure_canvas: Canvas2D,
 	pending_drag_yaw_delta: f64,
 	pending_drag_pitch_delta: f64,
@@ -984,6 +988,7 @@ impl AncientMountainScene {
 			character_load_handle: None,
 			fox_load_handle: None,
 			texture_asset_list: Vec::new(),
+			texture_description_handle_list: Vec::new(),
 			resources: None,
 			load_error_message: None,
 			rock_list: Vec::new(),
@@ -1004,6 +1009,9 @@ impl AncientMountainScene {
 			is_pad_placed: false,
 			overlay_image_table: HashMap::new(),
 			overlay_key: String::new(),
+			backdrop_view: UIView::new(),
+			link_hit_list: Vec::new(),
+			pressed_link_index: None,
 			overlay_measure_canvas: Canvas2D::new(1, 1),
 			pending_drag_yaw_delta: 0.0,
 			pending_drag_pitch_delta: 0.0,
@@ -1296,13 +1304,22 @@ impl AncientMountainScene {
 					engine_texture
 				}
 				None => {
-					let decoded_image = self.texture_asset_list[texture_index].get_image().ok_or_else(|| format!("텍스처를 아직 받는 중: {}", texture_name))?;
-					let image_description = ImageDescription { source: Some(Rc::new(ImageSource { width: decoded_image.get_width(), height: decoded_image.get_height(), pixels: decoded_image.get_pixels().to_vec() })), ..ImageDescription::default() };
+					let image_description = self.texture_description_handle_list[texture_index].get_image_description().ok_or_else(|| format!("텍스처를 아직 받는 중: {}", texture_name))??;
 					Material::create_texture(gl, Some(&image_description), [128, 128, 128, 255])?
 				}
 			};
 			unsafe {
 				gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+				// 웹: 엔진이 올린 텍스처에도 원본 loadTexture 처럼 밉맵과 LINEAR_MIPMAP_LINEAR 을 건다. (데스크탑은 create_texture 가 했다)
+				if cfg!(target_arch = "wasm32") {
+					gl.generate_mipmap(glow::TEXTURE_2D);
+					gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR_MIPMAP_LINEAR as i32);
+					gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+					if gl.supported_extensions().iter().any(|extension_name| extension_name.contains("texture_filter_anisotropic")) {
+						let maximum_anisotropy = gl.get_parameter_f32(glow::MAX_TEXTURE_MAX_ANISOTROPY_EXT);
+						gl.tex_parameter_f32(glow::TEXTURE_2D, glow::TEXTURE_MAX_ANISOTROPY_EXT, maximum_anisotropy.min(8.0));
+					}
+				}
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::MIRRORED_REPEAT as i32);
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::MIRRORED_REPEAT as i32);
 				gl.bind_texture(glow::TEXTURE_2D, None);
@@ -2352,19 +2369,22 @@ impl AncientMountainScene {
 			});
 			self.overlay_image_table.insert(title_key.clone(), image);
 		}
-		let link_key = format!("link|{}", blur_level);
+		let pointer_position = engine.get_input_manager().get_canvas_native_input_position();
+		let is_link_hovered = pointer_position.x >= link_box.position.x && pointer_position.x <= link_box.position.x + link_box.size.x && pointer_position.y >= link_box.position.y + entrance_offset_y && pointer_position.y <= link_box.position.y + entrance_offset_y + link_box.size.y;
+		let link_key = format!("link|{}|{}", blur_level, is_link_hovered);
 		if !self.overlay_image_table.contains_key(&link_key) {
 			let image = bake_overlay(link_bake_rect.size.x, link_bake_rect.size.y, device_scale, blur_level as f64, &|canvas| {
 				canvas.translate(-link_bake_rect.position.x, -link_bake_rect.position.y);
 				let radius = link_box.size.y * 0.5;
 				let mut path = vanilla::Path2D::new();
 				path.round_rect((link_box.position.x + 0.5) as f32, (link_box.position.y + 0.5) as f32, (link_box.size.x - 1.0) as f32, (link_box.size.y - 1.0) as f32, &[radius - 0.5]);
-				canvas.set_fill_style(rgba(16.0, 26.0, 38.0, 0.4));
+				// 올려 둔 때: 글자 흰색, 테두리 금빛, 바탕 밝게. (원본 #homeLink:hover)
+				canvas.set_fill_style(if is_link_hovered { rgba(38.0, 52.0, 70.0, 0.55) } else { rgba(16.0, 26.0, 38.0, 0.4) });
 				canvas.fill_path(&path, vanilla::CanvasFillRule::NonZero);
-				canvas.set_stroke_style(rgba(247.0, 243.0, 232.0, 0.32));
+				canvas.set_stroke_style(if is_link_hovered { rgba(255.0, 236.0, 180.0, 0.85) } else { rgba(247.0, 243.0, 232.0, 0.32) });
 				canvas.set_line_width(1.0);
 				canvas.stroke_path(&path);
-				draw_css_text(canvas, device_scale, &[(link_text, rgba(247.0, 243.0, 232.0, 0.8))], &link_font, link_letter_spacing, link_box.position.x + link_box.size.x * 0.5, link_box.position.y + 1.0 + 10.0 + link_ascent, &[TextShadow { color: shadow_dark, offset_y: 1.0, blur: 8.0 }]);
+				draw_css_text(canvas, device_scale, &[(link_text, if is_link_hovered { rgba(255.0, 255.0, 255.0, 1.0) } else { rgba(247.0, 243.0, 232.0, 0.8) })], &link_font, link_letter_spacing, link_box.position.x + link_box.size.x * 0.5, link_box.position.y + 1.0 + 10.0 + link_ascent, &[TextShadow { color: shadow_dark, offset_y: 1.0, blur: 8.0 }]);
 			});
 			self.overlay_image_table.insert(link_key.clone(), image);
 		}
@@ -2386,6 +2406,40 @@ impl AncientMountainScene {
 				}
 			});
 			self.overlay_image_table.insert(credit_key.clone(), image);
+		}
+		// 눌러 열 링크 자리. (알약과 저작자 표기의 링크 글, 크롬 앵커의 글자 상자)
+		self.link_hit_list.clear();
+		self.link_hit_list.push((Rect::create(link_box.position.x, link_box.position.y + entrance_offset_y, link_box.size.x, link_box.size.y), "https://vanillapunch.com/tools/"));
+		{
+			let measure_canvas = &mut self.overlay_measure_canvas;
+			measure_canvas.set_font(&credit_font);
+			let credit_ascent_descent = credit_ascent + credit_descent;
+			let measure_run = |canvas: &mut Canvas2D, text: &str| -> f64 { text.chars().map(|character| canvas.measure_text(&character.to_string()).width).sum::<f64>() + credit_letter_spacing * text.chars().count() as f64 };
+			let credit_line_link_list: [(&str, &str, &str); 2] = [
+				("CHARACTER: ", "QUATERNIUS UNIVERSAL ANIMATION LIBRARY (CC0)", "https://opengameart.org/content/universal-animation-library"),
+				("FOX: ", "MODEL PIXELMANNEN (CC0), RIGGING AND ANIMATION TOMKRANIS (CC BY 4.0), GLTF CONVERSION ASOBOSTUDIO AND SCUREST (CC BY 4.0)", "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Fox"),
+			];
+			for (line_index, (label_text, link_run_text, url)) in credit_line_link_list.iter().enumerate() {
+				let label_width = measure_run(measure_canvas, label_text);
+				let link_width = measure_run(measure_canvas, link_run_text);
+				let line_start_x = center_x - (label_width + link_width) * 0.5;
+				let line_top = credit_top + line_index as f64 * credit_line_height + (credit_line_height - credit_ascent_descent) * 0.5;
+				self.link_hit_list.push((Rect::create(line_start_x + label_width, line_top, link_width, credit_ascent_descent), *url));
+			}
+		}
+		// 알약 뒤 흐림. (원본 backdrop-filter: blur(8px), 둥근 모서리 안만. 엔진 흐림을 두 번 거치고 반지름은 표준편차를 맞춰 8 / 2.32, 기기 픽셀)
+		{
+			let pill_rect = Rect::create(link_box.position.x, link_box.position.y + entrance_offset_y, link_box.size.x, link_box.size.y);
+			self.backdrop_view.set_backdrop_blur(8.0 / 2.32 * device_scale);
+			let mut transform = NodeTransform::new();
+			transform.set_content_size(pill_rect.size);
+			graphic.begin_clip_rect(pill_rect, pill_rect.size.y * 0.5);
+			graphic.push_state();
+			graphic.translate(pill_rect.position.x, pill_rect.position.y);
+			self.backdrop_view.draw_background(&transform, graphic);
+			self.backdrop_view.draw_background(&transform, graphic);
+			graphic.pop_state();
+			graphic.end_clip_rect();
 		}
 		graphic.set_global_alpha(entrance_ease);
 		graphic.draw_image(&self.overlay_image_table[&title_key], Vector2::create(title_bake_rect.position.x, title_bake_rect.position.y + entrance_offset_y), title_bake_rect.size);
@@ -2625,10 +2679,19 @@ impl Scene for AncientMountainScene {
 		self.character_load_handle = Some(character_load_handle);
 		self.fox_load_handle = Some(fox_load_handle);
 		for texture_name in TEXTURE_NAME_LIST {
-			let mut texture_asset = ImageAsset::new();
-			let texture_load_handle = texture_asset.load(engine, texture_name);
-			self.scene_base.track_load_handle(&texture_load_handle);
-			self.texture_asset_list.push(texture_asset);
+			if cfg!(target_arch = "wasm32") {
+				// 웹: 브라우저가 푼다.
+				let mut texture_asset = ImageAsset::new();
+				let texture_load_handle = texture_asset.load(engine, texture_name);
+				self.scene_base.track_load_handle(&texture_load_handle);
+				self.texture_asset_list.push(texture_asset);
+			}
+			else {
+				// 데스크탑: 엔진 해독기(PNG, JPEG)가 푼다. 이방성 8, 밉맵은 create_texture 가 한다. (원본 loadTexture)
+				let description_handle = Material::load_image_description(engine, texture_name, Some(ImageDescriptionOptions { flip_y: false, is_color_data: false, anisotropy: 8.0 }));
+				self.scene_base.track_load_handle(description_handle.get_load_handle());
+				self.texture_description_handle_list.push(description_handle);
+			}
 		}
 	}
 
@@ -2721,6 +2784,18 @@ impl Scene for AncientMountainScene {
 				gamepad_state,
 			)
 		};
+		// 링크 누르기. (원본 <a target="_blank">, 누른 링크 위에서 떼면 연다. 터치는 원본 touchstart 의 preventDefault 로 열리지 않는다)
+		if left_just_pressed {
+			self.pressed_link_index = self.link_hit_list.iter().position(|(link_rect, _)| pointer_position.x >= link_rect.position.x && pointer_position.x <= link_rect.position.x + link_rect.size.x && pointer_position.y >= link_rect.position.y && pointer_position.y <= link_rect.position.y + link_rect.size.y);
+		}
+		if left_just_released {
+			if let Some(link_index) = self.pressed_link_index.take() {
+				let (link_rect, url) = self.link_hit_list[link_index];
+				if pointer_position.x >= link_rect.position.x && pointer_position.x <= link_rect.position.x + link_rect.size.x && pointer_position.y >= link_rect.position.y && pointer_position.y <= link_rect.position.y + link_rect.size.y {
+					engine.open_url(url);
+				}
+			}
+		}
 		if jump_key_pressed {
 			self.jump_pressed = true;
 		}

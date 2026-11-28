@@ -16,7 +16,7 @@ use std::rc::Rc;
 use vanilla::core::fullscreenpass::FullscreenPass;
 use vanilla::core::graphic::GlTexture;
 use vanilla::core::shaderprogram::ShaderProgram;
-use vanilla::{Canvas2D, CanvasTextAlign, CanvasTextBaseline, Color, Engine, EngineConfiguration, GlContext, Graphic, Image, RenderTarget, Rect, Scene, SceneBase, SkinnedModel, SkinnedModelLoadHandle, SkinnedModelRenderer, TextAlign, TextBaseline, Vector2};
+use vanilla::{Canvas2D, CanvasTextAlign, CanvasTextBaseline, Color, Engine, EngineConfiguration, GlContext, Graphic, Image, NodeTransform, RenderTarget, Rect, Scene, SceneBase, SkinnedModel, SkinnedModelLoadHandle, SkinnedModelRenderer, TextAlign, TextBaseline, UIView, Vector2};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -869,6 +869,8 @@ struct NeonHorizonScene {
 	overlay_key: String,
 	overlay_measure_canvas: Canvas2D,
 	link_hit_rect: Rect,
+	backdrop_view: UIView,
+	is_link_pressed: bool,
 	is_boost_pressed: bool,
 	drag_last_x: Option<f64>,
 	player_target_x: f64,
@@ -910,6 +912,8 @@ impl NeonHorizonScene {
 			overlay_key: String::new(),
 			overlay_measure_canvas: Canvas2D::new(1, 1),
 			link_hit_rect: Rect::create(0.0, 0.0, 0.0, 0.0),
+			backdrop_view: UIView::new(),
+			is_link_pressed: false,
 			is_boost_pressed: false,
 			drag_last_x: None,
 			player_target_x: 0.0,
@@ -1437,21 +1441,38 @@ impl NeonHorizonScene {
 			});
 			self.overlay_image_table.insert(title_key.clone(), image);
 		}
-		let link_key = format!("link|{}", blur_level);
+		let hover_pointer_position = engine.get_input_manager().get_canvas_native_input_position();
+		let is_link_hovered = hover_pointer_position.x >= link_box.position.x && hover_pointer_position.x <= link_box.position.x + link_box.size.x && hover_pointer_position.y >= link_box.position.y + entrance_offset_y && hover_pointer_position.y <= link_box.position.y + entrance_offset_y + link_box.size.y;
+		let link_key = format!("link|{}|{}", blur_level, is_link_hovered);
 		if !self.overlay_image_table.contains_key(&link_key) {
 			let image = bake_overlay(link_bake_rect.size.x, link_bake_rect.size.y, device_scale, blur_level as f64, &|canvas| {
 				canvas.translate(-link_bake_rect.position.x, -link_bake_rect.position.y);
 				let radius = link_box.size.y * 0.5;
 				let mut path = vanilla::Path2D::new();
 				path.round_rect((link_box.position.x + 0.5) as f32, (link_box.position.y + 0.5) as f32, (link_box.size.x - 1.0) as f32, (link_box.size.y - 1.0) as f32, &[radius - 0.5]);
-				canvas.set_fill_style(rgba(13.0, 7.0, 4.0, 0.45));
+				// 올려 둔 때: 글자 밝게, 테두리 금빛, 바탕 밝게. (원본 #homeLink:hover)
+				canvas.set_fill_style(if is_link_hovered { rgba(58.0, 36.0, 14.0, 0.55) } else { rgba(13.0, 7.0, 4.0, 0.45) });
 				canvas.fill_path(&path, vanilla::CanvasFillRule::NonZero);
-				canvas.set_stroke_style(rgba(243.0, 229.0, 171.0, 0.3));
+				canvas.set_stroke_style(if is_link_hovered { rgba(243.0, 229.0, 171.0, 0.85) } else { rgba(243.0, 229.0, 171.0, 0.3) });
 				canvas.set_line_width(1.0);
 				canvas.stroke_path(&path);
-				draw_css_text(canvas, device_scale, &[(link_text, rgba(241.0, 233.0, 216.0, 0.75))], &link_font, link_letter_spacing, link_box.position.x + link_box.size.x * 0.5, link_box.position.y + 1.0 + 10.0 + link_ascent, &[TextShadow { color: shadow_dark, offset_y: 0.0, blur: 10.0 }]);
+				draw_css_text(canvas, device_scale, &[(link_text, if is_link_hovered { rgba(255.0, 250.0, 240.0, 1.0) } else { rgba(241.0, 233.0, 216.0, 0.75) })], &link_font, link_letter_spacing, link_box.position.x + link_box.size.x * 0.5, link_box.position.y + 1.0 + 10.0 + link_ascent, &[TextShadow { color: shadow_dark, offset_y: 0.0, blur: 10.0 }]);
 			});
 			self.overlay_image_table.insert(link_key.clone(), image);
+		}
+		// 알약 뒤 흐림. (원본 backdrop-filter: blur(8px), 둥근 모서리 안만. 엔진 흐림을 두 번 거치고 반지름은 표준편차를 맞춰 8 / 2.32, 기기 픽셀)
+		{
+			let pill_rect = Rect::create(link_box.position.x, link_box.position.y + entrance_offset_y, link_box.size.x, link_box.size.y);
+			self.backdrop_view.set_backdrop_blur(8.0 / 2.32 * device_scale);
+			let mut transform = NodeTransform::new();
+			transform.set_content_size(pill_rect.size);
+			graphic.begin_clip_rect(pill_rect, pill_rect.size.y * 0.5);
+			graphic.push_state();
+			graphic.translate(pill_rect.position.x, pill_rect.position.y);
+			self.backdrop_view.draw_background(&transform, graphic);
+			self.backdrop_view.draw_background(&transform, graphic);
+			graphic.pop_state();
+			graphic.end_clip_rect();
 		}
 		graphic.set_global_alpha(entrance_ease);
 		graphic.draw_image(&self.overlay_image_table[&title_key], Vector2::create(title_bake_rect.position.x, title_bake_rect.position.y + entrance_offset_y), title_bake_rect.size);
@@ -1538,6 +1559,7 @@ impl Scene for NeonHorizonScene {
 		if is_pressed {
 			// 원본은 사이트 링크 위의 누름을 부스트로 읽지 않는다. (링크가 받는다)
 			if is_on_link {
+				self.is_link_pressed = true;
 			}
 			else if !self.handle_panel_press(pointer_position.x, pointer_position.y, window_size.x) {
 				self.is_boost_pressed = true;
@@ -1555,7 +1577,14 @@ impl Scene for NeonHorizonScene {
 				self.drag_last_x = Some(pointer_position.x);
 			}
 		}
+		// 사이트 링크. (누른 링크 위에서 떼면 새 창으로 연다, 원본 <a target="_blank">)
+		if is_released && self.is_link_pressed {
+			if is_on_link {
+				engine.open_url("https://vanillapunch.com/tools/");
+			}
+		}
 		if is_released || (!is_down && !is_pressed) {
+			self.is_link_pressed = false;
 			self.is_boost_pressed = false;
 			self.drag_last_x = None;
 			self.active_slider_index = None;
