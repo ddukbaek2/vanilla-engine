@@ -23,6 +23,7 @@ pub mod gamepadmanager;
 pub mod graphic;
 pub mod glcontext;
 pub(crate) mod glstatecache;
+pub mod gpumemorytracker;
 // GPU 경계의 수 바꾸기. (f64 를 유니폼의 f32 로)
 pub(crate) mod gluniform;
 // 읽었지만 아직 올리지 않은 그림. (원본 DecodedImageStore, 로딩 화면 동안 Graphic::prepare_loaded_images 가 올린다)

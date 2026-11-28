@@ -8289,6 +8289,18 @@
 			"vanilla-engine": {
 				"module": "core/engine",
 				"class": "EngineConfiguration",
+				"name": "track_gpu_memory"
+			},
+			"vanilla.js": {
+				"module": "core/engine",
+				"class": "EngineConfiguration",
+				"name": "trackGpuMemory"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/engine",
+				"class": "EngineConfiguration",
 				"name": "ignore_virtual_keyboard_resize"
 			},
 			"vanilla.js": {
@@ -8641,6 +8653,42 @@
 				"module": "core/engine",
 				"class": "Engine",
 				"name": "getCanvas"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/engine",
+				"class": "Engine",
+				"name": "enable_gpu_memory_tracking"
+			},
+			"vanilla.js": {
+				"module": "core/engine",
+				"class": "Engine",
+				"name": "enableGpuMemoryTracking"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/engine",
+				"class": "Engine",
+				"name": "is_gpu_memory_tracking_enabled"
+			},
+			"vanilla.js": {
+				"module": "core/engine",
+				"class": "Engine",
+				"name": "isGpuMemoryTrackingEnabled"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/engine",
+				"class": "Engine",
+				"name": "read_gpu_memory_usage"
+			},
+			"vanilla.js": {
+				"module": "core/engine",
+				"class": "Engine",
+				"name": "readGpuMemoryUsage"
 			}
 		},
 		{
@@ -11471,6 +11519,42 @@
 			"vanilla-engine": {
 				"module": "core/graphic",
 				"class": "Graphic",
+				"name": "enable_gpu_memory_tracking"
+			},
+			"vanilla.js": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "enableGpuMemoryTracking"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "is_gpu_memory_tracking_enabled"
+			},
+			"vanilla.js": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "isGpuMemoryTrackingEnabled"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "read_gpu_memory_usage"
+			},
+			"vanilla.js": {
+				"module": "core/graphic",
+				"class": "Graphic",
+				"name": "readGpuMemoryUsage"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/graphic",
+				"class": "Graphic",
 				"name": "get_vertex_array"
 			},
 			"vanilla.js": {
@@ -11579,6 +11663,16 @@
 			"vanilla.js": {
 				"module": "core/graphic",
 				"name": "detectTextDirection"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "core/gpumemorytracker",
+				"class": "GpuMemoryKind"
+			},
+			"vanilla.js": {
+				"module": "core/graphic/gpumemorytracker",
+				"class": "GpuMemoryKind"
 			}
 		},
 		{

@@ -1994,7 +1994,7 @@ impl Graphic {
 			let vertex_buffer = crate::core::glstatecache::create_buffer(&gl)?;
 			crate::core::glstatecache::bind_vertex_array(&gl, Some(vertex_array));
 			crate::core::glstatecache::bind_buffer(&gl, glow::ARRAY_BUFFER, Some(vertex_buffer));
-			gl.buffer_data_size(glow::ARRAY_BUFFER, (vertex_data.len() * 4) as i32, glow::DYNAMIC_DRAW);
+			GlContext::from_context(&gl).buffer_data_size(glow::ARRAY_BUFFER, (vertex_data.len() * 4) as i32, glow::DYNAMIC_DRAW);
 			let stride_bytes = (FLOATS_PER_VERTEX * 4) as i32;
 			let vertex_position_location = shader_program.get_attribute_location(GlContext::from_context(&gl), "vertexPosition");
 			let vertex_texture_coordinate_location = shader_program.get_attribute_location(GlContext::from_context(&gl), "vertexTextureCoordinate");
@@ -2012,7 +2012,7 @@ impl Graphic {
 			let white_texture = crate::core::glstatecache::create_texture(&gl)?;
 			crate::core::glstatecache::bind_texture(&gl, glow::TEXTURE_2D, Some(white_texture));
 			let white_pixel: [u8; 4] = [255, 255, 255, 255];
-			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, 1, 1, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&white_pixel)));
+			GlContext::from_context(&gl).tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, 1, 1, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&white_pixel)));
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
 
@@ -2827,7 +2827,7 @@ impl Graphic {
 		let float_count = vertex_count * FLOATS_PER_VERTEX;
 		let vertex_bytes = float_slice_to_bytes(&self.vertex_data[..float_count]);
 		unsafe {
-			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
+			GlContext::from_context(&self.gl).buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 		}
 
 		// 유니폼 업로드. (묶음을 내보낸 뒤에는 묶음 프로그램이 걸려 있을 수 있어 지금 쓰는 프로그램을 건다)
@@ -2957,7 +2957,7 @@ impl Graphic {
 		}
 		let vertex_bytes = float_slice_to_bytes(&self.vertex_data[..float_count]);
 		unsafe {
-			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
+			GlContext::from_context(&self.gl).buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 		}
 		if self.shader_program_override.is_none() {
 			self.draw_with_blend_shader_program(vertex_count, texture, color, shader_blend_mode_index);
@@ -3006,7 +3006,7 @@ impl Graphic {
 		let layer_vertex_count = self.write_quad(0, left_x, top_y, right_x, bottom_y, left_x / viewport_width, (viewport_height - top_y) / viewport_height, right_x / viewport_width, (viewport_height - bottom_y) / viewport_height) / FLOATS_PER_VERTEX;
 		let layer_vertex_bytes = float_slice_to_bytes(&self.vertex_data[..layer_vertex_count * FLOATS_PER_VERTEX]);
 		unsafe {
-			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, layer_vertex_bytes, glow::DYNAMIC_DRAW);
+			GlContext::from_context(&self.gl).buffer_data_u8_slice(glow::ARRAY_BUFFER, layer_vertex_bytes, glow::DYNAMIC_DRAW);
 		}
 		let transform_matrix = self.transform_matrix;
 		let global_alpha = self.global_alpha;
@@ -3175,7 +3175,7 @@ impl Graphic {
 		unsafe {
 			let texture = crate::core::glstatecache::create_texture(&self.gl)?;
 			self.bind_main_texture(texture);
-			self.gl.tex_image_2d(glow::TEXTURE_2D, 0, internal_format as i32, width, height, 0, pixel_format, pixel_type, glow::PixelUnpackData::Slice(None));
+			GlContext::from_context(&self.gl).tex_image_2d(glow::TEXTURE_2D, 0, internal_format as i32, width, height, 0, pixel_format, pixel_type, glow::PixelUnpackData::Slice(None));
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
@@ -4337,7 +4337,7 @@ impl Graphic {
 					else if is_full_upload {
 						// 처음이거나, 지난번보다 정점이 많거나, 모두 바뀌었으면 새 저장소를 잡으며 모두 올린다.
 						crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, vertex_buffer);
-						self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
+						GlContext::from_context(&self.gl).buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 						retained_flush.buffer_vertex_count = vertex_count;
 						self.batch_upload_byte_count += vertex_bytes.len() as u64;
 					}
@@ -4356,7 +4356,7 @@ impl Graphic {
 				None => {
 					crate::core::glstatecache::bind_vertex_array(&self.gl, self.batch_vertex_array);
 					crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, self.batch_vertex_buffer);
-					self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
+					GlContext::from_context(&self.gl).buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 					self.batch_upload_byte_count += vertex_bytes.len() as u64;
 				}
 			}
@@ -4852,7 +4852,7 @@ impl Graphic {
 			let particle_vertex_buffer = crate::core::glstatecache::create_buffer(&self.gl)?;
 			crate::core::glstatecache::bind_vertex_array(&self.gl, Some(particle_vertex_array));
 			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, Some(particle_vertex_buffer));
-			self.gl.buffer_data_size(glow::ARRAY_BUFFER, (PARTICLE_VERTEX_CAPACITY * PARTICLE_FLOATS_PER_VERTEX * 4) as i32, glow::DYNAMIC_DRAW);
+			GlContext::from_context(&self.gl).buffer_data_size(glow::ARRAY_BUFFER, (PARTICLE_VERTEX_CAPACITY * PARTICLE_FLOATS_PER_VERTEX * 4) as i32, glow::DYNAMIC_DRAW);
 			let stride_bytes = (PARTICLE_FLOATS_PER_VERTEX * 4) as i32;
 			let attribute_layout: [(&str, i32, i32); 3] = [("vertexPosition", 2, 0), ("vertexTextureCoordinate", 2, 8), ("vertexColor", 4, 16)];
 			for (attribute_name, component_count, byte_offset) in attribute_layout {
@@ -4980,7 +4980,7 @@ impl Graphic {
 		unsafe {
 			crate::core::glstatecache::bind_vertex_array(&self.gl, self.particle_vertex_array);
 			crate::core::glstatecache::bind_buffer(&self.gl, glow::ARRAY_BUFFER, self.particle_vertex_buffer);
-			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
+			GlContext::from_context(&self.gl).buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 			self.gl.uniform_matrix_3_f32_slice(model_matrix_location.as_ref(), false, &self.model_matrix_array);
 			self.gl.uniform_1_f64(global_alpha_location.as_ref(), self.global_alpha);
@@ -5119,7 +5119,7 @@ impl Graphic {
 		let soft_disc_texture = unsafe {
 			let texture = crate::core::glstatecache::create_texture(&self.gl).expect("soft disc texture");
 			crate::core::glstatecache::bind_texture(&self.gl, glow::TEXTURE_2D, Some(texture));
-			self.gl.tex_image_2d(
+			GlContext::from_context(&self.gl).tex_image_2d(
 				glow::TEXTURE_2D,
 				0,
 				glow::RGBA8 as i32,
@@ -6656,14 +6656,14 @@ impl Graphic {
 		unsafe {
 			let texture = crate::core::glstatecache::create_texture(&self.gl)?;
 			self.bind_main_texture(texture);
-			self.gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, viewport_width, viewport_height, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None));
+			GlContext::from_context(&self.gl).tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, viewport_width, viewport_height, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None));
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
-			let stencil_renderbuffer = self.gl.create_renderbuffer()?;
+			let stencil_renderbuffer = GlContext::from_context(&self.gl).create_renderbuffer()?;
 			self.gl.bind_renderbuffer(glow::RENDERBUFFER, Some(stencil_renderbuffer));
-			self.gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, viewport_width, viewport_height);
+			GlContext::from_context(&self.gl).renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, viewport_width, viewport_height);
 			self.gl.bind_renderbuffer(glow::RENDERBUFFER, None);
 			let target_framebuffer = crate::core::glstatecache::create_framebuffer(&self.gl)?;
 			crate::core::glstatecache::bind_framebuffer(&self.gl, glow::FRAMEBUFFER, Some(target_framebuffer));
@@ -6692,7 +6692,7 @@ impl Graphic {
 	fn destroy_opacity_layer_target(&self, target: OpacityLayerTarget) {
 		unsafe {
 			crate::core::glstatecache::delete_framebuffer(&self.gl, target.framebuffer);
-			self.gl.delete_renderbuffer(target.stencil_renderbuffer);
+			GlContext::from_context(&self.gl).delete_renderbuffer(target.stencil_renderbuffer);
 			crate::core::glstatecache::delete_texture(&self.gl, target.texture);
 		}
 	}
@@ -7222,6 +7222,77 @@ impl Graphic {
 	//==============================================================================
 	pub fn is_context_lost(&self) -> bool {
 		GlContext::from_context(&self.gl).is_context_lost()
+	}
+
+	//==============================================================================
+	/// GPU 메모리 셈 켜기. (원본 Graphic.enableGpuMemoryTracking, 개발용)
+	/// - 켠 뒤에 지은 텍스처, 렌더버퍼, 버퍼부터 센다. 이미 켰으면 아무것도 하지 않는다.
+	///   켜기 전에는 GL 짓기와 크기 정하기 호출이 깃발 하나만 보고 지나가 프레임에 드는 일이 없다. 엔진이 처음 짓는 자원까지 세려면 EngineConfiguration::track_gpu_memory.
+	///
+	/// # 예제
+	/// GPU 메모리 셈 켜기
+	/// ```rust,no_run
+	/// use vanilla::Graphic;
+	///
+	/// fn enable(graphic: &Graphic) {
+	/// 	graphic.enable_gpu_memory_tracking();
+	/// 	assert!(graphic.is_gpu_memory_tracking_enabled());
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn enable_gpu_memory_tracking(&self) {
+		crate::core::gpumemorytracker::enable();
+	}
+
+	//==============================================================================
+	/// GPU 메모리 셈이 켜져 있는지. (원본 Graphic.isGpuMemoryTrackingEnabled)
+	///
+	/// # 돌려줌
+	/// 켜져 있으면 true.
+	///
+	/// # 예제
+	/// 켜져 있는지 읽기
+	/// ```rust,no_run
+	/// use vanilla::Graphic;
+	///
+	/// fn check(graphic: &Graphic) -> bool {
+	/// 	graphic.is_gpu_memory_tracking_enabled()
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn is_gpu_memory_tracking_enabled(&self) -> bool {
+		crate::core::gpumemorytracker::is_enabled()
+	}
+
+	//==============================================================================
+	/// GPU 메모리 읽기. (원본 Graphic.readGpuMemoryUsage, 개발용)
+	/// - 텍스처, 렌더버퍼, 버퍼가 쓰는 GPU 메모리를 종류별과 주인별로 읽는다. (형식과 크기로 셈한 이름값, 멀티샘플 렌더버퍼는 샘플 수를 곱한다)
+	///   셈이 꺼져 있으면 이 호출이 켜고 그 뒤에 지은 것부터 센다. 처음부터 다 세려면 EngineConfiguration::track_gpu_memory 를 true 로 둔다.
+	///
+	/// # 돌려줌
+	/// 합(캔버스 기본 프레임 버퍼 몫 포함), 캔버스 몫, 종류별 몫, 주인별 몫(큰 것부터, 주인은 지은 호출 스택의 위쪽 세 칸).
+	///
+	/// # 예제
+	/// GPU 메모리 합 읽기
+	/// ```rust,no_run
+	/// use vanilla::Graphic;
+	///
+	/// fn read(graphic: &Graphic) {
+	/// 	let usage = graphic.read_gpu_memory_usage();
+	/// 	println!("{} {}", usage.total_bytes, usage.owner_list.len());
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn read_gpu_memory_usage(&self) -> crate::core::gpumemorytracker::GpuMemoryUsage {
+		self.enable_gpu_memory_tracking();
+		// 캔버스의 기본 프레임 버퍼. (색 4 바이트 + 깊이와 스텐실 4 바이트, 멀티샘플이면 샘플 수 4 를 곱하고 풀어 낸 색 한 장을 더한다, 샘플 수는 드라이버 몫이라 4 로 셈한 이름값)
+		let mut canvas_bytes: u64 = 0;
+		if !self.is_context_lost() {
+			let pixel_count = (self.applied_viewport_width.max(0) as u64) * (self.applied_viewport_height.max(0) as u64);
+			let sample_count: u64 = if read_default_framebuffer_multisampled(GlContext::from_context(&self.gl)).unwrap_or(self.framebuffer_sample_state != 0) { 4 } else { 1 };
+			canvas_bytes = pixel_count * 8 * sample_count + if sample_count > 1 { pixel_count * 4 } else { 0 };
+		}
+		crate::core::gpumemorytracker::read_usage(canvas_bytes)
 	}
 
 	//==============================================================================
@@ -7962,6 +8033,7 @@ mod tests {
 	#[cfg(target_os = "macos")]
 	mod gl_tests {
 		use super::*;
+		use crate::core::gpumemorytracker::{GpuMemoryKind, GpuMemoryKindUsage};
 
 		/// 시험 칸 한 변. (픽셀)
 		const TARGET_SIZE: i32 = 16;
@@ -8350,6 +8422,57 @@ mod tests {
 				}
 			}
 			assert!(failure_list.is_empty(), "바깥 GL 뒤 2D 그리기가 틀렸다: {:?}", failure_list);
+		}
+
+		//==============================================================================
+		// GPU 메모리 셈. (원본 tests/core/gpumemorytrackerchrome.test.mjs 와 같은 검사: 짓고 지우면 바이트가 같게 늘고 줄고, 꺼져 있으면 셈 0)
+		//==============================================================================
+		#[test]
+		fn gpu_memory_tracking_counts_bytes_only_when_enabled() {
+			let Some(graphic) = create_test_graphic() else {
+				return;
+			};
+			assert!(!graphic.is_gpu_memory_tracking_enabled());
+			let gl = graphic.get_gl();
+			unsafe {
+				// 꺼져 있을 때 지은 것은 세지 않는다.
+				let off_texture = gl.create_texture().unwrap();
+				gl.bind_texture(glow::TEXTURE_2D, Some(off_texture));
+				gl.tex_storage_2d(glow::TEXTURE_2D, 1, glow::RGBA8, 16, 16);
+				let off_usage = graphic.read_gpu_memory_usage();
+				assert!(graphic.is_gpu_memory_tracking_enabled());
+				assert_eq!(off_usage.kind_table[&GpuMemoryKind::Texture], GpuMemoryKindUsage { count: 0, bytes: 0 });
+				assert_eq!(off_usage.total_bytes, off_usage.canvas_bytes);
+
+				// 켠 뒤에 지은 것부터 센다.
+				let texture = gl.create_texture().unwrap();
+				gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+				gl.tex_storage_2d(glow::TEXTURE_2D, 1, glow::RGBA8, 8, 8);
+				let renderbuffer = gl.create_renderbuffer().unwrap();
+				gl.bind_renderbuffer(glow::RENDERBUFFER, Some(renderbuffer));
+				gl.renderbuffer_storage_multisample(glow::RENDERBUFFER, 4, glow::DEPTH24_STENCIL8, 4, 4);
+				let buffer = gl.create_buffer().unwrap();
+				gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+				gl.buffer_data_size(glow::ARRAY_BUFFER, 200, glow::STATIC_DRAW);
+				let usage = graphic.read_gpu_memory_usage();
+				assert_eq!(usage.kind_table[&GpuMemoryKind::Texture], GpuMemoryKindUsage { count: 1, bytes: 8 * 8 * 4 });
+				assert_eq!(usage.kind_table[&GpuMemoryKind::Renderbuffer], GpuMemoryKindUsage { count: 1, bytes: 4 * 4 * 4 * 4 });
+				assert_eq!(usage.kind_table[&GpuMemoryKind::Buffer], GpuMemoryKindUsage { count: 1, bytes: 200 });
+				assert_eq!(usage.total_bytes, 256 + 256 + 200 + usage.canvas_bytes);
+				assert!(!usage.owner_list.is_empty());
+
+				// 밉맵 두 단계(8x8, 4x4, 2x2, 1x1)를 더하고, 지우면 뺀다.
+				gl.generate_mipmap(glow::TEXTURE_2D);
+				assert_eq!(graphic.read_gpu_memory_usage().kind_table[&GpuMemoryKind::Texture].bytes, (64 + 16 + 4 + 1) * 4);
+				gl.delete_texture(texture);
+				gl.delete_renderbuffer(renderbuffer);
+				gl.delete_buffer(buffer);
+				gl.delete_texture(off_texture);
+				let after = graphic.read_gpu_memory_usage();
+				assert_eq!(after.kind_table[&GpuMemoryKind::Texture].bytes, 0);
+				assert_eq!(after.kind_table[&GpuMemoryKind::Renderbuffer].count, 0);
+				assert_eq!(after.kind_table[&GpuMemoryKind::Buffer].bytes, 0);
+			}
 		}
 	}
 }

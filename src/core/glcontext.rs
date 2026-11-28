@@ -11,6 +11,7 @@
 //! - 엔진은 GL 을 넘기는 자리에서 상태 캐시를 스스로 잊지 않는다. (원본과 같음) 상태 캐시를 거치지 않은 호출은 VANILLA_GL_STATE_CHECK=1 로 돌려 찾는다.
 //==============================================================================
 use crate::core::glstatecache::{self, GlStatePart};
+use crate::core::gpumemorytracker::{self, GpuMemoryKey, GpuMemoryKind};
 use crate::core::graphic::{GlBuffer, GlFramebuffer, GlProgram, GlTexture, GlVertexArray};
 use glow::HasContext;
 use std::rc::Rc;
@@ -85,6 +86,9 @@ impl GlContext {
 	#[cfg(any(target_arch = "wasm32", test))]
 	pub(crate) fn set_context_lost(is_context_lost: bool) {
 		IS_CONTEXT_LOST.with(|cell| cell.set(is_context_lost));
+		if is_context_lost {
+			gpumemorytracker::forget_all();
+		}
 	}
 
 	//==============================================================================
@@ -640,6 +644,7 @@ impl GlContext {
 	/// # 돌려줌
 	/// 새 버퍼. 못 만들면 까닭.
 	//==============================================================================
+	#[track_caller]
 	pub unsafe fn create_buffer(&self) -> Result<GlBuffer, String> {
 		unsafe { glstatecache::create_buffer(&self.context) }
 	}
@@ -671,6 +676,7 @@ impl GlContext {
 	/// # 돌려줌
 	/// 새 텍스처. 못 만들면 까닭.
 	//==============================================================================
+	#[track_caller]
 	pub unsafe fn create_texture(&self) -> Result<GlTexture, String> {
 		unsafe { glstatecache::create_texture(&self.context) }
 	}
@@ -855,6 +861,609 @@ impl GlContext {
 			return crate::core::graphic::read_texture_binding(self);
 		}
 		unsafe { self.context.get_parameter_texture(parameter) }
+	}
+}
+
+//==============================================================================
+// GPU 메모리 셈이 지켜보는 함수. (원본 GpuMemoryTracker 가 가로채는 짓기, 지우기, 크기 정하기, 켜져 있을 때만 셈하고 꺼져 있으면 깃발 하나만 본다)
+//==============================================================================
+impl GlContext {
+	/// 지금 묶인 텍스처. (대상에 맞는 묶음 값, 2D 는 상태 캐시가 기억한 값, 큐브의 여섯 면은 큐브 묶음)
+	fn read_tracked_texture(&self, target: u32) -> Option<GlTexture> {
+		match target {
+			glow::TEXTURE_2D => unsafe { self.get_parameter_texture(glow::TEXTURE_BINDING_2D) },
+			glow::TEXTURE_3D => unsafe { self.context.get_parameter_texture(glow::TEXTURE_BINDING_3D) },
+			glow::TEXTURE_2D_ARRAY => unsafe { self.context.get_parameter_texture(glow::TEXTURE_BINDING_2D_ARRAY) },
+			_ => unsafe { self.context.get_parameter_texture(glow::TEXTURE_BINDING_CUBE_MAP) },
+		}
+	}
+
+	//==============================================================================
+	/// 렌더버퍼 만들기. (glow 의 같은 이름, GPU 메모리 셈이 켜져 있으면 적는다)
+	///
+	/// # 돌려줌
+	/// 새 렌더버퍼. 못 만들면 까닭.
+	//==============================================================================
+	#[track_caller]
+	pub unsafe fn create_renderbuffer(&self) -> Result<glow::Renderbuffer, String> {
+		let renderbuffer = unsafe { self.context.create_renderbuffer() }?;
+		gpumemorytracker::register(GpuMemoryKey::Renderbuffer(renderbuffer), GpuMemoryKind::Renderbuffer);
+		Ok(renderbuffer)
+	}
+
+	//==============================================================================
+	/// 렌더버퍼 지우기. (glow 의 같은 이름, GPU 메모리 셈이 켜져 있으면 뺀다)
+	///
+	/// # 인자
+	/// - `renderbuffer`: 지울 렌더버퍼.
+	//==============================================================================
+	pub unsafe fn delete_renderbuffer(&self, renderbuffer: glow::Renderbuffer) {
+		gpumemorytracker::unregister(GpuMemoryKey::Renderbuffer(renderbuffer));
+		unsafe { self.context.delete_renderbuffer(renderbuffer) }
+	}
+
+	//==============================================================================
+	/// 2D 텍스처 올리기. (glow 의 같은 이름, GPU 메모리 셈이 켜져 있으면 묶인 텍스처의 그 단계 바이트를 적는다)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `border`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `pixels`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_2d(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, border: i32, format: u32, ty: u32, pixels: glow::PixelUnpackData) {
+		unsafe { self.context.tex_image_2d(target, level, internal_format, width, height, border, format, ty, pixels) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, 1, ty);
+		}
+	}
+
+	//==============================================================================
+	/// 3D 텍스처 올리기. (glow 의 같은 이름, GPU 메모리 셈이 켜져 있으면 묶인 텍스처의 그 단계 바이트를 적는다)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `depth`: glow 의 같은 인자.
+	/// - `border`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `pixels`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_3d(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, pixels: glow::PixelUnpackData) {
+		unsafe { self.context.tex_image_3d(target, level, internal_format, width, height, depth, border, format, ty, pixels) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, depth, ty);
+		}
+	}
+
+	//==============================================================================
+	/// 2D 텍스처 저장 정하기. (glow 의 같은 이름, GPU 메모리 셈이 켜져 있으면 단계마다 절반씩 줄여 바이트를 적는다)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `levels`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_storage_2d(&self, target: u32, levels: i32, internal_format: u32, width: i32, height: i32) {
+		unsafe { self.context.tex_storage_2d(target, levels, internal_format, width, height) }
+		if gpumemorytracker::is_enabled() {
+			let texture = self.read_tracked_texture(target);
+			let mut level_width = width;
+			let mut level_height = height;
+			for level in 0..levels {
+				gpumemorytracker::set_texture_level(texture, target, level, internal_format, level_width, level_height, 1, 0);
+				level_width = (level_width >> 1).max(1);
+				level_height = (level_height >> 1).max(1);
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 3D 텍스처 저장 정하기. (glow 의 같은 이름, GPU 메모리 셈이 켜져 있으면 단계마다 절반씩 줄여 바이트를 적는다, 깊이는 TEXTURE_3D 만 줄인다)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `levels`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `depth`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_storage_3d(&self, target: u32, levels: i32, internal_format: u32, width: i32, height: i32, depth: i32) {
+		unsafe { self.context.tex_storage_3d(target, levels, internal_format, width, height, depth) }
+		if gpumemorytracker::is_enabled() {
+			let texture = self.read_tracked_texture(target);
+			let mut level_width = width;
+			let mut level_height = height;
+			let mut level_depth = depth;
+			for level in 0..levels {
+				gpumemorytracker::set_texture_level(texture, target, level, internal_format, level_width, level_height, level_depth, 0);
+				level_width = (level_width >> 1).max(1);
+				level_height = (level_height >> 1).max(1);
+				if target == glow::TEXTURE_3D {
+					level_depth = (level_depth >> 1).max(1);
+				}
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 밉맵 만들기. (glow 의 같은 이름, GPU 메모리 셈이 켜져 있으면 1x1 까지 단계별 바이트를 적는다)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn generate_mipmap(&self, target: u32) {
+		unsafe { self.context.generate_mipmap(target) }
+		if gpumemorytracker::is_enabled() && matches!(target, glow::TEXTURE_2D | glow::TEXTURE_3D | glow::TEXTURE_2D_ARRAY | glow::TEXTURE_CUBE_MAP) {
+			gpumemorytracker::set_generated_mipmap(self.read_tracked_texture(target), target);
+		}
+	}
+
+	//==============================================================================
+	/// 렌더버퍼 저장 정하기. (glow 의 같은 이름, GPU 메모리 셈이 켜져 있으면 묶인 렌더버퍼의 바이트를 적는다)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn renderbuffer_storage(&self, target: u32, internal_format: u32, width: i32, height: i32) {
+		unsafe { self.context.renderbuffer_storage(target, internal_format, width, height) }
+		if gpumemorytracker::is_enabled() {
+			if let Some(renderbuffer) = unsafe { self.context.get_parameter_renderbuffer(glow::RENDERBUFFER_BINDING) } {
+				let byte_count = (width.max(0) as u64) * (height.max(0) as u64) * gpumemorytracker::read_format_byte_count(internal_format, 0);
+				gpumemorytracker::set_bytes(GpuMemoryKey::Renderbuffer(renderbuffer), None, byte_count);
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 멀티샘플 렌더버퍼 저장 정하기. (glow 의 같은 이름, GPU 메모리 셈이 켜져 있으면 샘플 수를 곱한 바이트를 적는다)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `samples`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn renderbuffer_storage_multisample(&self, target: u32, samples: i32, internal_format: u32, width: i32, height: i32) {
+		unsafe { self.context.renderbuffer_storage_multisample(target, samples, internal_format, width, height) }
+		if gpumemorytracker::is_enabled() {
+			if let Some(renderbuffer) = unsafe { self.context.get_parameter_renderbuffer(glow::RENDERBUFFER_BINDING) } {
+				let byte_count = (width.max(0) as u64) * (height.max(0) as u64) * gpumemorytracker::read_format_byte_count(internal_format, 0) * (samples.max(1) as u64);
+				gpumemorytracker::set_bytes(GpuMemoryKey::Renderbuffer(renderbuffer), None, byte_count);
+			}
+		}
+	}
+
+	/// 버퍼 대상의 지금 묶인 버퍼. (대상이 아니면 None)
+	fn read_tracked_buffer(&self, target: u32) -> Option<GlBuffer> {
+		let binding = match target {
+			glow::ARRAY_BUFFER => glow::ARRAY_BUFFER_BINDING,
+			glow::ELEMENT_ARRAY_BUFFER => glow::ELEMENT_ARRAY_BUFFER_BINDING,
+			glow::PIXEL_PACK_BUFFER => glow::PIXEL_PACK_BUFFER_BINDING,
+			glow::PIXEL_UNPACK_BUFFER => glow::PIXEL_UNPACK_BUFFER_BINDING,
+			glow::UNIFORM_BUFFER => glow::UNIFORM_BUFFER_BINDING,
+			glow::COPY_READ_BUFFER => glow::COPY_READ_BUFFER_BINDING,
+			glow::COPY_WRITE_BUFFER => glow::COPY_WRITE_BUFFER_BINDING,
+			glow::TRANSFORM_FEEDBACK_BUFFER => glow::TRANSFORM_FEEDBACK_BUFFER_BINDING,
+			_ => return None,
+		};
+		unsafe { self.context.get_parameter_buffer(binding) }
+	}
+
+	//==============================================================================
+	/// 버퍼 크기만 정하기. (glow 의 같은 이름, GPU 메모리 셈이 켜져 있으면 묶인 버퍼의 바이트를 적는다)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `size`: glow 의 같은 인자.
+	/// - `usage`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn buffer_data_size(&self, target: u32, size: i32, usage: u32) {
+		unsafe { self.context.buffer_data_size(target, size, usage) }
+		if gpumemorytracker::is_enabled() {
+			if let Some(buffer) = self.read_tracked_buffer(target) {
+				gpumemorytracker::set_bytes(GpuMemoryKey::Buffer(buffer), None, size.max(0) as u64);
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 버퍼 채우기. (glow 의 같은 이름, GPU 메모리 셈이 켜져 있으면 묶인 버퍼의 바이트를 적는다)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `data`: glow 의 같은 인자.
+	/// - `usage`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn buffer_data_u8_slice(&self, target: u32, data: &[u8], usage: u32) {
+		unsafe { self.context.buffer_data_u8_slice(target, data, usage) }
+		if gpumemorytracker::is_enabled() {
+			if let Some(buffer) = self.read_tracked_buffer(target) {
+				gpumemorytracker::set_bytes(GpuMemoryKey::Buffer(buffer), None, data.len() as u64);
+			}
+		}
+	}
+}
+
+//==============================================================================
+// GPU 메모리 셈이 지켜보는 웹의 이미지 원본 올리기. (원본 texImage2D, texImage3D 에 이미지, 캔버스, 비디오, ImageBitmap, ImageData 를 넘기는 꼴, 올린 크기를 센다)
+//==============================================================================
+#[cfg(all(target_family = "wasm", not(target_os = "emscripten")))]
+impl GlContext {
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `pixels`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_2d_with_image_bitmap(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, pixels: &web_sys::ImageBitmap) {
+		unsafe { self.context.tex_image_2d_with_image_bitmap(target, level, internal_format, format, ty, pixels) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, pixels.width() as i32, pixels.height() as i32, 1, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `pixels`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_2d_with_image_bitmap_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, pixels: &web_sys::ImageBitmap) {
+		unsafe { self.context.tex_image_2d_with_image_bitmap_and_width_and_height(target, level, internal_format, width, height, format, ty, pixels) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, 1, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `canvas`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_2d_with_html_canvas(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, canvas: &web_sys::HtmlCanvasElement) {
+		unsafe { self.context.tex_image_2d_with_html_canvas(target, level, internal_format, format, ty, canvas) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, canvas.width() as i32, canvas.height() as i32, 1, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `canvas`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_2d_with_html_canvas_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, canvas: &web_sys::HtmlCanvasElement) {
+		unsafe { self.context.tex_image_2d_with_html_canvas_and_width_and_height(target, level, internal_format, width, height, format, ty, canvas) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, 1, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `image`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_2d_with_html_image(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, image: &web_sys::HtmlImageElement) {
+		unsafe { self.context.tex_image_2d_with_html_image(target, level, internal_format, format, ty, image) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, image.natural_width() as i32, image.natural_height() as i32, 1, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `image`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_2d_with_html_image_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, image: &web_sys::HtmlImageElement) {
+		unsafe { self.context.tex_image_2d_with_html_image_and_width_and_height(target, level, internal_format, width, height, format, ty, image) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, 1, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `video`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_2d_with_html_video(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, video: &web_sys::HtmlVideoElement) {
+		unsafe { self.context.tex_image_2d_with_html_video(target, level, internal_format, format, ty, video) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, video.video_width() as i32, video.video_height() as i32, 1, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `video`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_2d_with_html_video_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, video: &web_sys::HtmlVideoElement) {
+		unsafe { self.context.tex_image_2d_with_html_video_and_width_and_height(target, level, internal_format, width, height, format, ty, video) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, 1, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `video_frame`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_2d_with_video_frame(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, video_frame: &web_sys::VideoFrame) {
+		unsafe { self.context.tex_image_2d_with_video_frame(target, level, internal_format, format, ty, video_frame) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, video_frame.display_width() as i32, video_frame.display_height() as i32, 1, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `video_frame`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_2d_with_video_frame_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, video_frame: &web_sys::VideoFrame) {
+		unsafe { self.context.tex_image_2d_with_video_frame_and_width_and_height(target, level, internal_format, width, height, format, ty, video_frame) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, 1, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `pixels`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_2d_with_image_data(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, pixels: &web_sys::ImageData) {
+		unsafe { self.context.tex_image_2d_with_image_data(target, level, internal_format, format, ty, pixels) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, pixels.width() as i32, pixels.height() as i32, 1, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `pixels`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_2d_with_image_data_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, pixels: &web_sys::ImageData) {
+		unsafe { self.context.tex_image_2d_with_image_data_and_width_and_height(target, level, internal_format, width, height, format, ty, pixels) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, 1, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `depth`: glow 의 같은 인자.
+	/// - `border`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `image`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_3d_with_image_bitmap(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::ImageBitmap) {
+		unsafe { self.context.tex_image_3d_with_image_bitmap(target, level, internal_format, width, height, depth, border, format, ty, image) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, depth, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `depth`: glow 의 같은 인자.
+	/// - `border`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `image`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_3d_with_html_canvas_element(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::HtmlCanvasElement) {
+		unsafe { self.context.tex_image_3d_with_html_canvas_element(target, level, internal_format, width, height, depth, border, format, ty, image) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, depth, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `depth`: glow 의 같은 인자.
+	/// - `border`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `image`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_3d_with_html_image_element(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::HtmlImageElement) {
+		unsafe { self.context.tex_image_3d_with_html_image_element(target, level, internal_format, width, height, depth, border, format, ty, image) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, depth, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `depth`: glow 의 같은 인자.
+	/// - `border`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `image`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_3d_with_html_video_element(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::HtmlVideoElement) {
+		unsafe { self.context.tex_image_3d_with_html_video_element(target, level, internal_format, width, height, depth, border, format, ty, image) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, depth, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `depth`: glow 의 같은 인자.
+	/// - `border`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `video_frame`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_3d_with_video_frame(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, video_frame: &web_sys::VideoFrame) {
+		unsafe { self.context.tex_image_3d_with_video_frame(target, level, internal_format, width, height, depth, border, format, ty, video_frame) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, depth, ty);
+		}
+	}
+
+	//==============================================================================
+	/// glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)
+	///
+	/// # 인자
+	/// - `target`: glow 의 같은 인자.
+	/// - `level`: glow 의 같은 인자.
+	/// - `internal_format`: glow 의 같은 인자.
+	/// - `width`: glow 의 같은 인자.
+	/// - `height`: glow 의 같은 인자.
+	/// - `depth`: glow 의 같은 인자.
+	/// - `border`: glow 의 같은 인자.
+	/// - `format`: glow 의 같은 인자.
+	/// - `ty`: glow 의 같은 인자.
+	/// - `image`: glow 의 같은 인자.
+	//==============================================================================
+	pub unsafe fn tex_image_3d_with_image_data(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::ImageData) {
+		unsafe { self.context.tex_image_3d_with_image_data(target, level, internal_format, width, height, depth, border, format, ty, image) }
+		if gpumemorytracker::is_enabled() {
+			gpumemorytracker::set_texture_level(self.read_tracked_texture(target), target, level, internal_format as u32, width, height, depth, ty);
+		}
 	}
 }
 
