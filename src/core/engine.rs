@@ -2544,11 +2544,22 @@ impl EngineRunner {
 				scene.create();
 				apply_scene_root_to_view_size(&self.engine, scene.as_mut());
 				scene.load(self.engine);
-				let current_time = self.read_scene_load_seconds();
-				initialize_scene_if_ready(self.engine, scene.as_mut(), current_time);
+				// 찍기 모드에서 첫 프레임 전(엔진 시계가 아직 0)에 맡긴 애셋이 이미 끝나 있어도 0.3 초 세기는 첫 프레임 시각부터 센다.
+				// (원본은 애셋을 fetch 로 받아 첫 rAF 프레임 뒤에야 끝나므로 세기가 첫 프레임 시각에 시작한다. 데스크탑은 파일을 바로 읽어 시계 0 에서 시작하면 첫 tick 이 한 프레임 일찍 와 프레임 번호가 어긋난다)
+				if !self.is_scene_load_clock_before_first_frame() {
+					let current_time = self.read_scene_load_seconds();
+					initialize_scene_if_ready(self.engine, scene.as_mut(), current_time);
+				}
 				self.scene_list.push(scene);
 			}
 		}
+	}
+
+	//==============================================================================
+	/// 찍기 모드의 엔진 시계가 아직 첫 프레임을 지나지 않았는지. (시간 관리자가 한 번도 갱신되지 않아 0 인 동안)
+	//==============================================================================
+	fn is_scene_load_clock_before_first_frame(&self) -> bool {
+		self.capture_request.is_some() && self.engine.time_manager.borrow().get_realtime_since_startup() == 0.0
 	}
 
 	//==============================================================================
@@ -3281,6 +3292,21 @@ mod tests {
 		engine_runner.engine.unload_all_scenes();
 		engine_runner.apply_pending_scenes();
 		assert!(engine_runner.engine.get_all_loaded_scenes().is_empty());
+	}
+
+	//==============================================================================
+	/// 찍기 모드에서 첫 프레임 전에 불러온 씬은 맡긴 애셋이 이미 끝나 있어도(데스크탑은 파일을 바로 읽는다) 0.3 초 세기를 첫 프레임 시각(1/60 초)부터 한다.
+	/// (원본은 fetch 가 첫 프레임 뒤에 끝나 세기가 첫 프레임 시각에 시작한다. 시계 0 에서 시작하면 첫 tick 이 한 프레임 일찍 와 프레임 번호가 어긋났다)
+	//==============================================================================
+	#[test]
+	fn capture_scene_load_wait_starts_at_first_frame_time() {
+		let counts = [Rc::new(Cell::new(0)), Rc::new(Cell::new(0)), Rc::new(Cell::new(0))];
+		let mut engine_runner = EngineRunner::new(Engine::new(EngineConfiguration::new()), CountingScene::create_boxed(&counts[0], &counts[1], &counts[2]));
+		engine_runner.capture_request = Some(CaptureRequest { output_path: String::from("unused_{frame}.png"), frame_numbers: vec![20], is_exit_after_last_capture: false });
+		engine_runner.engine.get_view_manager_mut().calculate_view_rect(640, 360, 1.0);
+		engine_runner.apply_pending_scenes();
+		// 첫 프레임 전에는 세기를 시작하지 않았다. (시작 시각을 지금 처음 적으면 그 값이 그대로 돌아온다)
+		assert_eq!(engine_runner.scene_list[0].get_scene_base_mut().mark_tracked_assets_finished(1.0 / 60.0), 1.0 / 60.0, "첫 프레임 전에 세기가 시계 0 에서 시작했다");
 	}
 
 	//==============================================================================
