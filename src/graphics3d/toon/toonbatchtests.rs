@@ -235,3 +235,156 @@ fn line_batching_keeps_pixels_and_stops_uploads() {
 	assert_eq!(stopped_counts[3], 0, "멈춘 프레임은 선의 판 묶음 자리를 올리지 않는다");
 	assert!(stopped_pixels == batch_pixels, "멈춘 프레임도 같은 화면");
 }
+
+//==============================================================================
+/// 원본 toonautoinstancechrome 과 같은 장면: 같은 모형과 재질 값만 묶고 머티리얼, 모형, 틴트, 뒤집은 감기가 다르면 묶지 않는다.
+/// - 그림자, 몸, 바깥선 껍데기는 [상자 같은 꼴 6, 상자 빨강 3, 공 3, 상자 머티리얼 2], 선의 판은 [상자 11, 공 3] 이라 인스턴스 수 목록이 원본과 같다.
+//==============================================================================
+#[test]
+fn auto_instancing_matches_original_instance_counts() {
+	use super::toonmaterial::{ToonMaterial, ToonMaterialChunks};
+	let Some(glow_context) = crate::core::glstatecache::tests::create_surfaceless_context() else {
+		panic!("창 없는 GL 컨텍스트를 짓지 못함");
+	};
+	let _ = crate::core::glstatecache::attach(&glow_context);
+	let gl: &GlContext = GlContext::from_context(&glow_context);
+	let target = create_target(gl);
+	let mut renderer = ToonRenderer::new(gl).expect("툰 렌더러");
+	let box_mesh = create_mesh(gl, &mut renderer, &create_box_geometry(0.5, 0.5, 0.5), "#e0d0c0");
+	let sphere_mesh = create_mesh(gl, &mut renderer, &create_sphere_geometry(0.3, 12, 8, std::f64::consts::PI), "#e0d0c0");
+	let ground_mesh = {
+		let mut builder = MeshBuilder::new();
+		builder.add_part(&create_box_geometry(6.0, 0.1, 5.0), &Matrix4::create_translation(0.0, -0.05, 0.0), "#808890", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
+		renderer.create_mesh(gl, &builder.read_arrays()).expect("바닥")
+	};
+	let stripe = ToonMaterial::new(ToonMaterialChunks { name: "autoStripe".to_string(), surface_chunk: "void applySurface(inout ToonSurface surface) { surface.baseColor *= 0.7; }".to_string(), ..ToonMaterialChunks::default() });
+	let mut outline = ToonScreenOutline::new(gl).expect("화면 바깥선");
+	outline.set_width(1.0, super::toonscreenoutline::ToonOutlineWidthUnit::Pixel);
+	let mut shadow_map = ShadowMap::new(gl, 256).expect("그림자 판");
+	shadow_map.set_update_mode(ShadowUpdateMode::EveryFrame, 1);
+	shadow_map.update_light_matrix(Vector3::create(0.0, 0.0, 0.0), Vector3::create(-0.3, -1.0, -0.2), 6.0, 0.1, 20.0);
+	renderer.set_shadow(Some(&shadow_map), 0.6);
+	let mut camera = Camera3D::new();
+	camera.set_perspective(0.9, 0.1, 30.0);
+	camera.set_aspect_ratio(1.0);
+	camera.look_at(Vector3::create(0.0, 4.0, 5.0), Vector3::create(0.0, 0.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
+	// 담을 것: [모형, 꼴, 머티리얼 쓰는지, 뒤집었는지]
+	let plain = [0.9, 0.8, 0.7, 1.0];
+	let red = [1.0, 0.4, 0.4, 1.0];
+	let mut entry_list: Vec<(bool, [f64; 4], bool, bool)> = Vec::new(); // (공인지, 틴트, 머티리얼, 뒤집음)
+	for _ in 0..6 {
+		entry_list.push((false, plain, false, false));
+	}
+	for _ in 0..3 {
+		entry_list.push((false, red, false, false));
+		entry_list.push((true, plain, false, false));
+	}
+	entry_list.push((false, plain, true, false));
+	entry_list.push((false, plain, true, false));
+	entry_list.push((false, plain, false, true));
+	let mut matrix_list: Vec<Matrix4> = Vec::new();
+	for (index, entry) in entry_list.iter().enumerate() {
+		let mut matrix = Matrix4::create_translation((index % 5) as f64 * 0.9 - 1.8, 0.25, (index / 5) as f64 * 0.9 - 1.2);
+		matrix.multiply(&Matrix4::create_rotation_y(index as f64 * 0.4));
+		if entry.3 {
+			matrix.multiply(&Matrix4::create_scale(-1.0, 1.0, 1.0));
+		}
+		matrix_list.push(matrix);
+	}
+	let transparent_matrix = Matrix4::create_translation(0.4, 0.6, 0.6);
+	let ground_matrix = Matrix4::create_identity();
+	let mut results: Vec<(Vec<i32>, u32, Vec<u8>)> = Vec::new();
+	for is_reference in [false, true] {
+		let mut frame_results = Vec::new();
+		for _frame in 0..3 {
+			let _ = crate::core::glstatecache::take_draw_record();
+			let mut queue = ToonDrawQueue::new();
+			queue.set_screen_outline(Some(&mut outline));
+			queue.add_mesh(&ground_mesh, &ground_matrix, ToonDrawOptions { line_id: Some(1), has_screen_outline: false, ..ToonDrawOptions::default() });
+			for (index, entry) in entry_list.iter().enumerate() {
+				let mut options = ToonDrawOptions { tint_color: entry.1, line_id: Some(2 + index as u32), ..ToonDrawOptions::default() };
+				if entry.2 {
+					options.material = Some(&stripe);
+				}
+				if is_reference {
+					options.index_count = 100000 + index;
+				}
+				queue.add_mesh(if entry.0 { &sphere_mesh } else { &box_mesh }, &matrix_list[index], options);
+			}
+			queue.add_mesh(&box_mesh, &transparent_matrix, ToonDrawOptions { tint_color: [0.5, 0.8, 1.0, 1.0], alpha: 0.5, line_id: Some(40), ..ToonDrawOptions::default() });
+			queue.draw_shadows(gl, &mut renderer, &shadow_map);
+			target.clear();
+			queue.draw(gl, &mut renderer, &camera);
+			let (plain_count, mut instance_counts) = crate::core::glstatecache::take_draw_record();
+			instance_counts.sort_by(|first, second| second.cmp(first));
+			frame_results.push((instance_counts, plain_count, target.read_pixels()));
+		}
+		results.push(frame_results.remove(0));
+		let (_, _, last_pixels) = frame_results.pop().unwrap();
+		let first_pixels = results.last().unwrap().2.clone();
+		assert!(first_pixels == last_pixels, "프레임을 되풀이해도 같은 화면");
+	}
+	let expected = vec![11, 6, 6, 6, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2];
+	eprintln!("자동 인스턴싱(원본 장면): 인스턴스 수 {:?}, 보통 그리기 묶음 {} 묶지 않음 {}", results[0].0, results[0].1, results[1].1);
+	print_hash("autoinstance_original_scene", &results[0].2);
+	assert_eq!(results[0].0, expected, "같은 모형과 재질 값만 묶는다");
+	assert!(results[1].0.is_empty(), "비교 쪽은 묶지 않는다 ({:?})", results[1].0);
+	assert!(results[0].1 + (results[0].0.len() as u32) < results[1].1, "그리기 수가 준다");
+	assert!(results[0].2 == results[1].2, "화면이 묶지 않고 그린 것과 바이트까지 같다");
+	assert_eq!(unsafe { glow_context_error(&glow_context) }, 0, "GL 오류");
+}
+
+//==============================================================================
+/// 원본 toonlinebatchchrome 의 같은 확인: 행렬 하나만 바뀌면 그 묶음 하나만 올린다.
+//==============================================================================
+#[test]
+fn line_batching_uploads_only_changed_group() {
+	let Some(glow_context) = crate::core::glstatecache::tests::create_surfaceless_context() else {
+		panic!("창 없는 GL 컨텍스트를 짓지 못함");
+	};
+	let _ = crate::core::glstatecache::attach(&glow_context);
+	let gl: &GlContext = GlContext::from_context(&glow_context);
+	let target = create_target(gl);
+	let mut renderer = ToonRenderer::new(gl).expect("툰 렌더러");
+	let box_mesh = create_mesh(gl, &mut renderer, &create_box_geometry(0.8, 0.8, 0.8), "#c08060");
+	let sphere_mesh = create_mesh(gl, &mut renderer, &create_sphere_geometry(0.4, 12, 8, std::f64::consts::PI), "#6080c0");
+	let mut outline = ToonScreenOutline::new(gl).expect("화면 바깥선");
+	let camera = create_camera();
+	let draw_frame = |renderer: &mut ToonRenderer, outline: &mut ToonScreenOutline, shift: f64| {
+		let before = UPLOAD_COUNTS.with(|counts| counts.get());
+		let mut queue = ToonDrawQueue::new();
+		queue.set_screen_outline(Some(outline));
+		for index in 0..9usize {
+			let (mesh, count) = if index < 6 { (&box_mesh, index) } else { (&sphere_mesh, index) };
+			let moved = if index == 8 { shift } else { 0.0 };
+			queue.add_mesh(mesh, &Matrix4::create_translation(-3.0 + count as f64 * 0.8 + moved, 0.5, 0.0), ToonDrawOptions::default());
+		}
+		target.clear();
+		queue.draw(gl, renderer, &camera);
+		let after = UPLOAD_COUNTS.with(|counts| counts.get());
+		(target.read_pixels(), after[3] - before[3])
+	};
+	let (first_pixels, first_upload) = draw_frame(&mut renderer, &mut outline, 0.0);
+	let (second_pixels, second_upload) = draw_frame(&mut renderer, &mut outline, 0.0);
+	let (moved_pixels, moved_upload) = draw_frame(&mut renderer, &mut outline, 0.4);
+	let (still_pixels, still_upload) = draw_frame(&mut renderer, &mut outline, 0.4);
+	// 처음부터 그 행렬로 그린 새 렌더러와 같은 화면.
+	let mut fresh_outline = ToonScreenOutline::new(gl).expect("화면 바깥선");
+	let (fresh_pixels, _) = draw_frame(&mut renderer, &mut fresh_outline, 0.4);
+	eprintln!("선의 판 묶음: 올림 처음 {} 멈춤 {} 옮김 {} 다시 멈춤 {}", first_upload, second_upload, moved_upload, still_upload);
+	assert_eq!(first_upload, 2, "처음 프레임은 묶음 둘(상자 6, 공 3)을 올림");
+	assert_eq!(second_upload, 0, "멈춘 프레임은 올림 0");
+	assert!(second_pixels == first_pixels, "멈춘 프레임의 화면은 앞 프레임과 바이트까지 같다");
+	assert_eq!(moved_upload, 1, "행렬 하나가 바뀌면 그 묶음 하나만 올림");
+	assert!(moved_pixels != first_pixels, "옮긴 프레임은 화면이 바뀜");
+	assert!(moved_pixels == fresh_pixels, "바뀐 프레임의 화면은 처음부터 그린 것과 바이트까지 같다");
+	assert_eq!(still_upload, 0, "다시 멈추면 올림 0");
+	assert!(still_pixels == moved_pixels, "다시 멈추면 화면 같음");
+	destroy_outline(gl, outline, fresh_outline);
+	assert_eq!(unsafe { glow_context_error(&glow_context) }, 0, "GL 오류");
+}
+
+fn destroy_outline(gl: &GlContext, mut first: ToonScreenOutline, mut second: ToonScreenOutline) {
+	first.destroy(gl);
+	second.destroy(gl);
+}

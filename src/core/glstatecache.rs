@@ -1508,15 +1508,31 @@ pub(crate) unsafe fn draw_arrays_instanced(gl: &impl GlowContextSource, mode: u3
 /// 인덱스 그리기. (glow draw_elements)
 pub(crate) unsafe fn draw_elements(gl: &impl GlowContextSource, mode: u32, count: i32, element_type: u32, offset: i32) {
 	let gl = gl.read_glow_context();
+	#[cfg(test)]
+	DRAW_RECORD.with(|record| record.borrow_mut().0 += 1);
 	check_before_draw(gl, "draw_elements");
 	unsafe {
 		gl.draw_elements(mode, count, element_type, offset);
 	}
 }
 
+// 시험이 그리기 호출을 세는 값. (보통 그리기 수, 인스턴스 그리기마다 인스턴스 수)
+#[cfg(test)]
+thread_local! {
+	static DRAW_RECORD: std::cell::RefCell<(u32, Vec<i32>)> = const { std::cell::RefCell::new((0, Vec::new())) };
+}
+
+/// 지금까지 센 그리기를 읽고 비운다. (시험용, 보통 그리기 수와 인스턴스 그리기의 인스턴스 수 목록)
+#[cfg(test)]
+pub(crate) fn take_draw_record() -> (u32, Vec<i32>) {
+	DRAW_RECORD.with(|record| std::mem::take(&mut *record.borrow_mut()))
+}
+
 /// 인덱스 여럿 그리기. (glow draw_elements_instanced)
 pub(crate) unsafe fn draw_elements_instanced(gl: &impl GlowContextSource, mode: u32, count: i32, element_type: u32, offset: i32, instance_count: i32) {
 	let gl = gl.read_glow_context();
+	#[cfg(test)]
+	DRAW_RECORD.with(|record| record.borrow_mut().1.push(instance_count));
 	check_before_draw(gl, "draw_elements_instanced");
 	unsafe {
 		gl.draw_elements_instanced(mode, count, element_type, offset, instance_count);
