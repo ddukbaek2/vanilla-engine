@@ -441,6 +441,10 @@ const TOON_FEATURE_INTENSITY_LIMIT: u32 = 1024;
 /// 미리 짓기가 한 걸음에 끝내는 프로그램 수. (끝내기의 유니폼 칸 읽기를 프레임에 나눈다, 원본 PREWARM_FINISH_PER_STEP)
 const PREWARM_FINISH_PER_STEP: usize = 3;
 const TOON_FEATURE_ALL: u32 = 2047;
+/// 그리기 꼴이 정하는 기능 비트. (텍스처 다섯과 그림자 받기, 나머지는 빛 묶음이 정한다, 원본 TOON_FEATURE_DRAW_BITS)
+const TOON_FEATURE_DRAW_BITS: u32 = TOON_FEATURE_BASE_TEXTURE | TOON_FEATURE_EMISSIVE_TEXTURE | TOON_FEATURE_DECAL_TEXTURE | TOON_FEATURE_MATCAP | TOON_FEATURE_ANGEL_RING | TOON_FEATURE_SHADOW;
+/// prewarm_draw_queue_with_options 의 light_feature_list 이름과 기능 비트. (원본 TOON_FEATURE_LIGHT_BIT_TABLE)
+const TOON_FEATURE_LIGHT_BIT_TABLE: [(&str, u32); 5] = [("rampTexture", TOON_FEATURE_RAMP_TEXTURE), ("shadeStops", TOON_FEATURE_SHADE_STOPS), ("rim", TOON_FEATURE_RIM), ("shadeRim", TOON_FEATURE_SHADE_RIM), ("intensityLimit", TOON_FEATURE_INTENSITY_LIMIT)];
 
 /// 몸을 그리는 조각 셰이더의 머리. (유니폼, 표면과 빛 구조, 공용 함수)
 const SOLID_FRAGMENT_HEAD: &str = concat!("#version 300 es
@@ -2033,6 +2037,27 @@ pub(crate) struct ToonProgramRequests<'a> {
 }
 
 //==============================================================================
+/// 미리 짓기에 더할 조합 목록. (원본 prewarmDrawQueue 의 options, 기본값은 아무것도 더하지 않음)
+///
+/// # 예제
+/// ```rust
+/// use vanilla::ToonProgramPrewarmOptions;
+///
+/// let options = ToonProgramPrewarmOptions::default();
+/// assert!(options.light_feature_list.is_empty());
+/// ```
+//==============================================================================
+#[derive(Clone, Copy, Default)]
+pub struct ToonProgramPrewarmOptions<'a, 'q> {
+	/// 더 읽을 그리기 줄. (나중에 나올 재질이나 인스턴스 꼴을 담은 줄, 원본 queueList)
+	pub queue_list: &'a [&'a ToonDrawQueue<'q>],
+	/// 그리기 줄의 모든 그리기에 더 맞춰 볼 빛 묶음. (지금 값의 기능 비트를 쓴다, 원본 lightSetList)
+	pub light_set_list: &'a [&'a ToonLightSet],
+	/// 더 맞춰 볼 빛 묶음 쪽 기능 조합. (조합마다 "rampTexture", "shadeStops", "rim", "shadeRim", "intensityLimit" 중 더 켜질 것의 이름, 원본 lightFeatureList)
+	pub light_feature_list: &'a [&'a [&'a str]],
+}
+
+//==============================================================================
 /// 프로그램 변형 미리 짓기의 진행. (ToonRenderer::prewarm_draw_queue 의 결과, 원본 ToonProgramPrewarm)
 /// - 병렬 컴파일 확장이 없으면 만들어질 때 이미 끝나 있다. 있으면 맡긴 컴파일을 step 으로 프레임마다 나눠 끝낸다.
 ///
@@ -2202,6 +2227,8 @@ pub struct ToonRenderer {
 	pending_build_table: RefCell<HashMap<PendingKey, PendingBuild>>,
 	/// 기능 비트를 셈한 빛 묶음 번호와 판 번호와 빛 묶음 쪽 비트. (원본 #featureLightSet, #featureLightVersion, #featureLightMask)
 	feature_light_cache: Cell<(u32, u64, u32)>,
+	/// 처음 보는 몸 변형을 병렬 컴파일에 맡기고 그동안 기본 몸으로 그릴지. (원본 #isAsyncProgramBuild, 기본 true, 병렬 확장이 있을 때만)
+	is_async_program_build: bool,
 }
 
 //==============================================================================
@@ -2713,6 +2740,7 @@ impl ToonRenderer {
 			ambient_occlusion_input: None,
 			ambient_occlusion_program_table: HashMap::new(),
 			solid_variant_table: HashMap::new(),
+			is_async_program_build: true,
 			pending_build_table: RefCell::new(HashMap::new()),
 			feature_light_cache: Cell::new((0, u64::MAX, 0)),
 		})
@@ -2967,6 +2995,22 @@ impl ToonRenderer {
 		if self.solid_variant_table.contains_key(&key) {
 			return;
 		}
+		if self.is_async_program_build && ToonRenderer::is_async_build_available(gl) {
+			let pending_state = self.pending_build_table.borrow().get(&PendingKey::Variant(key)).map(|pending_build| pending_build.program_list.iter().all(|program| program.is_build_complete(gl)));
+			match pending_state {
+				Some(false) => {
+					return; // 아직 짓는 중이면 전부 켠 기본 몸(같은 화면)으로 그리고 칸에 넣지 않는다. 다음 그리기에 다시 묻는다.
+				}
+				None => {
+					// 처음 보는 변형은 컴파일만 맡기고 이번 프레임은 기본 몸으로 그려 프레임을 막지 않는다.
+					if let Ok(program) = ToonRenderer::start_solid_program(gl, material, instance_layout, is_ambient_occlusion, self.color_space, &ToonRenderer::read_disabled_features(feature_mask), true) {
+						self.pending_build_table.borrow_mut().insert(PendingKey::Variant(key), PendingBuild { program_list: vec![program], name: ToonRenderer::read_program_name(material, (key.0, key.1)) });
+						return;
+					}
+				}
+				Some(true) => {}
+			}
+		}
 		// 미리 짓기가 컴파일을 맡겨 둔 것이 있으면 그것을 끝내 쓴다.
 		let started = match self.take_pending_solid(PendingKey::Variant(key)) {
 			Some(program) => {
@@ -3060,6 +3104,60 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
+	/// 컴파일을 맡기고 기본 몸으로 그리는 길을 쓸 수 있는지. (병렬 컴파일 확장이 있을 때, 시험은 FORCE_DEFERRED_PREWARM 으로도)
+	//==============================================================================
+	fn is_async_build_available(gl: &crate::GlContext) -> bool {
+		#[cfg(test)]
+		if FORCE_DEFERRED_PREWARM.with(|flag| flag.get()) {
+			return true;
+		}
+		ShaderProgram::is_parallel_compile_supported(gl)
+	}
+
+	//==============================================================================
+	/// 처음 보는 몸 변형을 맡기고 기본 몸으로 그릴지 정하기. (원본 setAsyncProgramBuild, 기본 true, 병렬 컴파일 확장이 없으면 이 값과 상관없이 그 자리에서 짓는다)
+	///
+	/// # 인자
+	/// - `is_async`: true 면 장면 중간에 처음 보는 몸 변형을 그 자리에서 짓지 않고, 다 지어질 때까지 전부 켠 기본 몸(같은 화면)으로 그린다. false 면 그 자리에서 짓고 기다린다.
+	///
+	/// # 예제
+	/// ```rust,no_run
+	/// use vanilla::ToonRenderer;
+	///
+	/// fn configure(gl: &vanilla::GlContext) -> Result<(), String> {
+	/// 	let mut renderer = ToonRenderer::new(gl)?;
+	/// 	renderer.set_async_program_build(false);
+	/// 	assert!(!renderer.is_async_program_build());
+	/// 	Ok(())
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn set_async_program_build(&mut self, is_async: bool) {
+		self.is_async_program_build = is_async;
+	}
+
+	//==============================================================================
+	/// 처음 보는 몸 변형을 맡기고 기본 몸으로 그리는지 읽기. (원본 isAsyncProgramBuild)
+	///
+	/// # 돌려줌
+	/// 맡기고 기본 몸으로 그리면 true. (기본 true)
+	///
+	/// # 예제
+	/// ```rust,no_run
+	/// use vanilla::ToonRenderer;
+	///
+	/// fn read(gl: &vanilla::GlContext) -> Result<(), String> {
+	/// 	let renderer = ToonRenderer::new(gl)?;
+	/// 	assert!(renderer.is_async_program_build());
+	/// 	Ok(())
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn is_async_program_build(&self) -> bool {
+		self.is_async_program_build
+	}
+
+	//==============================================================================
 	/// 머티리얼의 프로그램을 미리 짓기. (처음 그릴 때의 멈춤을 피할 때, 짓지 못하면 false)
 	///
 	/// # 인자
@@ -3110,6 +3208,118 @@ impl ToonRenderer {
 	//==============================================================================
 	pub fn prewarm_draw_queue(&mut self, gl: &crate::GlContext, queue: &ToonDrawQueue) -> ToonProgramPrewarm {
 		let request_list = queue.read_program_requests(self);
+		self.prewarm_request_list(gl, request_list)
+	}
+
+	//==============================================================================
+	/// 그리기 줄에 담긴 것에 게임이 장면 중간에 쓸 조합까지 더해 미리 짓기. (원본 prewarmDrawQueue(queue, options), 유니티 ShaderVariantCollection 처럼 조합 목록을 준다)
+	/// - 줄이 담은 변형에 options 의 빛 기능 조합, 빛 묶음, 다른 줄이 읽은 변형을 더해 지금 담기지 않은 것까지 같은 열쇠로 짓는다. 그 밖은 prewarm_draw_queue 와 같다.
+	/// - 빛 기능 이름이 rampTexture, shadeStops, rim, shadeRim, intensityLimit 가 아니면 아무것도 짓지 않고 Err 로 돌려준다. (원본은 던진다)
+	///
+	/// # 인자
+	/// - `gl`: 렌더러를 지은 GL 컨텍스트.
+	/// - `queue`: 변형을 읽을 그리기 줄.
+	/// - `options`: 더 지을 조합 목록. (ToonProgramPrewarmOptions::default() 는 prewarm_draw_queue 와 같다)
+	///
+	/// # 돌려줌
+	/// 미리 짓기의 진행. 잘못된 빛 기능 이름이면 Err.
+	///
+	/// # 예제
+	/// 장면 중간에 켜질 림 라이트 조합까지 미리 짓기
+	/// ```rust,no_run
+	/// use vanilla::{create_sphere_geometry, Matrix4, MeshBuilder, ToonDrawOptions, ToonDrawQueue, ToonPartOptions, ToonProgramPrewarmOptions, ToonRenderer};
+	///
+	/// fn prewarm(gl: &vanilla::GlContext) -> Result<(), String> {
+	/// 	let mut renderer = ToonRenderer::new(gl)?;
+	/// 	let mut builder = MeshBuilder::new();
+	/// 	builder.add_part(&create_sphere_geometry(0.5, 16, 10, std::f64::consts::PI), &Matrix4::create_identity(), "#f0e8e0", ToonPartOptions::default());
+	/// 	let mesh = renderer.create_mesh(gl, &builder.read_arrays()).ok_or("empty mesh")?;
+	/// 	let mut queue = ToonDrawQueue::new();
+	/// 	queue.add_mesh(&mesh, &Matrix4::create_identity(), ToonDrawOptions { casts_shadow: false, ..ToonDrawOptions::default() });
+	/// 	let rim: &[&str] = &["rim"];
+	/// 	let rim_and_shade_rim: &[&str] = &["rim", "shadeRim"];
+	/// 	let options = ToonProgramPrewarmOptions { light_feature_list: &[rim, rim_and_shade_rim], ..ToonProgramPrewarmOptions::default() };
+	/// 	let mut prewarm = renderer.prewarm_draw_queue_with_options(gl, &queue, &options)?;
+	/// 	prewarm.wait(gl, &mut renderer);
+	/// 	assert!(prewarm.is_ready());
+	/// 	Ok(())
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn prewarm_draw_queue_with_options<'x, 'a: 'x, 'q: 'x>(&mut self, gl: &crate::GlContext, queue: &ToonDrawQueue<'a>, options: &ToonProgramPrewarmOptions<'_, 'q>) -> Result<ToonProgramPrewarm, String> {
+		let request_list = self.expand_prewarm_requests(queue, options)?;
+		Ok(self.prewarm_request_list(gl, request_list))
+	}
+
+	//==============================================================================
+	/// 미리 지을 변형 목록 만들기. (원본 expandPrewarmRequests, 그리기 줄들이 읽은 것에 빛 묶음 쪽 기능 조합을 곱한다, 같은 열쇠는 한 번만)
+	//==============================================================================
+	fn expand_prewarm_requests<'x, 'a: 'x, 'q: 'x>(&self, queue: &ToonDrawQueue<'a>, options: &ToonProgramPrewarmOptions<'_, 'q>) -> Result<ToonProgramRequests<'x>, String> {
+		let mut added_mask_list: Vec<u32> = Vec::new();
+		for name_list in options.light_feature_list.iter() {
+			let mut light_mask = 0;
+			for name in name_list.iter() {
+				let Some((_, bit)) = TOON_FEATURE_LIGHT_BIT_TABLE.iter().find(|(feature_name, _)| feature_name == name) else {
+					return Err(format!("ToonRenderer::prewarm_draw_queue_with_options: 알 수 없는 빛 기능 이름 {} (rampTexture, shadeStops, rim, shadeRim, intensityLimit)", name));
+				};
+				light_mask |= bit;
+			}
+			added_mask_list.push(light_mask);
+		}
+		let light_mask_list: Vec<u32> = options.light_set_list.iter().map(|light_set| ToonRenderer::read_light_feature_mask(light_set)).collect();
+		let mut program_requests = queue.read_program_requests(self);
+		let request_key = |request: &ToonProgramRequest| (request.material.map(|material| material.get_id()).unwrap_or(0), request.instance_layout.map(|instance_layout| instance_layout.get_id()).unwrap_or(0), request.feature_mask);
+		let mut key_set: std::collections::HashSet<(u32, u32, Option<u32>)> = program_requests.request_list.iter().map(request_key).collect();
+		for other_queue in options.queue_list.iter() {
+			let other_requests = other_queue.read_program_requests(self);
+			program_requests.is_ambient_occlusion = program_requests.is_ambient_occlusion || other_requests.is_ambient_occlusion;
+			for request in other_requests.request_list {
+				if key_set.insert(request_key(&request)) {
+					program_requests.request_list.push(request);
+				}
+			}
+		}
+		let base_count = program_requests.request_list.len();
+		for index in 0..base_count {
+			let (material, instance_layout, base_mask) = {
+				let request = &program_requests.request_list[index];
+				let Some(base_mask) = request.feature_mask else {
+					continue;
+				};
+				(request.material, request.instance_layout, base_mask)
+			};
+			let mut feature_mask_list: Vec<u32> = Vec::new();
+			for light_mask in light_mask_list.iter() {
+				feature_mask_list.push((base_mask & TOON_FEATURE_DRAW_BITS) | light_mask);
+			}
+			for added_mask in added_mask_list.iter() {
+				feature_mask_list.push(base_mask | added_mask);
+			}
+			for feature_mask in feature_mask_list {
+				let expanded = ToonProgramRequest { material, instance_layout, feature_mask: Some(feature_mask) };
+				if key_set.insert(request_key(&expanded)) {
+					program_requests.request_list.push(expanded);
+				}
+			}
+		}
+		Ok(program_requests)
+	}
+
+	//==============================================================================
+	/// 빛 묶음 쪽 몸 기능 비트. (원본 readLightFeatureMask, read_feature_mask 의 빛 묶음 몫, 캐시는 건드리지 않는다)
+	//==============================================================================
+	fn read_light_feature_mask(light_set: &ToonLightSet) -> u32 {
+		(if light_set.get_ramp_texture().is_some() { TOON_FEATURE_RAMP_TEXTURE } else { 0 })
+			| (if light_set.get_shade_ramp().positions.len() >= 2 { TOON_FEATURE_SHADE_STOPS } else { 0 })
+			| (if light_set.get_rim_light().power > 0.0 { TOON_FEATURE_RIM } else { 0 })
+			| (if light_set.get_shade_rim_light().power > 0.0 { TOON_FEATURE_SHADE_RIM } else { 0 })
+			| (if light_set.is_light_intensity_limited() { TOON_FEATURE_INTENSITY_LIMIT } else { 0 })
+	}
+
+	//==============================================================================
+	/// 미리 짓기 본체. (읽어 둔 변형 목록을 짓거나 맡긴다)
+	//==============================================================================
+	fn prewarm_request_list(&mut self, gl: &crate::GlContext, request_list: ToonProgramRequests) -> ToonProgramPrewarm {
 		let is_ambient_occlusion = request_list.is_ambient_occlusion || self.ambient_occlusion_input.is_some();
 		#[cfg(test)]
 		let is_forced_deferred = FORCE_DEFERRED_PREWARM.with(|flag| flag.get());

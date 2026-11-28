@@ -605,3 +605,122 @@ fn program_prewarm_removes_first_frame_builds_and_keeps_pixels() {
 	}
 	assert_eq!(unsafe { glow_context_error(&glow_context) }, 0, "GL 오류");
 }
+
+//==============================================================================
+/// 장면 중간에 빛 묶음 쪽 기능 비트가 바뀌는 장면 하나를 그리고 프레임마다 (지은 프로그램 수, 화면 해시) 를 돌려준다. (원본 크롬 시험 toonprogramprewarmchrome 의 5 번 runSteps)
+/// - 림, 림에 음영 림, 램프 텍스처가 차례로 켜진다. 빛 묶음을 바꾸므로 프레임마다 그리기 줄을 다시 담는다.
+/// - mode 0: 미리 짓기 없이 동기, 1: 지금 빛만 미리 짓고 동기, 2: light_feature_list 로 미리 짓고 동기, 3: light_set_list 로 미리 짓고 동기, 4: 미리 짓기 없이 맡기고 기본 몸으로(기본값, 맡기는 길 강제), 5: 4 와 같고 단계마다 지어질 때까지 한 번 더 그린다.
+//==============================================================================
+fn run_light_steps(gl: &GlContext, target: &Target, mode: u8) -> Vec<(u32, u64)> {
+	use crate::core::shaderprogram::BUILT_PROGRAM_COUNT;
+	use crate::ToonProgramPrewarmOptions;
+	let mut renderer = ToonRenderer::new(gl).expect("툰 렌더러");
+	let mesh = create_mesh(gl, &mut renderer, &create_sphere_geometry(0.9, 12, 8, std::f64::consts::PI), "#c8b090");
+	let camera = create_camera();
+	let mut light = renderer.create_light_set();
+	let ramp_pixels: [u8; 16] = [60, 60, 70, 255, 120, 120, 130, 255, 200, 200, 210, 255, 255, 255, 255, 255];
+	let ramp_texture = renderer.create_texture(gl, 4, 1, &ramp_pixels, crate::ToonTextureOptions { is_mipmapped: false, is_repeated: false, ..crate::ToonTextureOptions::default() }).expect("램프 텍스처");
+	let mut future_light_list: Vec<crate::ToonLightSet> = Vec::new();
+	for step in 1..4 {
+		let mut future_light = renderer.create_light_set();
+		future_light.set_rim_light([0.6, 0.65, 0.8], 2.5, 0.0, 1.0);
+		if step >= 2 {
+			future_light.set_shade_rim_light([0.3, 0.3, 0.5], 2.0);
+		}
+		if step >= 3 {
+			future_light.set_ramp_texture(Some(ramp_texture), true);
+		}
+		future_light_list.push(future_light);
+	}
+	renderer.set_async_program_build(mode >= 4);
+	FORCE_DEFERRED_PREWARM.with(|flag| flag.set(mode >= 4));
+	let identity = Matrix4::create_identity();
+	if mode >= 1 && mode <= 3 {
+		let mut queue = ToonDrawQueue::new();
+		queue.add_mesh(&mesh, &identity, ToonDrawOptions { casts_shadow: false, light_set: Some(&light), ..ToonDrawOptions::default() });
+		let rim: &[&str] = &["rim"];
+		let rim_shade_rim: &[&str] = &["rim", "shadeRim"];
+		let rim_shade_rim_ramp: &[&str] = &["rim", "shadeRim", "rampTexture"];
+		let feature_list: [&[&str]; 3] = [rim, rim_shade_rim, rim_shade_rim_ramp];
+		let light_set_list: Vec<&crate::ToonLightSet> = future_light_list.iter().collect();
+		let options = match mode {
+			2 => ToonProgramPrewarmOptions { light_feature_list: &feature_list, ..ToonProgramPrewarmOptions::default() },
+			3 => ToonProgramPrewarmOptions { light_set_list: &light_set_list, ..ToonProgramPrewarmOptions::default() },
+			_ => ToonProgramPrewarmOptions::default(),
+		};
+		let mut prewarm = renderer.prewarm_draw_queue_with_options(gl, &queue, &options).expect("미리 짓기");
+		prewarm.wait(gl, &mut renderer);
+	}
+	let mut frame_list: Vec<(u32, u64)> = Vec::new();
+	for step in 0..4 {
+		match step {
+			1 => {
+				light.set_rim_light([0.6, 0.65, 0.8], 2.5, 0.0, 1.0);
+			}
+			2 => {
+				light.set_shade_rim_light([0.3, 0.3, 0.5], 2.0);
+			}
+			3 => {
+				light.set_ramp_texture(Some(ramp_texture), true);
+			}
+			_ => {}
+		}
+		let draw_frame = |renderer: &mut ToonRenderer| -> (u32, u64) {
+			let mut queue = ToonDrawQueue::new();
+			queue.add_mesh(&mesh, &identity, ToonDrawOptions { casts_shadow: false, light_set: Some(&light), ..ToonDrawOptions::default() });
+			target.clear();
+			let before = BUILT_PROGRAM_COUNT.with(|count| count.get());
+			queue.draw(gl, renderer, &camera);
+			(BUILT_PROGRAM_COUNT.with(|count| count.get()) - before, read_hash(&target.read_pixels()))
+		};
+		if mode == 5 {
+			draw_frame(&mut renderer); // 처음 보는 변형이면 맡기고 기본 몸으로 그린다.
+		}
+		frame_list.push(draw_frame(&mut renderer));
+	}
+	FORCE_DEFERRED_PREWARM.with(|flag| flag.set(false));
+	renderer.destroy(gl);
+	frame_list
+}
+
+//==============================================================================
+/// 미리 짓기 인자와 맡기고 기본 몸으로 그리기: 장면 중간에 빛 묶음이 바뀌어도 조합 목록으로 미리 지으면 프레임마다 짓기 0 번이고, 맡기고 기본 몸으로 그린 프레임도 화면이 바이트까지 같다. (원본 이슈 2)
+//==============================================================================
+#[test]
+fn prewarm_options_and_async_program_build_keep_pixels() {
+	let Some(glow_context) = crate::core::glstatecache::tests::create_surfaceless_context() else {
+		panic!("창 없는 GL 컨텍스트를 짓지 못함");
+	};
+	let _ = crate::core::glstatecache::attach(&glow_context);
+	let gl: &GlContext = GlContext::from_context(&glow_context);
+	let target = create_target(gl);
+	let sync_list = run_light_steps(gl, &target, 0);
+	let narrow_list = run_light_steps(gl, &target, 1);
+	let listed_list = run_light_steps(gl, &target, 2);
+	let set_list = run_light_steps(gl, &target, 3);
+	let async_list = run_light_steps(gl, &target, 4);
+	let settled_list = run_light_steps(gl, &target, 5);
+	let built = |list: &Vec<(u32, u64)>| -> Vec<u32> { list.iter().map(|frame| frame.0).collect() };
+	let hash = |list: &Vec<(u32, u64)>| -> Vec<u64> { list.iter().map(|frame| frame.1).collect() };
+	eprintln!("빛 묶음이 바뀌는 프레임별 짓기 수: 미리 짓기 없이 {:?}, 지금 값만 {:?}, 조합 목록 {:?}, 빛 묶음 목록 {:?}, 맡기고 기본 몸으로 {:?}, 지어질 때까지 한 번 더 {:?}", built(&sync_list), built(&narrow_list), built(&listed_list), built(&set_list), built(&async_list), built(&settled_list));
+	assert!(built(&sync_list).iter().skip(1).all(|count| *count > 0), "미리 짓기 없이는 빛이 바뀔 때마다 짓는다");
+	assert!(built(&narrow_list).iter().skip(1).all(|count| *count > 0), "지금 빛 값만 미리 지으면 장면 중간에 켜진 조합은 그때 짓는다");
+	assert_eq!(built(&listed_list), vec![0, 0, 0, 0], "light_feature_list 로 미리 지으면 프레임마다 짓기 0 번");
+	assert_eq!(built(&set_list), vec![0, 0, 0, 0], "light_set_list 로 미리 지으면 프레임마다 짓기 0 번");
+	assert_eq!(hash(&listed_list), hash(&sync_list), "조합 목록이 있어도 화면은 바이트까지 같다");
+	assert_eq!(hash(&set_list), hash(&sync_list));
+	assert_eq!(hash(&narrow_list), hash(&sync_list));
+	assert_eq!(hash(&async_list), hash(&sync_list), "기본 몸으로 그린 프레임이 짓고 그린 화면과 바이트까지 같다");
+	assert_eq!(hash(&settled_list), hash(&sync_list), "지어진 뒤 변형으로 바뀌어도 같은 화면");
+	let mut renderer = ToonRenderer::new(gl).expect("툰 렌더러");
+	assert!(renderer.is_async_program_build(), "맡기고 기본 몸으로 그리기가 기본");
+	renderer.set_async_program_build(false);
+	assert!(!renderer.is_async_program_build());
+	let queue = ToonDrawQueue::new();
+	let bad_name: &[&str] = &["noSuchFeature"];
+	let bad_list: [&[&str]; 1] = [bad_name];
+	let error = renderer.prewarm_draw_queue_with_options(gl, &queue, &crate::ToonProgramPrewarmOptions { light_feature_list: &bad_list, ..crate::ToonProgramPrewarmOptions::default() }).err().expect("잘못된 이름은 Err");
+	assert!(error.contains("noSuchFeature"), "{}", error);
+	renderer.destroy(gl);
+	assert_eq!(unsafe { glow_context_error(&glow_context) }, 0, "GL 오류");
+}
