@@ -350,6 +350,7 @@ VANILLA_CAPTURE_PATH=shots/uigallery_{frame}.png VANILLA_CAPTURE_FRAMES=60 VANIL
 | `modelviewer` | 스키닝 3D(glTF, FBX), 그림자, 블룸 |
 | `ancientmountain` | 3인칭 산 오르기: 절차 지형과 3중 텍스처, 마네킹 달리기, 점프, 등반, 뛰어내리기, 여우 여섯, 정상 깃발, 섀도우 맵, 블룸, 모션 블러, 옵션 패널 |
 | `neonhorizon` | 네온 그리드 지형 달리기: 별과 유성, 함대, 부스트 빛살, 먼지 파티클, 블룸, 색수차, 필름 그레인, 필믹 톤맵, 옵션 패널 |
+| `oldface` | 원본 OLD FACE 장면: 사람 피부 렌더러(피부, 눈, 머리카락), 그림자, AO, SSS, 블룸, ACES, FXAA, 표정 모프와 주름 맵 (숫자 키로 표정) |
 | `engineextras` | 테, 진행 고리, 부드러운 그늘, 마우스 커서, 카메라 손짓, 마우스 단추와 손가락 입력 (직접 눌러 본다) |
 | `devtoolsshowcase` | 개발자 도구(F2): 하이어라키, 인스펙터, 통계, 로컬 스토리지, 설정 |
 | `toonshowcase` | 툰 3D: 기본 도형과 바깥선, GLB 모형의 뼈대 움직임, 셀 셰이딩, 바위 2 천 개 인스턴싱과 화면 밖 거르기, 그림자, HDR 블룸 |
@@ -376,7 +377,7 @@ cargo run --example uigallery
 cargo run --release --example modelviewer
 ```
 
-`modelviewer`, `ancientmountain`, `toonshowcase`, `toonshading`, `timelineshowcase`, `loadingshowcase`, `scenedocument` 는 vanilla.js 의 예제 애셋을 씁니다. vanilla.js 저장소를 이 저장소 옆에 받아 두면 됩니다. (`Github/vanilla.js`, `Github/vanilla-engine`)
+`modelviewer`, `ancientmountain`, `oldface`, `toonshowcase`, `toonshading`, `timelineshowcase`, `loadingshowcase`, `scenedocument` 는 vanilla.js 의 예제 애셋을 씁니다. vanilla.js 저장소를 이 저장소 옆에 받아 두면 됩니다. (`Github/vanilla.js`, `Github/vanilla-engine`)
 
 ## 기술 노트
 
@@ -550,7 +551,7 @@ cargo run --release --example modelviewer
 
 - 제3자 라이선스 고지는 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) 한 파일에 모았습니다. 엔진이 쓰는 크레이트(직접과 간접, 데스크탑 세 OS 와 wasm 대상, 일반과 빌드 의존)의 이름, 판, 라이선스 식, 고른 라이선스, 저작권 줄, 전문이 들어 있고, 크레이트가 아닌 실린 자료(HRTF 자료, 옮겨 온 셈)는 그 파일의 '실린 자료' 절에 손으로 적습니다. 표기 의무가 없는 라이선스(CC0-1.0, Unlicense, 0BSD, MIT-0)로 쓰는 크레이트는 끝에 한 줄씩만 둡니다.
 - `cargo package` 에는 소스와 라이선스 두 파일, README 만 실립니다. (Cargo.toml 의 include, 문서와 예제와 시험 자산은 저장소에만 둡니다)
-- 예제가 읽는 3D 모형과 애니메이션은 vanilla.js 저장소의 것입니다. 출처와 라이선스는 그 저장소 THIRD_PARTY_LICENSES.md 의 Example Assets 에 있습니다. (마네킹과 애니메이션은 Quaternius CC0, 여우는 Khronos 샘플 CC0 과 CC BY 4.0, toonshading 의 캐릭터는 pixiv Inc. 의 VRM1 Constraint Twist Sample, VRM Public License 1.0) 이 저장소의 예제 자산(examples/assets)과 시험 자산(tests/assets, 소리 파일에는 FFmpeg 와 애플 인코더 표시가 있다)은 이 저장소를 위해 만든 것이고, HRTF 자료는 THIRD_PARTY_LICENSES.md 에 있습니다.
+- 예제가 읽는 3D 모형과 애니메이션은 vanilla.js 저장소의 것입니다. 출처와 라이선스는 그 저장소 THIRD_PARTY_LICENSES.md 의 Example Assets 에 있습니다. (마네킹과 애니메이션은 Quaternius CC0, 여우는 Khronos 샘플 CC0 과 CC BY 4.0, toonshading 의 캐릭터는 pixiv Inc. 의 VRM1 Constraint Twist Sample, VRM Public License 1.0, oldface 의 인물은 Epic Games 의 MetaHuman, 데모 전용이고 엔진 라이선스에 들지 않습니다. 자산은 examples/oldface_assets, https://www.metahuman.com/ , https://www.metahuman.com/en-US/license , 문의나 제외 요청은 contact@vanillapunch.com) 이 저장소의 예제 자산(examples/assets)과 시험 자산(tests/assets, 소리 파일에는 FFmpeg 와 애플 인코더 표시가 있다)은 이 저장소를 위해 만든 것이고, HRTF 자료는 THIRD_PARTY_LICENSES.md 에 있습니다.
 - 의존을 바꾸면 `cargo run -p vanilla-engine-licenses` 로 다시 짓고, `cargo run -p vanilla-engine-licenses -- --check` 로 파일이 지금 의존과 같은지 봅니다. (도구는 [tools/TOOLS.md](tools/TOOLS.md) 의 licenses)
 - 게임을 낼 때는 게임의 의존까지 모은 고지 파일을 지어 실행 파일과 함께 냅니다. 게임 자신의 라이선스는 게임의 몫이고, 이 파일은 제3자 고지만 담습니다. 엔진이 실은 자료의 절도 엔진 크레이트에서 읽어 함께 들어갑니다.
   ```bash

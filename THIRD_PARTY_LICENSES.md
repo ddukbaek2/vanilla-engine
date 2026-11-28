@@ -574,6 +574,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ````
+### Example Assets (MetaHuman, demo only)
+
+- `examples/oldface_assets` (used by `examples/oldface.rs`) is MetaHuman by Epic Games, copyright Epic Games. Demo use only, not covered by the vanilla-engine license. https://www.metahuman.com/ , https://www.metahuman.com/en-US/license
+- For questions or removal requests, contact contact@vanillapunch.com
+
 ### Public domain and CC0 code
 
 No notice is required for these. They are listed so that the origin of the code is clear.
