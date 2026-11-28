@@ -173,6 +173,10 @@ pub struct EngineConfiguration {
 	///   (맥미니 2560x1440 툰 후처리 장면 GPU 처리량 6.89 → 6.49 ms, 끈 판 6.81 → 5.22 ms, 원본 같은 장면에서 잰 값)
 	/// - 예: engine_configuration.antialias = false; (ToonPostProcess 를 쓰는 게임)
 	pub antialias: bool,
+	/// GPU 메모리 셈(개발용)을 처음부터 켤지. (원본 trackGpuMemory, 기본 false, 생성 때 정한다) 끄면 GL 짓기와 크기 정하기 호출이 깃발 하나만 보고 지나가 프레임에 드는 일이 없다.
+	/// - 켜면 엔진이 처음 짓는 자원까지 센다. 나중에 켜려면 Engine::enable_gpu_memory_tracking 이고 그 뒤에 지은 것부터 센다.
+	/// - 예: engine_configuration.track_gpu_memory = true; (프로파일링 때)
+	pub track_gpu_memory: bool,
 	/// 화면 키보드: 글자 입력칸이 포커스된 동안 가로가 같고 세로만 줄었으면 크기를 그대로 둔다. (auto_resize_on_window_resize 일 때,
 	/// 데스크탑은 크롬 윈도우처럼 터치 키보드가 visualViewport 를 줄인다. 맥과 리눅스는 크롬처럼 줄지 않는다)
 	pub ignore_virtual_keyboard_resize: bool,
@@ -223,6 +227,7 @@ impl EngineConfiguration {
 			auto_resize_on_window_resize: false,
 			preserve_drawing_buffer: false,
 			antialias: true,
+			track_gpu_memory: false,
 			ignore_virtual_keyboard_resize: false,
 			max_canvas_aspect_ratio: 0.0,
 			rebake_text_on_font_load: false,
@@ -431,6 +436,9 @@ impl Engine {
 		let reference_resolution_size = engine_configuration.reference_resolution_size;
 		let view_scale_mode = engine_configuration.view_scale_mode;
 		let color_space = engine_configuration.color_space;
+		if engine_configuration.track_gpu_memory {
+			crate::core::gpumemorytracker::enable();
+		}
 		crate::platform::document::apply_engine_configuration(&engine_configuration.document_language, &engine_configuration.document_meta_list);
 		let engine = Engine {
 			color_space,
@@ -1458,6 +1466,66 @@ impl Engine {
 				eprintln!("Engine: 기본 폰트를 찾지 못했습니다. 글자가 보이지 않습니다.");
 			}
 		}
+	}
+
+	//==============================================================================
+	/// GPU 메모리 셈 켜기. (원본 Engine.enableGpuMemoryTracking, 개발용)
+	/// - 켠 뒤에 지은 텍스처, 렌더버퍼, 버퍼부터 센다. 이미 켰으면 아무것도 하지 않는다. 처음부터 세려면 EngineConfiguration::track_gpu_memory.
+	///
+	/// # 예제
+	/// GPU 메모리 셈 켜기
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// engine.enable_gpu_memory_tracking();
+	/// assert!(engine.is_gpu_memory_tracking_enabled());
+	/// ```
+	//==============================================================================
+	pub fn enable_gpu_memory_tracking(&self) {
+		crate::core::gpumemorytracker::enable();
+	}
+
+	//==============================================================================
+	/// GPU 메모리 셈이 켜져 있는지. (원본 Engine.isGpuMemoryTrackingEnabled)
+	///
+	/// # 돌려줌
+	/// 켜져 있으면 true.
+	///
+	/// # 예제
+	/// 기본은 꺼져 있다
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// assert!(!engine.is_gpu_memory_tracking_enabled());
+	/// ```
+	//==============================================================================
+	pub fn is_gpu_memory_tracking_enabled(&self) -> bool {
+		crate::core::gpumemorytracker::is_enabled()
+	}
+
+	//==============================================================================
+	/// GPU 메모리 읽기. (원본 Engine.readGpuMemoryUsage, 개발용, Graphic::read_gpu_memory_usage 와 같다)
+	/// - 셈이 꺼져 있으면 이 호출이 켜고 그 뒤에 지은 것부터 센다. 그래픽이 아직 없으면 None.
+	///
+	/// # 돌려줌
+	/// 합, 캔버스 몫, 종류별과 주인별 몫.
+	///
+	/// # 예제
+	/// 그래픽이 있으면 합을 읽는다
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// if let Some(usage) = engine.read_gpu_memory_usage() {
+	/// 	assert_eq!(usage.total_bytes, usage.canvas_bytes + usage.kind_table.values().map(|kind_usage| kind_usage.bytes).sum::<u64>());
+	/// }
+	/// assert!(engine.is_gpu_memory_tracking_enabled() || engine.get_graphic().is_none());
+	/// ```
+	//==============================================================================
+	pub fn read_gpu_memory_usage(&self) -> Option<crate::core::gpumemorytracker::GpuMemoryUsage> {
+		self.get_graphic().map(|graphic| graphic.read_gpu_memory_usage())
 	}
 
 	//==============================================================================

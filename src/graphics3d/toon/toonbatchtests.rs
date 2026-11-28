@@ -29,10 +29,10 @@ fn create_target<'a>(gl: &'a GlContext) -> Target<'a> {
 	let framebuffer = unsafe {
 		let color_texture = crate::core::glstatecache::create_texture(gl).unwrap();
 		crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, Some(color_texture));
-		raw.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, SIZE, SIZE, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None));
-		let depth = raw.create_renderbuffer().unwrap();
+		GlContext::from_context(&raw).tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, SIZE, SIZE, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None));
+		let depth = GlContext::from_context(&raw).create_renderbuffer().unwrap();
 		raw.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
-		raw.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH_COMPONENT24, SIZE, SIZE);
+		GlContext::from_context(&raw).renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH_COMPONENT24, SIZE, SIZE);
 		let framebuffer = crate::core::glstatecache::create_framebuffer(gl).unwrap();
 		crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(framebuffer));
 		raw.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(color_texture), 0);

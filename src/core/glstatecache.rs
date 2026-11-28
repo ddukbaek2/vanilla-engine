@@ -812,10 +812,12 @@ pub(crate) unsafe fn bind_buffer(gl: &impl GlowContextSource, target: u32, buffe
 }
 
 /// 버퍼 만들기. (지운 이름을 GL 이 다시 주면 지운 기억과 처음 묶은 대상을 뺀다)
+#[track_caller]
 pub(crate) unsafe fn create_buffer(gl: &impl GlowContextSource) -> Result<GlBuffer, String> {
 	let gl = gl.read_glow_context();
 	note_call(|| String::from("create_buffer()"));
 	let buffer = unsafe { gl.create_buffer() }?;
+	crate::core::gpumemorytracker::register(crate::core::gpumemorytracker::GpuMemoryKey::Buffer(buffer), crate::core::gpumemorytracker::GpuMemoryKind::Buffer);
 	with_state_cache(gl, |state_cache| {
 		if let Some(state_cache) = state_cache {
 			state_cache.deleted_buffer_set.borrow_mut().remove(&buffer);
@@ -829,6 +831,7 @@ pub(crate) unsafe fn create_buffer(gl: &impl GlowContextSource) -> Result<GlBuff
 pub(crate) unsafe fn delete_buffer(gl: &impl GlowContextSource, buffer: GlBuffer) {
 	let gl = gl.read_glow_context();
 	note_call(|| format!("delete_buffer({:?})", buffer));
+	crate::core::gpumemorytracker::unregister(crate::core::gpumemorytracker::GpuMemoryKey::Buffer(buffer));
 	unsafe {
 		gl.delete_buffer(buffer);
 	}
@@ -921,10 +924,12 @@ pub(crate) unsafe fn bind_texture(gl: &impl GlowContextSource, target: u32, text
 }
 
 /// 텍스처 만들기. (지운 이름을 GL 이 다시 주면 지운 기억과 처음 묶은 대상을 뺀다)
+#[track_caller]
 pub(crate) unsafe fn create_texture(gl: &impl GlowContextSource) -> Result<GlTexture, String> {
 	let gl = gl.read_glow_context();
 	note_call(|| String::from("create_texture()"));
 	let texture = unsafe { gl.create_texture() }?;
+	crate::core::gpumemorytracker::register(crate::core::gpumemorytracker::GpuMemoryKey::Texture(texture), crate::core::gpumemorytracker::GpuMemoryKind::Texture);
 	with_state_cache(gl, |state_cache| {
 		if let Some(state_cache) = state_cache {
 			state_cache.deleted_texture_set.borrow_mut().remove(&texture);
@@ -938,6 +943,7 @@ pub(crate) unsafe fn create_texture(gl: &impl GlowContextSource) -> Result<GlTex
 pub(crate) unsafe fn delete_texture(gl: &impl GlowContextSource, texture: GlTexture) {
 	let gl = gl.read_glow_context();
 	note_call(|| format!("delete_texture({:?})", texture));
+	crate::core::gpumemorytracker::unregister(crate::core::gpumemorytracker::GpuMemoryKey::Texture(texture));
 	unsafe {
 		gl.delete_texture(texture);
 	}

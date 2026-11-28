@@ -1,7 +1,7 @@
 //==============================================================================
 //! GlContext 의 glow 넘기기 메서드. (기계로 지은 파일, 손으로 고치지 않는다)
 //! - glow 0.18.0 의 HasContext 트레이트 메서드 모두(396 개)와 웹의 glow::Context 고유 메서드 가운데 &self 를 받는 것(45 개) 가운데,
-//!   src/core/glcontext.rs 에 손으로 둔 것(상태 캐시를 거치거나 그 값을 잊게 하는 61 개)을 뺀 380 개다. 같은 이름, 같은 꼴로 안의 glow::Context 를 그대로 부른다.
+//!   src/core/glcontext.rs 에 손으로 둔 것(상태 캐시를 거치거나 그 값을 잊게 하는 72 개)을 뺀 369 개다. 같은 이름, 같은 꼴로 안의 glow::Context 를 그대로 부른다.
 //! - 웹 고유 메서드는 glow 와 같은 cfg(all(target_family = "wasm", not(target_os = "emscripten"))) 로 가른다.
 //! - 지은 법: glow-0.18.0/src/lib.rs 의 `pub trait HasContext` 선언에서 메서드 선언(속성 #[doc(alias)] 와 함께)을 차례대로 읽고,
 //!   glow-0.18.0/src/web_sys.rs 의 첫 `impl Context` 블록에서 `pub fn`, `pub unsafe fn` 가운데 첫 인자가 self 인 것을 읽는다.
@@ -71,17 +71,6 @@ impl GlContext {
 	#[inline]
 	pub unsafe fn create_query(&self) -> Result<glow::Query, String> {
 		unsafe { self.context.create_query() }
-	}
-
-	//==============================================================================
-	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
-	///
-	/// # 돌려줌
-	/// glow 가 돌려주는 값.
-	//==============================================================================
-	#[inline]
-	pub unsafe fn create_renderbuffer(&self) -> Result<glow::Renderbuffer, String> {
-		unsafe { self.context.create_renderbuffer() }
 	}
 
 	//==============================================================================
@@ -1113,19 +1102,6 @@ impl GlContext {
 	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
 	///
 	/// # 인자
-	/// - `target`: glow 의 같은 인자.
-	/// - `size`: glow 의 같은 인자.
-	/// - `usage`: glow 의 같은 인자.
-	//==============================================================================
-	#[inline]
-	pub unsafe fn buffer_data_size(&self, target: u32, size: i32, usage: u32) {
-		unsafe { self.context.buffer_data_size(target, size, usage) }
-	}
-
-	//==============================================================================
-	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
-	///
-	/// # 인자
 	/// - `buffer`: glow 의 같은 인자.
 	/// - `size`: glow 의 같은 인자.
 	/// - `usage`: glow 의 같은 인자.
@@ -1133,19 +1109,6 @@ impl GlContext {
 	#[inline]
 	pub unsafe fn named_buffer_data_size(&self, buffer: glow::Buffer, size: i32, usage: u32) {
 		unsafe { self.context.named_buffer_data_size(buffer, size, usage) }
-	}
-
-	//==============================================================================
-	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
-	///
-	/// # 인자
-	/// - `target`: glow 의 같은 인자.
-	/// - `data`: glow 의 같은 인자.
-	/// - `usage`: glow 의 같은 인자.
-	//==============================================================================
-	#[inline]
-	pub unsafe fn buffer_data_u8_slice(&self, target: u32, data: &[u8], usage: u32) {
-		unsafe { self.context.buffer_data_u8_slice(target, data, usage) }
 	}
 
 	//==============================================================================
@@ -1528,17 +1491,6 @@ impl GlContext {
 	#[inline]
 	pub unsafe fn delete_query(&self, query: glow::Query) {
 		unsafe { self.context.delete_query(query) }
-	}
-
-	//==============================================================================
-	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
-	///
-	/// # 인자
-	/// - `renderbuffer`: glow 의 같은 인자.
-	//==============================================================================
-	#[inline]
-	pub unsafe fn delete_renderbuffer(&self, renderbuffer: glow::Renderbuffer) {
-		unsafe { self.context.delete_renderbuffer(renderbuffer) }
 	}
 
 	//==============================================================================
@@ -2460,35 +2412,6 @@ impl GlContext {
 	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
 	///
 	/// # 인자
-	/// - `target`: glow 의 같은 인자.
-	/// - `internal_format`: glow 의 같은 인자.
-	/// - `width`: glow 의 같은 인자.
-	/// - `height`: glow 의 같은 인자.
-	//==============================================================================
-	#[inline]
-	pub unsafe fn renderbuffer_storage(&self, target: u32, internal_format: u32, width: i32, height: i32) {
-		unsafe { self.context.renderbuffer_storage(target, internal_format, width, height) }
-	}
-
-	//==============================================================================
-	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
-	///
-	/// # 인자
-	/// - `target`: glow 의 같은 인자.
-	/// - `samples`: glow 의 같은 인자.
-	/// - `internal_format`: glow 의 같은 인자.
-	/// - `width`: glow 의 같은 인자.
-	/// - `height`: glow 의 같은 인자.
-	//==============================================================================
-	#[inline]
-	pub unsafe fn renderbuffer_storage_multisample(&self, target: u32, samples: i32, internal_format: u32, width: i32, height: i32) {
-		unsafe { self.context.renderbuffer_storage_multisample(target, samples, internal_format, width, height) }
-	}
-
-	//==============================================================================
-	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
-	///
-	/// # 인자
 	/// - `sampler`: glow 의 같은 인자.
 	/// - `name`: glow 의 같은 인자.
 	/// - `value`: glow 의 같은 인자.
@@ -2571,17 +2494,6 @@ impl GlContext {
 	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
 	///
 	/// # 인자
-	/// - `target`: glow 의 같은 인자.
-	//==============================================================================
-	#[inline]
-	pub unsafe fn generate_mipmap(&self, target: u32) {
-		unsafe { self.context.generate_mipmap(target) }
-	}
-
-	//==============================================================================
-	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
-	///
-	/// # 인자
 	/// - `texture`: glow 의 같은 인자.
 	//==============================================================================
 	#[inline]
@@ -2629,25 +2541,6 @@ impl GlContext {
 	///
 	/// # 인자
 	/// - `target`: glow 의 같은 인자.
-	/// - `level`: glow 의 같은 인자.
-	/// - `internal_format`: glow 의 같은 인자.
-	/// - `width`: glow 의 같은 인자.
-	/// - `height`: glow 의 같은 인자.
-	/// - `border`: glow 의 같은 인자.
-	/// - `format`: glow 의 같은 인자.
-	/// - `ty`: glow 의 같은 인자.
-	/// - `pixels`: glow 의 같은 인자.
-	//==============================================================================
-	#[inline]
-	pub unsafe fn tex_image_2d(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, border: i32, format: u32, ty: u32, pixels: glow::PixelUnpackData) {
-		unsafe { self.context.tex_image_2d(target, level, internal_format, width, height, border, format, ty, pixels) }
-	}
-
-	//==============================================================================
-	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
-	///
-	/// # 인자
-	/// - `target`: glow 의 같은 인자.
 	/// - `samples`: glow 의 같은 인자.
 	/// - `internal_format`: glow 의 같은 인자.
 	/// - `width`: glow 의 같은 인자.
@@ -2688,26 +2581,6 @@ impl GlContext {
 	/// - `height`: glow 의 같은 인자.
 	/// - `depth`: glow 의 같은 인자.
 	/// - `border`: glow 의 같은 인자.
-	/// - `format`: glow 의 같은 인자.
-	/// - `ty`: glow 의 같은 인자.
-	/// - `pixels`: glow 의 같은 인자.
-	//==============================================================================
-	#[inline]
-	pub unsafe fn tex_image_3d(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, pixels: glow::PixelUnpackData) {
-		unsafe { self.context.tex_image_3d(target, level, internal_format, width, height, depth, border, format, ty, pixels) }
-	}
-
-	//==============================================================================
-	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
-	///
-	/// # 인자
-	/// - `target`: glow 의 같은 인자.
-	/// - `level`: glow 의 같은 인자.
-	/// - `internal_format`: glow 의 같은 인자.
-	/// - `width`: glow 의 같은 인자.
-	/// - `height`: glow 의 같은 인자.
-	/// - `depth`: glow 의 같은 인자.
-	/// - `border`: glow 의 같은 인자.
 	/// - `image_size`: glow 의 같은 인자.
 	/// - `pixels`: glow 의 같은 인자.
 	//==============================================================================
@@ -2728,21 +2601,6 @@ impl GlContext {
 	#[inline]
 	pub unsafe fn tex_storage_1d(&self, target: u32, levels: i32, internal_format: u32, width: i32) {
 		unsafe { self.context.tex_storage_1d(target, levels, internal_format, width) }
-	}
-
-	//==============================================================================
-	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
-	///
-	/// # 인자
-	/// - `target`: glow 의 같은 인자.
-	/// - `levels`: glow 의 같은 인자.
-	/// - `internal_format`: glow 의 같은 인자.
-	/// - `width`: glow 의 같은 인자.
-	/// - `height`: glow 의 같은 인자.
-	//==============================================================================
-	#[inline]
-	pub unsafe fn tex_storage_2d(&self, target: u32, levels: i32, internal_format: u32, width: i32, height: i32) {
-		unsafe { self.context.tex_storage_2d(target, levels, internal_format, width, height) }
 	}
 
 	//==============================================================================
@@ -2774,22 +2632,6 @@ impl GlContext {
 	#[inline]
 	pub unsafe fn tex_storage_2d_multisample(&self, target: u32, samples: i32, internal_format: u32, width: i32, height: i32, fixed_sample_locations: bool) {
 		unsafe { self.context.tex_storage_2d_multisample(target, samples, internal_format, width, height, fixed_sample_locations) }
-	}
-
-	//==============================================================================
-	/// glow 의 같은 이름 함수를 그대로 부른다. (상태 캐시와 상관없는 GL 함수)
-	///
-	/// # 인자
-	/// - `target`: glow 의 같은 인자.
-	/// - `levels`: glow 의 같은 인자.
-	/// - `internal_format`: glow 의 같은 인자.
-	/// - `width`: glow 의 같은 인자.
-	/// - `height`: glow 의 같은 인자.
-	/// - `depth`: glow 의 같은 인자.
-	//==============================================================================
-	#[inline]
-	pub unsafe fn tex_storage_3d(&self, target: u32, levels: i32, internal_format: u32, width: i32, height: i32, depth: i32) {
-		unsafe { self.context.tex_storage_3d(target, levels, internal_format, width, height, depth) }
 	}
 
 	//==============================================================================
