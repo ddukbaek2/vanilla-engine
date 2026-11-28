@@ -49,7 +49,7 @@ pub const JOINT_BLOCK_GLSL: &str = joint_block_glsl_source!();
 /// # 예제
 /// ```rust
 /// use vanilla::JOINT_BLOCK_MAXIMUM;
-/// // 버퍼는 GL 컨텍스트가 있어야 지으므로 여기서는 크기만 본다. (뼈 96 개 x mat4 64 바이트 = 6144 바이트, MAX_UNIFORM_BLOCK_SIZE 최소 16384 안)
+/// // The buffer needs a GL context, so only the size is checked here. (96 joints x 64 bytes per mat4 = 6144 bytes, within the 16384 minimum of MAX_UNIFORM_BLOCK_SIZE)
 /// assert!(JOINT_BLOCK_MAXIMUM * 64 <= 16384);
 /// ```
 //==============================================================================

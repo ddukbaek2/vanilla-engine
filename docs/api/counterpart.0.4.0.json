@@ -19897,6 +19897,26 @@
 		},
 		{
 			"vanilla-engine": {
+				"module": "graphics3d/jointblock",
+				"name": "JOINT_BLOCK_MAXIMUM"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/jointblock",
+				"name": "JOINT_BLOCK_MAXIMUM"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/jointblock",
+				"name": "JOINT_BLOCK_GLSL"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/jointblock",
+				"name": "JOINT_BLOCK_GLSL"
+			}
+		},
+		{
+			"vanilla-engine": {
 				"module": "graphics3d/material",
 				"class": "Material"
 			},
@@ -21779,6 +21799,18 @@
 				"module": "graphics3d/skinnedmodelrenderer",
 				"class": "SkinnedModelRenderer",
 				"name": "constructor"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/skinnedmodelrenderer",
+				"class": "SkinnedModelRenderer",
+				"name": "upload_joint_matrices"
+			},
+			"vanilla.js": {
+				"module": "graphics3d/skinnedmodelrenderer",
+				"class": "SkinnedModelRenderer",
+				"name": "uploadJointMatrices"
 			}
 		},
 		{

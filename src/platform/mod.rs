@@ -67,6 +67,18 @@ pub use web::read_local_time;
 
 //==============================================================================
 /// 현지 시각. (이 기계의 시간대로 본 달력 시각, 원본 Engine.readLocalTime 이 돌려주는 {year, month, day, hour, minute, second, weekday} 와 같다)
+///
+/// # 예제
+/// 지금의 현지 시각 읽기
+/// ```rust
+/// use vanilla::platform::read_local_time;
+///
+/// let local_time = read_local_time(0.0);
+/// assert!(local_time.year >= 2026);
+/// assert!((1..=12).contains(&local_time.month));
+/// assert!((1..=31).contains(&local_time.day));
+/// assert!(local_time.hour < 24);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LocalTime {
@@ -136,6 +148,9 @@ pub use desktop::systemfont::{find_fallback_font_file, find_family_font_file, li
 mod local_time_tests {
 	use super::*;
 
+	//==============================================================================
+	// 달력 변환이 알려진 시각(1970-01-01 등)과 맞는지 본다.
+	//==============================================================================
 	#[test]
 	fn civil_from_epoch_seconds_matches_known_instants() {
 		assert_eq!(civil_from_epoch_seconds(0), LocalTime { year: 1970, month: 1, day: 1, hour: 0, minute: 0, second: 0, weekday: 4 });

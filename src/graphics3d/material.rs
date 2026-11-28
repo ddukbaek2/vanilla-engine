@@ -997,6 +997,7 @@ pub fn decode_image_bytes(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 	}
 }
 
+// 웹에서 image 크레이트로 그림 바이트를 풀어 (너비, 높이, RGBA 바이트)로 돌려준다.
 #[cfg(target_arch = "wasm32")]
 fn decode_image_bytes_with_image_crate(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 	let dynamic_image = image::load_from_memory(bytes).map_err(|error| format!("Material: image decode failed: {}", error))?;

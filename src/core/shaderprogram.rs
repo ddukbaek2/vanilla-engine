@@ -457,6 +457,10 @@ unsafe fn bind_known_blocks(gl: &GlContext, program: crate::core::graphic::GlPro
 	}
 }
 
+//==============================================================================
+// 셰이더 한 단계(정점 또는 조각)를 컴파일한다.
+// - 컴파일에 실패하면 GL 의 정보 로그를 Err 로 돌려준다.
+//==============================================================================
 unsafe fn compile_shader(gl: &GlContext, shader_type: u32, source: &str) -> Result<crate::core::graphic::GlShader, String> {
 	let shader = gl.create_shader(shader_type)?;
 	gl.shader_source(shader, source);

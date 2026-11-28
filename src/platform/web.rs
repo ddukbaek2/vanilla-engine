@@ -1092,6 +1092,9 @@ pub fn open_url(url: &str) -> bool {
 ///
 /// # 인자
 /// - `minute_offset`: 지금에 더할 분. (음수는 과거, 0 이면 지금)
+///
+/// # 돌려줌
+/// 더한 때를 브라우저 시간대로 본 달력 시각.
 //==============================================================================
 pub fn read_local_time(minute_offset: f64) -> crate::platform::LocalTime {
 	let date = js_sys::Date::new(&JsValue::from_f64(js_sys::Date::now() + minute_offset * 60000.0));

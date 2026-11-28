@@ -873,6 +873,9 @@ pub fn open_url(url: &str) -> bool {
 ///
 /// # 인자
 /// - `minute_offset`: 지금에 더할 분. (음수는 과거, 0 이면 지금)
+///
+/// # 돌려줌
+/// 더한 때를 이 기계의 시간대로 본 달력 시각.
 //==============================================================================
 pub fn read_local_time(minute_offset: f64) -> crate::platform::LocalTime {
 	let now_milliseconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_millis() as i64).unwrap_or(0);

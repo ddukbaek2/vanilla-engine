@@ -1025,6 +1025,7 @@ pub fn decode_glb_image(image: &ToonGlbImage) -> Result<(u32, u32, Vec<u8>), Str
 	}
 }
 
+// 웹에서 image 크레이트로 GLB 안의 그림을 풀어 (너비, 높이, RGBA 바이트)로 돌려준다.
 #[cfg(target_arch = "wasm32")]
 fn decode_glb_image_with_image_crate(image: &ToonGlbImage) -> Result<(u32, u32, Vec<u8>), String> {
 	let decoded = image::load_from_memory(&image.data).map_err(|error| format!("GLB 그림 {} 을 풀지 못했다: {}", image.name, error))?;

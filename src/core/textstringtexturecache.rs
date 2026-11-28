@@ -484,6 +484,19 @@ pub struct FontFileSource {
 
 //==============================================================================
 /// 시스템 글꼴 이름이 가진 얼굴 하나. (운영체제가 알려 주는 굵기와 기울임, 얼굴을 고르는 CSS 굵기 규칙의 후보)
+///
+/// # 예제
+/// 굵은 얼굴 하나 지어 보기
+/// ```rust
+/// use vanilla::core::textstringtexturecache::{FamilyFontFace, FontFileSource};
+///
+/// let face = FamilyFontFace {
+/// 	source: FontFileSource { path: std::path::PathBuf::from("GameSans-Bold.ttf"), face_index: None, post_script_name: None },
+/// 	weight: 700,
+/// 	is_italic: false,
+/// };
+/// assert_eq!(face.weight, 700);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FamilyFontFace {
