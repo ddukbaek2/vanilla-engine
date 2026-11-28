@@ -246,6 +246,8 @@ void main() {
 }
 ");
 
+// 판을 덮어쓰기 앞에 비울 값. (옛 내용을 읽어 들이지 않게 하는 비우기. invalidate_framebuffer 는 아이패드와 아이폰 사파리에서 프레임마다 수 ~ 수십 ms 가 붙어 쓰지 않는다, 원본 ZERO_CLEAR_FLOAT_VALUE)
+const ZERO_CLEAR_FLOAT_VALUE: [f32; 4] = [0.0; 4];
 /// 합성 프래그먼트 셰이더. (씬에 블룸을 더해 HDR 길은 노출, 톤매핑, 감마를 걸고 LDR 길은 그대로 자른 뒤, 밝기(밝힌 자리 안은 1 쪽으로), 채도, 색조, 안개빛, 대비, 가장자리 어둡게 차례로 건다)
 const COMPOSITE_FRAGMENT_SHADER: &str = "#version 300 es
 precision highp float;
@@ -1225,6 +1227,7 @@ impl ToonPostProcess {
 
 			// 1. 반 해상도 GTAO. (빈 칸 유닛 2 에는 결과 판이 아닌 흐림 판을 묶어 둔다)
 			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(target.occlusion_framebuffer));
+			gl.clear_buffer_f32_slice(glow::COLOR, 0, &ZERO_CLEAR_FLOAT_VALUE);
 			crate::core::glstatecache::viewport(gl, 0, 0, cell_width, cell_height);
 			let occlusion_pass = &passes[0];
 			bind_common(occlusion_pass, target.blur_texture);
@@ -1236,18 +1239,21 @@ impl ToonPostProcess {
 
 			// 2. 가로 흐림. (반 해상도, GTAO 판에서 흐림 판으로)
 			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(target.blur_framebuffer));
+			gl.clear_buffer_f32_slice(glow::COLOR, 0, &ZERO_CLEAR_FLOAT_VALUE);
 			bind_common(&passes[1], target.occlusion_texture);
 			gl.uniform_2_i32(passes[1].get_uniform_location(gl, "blurDirection").as_ref(), 1, 0);
 			passes[1].draw(gl);
 
 			// 3. 세로 흐림. (반 해상도, 흐림 판에서 GTAO 판으로, 판 둘을 돌려 쓴다)
 			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(target.occlusion_framebuffer));
+			gl.clear_buffer_f32_slice(glow::COLOR, 0, &ZERO_CLEAR_FLOAT_VALUE);
 			bind_common(&passes[1], target.blur_texture);
 			gl.uniform_2_i32(passes[1].get_uniform_location(gl, "blurDirection").as_ref(), 0, 1);
 			passes[1].draw(gl);
 
 			// 4. 키우기. (선의 판 해상도, 세기를 건다)
 			crate::core::glstatecache::bind_framebuffer(gl, glow::FRAMEBUFFER, Some(target.result_framebuffer));
+			gl.clear_buffer_f32_slice(glow::COLOR, 0, &ZERO_CLEAR_FLOAT_VALUE);
 			crate::core::glstatecache::viewport(gl, 0, 0, width, height);
 			let upsample_pass = &passes[2];
 			bind_common(upsample_pass, target.occlusion_texture);

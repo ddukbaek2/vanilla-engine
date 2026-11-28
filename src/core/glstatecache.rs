@@ -266,20 +266,6 @@ pub(crate) fn reset(gl: &impl GlowContextSource) {
 //==============================================================================
 // 프레임 버퍼.
 //==============================================================================
-/// 다 쓴 첨부 버리기. (원본 invalidateFramebuffer, 버리기는 그린 결과를 바꾸지 않는 힌트라 GL 4.3, ARB_invalidate_subdata, GLES 3 이 아니면(맥 데스크탑 GL 4.1) 부르지 않는다)
-pub(crate) unsafe fn invalidate_framebuffer(gl: &impl GlowContextSource, target: u32, attachments: &[u32]) {
-	let gl = gl.read_glow_context();
-	let version = gl.version();
-	let is_supported = (version.is_embedded && version.major >= 3) || version.major > 4 || (version.major == 4 && version.minor >= 3) || gl.supported_extensions().contains("GL_ARB_invalidate_subdata");
-	if !is_supported {
-		return;
-	}
-	note_call(|| format!("invalidate_framebuffer(0x{:X}, {:?})", target, attachments));
-	unsafe {
-		gl.invalidate_framebuffer(target, attachments);
-	}
-}
-
 /// 프레임 버퍼 묶기. (원본 bindFramebuffer)
 pub(crate) unsafe fn bind_framebuffer(gl: &impl GlowContextSource, target: u32, framebuffer: Option<GlFramebuffer>) {
 	let gl = gl.read_glow_context();

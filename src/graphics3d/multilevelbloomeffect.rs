@@ -13,6 +13,8 @@ use crate::graphics3d::fullscreenpass::FullscreenPass;
 use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 use crate::core::gluniform::GlUniformF64;
 
+// 판을 덮어쓰기 앞에 비울 값. (옛 내용을 읽어 들이지 않게 하는 비우기. invalidate_framebuffer 는 아이패드와 아이폰 사파리에서 프레임마다 수 ~ 수십 ms 가 붙어 쓰지 않는다, 원본 ZERO_CLEAR_FLOAT_VALUE)
+const ZERO_CLEAR_FLOAT_VALUE: [f32; 4] = [0.0; 4];
 /// 밝은 몫 뽑기. (반 크기로 줄이며 원본 네 점을 고르게, 밝기는 세 채널 가운데 가장 큰 값, 문턱 둘레는 부드러운 무릎)
 const EXTRACT_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
 precision highp float;
@@ -263,6 +265,9 @@ impl MultiLevelBloomEffect {
 		// 1. 밝은 몫을 반 크기로 뽑기. (씬 → 첫 단)
 		let extract_pass = &self.extract_pass;
 		level_render_target_list[0].bind(gl);
+		unsafe {
+			gl.clear_buffer_f32_slice(glow::COLOR, 0, &ZERO_CLEAR_FLOAT_VALUE);
+		}
 		extract_pass.use_program(gl);
 		unsafe {
 			gl.uniform_1_i32(extract_pass.get_uniform_location(gl, "sourceTexture").as_ref(), 0);
@@ -283,6 +288,9 @@ impl MultiLevelBloomEffect {
 		for level_index in 1..level_count {
 			let source_render_target = &level_render_target_list[level_index - 1];
 			level_render_target_list[level_index].bind(gl);
+			unsafe {
+				gl.clear_buffer_f32_slice(glow::COLOR, 0, &ZERO_CLEAR_FLOAT_VALUE);
+			}
 			unsafe {
 				gl.uniform_2_f64(downsample_texel_location.as_ref(), 1.0 / source_render_target.get_width() as f64, 1.0 / source_render_target.get_height() as f64);
 				crate::core::glstatecache::bind_texture(gl, glow::TEXTURE_2D, source_render_target.get_color_texture(0));

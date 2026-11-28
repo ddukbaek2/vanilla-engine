@@ -14,6 +14,8 @@ use crate::core::gluniform::GlUniformF64;
 //==============================================================================
 // 전역 상수 목록.
 //==============================================================================
+// 판을 덮어쓰기 앞에 비울 값. (옛 내용을 읽어 들이지 않게 하는 비우기. invalidate_framebuffer 는 아이패드와 아이폰 사파리에서 프레임마다 수 ~ 수십 ms 가 붙어 쓰지 않는다, 원본 ZERO_CLEAR_FLOAT_VALUE)
+const ZERO_CLEAR_FLOAT_VALUE: [f32; 4] = [0.0; 4];
 /// 밝은 영역 추출 패스. (씬 → 하프 해상도)
 const BRIGHTPASS_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
 precision highp float;
@@ -162,6 +164,9 @@ impl BloomEffect {
 		let ping_render_target = &self.ping_render_target;
 		let pong_render_target = &self.pong_render_target;
 		ping_render_target.bind(gl);
+		unsafe {
+			gl.clear_buffer_f32_slice(glow::COLOR, 0, &ZERO_CLEAR_FLOAT_VALUE);
+		}
 		let bright_pass = &self.bright_pass;
 		bright_pass.use_program(gl);
 		let bright_scene_texture_location = bright_pass.get_uniform_location(gl, "sceneTexture");
@@ -184,6 +189,9 @@ impl BloomEffect {
 		for _blur_index in 0..self.iteration_count {
 			// 가로. (핑 → 퐁)
 			pong_render_target.bind(gl);
+			unsafe {
+				gl.clear_buffer_f32_slice(glow::COLOR, 0, &ZERO_CLEAR_FLOAT_VALUE);
+			}
 			let ping_width = ping_render_target.get_width() as f64;
 			unsafe {
 				gl.uniform_2_f64(blur_direction_location.as_ref(), 1.0 / ping_width, 0.0);
@@ -193,6 +201,9 @@ impl BloomEffect {
 
 			// 세로. (퐁 → 핑)
 			ping_render_target.bind(gl);
+			unsafe {
+				gl.clear_buffer_f32_slice(glow::COLOR, 0, &ZERO_CLEAR_FLOAT_VALUE);
+			}
 			let pong_height = pong_render_target.get_height() as f64;
 			unsafe {
 				gl.uniform_2_f64(blur_direction_location.as_ref(), 0.0, 1.0 / pong_height);
@@ -406,5 +417,22 @@ mod tests {
 		assert_eq!(read_live_counts(), [2, 2, 2, 2]);
 		bloom_effect.destroy(GlContext::from_context(&gl));
 		assert_eq!(read_live_counts(), [0, 0, 0, 0]);
+	}
+
+	//==============================================================================
+	/// 판을 덮어쓰는 패스 앞에서 판을 비우고(clear_buffer) 버리지(invalidate_framebuffer) 않는다. (원본 render 와 같게, 가짜 GL)
+	//==============================================================================
+	#[test]
+	fn render_clears_overwritten_targets_without_invalidating() {
+		let gl = fake_gl::create_context();
+		let mut bloom_effect = BloomEffect::new(GlContext::from_context(&gl)).expect("bloom effect");
+		bloom_effect.resize(GlContext::from_context(&gl), 64, 32).expect("resize");
+		fake_gl::take_cleared_float_buffer_list();
+		bloom_effect.render(GlContext::from_context(&gl), None);
+		let cleared_list = fake_gl::take_cleared_float_buffer_list();
+		assert_eq!(cleared_list.len(), 1 + 2 * bloom_effect.iteration_count as usize);
+		assert!(cleared_list.iter().all(|cleared| *cleared == (glow::COLOR, 0, [0.0; 4])));
+		assert!(fake_gl::take_invalidated_attachment_list().is_empty());
+		bloom_effect.destroy(GlContext::from_context(&gl));
 	}
 }
