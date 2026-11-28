@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use vanilla::{
-	BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, GlContext, Graphic, Material, Matrix4, Quaternion, Rect, RenderTarget, RenderTargetOptions, Scene, SceneBase, ShaderProgram, ShadowMap, SkinnedModel, SkinnedModelRenderer,
+	BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, GlContext, Graphic, Material, Matrix4, MouseButton, Quaternion, Rect, RenderTarget, RenderTargetOptions, Scene, SceneBase, ShaderProgram, ShadowMap, SkinnedModel, SkinnedModelRenderer,
 	TextAlign, TextBaseline, Vector2, Vector3, MORPH_GLSL,
 };
 
@@ -31,7 +31,6 @@ const CAMERA_MINIMUM_DISTANCE: f64 = 0.4;
 const CAMERA_MAXIMUM_DISTANCE: f64 = 7.0;
 const SHADOWMAP_RESOLUTION: i32 = 2048;
 // 내부 렌더 기준 해상도. (세로 1080 픽셀 기준 픽셀 수, 원본 RENDER BASE 1080P)
-const RENDER_BASE_HEIGHT: f64 = 1080.0;
 const BODY_FOCUS_HEIGHT: f64 = 0.95;
 const FACE_FOCUS_DISTANCE: f64 = 0.72;
 const BODY_FOCUS_DISTANCE: f64 = 4.0;
@@ -99,46 +98,9 @@ const SOURCE_BONE_MAP: [(&str, &str); 52] = [
 const FACE_SPHERE_OFFSET: [f64; 3] = [0.0, -0.025, -0.05];
 const HAIR_SPHERE_OFFSET: [f64; 3] = [0.0, 0.02, -0.03];
 // 슬라이더 기본값. (원본 옵션 패널의 기본값 그대로, 이 예제는 패널이 없어 고정이다)
-const EXPOSURE: f32 = 1.0;
-const BLOOM_STRENGTH: f32 = 0.5;
-const BLOOM_THRESHOLD: f64 = 0.5;
-const VIGNETTE: f32 = 0.4;
-const SATURATION: f32 = 1.12;
-const CONTRAST: f32 = 1.06;
-const LIGHT_AZIMUTH: f64 = -1.4;
-const LIGHT_ELEVATION: f64 = 0.72;
-const LIGHT_INTENSITY: f32 = 0.95;
-const LIGHT_WARMTH: f64 = 0.2;
-const AMBIENT: f32 = 0.3;
-const SHADING_TOONY: f32 = 0.85;
-const SHADING_SHIFT: f32 = -0.02;
-const SHADE_STRENGTH: f32 = 1.0;
-const SHADE_DARKNESS: f32 = 0.62;
-const WARM_BAND: f32 = 0.3;
-const NORMAL_MAP: f32 = 0.45;
-const FACE_FLATTEN: f64 = 0.9;
-const FACE_SHADOW_SOFTNESS: f32 = 0.035;
-const HAIR_SHADOW_OFFSET: f64 = 20.0;
-const HAIR_SHADOW_STRENGTH: f32 = 0.85;
-const HAIR_SMOOTH: f64 = 0.7;
-const HAIR_HIGHLIGHT_WIDTH: f32 = 0.3;
-const HAIR_HIGHLIGHT_STRENGTH: f32 = 0.7;
-const HAIR_HIGHLIGHT_SHIFT: f32 = 0.0;
-const SPECULAR_POWER: f32 = 48.0;
-const SPECULAR_STRENGTH: f32 = 0.45;
-const SPECULAR_SOFTNESS: f32 = 0.1;
-const RIM_WIDTH: f32 = 3.0;
-const RIM_THRESHOLD: f32 = 0.012;
-const RIM_STRENGTH: f32 = 1.2;
-const OUTLINE_WIDTH: f32 = 0.0;
-const OUTLINE_MINIMUM: f32 = 1.0;
-const OUTLINE_MAXIMUM: f32 = 4.0;
-const OUTLINE_TINT: f32 = 0.6;
-const OUTLINE_BRIGHTNESS: f32 = 1.0;
-const SHADOW_STRENGTH: f32 = 0.85;
-const SHADOW_SOFTNESS: f32 = 1.5;
-const BLINK_RATE: f64 = 1.0;
 const SEE_THROUGH_MAXIMUM_ALPHA: f64 = 0.42;
+const DEFAULT_CAMERA_YAW: f64 = 0.18;
+const DEFAULT_CAMERA_PITCH: f64 = 0.1;
 
 //==============================================================================
 // 수학 보조. (쿼터니언은 엔진 Quaternion)
@@ -222,6 +184,302 @@ fn clamp_value(value: f64, minimum_value: f64, maximum_value: f64) -> f64 {
 }
 
 //==============================================================================
+// 옵션과 슬라이더 목록. (우측 상단 패널, 원본 index.html 의 optionDefinitions, sliderDefinitions 와 같은 항목, 범위, 기본값, 묶음)
+//==============================================================================
+const FRAME_RATE_OPTIONS: [u32; 2] = [30, 60];
+// 내부 렌더 기준 해상도 후보. (세로 픽셀 기준 픽셀 수, RESOLUTION SCALE 은 여기에 곱한다)
+const RENDER_BASE_OPTIONS: [f64; 4] = [720.0, 1080.0, 1440.0, 2160.0];
+const RENDER_BASE_LABELS: [&str; 4] = ["720P", "1080P", "1440P", "4K"];
+const ANTIALIAS_LABELS: [&str; 3] = ["OFF", "FXAA", "FXAA + SHARPEN"];
+const SPRING_COLLIDER_MARGIN: f64 = 0.012;
+const SPRING_STEP_SECONDS: f64 = 1.0 / 60.0;
+const EYE_MAXIMUM_RADIAN: f64 = 0.17;
+
+// 앞 9개는 숫자 키로도 전환한다.
+const OPTION_DEFINITIONS: [(&str, &str); 12] = [
+	("outline", "OUTLINE"),
+	("face_shadow", "FACE SHADOW"),
+	("hair_shadow", "HAIR SHADOW ON FACE"),
+	("hair_highlight", "HAIR HIGHLIGHT"),
+	("rim", "RIM LIGHT"),
+	("specular", "SPECULAR"),
+	("see_through", "SEE-THROUGH BANGS"),
+	("spring_bones", "SPRING BONES"),
+	("bloom", "BLOOM"),
+	("turntable", "TURNTABLE"),
+	("wireframe", "WIREFRAME"),
+	("hud", "RENDERING INFO"),
+];
+const DEFAULT_OPTION_STATES: [bool; 12] = [true, true, true, true, true, true, true, true, true, false, false, false];
+const OPTION_KEY_NAMES: [&str; 9] = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9"];
+const OPTION_NUMPAD_KEY_NAMES: [&str; 9] = ["Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad5", "Numpad6", "Numpad7", "Numpad8", "Numpad9"];
+const CONTEXT_MENU_ITEMS: [&str; 4] = ["RESET VIEW", "FOCUS FACE", "FOCUS BODY", "RESET OPTIONS"];
+
+#[derive(Clone, Copy)]
+enum SliderFormat {
+	FrameRate,
+	RenderBase,
+	Percent,
+	Antialias,
+	Integer,
+	Fixed2,
+	Fixed3,
+	Degrees,
+	Pixels1,
+	Centimeters1,
+	Times1,
+	Times2,
+}
+
+struct SliderDefinition {
+	group: &'static str,
+	name: &'static str,
+	label: &'static str,
+	minimum: f64,
+	maximum: f64,
+	step: f64,
+	value: f64,
+	format: SliderFormat,
+}
+
+const fn slider_definition(group: &'static str, name: &'static str, label: &'static str, minimum: f64, maximum: f64, step: f64, value: f64, format: SliderFormat) -> SliderDefinition {
+	SliderDefinition { group, name, label, minimum, maximum, step, value, format }
+}
+
+const SLIDER_DEFINITIONS: [SliderDefinition; 48] = [
+	slider_definition("RENDER", "frame_rate", "FRAME RATE", 0.0, 1.0, 1.0, 0.0, SliderFormat::FrameRate),
+	slider_definition("RENDER", "render_base", "RENDER BASE", 0.0, 3.0, 1.0, 1.0, SliderFormat::RenderBase),
+	slider_definition("RENDER", "render_scale", "RESOLUTION SCALE", 0.5, 2.0, 0.05, 1.0, SliderFormat::Percent),
+	slider_definition("RENDER", "antialias", "ANTI-ALIASING", 0.0, 2.0, 1.0, 1.0, SliderFormat::Antialias),
+	slider_definition("RENDER", "exposure", "EXPOSURE", 0.3, 1.8, 0.01, 1.0, SliderFormat::Fixed2),
+	slider_definition("RENDER", "bloom_strength", "BLOOM STRENGTH", 0.0, 0.5, 0.01, 0.5, SliderFormat::Fixed2),
+	slider_definition("RENDER", "bloom_threshold", "BLOOM THRESHOLD", 0.5, 2.5, 0.05, 0.5, SliderFormat::Fixed2),
+	slider_definition("RENDER", "vignette", "VIGNETTE", 0.0, 1.0, 0.02, 0.4, SliderFormat::Fixed2),
+	slider_definition("RENDER", "saturation", "SATURATION", 0.0, 1.6, 0.02, 1.12, SliderFormat::Fixed2),
+	slider_definition("RENDER", "contrast", "CONTRAST", 0.7, 1.4, 0.01, 1.06, SliderFormat::Fixed2),
+	slider_definition("LIGHTING", "light_azimuth", "LIGHT ANGLE", -3.14, 3.14, 0.02, -1.4, SliderFormat::Degrees),
+	slider_definition("LIGHTING", "light_elevation", "LIGHT HEIGHT", -0.3, 1.4, 0.02, 0.72, SliderFormat::Degrees),
+	slider_definition("LIGHTING", "light_intensity", "LIGHT INTENSITY", 0.0, 2.5, 0.05, 0.95, SliderFormat::Fixed2),
+	slider_definition("LIGHTING", "light_warmth", "LIGHT WARMTH", 0.0, 1.0, 0.02, 0.2, SliderFormat::Fixed2),
+	slider_definition("LIGHTING", "ambient", "AMBIENT", 0.0, 1.5, 0.02, 0.3, SliderFormat::Fixed2),
+	slider_definition("RAMP", "shading_toony", "SHADOW STEP", 0.0, 1.0, 0.01, 0.85, SliderFormat::Fixed2),
+	slider_definition("RAMP", "shading_shift", "SHADOW SHIFT", -0.5, 0.5, 0.01, -0.02, SliderFormat::Fixed2),
+	slider_definition("RAMP", "shade_strength", "SHADE TINT", 0.0, 1.5, 0.02, 1.0, SliderFormat::Fixed2),
+	slider_definition("RAMP", "shade_darkness", "SHADE DARKNESS", 0.3, 1.0, 0.01, 0.62, SliderFormat::Fixed2),
+	slider_definition("RAMP", "warm_band", "SKIN WARM BAND", 0.0, 1.5, 0.02, 0.3, SliderFormat::Fixed2),
+	slider_definition("RAMP", "normal_map", "NORMAL MAP", 0.0, 1.0, 0.02, 0.45, SliderFormat::Fixed2),
+	slider_definition("FACE", "face_flatten", "FACE SPHERE NORMAL", 0.0, 1.0, 0.02, 0.9, SliderFormat::Fixed2),
+	slider_definition("FACE", "face_shadow_softness", "FACE SHADOW SOFTNESS", 0.004, 0.3, 0.002, 0.035, SliderFormat::Fixed3),
+	slider_definition("FACE", "hair_shadow_offset", "HAIR SHADOW OFFSET", 0.0, 40.0, 0.5, 20.0, SliderFormat::Pixels1),
+	slider_definition("FACE", "hair_shadow_strength", "HAIR SHADOW STRENGTH", 0.0, 1.0, 0.02, 0.85, SliderFormat::Fixed2),
+	slider_definition("HAIR", "hair_smooth", "HAIR SPHERE NORMAL", 0.0, 1.0, 0.02, 0.7, SliderFormat::Fixed2),
+	slider_definition("HAIR", "hair_highlight_width", "HIGHLIGHT WIDTH", 0.0, 1.0, 0.02, 0.3, SliderFormat::Fixed2),
+	slider_definition("HAIR", "hair_highlight_strength", "HIGHLIGHT STRENGTH", 0.0, 2.0, 0.05, 0.7, SliderFormat::Fixed2),
+	slider_definition("HAIR", "hair_highlight_shift", "HIGHLIGHT SHIFT", -0.5, 0.5, 0.01, 0.0, SliderFormat::Fixed2),
+	slider_definition("SPECULAR", "specular_power", "SPECULAR SIZE", 8.0, 160.0, 1.0, 48.0, SliderFormat::Integer),
+	slider_definition("SPECULAR", "specular_strength", "SPECULAR STRENGTH", 0.0, 1.5, 0.02, 0.45, SliderFormat::Fixed2),
+	slider_definition("SPECULAR", "specular_softness", "SPECULAR SOFTNESS", 0.01, 0.5, 0.01, 0.1, SliderFormat::Fixed2),
+	slider_definition("RIM LIGHT", "rim_width", "RIM WIDTH", 0.5, 8.0, 0.1, 3.0, SliderFormat::Pixels1),
+	slider_definition("RIM LIGHT", "rim_threshold", "RIM DEPTH", 0.002, 0.08, 0.001, 0.012, SliderFormat::Centimeters1),
+	slider_definition("RIM LIGHT", "rim_strength", "RIM STRENGTH", 0.0, 3.0, 0.05, 1.2, SliderFormat::Fixed2),
+	slider_definition("OUTLINE", "outline_width", "OUTLINE WIDTH", 0.0, 3.0, 0.05, 0.0, SliderFormat::Times2),
+	slider_definition("OUTLINE", "outline_minimum", "OUTLINE MIN", 0.0, 4.0, 0.1, 1.0, SliderFormat::Pixels1),
+	slider_definition("OUTLINE", "outline_maximum", "OUTLINE MAX", 1.0, 12.0, 0.1, 4.0, SliderFormat::Pixels1),
+	slider_definition("OUTLINE", "outline_tint", "OUTLINE ALBEDO TINT", 0.0, 1.0, 0.02, 0.6, SliderFormat::Fixed2),
+	slider_definition("OUTLINE", "outline_brightness", "OUTLINE BRIGHTNESS", 0.2, 2.0, 0.02, 1.0, SliderFormat::Fixed2),
+	slider_definition("SHADOW MAP", "shadow_strength", "SHADOW STRENGTH", 0.0, 1.0, 0.02, 0.85, SliderFormat::Fixed2),
+	slider_definition("SHADOW MAP", "shadow_softness", "SHADOW SOFTNESS", 0.0, 6.0, 0.25, 1.5, SliderFormat::Fixed2),
+	slider_definition("ANIMATION", "turntable_speed", "TURNTABLE SPEED", 0.05, 1.5, 0.05, 0.35, SliderFormat::Fixed2),
+	slider_definition("ANIMATION", "head_follow", "HEAD FOLLOW POINTER", 0.0, 1.0, 0.05, 0.5, SliderFormat::Fixed2),
+	slider_definition("ANIMATION", "eye_follow", "EYE CONTACT", 0.0, 1.0, 0.05, 0.3, SliderFormat::Fixed2),
+	slider_definition("ANIMATION", "blink_rate", "BLINK RATE", 0.0, 2.0, 0.1, 1.0, SliderFormat::Times1),
+	slider_definition("ANIMATION", "spring_stiffness", "SPRING STIFFNESS", 0.2, 3.0, 0.05, 1.0, SliderFormat::Times2),
+	slider_definition("ANIMATION", "spring_gravity", "SPRING GRAVITY", 0.0, 3.0, 0.05, 1.0, SliderFormat::Times2),
+];
+
+fn format_slider_value(definition: &SliderDefinition, value: f64) -> String {
+	match definition.format {
+		SliderFormat::FrameRate => format!("{} FPS", FRAME_RATE_OPTIONS[(value.round() as usize).min(FRAME_RATE_OPTIONS.len() - 1)]),
+		SliderFormat::RenderBase => RENDER_BASE_LABELS[(value.round() as usize).min(RENDER_BASE_LABELS.len() - 1)].to_string(),
+		SliderFormat::Percent => format!("{}%", (value * 100.0).round()),
+		SliderFormat::Antialias => ANTIALIAS_LABELS[(value.round() as usize).min(ANTIALIAS_LABELS.len() - 1)].to_string(),
+		SliderFormat::Integer => format!("{:.0}", value),
+		SliderFormat::Fixed2 => format!("{:.2}", value),
+		SliderFormat::Fixed3 => format!("{:.3}", value),
+		SliderFormat::Degrees => format!("{}\u{00B0}", (value * 180.0 / std::f64::consts::PI).round()),
+		SliderFormat::Pixels1 => format!("{:.1} PX", value),
+		SliderFormat::Centimeters1 => format!("{:.1} CM", value * 100.0),
+		SliderFormat::Times1 => format!("{:.1}X", value),
+		SliderFormat::Times2 => format!("{:.2}X", value),
+	}
+}
+
+//==============================================================================
+// 렌더링 설정. (옵션 켜고 끔 + 슬라이더 값, 매 프레임 적용)
+//==============================================================================
+#[derive(Clone)]
+struct RenderSettings {
+	slider_value_list: Vec<f64>,
+	option_state_list: [bool; 12],
+}
+
+impl RenderSettings {
+	fn new() -> RenderSettings {
+		RenderSettings { slider_value_list: SLIDER_DEFINITIONS.iter().map(|definition| definition.value).collect(), option_state_list: DEFAULT_OPTION_STATES }
+	}
+
+	fn slider(&self, name: &str) -> f64 {
+		match SLIDER_DEFINITIONS.iter().position(|definition| definition.name == name) {
+			Some(index) => self.slider_value_list[index],
+			None => 0.0,
+		}
+	}
+
+	fn option(&self, name: &str) -> bool {
+		match OPTION_DEFINITIONS.iter().position(|definition| definition.0 == name) {
+			Some(index) => self.option_state_list[index],
+			None => false,
+		}
+	}
+
+	fn reset(&mut self) {
+		*self = RenderSettings::new();
+	}
+}
+
+//==============================================================================
+// 스프링 본. (VRMC_springBone, 베를레 꼬리 + 강성, 감쇠, 중력 + 구, 캡슐 콜라이더, 월드 공간 = 턴테이블 포함)
+//==============================================================================
+struct SpringJoint {
+	node_index: usize,
+	child_node_index: usize,
+	bone_axis_local: [f64; 3],
+	bone_length: f64,
+	stiffness: f64,
+	drag_force: f64,
+	gravity_power: f64,
+	gravity_direction: [f64; 3],
+	hit_radius: f64,
+	collider_index_list: Vec<usize>,
+	current_tail: [f64; 3],
+	previous_tail: [f64; 3],
+	previous_joint: Option<usize>,
+	new_world_rotation: Quaternion,
+}
+
+struct SpringCollider {
+	node_index: usize,
+	is_capsule: bool,
+	offset: [f64; 3],
+	tail: [f64; 3],
+	radius: f64,
+	world_head: [f64; 3],
+	world_tail: [f64; 3],
+}
+
+fn vector_add(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+	[left[0] + right[0], left[1] + right[1], left[2] + right[2]]
+}
+
+fn vector_subtract(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+	[left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+fn vector_scale(vector: [f64; 3], scale: f64) -> [f64; 3] {
+	[vector[0] * scale, vector[1] * scale, vector[2] * scale]
+}
+
+fn vector_dot(left: [f64; 3], right: [f64; 3]) -> f64 {
+	left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+fn vector_length(vector: [f64; 3]) -> f64 {
+	vector_dot(vector, vector).sqrt()
+}
+
+// 열 우선 행렬로 점 변환.
+fn transform_point(elements: &[f32; 16], point: [f64; 3]) -> [f64; 3] {
+	let e = |index: usize| elements[index] as f64;
+	[e(0) * point[0] + e(4) * point[1] + e(8) * point[2] + e(12), e(1) * point[0] + e(5) * point[1] + e(9) * point[2] + e(13), e(2) * point[0] + e(6) * point[1] + e(10) * point[2] + e(14)]
+}
+
+fn quaternion_from_axis_angle(axis: [f64; 3], radian: f64) -> Quaternion {
+	let half = radian * 0.5;
+	let sine = half.sin();
+	Quaternion { x: axis[0] * sine, y: axis[1] * sine, z: axis[2] * sine, w: half.cos() }
+}
+
+fn read_vector3(value: &Value, default_vector: [f64; 3]) -> [f64; 3] {
+	match value.as_array() {
+		Some(array) if array.len() >= 3 => [array[0].as_f64().unwrap_or(0.0), array[1].as_f64().unwrap_or(0.0), array[2].as_f64().unwrap_or(0.0)],
+		_ => default_vector,
+	}
+}
+
+fn rect_contains(rect: Rect, point: Vector2) -> bool {
+	point.x >= rect.position.x && point.x <= rect.position.x + rect.size.x && point.y >= rect.position.y && point.y <= rect.position.y + rect.size.y
+}
+
+// 카메라 위치. (목표값을 따라가는 값 + 미세한 자동 흔들림)
+fn compute_camera_position(camera_state: &CameraState, elapsed_time: f64, aspect_ratio: f64) -> [f64; 3] {
+	let sway_yaw = camera_state.yaw + (elapsed_time * 0.19).sin() * 0.015;
+	let sway_pitch = camera_state.pitch + (elapsed_time * 0.27 + 1.0).sin() * 0.008;
+	let portrait_factor = if aspect_ratio < 1.2 { (1.2 / aspect_ratio).powf(0.55) } else { 1.0 };
+	let camera_distance = camera_state.distance * portrait_factor;
+	[sway_yaw.sin() * sway_pitch.cos() * camera_distance, camera_state.focus_height + sway_pitch.sin() * camera_distance, sway_yaw.cos() * sway_pitch.cos() * camera_distance]
+}
+
+//==============================================================================
+// 패널 줄. (옵션 줄, 묶음 제목, 슬라이더 줄)
+//==============================================================================
+#[derive(Clone, Copy)]
+enum PanelRowKind {
+	Option(usize),
+	Group(&'static str),
+	Slider(usize),
+}
+
+const PANEL_WIDTH: f64 = 372.0;
+const PANEL_TITLE_HEIGHT: f64 = 33.0;
+const PANEL_OPTION_ROW_HEIGHT: f64 = 28.0;
+const PANEL_GROUP_ROW_HEIGHT: f64 = 25.0;
+const PANEL_SLIDER_ROW_HEIGHT: f64 = 26.0;
+const PANEL_LABEL_WIDTH: f64 = 118.0;
+const PANEL_VALUE_WIDTH: f64 = 82.0;
+
+fn build_panel_rows() -> Vec<(PanelRowKind, f64, f64)> {
+	let mut row_list = Vec::new();
+	let mut cursor = 0.0;
+	for index in 0..OPTION_DEFINITIONS.len() {
+		row_list.push((PanelRowKind::Option(index), cursor, PANEL_OPTION_ROW_HEIGHT));
+		cursor += PANEL_OPTION_ROW_HEIGHT;
+	}
+	let mut previous_group = "";
+	for (index, definition) in SLIDER_DEFINITIONS.iter().enumerate() {
+		if definition.group != previous_group {
+			row_list.push((PanelRowKind::Group(definition.group), cursor, PANEL_GROUP_ROW_HEIGHT));
+			cursor += PANEL_GROUP_ROW_HEIGHT;
+			previous_group = definition.group;
+		}
+		row_list.push((PanelRowKind::Slider(index), cursor, PANEL_SLIDER_ROW_HEIGHT));
+		cursor += PANEL_SLIDER_ROW_HEIGHT;
+	}
+	row_list
+}
+
+fn format_with_commas(value: u64) -> String {
+	let digits = value.to_string();
+	let mut result = String::new();
+	for (index, character) in digits.chars().enumerate() {
+		if index > 0 && (digits.len() - index) % 3 == 0 {
+			result.push(',');
+		}
+		result.push(character);
+	}
+	result
+}
+
+//==============================================================================
 // 드로어블 정보. (머티리얼 이름 → 종류 / MToon 그림자색 / 아웃라인)
 //==============================================================================
 struct DrawableInfo {
@@ -292,6 +550,16 @@ struct Resources {
 	source_hips_rest_position: [f64; 3],
 	hips_height_scale: f64,
 	head_node_index: Option<usize>,
+	left_eye_index: Option<usize>,
+	right_eye_index: Option<usize>,
+	head_rest_rotation: Quaternion,
+	look_at_offset: [f64; 3],
+	spring_joint_list: Vec<SpringJoint>,
+	spring_collider_list: Vec<SpringCollider>,
+	image_byte_total: f64,
+	triangle_count: f64,
+	vertex_total: usize,
+	morph_target_count: usize,
 	expression_bind_table: HashMap<String, Vec<ExpressionBind>>,
 	expression_override_blink: HashMap<String, bool>,
 	face_center: [f64; 3],
@@ -346,6 +614,44 @@ struct ToonShadingScene {
 	drag_position: Option<Vector2>,
 	is_panning: bool,
 	random_state: u32,
+	settings: RenderSettings,
+	is_panel_collapsed: bool,
+	panel_scroll: f64,
+	panel_rect: Rect,
+	panel_hud_top: f64,
+	context_menu_position: Option<Vector2>,
+	context_menu_rect: Option<Rect>,
+	active_slider: Option<usize>,
+	has_panned: bool,
+	last_press_seconds: f64,
+	last_press_position: Vector2,
+	pointer_normalized: [f64; 2],
+	has_pointer_moved: bool,
+	last_pointer_position: Vector2,
+	turntable_angle: f64,
+	model_matrix_elements: [f32; 16],
+	model_rotation: Quaternion,
+	spring_reset_pending: bool,
+	head_current_yaw: f64,
+	head_current_pitch: f64,
+	left_eye_rotation: Quaternion,
+	right_eye_rotation: Quaternion,
+	head_follow_rotation: Quaternion,
+	head_forward_world: [f64; 3],
+	last_aspect_ratio: f64,
+	load_stage: u32,
+	ready_seconds: Option<f64>,
+	smoothed_frame_seconds: f64,
+	cpu_frame_milliseconds: f64,
+	draw_call_count: u32,
+	display_size: (i32, i32),
+	gpu_memory_bytes: f64,
+	gpu_memory_sample_seconds: f64,
+	last_face_blend: f64,
+	last_hair_blend: f64,
+	last_frame_instant: Option<std::time::Instant>,
+	drag_is_right: bool,
+	tick_milliseconds: f64,
 }
 
 impl ToonShadingScene {
@@ -387,6 +693,44 @@ impl ToonShadingScene {
 			drag_position: None,
 			is_panning: false,
 			random_state: 12345,
+			settings: RenderSettings::new(),
+			is_panel_collapsed: false,
+			panel_scroll: 0.0,
+			panel_rect: Rect::create(0.0, 0.0, 0.0, 0.0),
+			panel_hud_top: 702.0,
+			context_menu_position: None,
+			context_menu_rect: None,
+			active_slider: None,
+			has_panned: false,
+			last_press_seconds: -10.0,
+			last_press_position: Vector2::create(-1000.0, -1000.0),
+			pointer_normalized: [0.0, 0.0],
+			has_pointer_moved: false,
+			last_pointer_position: Vector2::create(-1.0, -1.0),
+			turntable_angle: 0.0,
+			model_matrix_elements: *Matrix4::create_identity().get_elements(),
+			model_rotation: Quaternion::identity(),
+			spring_reset_pending: true,
+			head_current_yaw: 0.0,
+			head_current_pitch: 0.0,
+			left_eye_rotation: Quaternion::identity(),
+			right_eye_rotation: Quaternion::identity(),
+			head_follow_rotation: Quaternion::identity(),
+			head_forward_world: [0.0, 0.0, 1.0],
+			last_aspect_ratio: 16.0 / 9.0,
+			load_stage: 0,
+			ready_seconds: None,
+			smoothed_frame_seconds: 1.0 / 60.0,
+			cpu_frame_milliseconds: 0.0,
+			draw_call_count: 0,
+			display_size: (0, 0),
+			gpu_memory_bytes: 0.0,
+			gpu_memory_sample_seconds: -10.0,
+			last_face_blend: -1.0,
+			last_hair_blend: -1.0,
+			last_frame_instant: None,
+			drag_is_right: false,
+			tick_milliseconds: 0.0,
 		}
 	}
 
@@ -531,13 +875,17 @@ impl ToonShadingScene {
 		}
 
 		// 머리 위치. (구면 노멀 중심은 T 포즈 머리 뼈 월드 위치 기준)
+		let look_at_offset = read_vector3(&vrm_document["extensions"]["VRMC_vrm"]["lookAt"]["offsetFromHeadBone"], [0.0, 0.06, 0.0]);
 		let head_rest_position = match head_node_index {
-			Some(head_index) => {
-				let elements = &model.get_node_list()[head_index].world_matrix.elements;
-				[elements[12] as f64, elements[13] as f64, elements[14] as f64]
-			}
+			Some(head_index) => transform_point(&model.get_node_list()[head_index].world_matrix.elements, look_at_offset),
 			None => [0.0, 1.45, 0.0],
 		};
+		let head_rest_rotation = match head_node_index {
+			Some(head_index) => rest_world_rotation_list[head_index],
+			None => Quaternion::identity(),
+		};
+		let left_eye_index = humanoid_node_index_by_bone.get("leftEye").copied();
+		let right_eye_index = humanoid_node_index_by_bone.get("rightEye").copied();
 		let face_center = [head_rest_position[0] + FACE_SPHERE_OFFSET[0], head_rest_position[1] + FACE_SPHERE_OFFSET[1], head_rest_position[2] + FACE_SPHERE_OFFSET[2]];
 		let hair_center = [head_rest_position[0] + HAIR_SPHERE_OFFSET[0], head_rest_position[1] + HAIR_SPHERE_OFFSET[1], head_rest_position[2] + HAIR_SPHERE_OFFSET[2]];
 		self.head_position = head_rest_position;
@@ -620,6 +968,93 @@ impl ToonShadingScene {
 			}
 		}
 
+		// 스프링 본. (VRMC_springBone)
+		let spring_extension = &vrm_document["extensions"]["VRMC_springBone"];
+		let mut spring_joint_list: Vec<SpringJoint> = Vec::new();
+		if let Some(spring_array) = spring_extension["springs"].as_array() {
+			for spring in spring_array.iter() {
+				let mut collider_index_list: Vec<usize> = Vec::new();
+				if let Some(group_array) = spring["colliderGroups"].as_array() {
+					for group_value in group_array.iter() {
+						let group_index = group_value.as_u64().unwrap_or(0) as usize;
+						if let Some(collider_array) = spring_extension["colliderGroups"][group_index]["colliders"].as_array() {
+							for collider_value in collider_array.iter() {
+								let collider_index = collider_value.as_u64().unwrap_or(0) as usize;
+								if !collider_index_list.contains(&collider_index) {
+									collider_index_list.push(collider_index);
+								}
+							}
+						}
+					}
+				}
+				let joint_array = match spring["joints"].as_array() {
+					Some(joint_array) => joint_array,
+					None => {
+						continue;
+					}
+				};
+				let mut previous_joint: Option<usize> = None;
+				for joint_order in 0..joint_array.len().saturating_sub(1) {
+					let joint = &joint_array[joint_order];
+					let child_node_index = joint_array[joint_order + 1]["node"].as_u64().unwrap_or(0) as usize;
+					let bone_axis = model.get_node_list()[child_node_index].base_translation;
+					let bone_length = vector_length(bone_axis);
+					if bone_length < 0.000001 {
+						previous_joint = None;
+						continue;
+					}
+					spring_joint_list.push(SpringJoint {
+						node_index: joint["node"].as_u64().unwrap_or(0) as usize,
+						child_node_index,
+						bone_axis_local: vector_scale(bone_axis, 1.0 / bone_length),
+						bone_length,
+						stiffness: joint["stiffness"].as_f64().unwrap_or(1.0),
+						drag_force: joint["dragForce"].as_f64().unwrap_or(0.4),
+						gravity_power: joint["gravityPower"].as_f64().unwrap_or(0.0),
+						gravity_direction: read_vector3(&joint["gravityDir"], [0.0, -1.0, 0.0]),
+						hit_radius: joint["hitRadius"].as_f64().unwrap_or(0.0),
+						collider_index_list: collider_index_list.clone(),
+						current_tail: [0.0, 0.0, 0.0],
+						previous_tail: [0.0, 0.0, 0.0],
+						previous_joint,
+						new_world_rotation: Quaternion::identity(),
+					});
+					previous_joint = Some(spring_joint_list.len() - 1);
+				}
+			}
+		}
+		let mut spring_collider_list: Vec<SpringCollider> = Vec::new();
+		if let Some(collider_array) = spring_extension["colliders"].as_array() {
+			for collider in collider_array.iter() {
+				let shape = if !collider["shape"]["sphere"].is_null() { &collider["shape"]["sphere"] } else { &collider["shape"]["capsule"] };
+				spring_collider_list.push(SpringCollider {
+					node_index: collider["node"].as_u64().unwrap_or(0) as usize,
+					is_capsule: !collider["shape"]["capsule"].is_null(),
+					offset: read_vector3(&shape["offset"], [0.0, 0.0, 0.0]),
+					tail: read_vector3(&shape["tail"], [0.0, 0.0, 0.0]),
+					radius: shape["radius"].as_f64().unwrap_or(0.0),
+					world_head: [0.0, 0.0, 0.0],
+					world_tail: [0.0, 0.0, 0.0],
+				});
+			}
+		}
+		// 통계. (렌더링 정보 패널)
+		let mut triangle_count = 0.0;
+		let mut vertex_total = 0usize;
+		let mut morph_target_count = 0usize;
+		for drawable in model.get_drawable_list().iter() {
+			triangle_count += if drawable.is_indexed { drawable.index_count as f64 / 3.0 } else { drawable.vertex_count as f64 / 3.0 };
+			vertex_total += drawable.vertex_count;
+			morph_target_count = morph_target_count.max(drawable.morph_target_list.len());
+		}
+		let mut image_byte_total = 0.0;
+		if let Some(image_array) = vrm_document["images"].as_array() {
+			for image in image_array.iter() {
+				let buffer_view = &vrm_document["bufferViews"][image["bufferView"].as_u64().unwrap_or(0) as usize];
+				image_byte_total += buffer_view["byteLength"].as_f64().unwrap_or(0.0);
+			}
+		}
+
 		let mut resources = Resources {
 			renderer,
 			model,
@@ -635,6 +1070,16 @@ impl ToonShadingScene {
 			source_hips_rest_position,
 			hips_height_scale,
 			head_node_index,
+			left_eye_index,
+			right_eye_index,
+			head_rest_rotation,
+			look_at_offset,
+			spring_joint_list,
+			spring_collider_list,
+			image_byte_total,
+			triangle_count,
+			vertex_total,
+			morph_target_count,
 			expression_bind_table,
 			expression_override_blink,
 			face_center,
@@ -652,7 +1097,8 @@ impl ToonShadingScene {
 			composite_pass,
 			antialias_pass,
 		};
-		ToonShadingScene::rebake_normals(&mut resources, gl, FACE_FLATTEN, HAIR_SMOOTH);
+		let default_settings = RenderSettings::new();
+		ToonShadingScene::rebake_normals(&mut resources, gl, default_settings.slider("face_flatten"), default_settings.slider("hair_smooth"));
 		Ok(resources)
 	}
 
@@ -721,6 +1167,7 @@ impl ToonShadingScene {
 			return;
 		}
 		self.active_animation = animation_name.to_string();
+		self.spring_reset_pending = true;
 		if let Some(resources) = self.resources.as_mut() {
 			resources.animation_model.play_animation(animation_name, 0.3);
 		}
@@ -812,7 +1259,11 @@ impl ToonShadingScene {
 	fn render_scene(&mut self, gl: &GlContext, display_width: i32, display_height: i32) -> Result<(), String> {
 		let camera_state = &self.camera_state;
 		let elapsed_time = self.elapsed_seconds;
-		let hips_offset = self.hips_offset;
+		let settings = self.settings.clone();
+		let model_elements = self.model_matrix_elements;
+		let head_forward_world = self.head_forward_world;
+		let head_position = self.head_position;
+		let mut draw_call_count: u32 = 0;
 		let resources = match self.resources.as_mut() {
 			Some(resources) => resources,
 			None => {
@@ -821,10 +1272,15 @@ impl ToonShadingScene {
 		};
 
 		// 렌더 해상도. (RENDER BASE 1080P 의 픽셀 수를 화면 종횡비로 잡는다)
-		let pixel_budget = RENDER_BASE_HEIGHT * (16.0 / 9.0) * RENDER_BASE_HEIGHT;
+		let render_base_height = RENDER_BASE_OPTIONS[(settings.slider("render_base").round() as usize).min(RENDER_BASE_OPTIONS.len() - 1)];
+		let pixel_budget = render_base_height * (16.0 / 9.0) * render_base_height;
 		let pixel_budget_scale = (pixel_budget / (display_width as f64 * display_height as f64).max(1.0)).sqrt();
-		let render_width = ((display_width as f64 * pixel_budget_scale).floor() as i32).max(2);
-		let render_height = ((display_height as f64 * pixel_budget_scale).floor() as i32).max(2);
+		let effective_render_scale = settings.slider("render_scale") * pixel_budget_scale;
+		let maximum_render_target_size = unsafe { (gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE).min(gl.get_parameter_i32(glow::MAX_RENDERBUFFER_SIZE))) as f64 };
+		let longest_display_side = display_width.max(display_height).max(1) as f64;
+		let size_limit_scale = (maximum_render_target_size / (longest_display_side * effective_render_scale)).min(1.0);
+		let render_width = ((display_width as f64 * effective_render_scale * size_limit_scale).floor() as i32).max(2);
+		let render_height = ((display_height as f64 * effective_render_scale * size_limit_scale).floor() as i32).max(2);
 		if resources.scene_render_target.get_width() != render_width || resources.scene_render_target.get_height() != render_height {
 			resources.scene_render_target.resize(gl, render_width, render_height)?;
 			resources.hair_render_target.resize(gl, render_width, render_height)?;
@@ -833,19 +1289,12 @@ impl ToonShadingScene {
 		}
 		let aspect_ratio = display_width as f64 / display_height.max(1) as f64;
 
-		// 모델 행렬. (골반 이동)
-		let model_matrix = Matrix4::create_translation(hips_offset[0], hips_offset[1], hips_offset[2]);
-		let model_elements = *model_matrix.get_elements();
-
 		// 카메라. (미세한 자동 흔들림)
-		let sway_yaw = camera_state.yaw + (elapsed_time * 0.19).sin() * 0.015;
-		let sway_pitch = camera_state.pitch + (elapsed_time * 0.27 + 1.0).sin() * 0.008;
-		let portrait_factor = if aspect_ratio < 1.2 { (1.2 / aspect_ratio).powf(0.55) } else { 1.0 };
-		let camera_distance = camera_state.distance * portrait_factor;
+		let camera_offset = compute_camera_position(camera_state, elapsed_time, aspect_ratio);
 		let camera_target = Vector3::create(0.0, camera_state.focus_height, 0.0);
-		let camera_x = camera_target.x + sway_yaw.sin() * sway_pitch.cos() * camera_distance;
-		let camera_y = camera_target.y + sway_pitch.sin() * camera_distance;
-		let camera_z = camera_target.z + sway_yaw.cos() * sway_pitch.cos() * camera_distance;
+		let camera_x = camera_offset[0];
+		let camera_y = camera_offset[1];
+		let camera_z = camera_offset[2];
 		let camera_position = Vector3::create(camera_x, camera_y, camera_z);
 		let view_matrix = Matrix4::create_look_at(camera_position, camera_target, Vector3::up());
 		let projection_matrix = Matrix4::create_perspective(CAMERA_FIELD_OF_VIEW, aspect_ratio, CAMERA_NEAR_DISTANCE, CAMERA_FAR_DISTANCE);
@@ -856,22 +1305,33 @@ impl ToonShadingScene {
 		let projection_scale_y = projection_matrix.get_elements()[5];
 
 		// 조명. (방위, 고도 → 빛을 향하는 방향, 따뜻함 → 색)
-		let light_x = LIGHT_AZIMUTH.sin() * LIGHT_ELEVATION.cos();
-		let light_y = LIGHT_ELEVATION.sin();
-		let light_z = LIGHT_AZIMUTH.cos() * LIGHT_ELEVATION.cos();
+		let light_azimuth = settings.slider("light_azimuth");
+		let light_elevation = settings.slider("light_elevation");
+		let light_warmth = settings.slider("light_warmth");
+		let light_x = light_azimuth.sin() * light_elevation.cos();
+		let light_y = light_elevation.sin();
+		let light_z = light_azimuth.cos() * light_elevation.cos();
 		let light_length = (light_x * light_x + light_y * light_y + light_z * light_z).sqrt();
 		let light_direction = Vector3::create(light_x / light_length, light_y / light_length, light_z / light_length);
-		let light_color = [1.0f32, (1.0 - 0.1 * LIGHT_WARMTH) as f32, (1.0 - 0.26 * LIGHT_WARMTH) as f32];
+		let light_color = [1.0f32, (1.0 - 0.1 * light_warmth) as f32, (1.0 - 0.26 * light_warmth) as f32];
 		let light_view = view_matrix.transform_direction(light_direction.x, light_direction.y, light_direction.z);
 		let light_screen_length = (light_view.x * light_view.x + light_view.y * light_view.y).sqrt().max(0.0001);
 		let light_screen_direction = [(light_view.x / light_screen_length) as f32, (light_view.y / light_screen_length) as f32];
 
 		// 앞머리 너머 비침. (머리가 카메라 쪽을 볼 때만, 머리는 +Z 정면)
-		let head_position = self.head_position;
 		let to_camera = [camera_x - head_position[0], camera_y - head_position[1], camera_z - head_position[2]];
 		let to_camera_length = (to_camera[0] * to_camera[0] + to_camera[1] * to_camera[1] + to_camera[2] * to_camera[2]).sqrt().max(1e-9);
-		let facing = to_camera[2] / to_camera_length;
-		let see_through_alpha = (SEE_THROUGH_MAXIMUM_ALPHA * clamp_value((facing - 0.25) / 0.3, 0.0, 1.0)) as f32;
+		let facing = vector_dot(head_forward_world, [to_camera[0] / to_camera_length, to_camera[1] / to_camera_length, to_camera[2] / to_camera_length]);
+		let see_through_alpha = if settings.option("see_through") { (SEE_THROUGH_MAXIMUM_ALPHA * clamp_value((facing - 0.25) / 0.3, 0.0, 1.0)) as f32 } else { 0.0 };
+
+		// 얼굴, 머리카락 구면 노멀 섞기. (값이 바뀔 때만 다시 굽는다)
+		let face_blend = if settings.option("face_shadow") { settings.slider("face_flatten") } else { 0.0 };
+		let hair_blend = settings.slider("hair_smooth");
+		if face_blend != self.last_face_blend || hair_blend != self.last_hair_blend {
+			self.last_face_blend = face_blend;
+			self.last_hair_blend = hair_blend;
+			ToonShadingScene::rebake_normals(resources, gl, face_blend, hair_blend);
+		}
 
 		resources.model.upload_pending_morph_targets(gl);
 
@@ -884,8 +1344,9 @@ impl ToonShadingScene {
 		resources.shadow_map.update_light_matrix(Vector3::create(0.0, 0.82, 0.0), light_travel_direction, 1.25, 0.1, 8.0);
 		let light_view_projection_elements = *resources.shadow_map.get_light_view_projection_matrix().get_elements();
 		resources.shadow_map.begin_render(gl);
-		if SHADOW_STRENGTH > 0.001 {
+		if settings.slider("shadow_strength") > 0.001 {
 			resources.renderer.draw_depth(gl, &mut resources.model, &light_view_projection_elements, &model_elements);
+			draw_call_count += resources.drawable_info_list.len() as u32;
 		}
 		resources.hair_render_target.bind(gl);
 		unsafe {
@@ -913,6 +1374,7 @@ impl ToonShadingScene {
 				}
 				resources.renderer.apply_morph_uniforms(gl, depth_program, drawable);
 				ToonShadingScene::draw_drawable(gl, drawable);
+				draw_call_count += 1;
 			}
 			unsafe {
 				gl.bind_vertex_array(None);
@@ -934,6 +1396,7 @@ impl ToonShadingScene {
 			gl.uniform_3_f32(resources.background_pass.get_uniform_location(gl, "glowColor").as_ref(), 0.085, 0.07, 0.05);
 		}
 		resources.background_pass.draw(gl);
+		draw_call_count += 1;
 		unsafe {
 			gl.enable(glow::DEPTH_TEST);
 			gl.depth_mask(true);
@@ -948,8 +1411,8 @@ impl ToonShadingScene {
 				gl.uniform_matrix_4_f32_slice(floor_program.get_uniform_location(gl, "lightViewProjectionMatrix").as_ref(), false, &light_view_projection_elements);
 				gl.uniform_1_i32(floor_program.get_uniform_location(gl, "shadowMapTexture").as_ref(), 1);
 				gl.uniform_1_f32(floor_program.get_uniform_location(gl, "shadowTexelSize").as_ref(), 1.0 / SHADOWMAP_RESOLUTION as f32);
-				gl.uniform_1_f32(floor_program.get_uniform_location(gl, "shadowStrength").as_ref(), SHADOW_STRENGTH);
-				gl.uniform_1_f32(floor_program.get_uniform_location(gl, "shadowSoftness").as_ref(), SHADOW_SOFTNESS);
+				gl.uniform_1_f32(floor_program.get_uniform_location(gl, "shadowStrength").as_ref(), settings.slider("shadow_strength") as f32);
+				gl.uniform_1_f32(floor_program.get_uniform_location(gl, "shadowSoftness").as_ref(), settings.slider("shadow_softness") as f32);
 				gl.uniform_3_f32(floor_program.get_uniform_location(gl, "backgroundColor").as_ref(), 0.014, 0.013, 0.016);
 				gl.uniform_3_f32(floor_program.get_uniform_location(gl, "glowColor").as_ref(), 0.085, 0.07, 0.05);
 				gl.uniform_2_f32(floor_program.get_uniform_location(gl, "screenResolution").as_ref(), render_width as f32, render_height as f32);
@@ -964,16 +1427,19 @@ impl ToonShadingScene {
 				gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_SHORT, 0);
 				gl.bind_vertex_array(None);
 			}
+			draw_call_count += 1;
 		}
 		// 셀 셰이딩.
-		ToonShadingScene::draw_toon_pass(resources, gl, &view_projection_elements, &view_elements, &model_elements, &light_view_projection_elements, [camera_x, camera_y, camera_z], [light_direction.x as f32, light_direction.y as f32, light_direction.z as f32], light_color, light_screen_direction, render_width, render_height, see_through_alpha, false);
+		ToonShadingScene::draw_toon_pass(resources, gl, &view_projection_elements, &view_elements, &model_elements, &light_view_projection_elements, [camera_x, camera_y, camera_z], [light_direction.x as f32, light_direction.y as f32, light_direction.z as f32], light_color, light_screen_direction, render_width, render_height, see_through_alpha, false, &settings, head_forward_world);
+		draw_call_count += resources.drawable_info_list.len() as u32;
 		// 아웃라인. (원본 기본 OUTLINE WIDTH 0 배라 그려지지 않는다)
-		if OUTLINE_WIDTH > 0.0 {
+		if settings.option("outline") && settings.slider("outline_width") > 0.0 {
 			unsafe {
 				gl.enable(glow::CULL_FACE);
 				gl.cull_face(glow::FRONT);
 			}
-			ToonShadingScene::draw_outline_pass(resources, gl, &view_projection_elements, &view_elements, &model_elements, render_width, render_height, projection_scale_y as f32);
+			ToonShadingScene::draw_outline_pass(resources, gl, &view_projection_elements, &view_elements, &model_elements, render_width, render_height, projection_scale_y as f32, &settings);
+			draw_call_count += resources.drawable_info_list.iter().filter(|info| info.outline_width > 0.0).count() as u32;
 			unsafe {
 				gl.disable(glow::CULL_FACE);
 			}
@@ -987,7 +1453,8 @@ impl ToonShadingScene {
 				gl.depth_mask(false);
 				gl.depth_func(glow::GREATER);
 			}
-			ToonShadingScene::draw_toon_pass(resources, gl, &view_projection_elements, &view_elements, &model_elements, &light_view_projection_elements, [camera_x, camera_y, camera_z], [light_direction.x as f32, light_direction.y as f32, light_direction.z as f32], light_color, light_screen_direction, render_width, render_height, see_through_alpha, true);
+			ToonShadingScene::draw_toon_pass(resources, gl, &view_projection_elements, &view_elements, &model_elements, &light_view_projection_elements, [camera_x, camera_y, camera_z], [light_direction.x as f32, light_direction.y as f32, light_direction.z as f32], light_color, light_screen_direction, render_width, render_height, see_through_alpha, true, &settings, head_forward_world);
+			draw_call_count += resources.drawable_info_list.iter().filter(|info| info.is_see_through_part).count() as u32;
 			unsafe {
 				gl.depth_func(glow::LESS);
 				gl.depth_mask(true);
@@ -1001,11 +1468,24 @@ impl ToonShadingScene {
 
 		// 3. 블룸.
 		let scene_color_texture = resources.scene_render_target.get_color_texture(0);
-		resources.bloom_effect.set_threshold(BLOOM_THRESHOLD, BLOOM_THRESHOLD + 0.85);
-		resources.bloom_effect.render(gl, scene_color_texture);
+		let use_bloom = settings.option("bloom");
+		resources.bloom_effect.set_threshold(settings.slider("bloom_threshold"), settings.slider("bloom_threshold") + 0.85);
+		if use_bloom {
+			resources.bloom_effect.render(gl, scene_color_texture);
+			draw_call_count += 1 + 3 * 2;
+		}
 
 		// 4. 림 + 톤 매핑 합성 → LDR.
-		resources.ldr_render_target.bind(gl);
+		let use_antialias = settings.slider("antialias") > 0.5;
+		if use_antialias {
+			resources.ldr_render_target.bind(gl);
+		}
+		else {
+			unsafe {
+				gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+				gl.viewport(0, 0, display_width, display_height);
+			}
+		}
 		{
 			let composite_pass = &resources.composite_pass;
 			composite_pass.use_program(gl);
@@ -1016,15 +1496,15 @@ impl ToonShadingScene {
 				gl.uniform_1_i32(composite_pass.get_uniform_location(gl, "bloomTexture").as_ref(), 3);
 				gl.uniform_2_f32(composite_pass.get_uniform_location(gl, "resolution").as_ref(), render_width as f32, render_height as f32);
 				gl.uniform_2_f32(composite_pass.get_uniform_location(gl, "cameraPlanes").as_ref(), CAMERA_NEAR_DISTANCE as f32, CAMERA_FAR_DISTANCE as f32);
-				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "exposure").as_ref(), EXPOSURE);
-				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "bloomStrength").as_ref(), BLOOM_STRENGTH);
-				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "vignetteStrength").as_ref(), VIGNETTE);
-				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "saturation").as_ref(), SATURATION);
-				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "contrast").as_ref(), CONTRAST);
-				gl.uniform_1_i32(composite_pass.get_uniform_location(gl, "useRim").as_ref(), 1);
-				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "rimWidth").as_ref(), RIM_WIDTH * render_height as f32 / 1080.0);
-				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "rimThreshold").as_ref(), RIM_THRESHOLD);
-				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "rimStrength").as_ref(), RIM_STRENGTH);
+				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "exposure").as_ref(), settings.slider("exposure") as f32);
+				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "bloomStrength").as_ref(), if use_bloom { settings.slider("bloom_strength") as f32 } else { 0.0 });
+				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "vignetteStrength").as_ref(), settings.slider("vignette") as f32);
+				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "saturation").as_ref(), settings.slider("saturation") as f32);
+				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "contrast").as_ref(), settings.slider("contrast") as f32);
+				gl.uniform_1_i32(composite_pass.get_uniform_location(gl, "useRim").as_ref(), i32::from(settings.option("rim")));
+				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "rimWidth").as_ref(), settings.slider("rim_width") as f32 * render_height as f32 / 1080.0);
+				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "rimThreshold").as_ref(), settings.slider("rim_threshold") as f32);
+				gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "rimStrength").as_ref(), settings.slider("rim_strength") as f32);
 				gl.uniform_3_f32(composite_pass.get_uniform_location(gl, "rimColor").as_ref(), light_color[0], light_color[1], light_color[2]);
 				gl.uniform_2_f32(composite_pass.get_uniform_location(gl, "rimLightScreenDirection").as_ref(), light_screen_direction[0], light_screen_direction[1]);
 				gl.active_texture(glow::TEXTURE0);
@@ -1034,10 +1514,11 @@ impl ToonShadingScene {
 				gl.active_texture(glow::TEXTURE2);
 				gl.bind_texture(glow::TEXTURE_2D, resources.scene_render_target.get_depth_texture());
 				gl.active_texture(glow::TEXTURE3);
-				gl.bind_texture(glow::TEXTURE_2D, resources.bloom_effect.get_result_texture());
+				gl.bind_texture(glow::TEXTURE_2D, if use_bloom { resources.bloom_effect.get_result_texture() } else { scene_color_texture });
 				gl.active_texture(glow::TEXTURE0);
 			}
 			composite_pass.draw(gl);
+			draw_call_count += 1;
 			unsafe {
 				// 유닛 1 은 다음 프레임에 섀도우 맵이 쓴다. (일반 텍스처가 남아 있으면 비교 샘플러와 어긋난다)
 				gl.active_texture(glow::TEXTURE1);
@@ -1048,24 +1529,609 @@ impl ToonShadingScene {
 			}
 		}
 
-		// 5. FXAA → 화면.
-		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-			gl.viewport(0, 0, display_width, display_height);
-		}
-		{
+		// 5. FXAA (+ 샤픈) → 화면.
+		if use_antialias {
+			unsafe {
+				gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+				gl.viewport(0, 0, display_width, display_height);
+			}
 			let antialias_pass = &resources.antialias_pass;
 			antialias_pass.use_program(gl);
 			unsafe {
 				gl.uniform_1_i32(antialias_pass.get_uniform_location(gl, "sourceTexture").as_ref(), 0);
 				gl.uniform_2_f32(antialias_pass.get_uniform_location(gl, "texelSize").as_ref(), 1.0 / render_width as f32, 1.0 / render_height as f32);
-				gl.uniform_1_f32(antialias_pass.get_uniform_location(gl, "sharpenStrength").as_ref(), 0.0);
+				gl.uniform_1_f32(antialias_pass.get_uniform_location(gl, "sharpenStrength").as_ref(), if settings.slider("antialias") >= 1.5 { 0.5 } else { 0.0 });
 				gl.active_texture(glow::TEXTURE0);
 				gl.bind_texture(glow::TEXTURE_2D, resources.ldr_render_target.get_color_texture(0));
 			}
 			antialias_pass.draw(gl);
+			draw_call_count += 1;
 		}
+
+		// 6. 와이어프레임. (화면 깊이 프리패스로 앞면 모서리만, 모프와 스키닝 반영)
+		if settings.option("wireframe") {
+			unsafe {
+				gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+				gl.viewport(0, 0, display_width, display_height);
+				gl.enable(glow::DEPTH_TEST);
+				gl.depth_mask(true);
+				gl.clear(glow::DEPTH_BUFFER_BIT);
+				gl.color_mask(false, false, false, false);
+				gl.enable(glow::POLYGON_OFFSET_FILL);
+				gl.polygon_offset(1.5, 2.0);
+			}
+			resources.renderer.draw_depth(gl, &mut resources.model, &view_projection_elements, &model_elements);
+			unsafe {
+				gl.disable(glow::POLYGON_OFFSET_FILL);
+				gl.color_mask(true, true, true, true);
+				gl.depth_mask(false);
+				gl.depth_func(glow::LEQUAL);
+				gl.enable(glow::BLEND);
+				gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+			}
+			resources.renderer.draw_wireframe(gl, &mut resources.model, &view_projection_elements, &model_elements, 0.91, 0.79, 0.54, 0.55);
+			unsafe {
+				gl.disable(glow::BLEND);
+				gl.depth_mask(true);
+				gl.depth_func(glow::LESS);
+				gl.disable(glow::DEPTH_TEST);
+			}
+			draw_call_count += 2;
+		}
+		self.draw_call_count = draw_call_count;
+		self.display_size = (display_width, display_height);
 		Ok(())
+	}
+
+	//==============================================================================
+	// 화면 찍기용 시작 설정. (환경 변수 TOONSHADING_SHOT = "animation=Run,expression=happy,hud=1,scroll=700,collapsed=1" 꼴, 없으면 아무것도 하지 않는다)
+	//==============================================================================
+	fn apply_shot_setting(&mut self) {
+		let shot_setting = match std::env::var("TOONSHADING_SHOT") {
+			Ok(shot_setting) => shot_setting,
+			Err(_) => {
+				return;
+			}
+		};
+		for entry in shot_setting.split(',') {
+			let mut parts = entry.splitn(2, '=');
+			let key = parts.next().unwrap_or("");
+			let value = parts.next().unwrap_or("");
+			match key {
+				"animation" => {
+					self.select_animation(value);
+				}
+				"expression" => {
+					self.select_expression(value);
+				}
+				"hud" => {
+					self.settings.option_state_list[11] = value == "1";
+				}
+				"scroll" => {
+					self.panel_scroll = value.parse::<f64>().unwrap_or(0.0);
+				}
+				"collapsed" => {
+					self.is_panel_collapsed = value == "1";
+				}
+				_ => {}
+			}
+		}
+	}
+
+	//==============================================================================
+	// 머리 기준 방향. (모델 공간, 턴테이블 전, 위치는 lookAt 오프셋 반영)
+	//==============================================================================
+	fn get_head_frame(resources: &Resources) -> ([f64; 3], [f64; 3]) {
+		let head_index = match resources.head_node_index {
+			Some(head_index) => head_index,
+			None => {
+				return ([0.0, 1.45, 0.0], [0.0, 0.0, 1.0]);
+			}
+		};
+		let node = &resources.model.get_node_list()[head_index];
+		let head_rotation = quaternion_from_matrix_elements(&node.world_matrix.elements);
+		let head_position = transform_point(&node.world_matrix.elements, resources.look_at_offset);
+		let head_turn = head_rotation.multiply(quaternion_conjugate(resources.head_rest_rotation));
+		(head_position, normalize_vector(rotate_vector(head_turn, [0.0, 0.0, 1.0])))
+	}
+
+	fn get_node_world_rotation(resources: &Resources, node_index: usize) -> Quaternion {
+		quaternion_from_matrix_elements(&resources.model.get_node_list()[node_index].world_matrix.elements)
+	}
+
+	fn get_node_world_position(resources: &Resources, model_matrix: &[f32; 16], node_index: usize) -> [f64; 3] {
+		transform_point(model_matrix, transform_point(&resources.model.get_node_list()[node_index].world_matrix.elements, [0.0, 0.0, 0.0]))
+	}
+
+	//==============================================================================
+	// 모델 공간 회전을 노드에 적용. (부모 월드 회전은 직전 프레임 값, newLocal = parent^-1 * R * parent * base, 오프셋 = base^-1 * newLocal)
+	//==============================================================================
+	fn set_model_space_rotation_offset(resources: &mut Resources, node_index: usize, model_space_rotation: Quaternion) {
+		let parent_rotation = match resources.parent_index_list[node_index] {
+			Some(parent_index) => ToonShadingScene::get_node_world_rotation(resources, parent_index),
+			None => Quaternion::identity(),
+		};
+		let base_rotation = resources.model.get_node_list()[node_index].base_rotation;
+		let new_local = quaternion_conjugate(parent_rotation).multiply(model_space_rotation).multiply(parent_rotation).multiply(base_rotation);
+		let node_name = resources.node_name_list[node_index].clone();
+		resources.model.set_joint_rotation_offset(&node_name, quaternion_conjugate(base_rotation).multiply(new_local));
+	}
+
+	//==============================================================================
+	// 머리와 시선. (카메라 쪽 응시 + 포인터 + 느린 배회, 눈마다 자기 위치에서 카메라를 향하는 회전을 10도 안으로 묶는다)
+	//==============================================================================
+	fn update_head_and_eyes(&mut self, delta_time: f64, camera_position: [f64; 3]) {
+		let elapsed_time = self.elapsed_seconds;
+		let head_follow = self.settings.slider("head_follow");
+		let eye_follow = self.settings.slider("eye_follow");
+		let model_rotation = self.model_rotation;
+		let pointer_normalized = self.pointer_normalized;
+		let has_pointer_moved = self.has_pointer_moved;
+		let resources = match self.resources.as_mut() {
+			Some(resources) => resources,
+			None => {
+				return;
+			}
+		};
+		if resources.head_node_index.is_none() {
+			return;
+		}
+		let (head_position, head_forward) = ToonShadingScene::get_head_frame(resources);
+		// 카메라 방향을 모델 공간으로. (턴테이블 역회전)
+		let camera_model_space = rotate_vector(quaternion_conjugate(model_rotation), camera_position);
+		let to_camera = normalize_vector(vector_subtract(camera_model_space, head_position));
+		let camera_yaw = to_camera[0].atan2(to_camera[2]);
+		let camera_pitch = clamp_value(to_camera[1], -1.0, 1.0).asin();
+
+		let wander_yaw = 0.05 * (elapsed_time * 0.23).sin() + 0.025 * (elapsed_time * 0.61 + 1.3).sin();
+		let wander_pitch = 0.02 * (elapsed_time * 0.31 + 0.6).sin();
+		let follow_yaw = if has_pointer_moved { pointer_normalized[0] * 0.35 * head_follow } else { 0.0 };
+		let follow_pitch = if has_pointer_moved { -pointer_normalized[1] * 0.18 * head_follow } else { 0.0 };
+		let target_yaw = clamp_value(wander_yaw + follow_yaw + camera_yaw * 0.35 * head_follow, -0.7, 0.7);
+		let target_pitch = clamp_value(wander_pitch + follow_pitch + camera_pitch * 0.3 * head_follow, -0.35, 0.35);
+		let approach = (delta_time * 2.4).min(1.0);
+		self.head_current_yaw += (target_yaw - self.head_current_yaw) * approach;
+		self.head_current_pitch += (target_pitch - self.head_current_pitch) * approach;
+		let head_rotation = quaternion_from_axis_angle([0.0, 1.0, 0.0], self.head_current_yaw * 0.65).multiply(quaternion_from_axis_angle([1.0, 0.0, 0.0], -self.head_current_pitch * 0.65));
+		let neck_rotation = quaternion_from_axis_angle([0.0, 1.0, 0.0], self.head_current_yaw * 0.35).multiply(quaternion_from_axis_angle([1.0, 0.0, 0.0], -self.head_current_pitch * 0.35));
+		self.head_follow_rotation = head_rotation.multiply(neck_rotation);
+
+		// 시선.
+		let eye_approach = (delta_time * 9.0).min(1.0);
+		for is_left in [true, false] {
+			let eye_index = if is_left { resources.left_eye_index } else { resources.right_eye_index };
+			let eye_index = match eye_index {
+				Some(eye_index) => eye_index,
+				None => {
+					continue;
+				}
+			};
+			let eye_position = transform_point(&resources.model.get_node_list()[eye_index].world_matrix.elements, [0.0, 0.0, 0.0]);
+			let to_camera_from_eye = normalize_vector(vector_subtract(camera_model_space, eye_position));
+			let full_gaze = quaternion_from_to(head_forward, to_camera_from_eye);
+			let gaze_radian = 2.0 * clamp_value(full_gaze.w.abs(), -1.0, 1.0).acos();
+			let gaze_scale = (EYE_MAXIMUM_RADIAN / gaze_radian.max(0.000001)).min(1.0) * eye_follow;
+			let target_gaze = Quaternion::slerp(Quaternion::identity(), full_gaze, gaze_scale);
+			let previous_gaze = if is_left { self.left_eye_rotation } else { self.right_eye_rotation };
+			let next_gaze = Quaternion::slerp(previous_gaze, target_gaze, eye_approach);
+			if is_left {
+				self.left_eye_rotation = next_gaze;
+			}
+			else {
+				self.right_eye_rotation = next_gaze;
+			}
+			ToonShadingScene::set_model_space_rotation_offset(resources, eye_index, next_gaze);
+		}
+	}
+
+	//==============================================================================
+	// 스프링 본. (꼬리를 현재 자세에 다시 잡는다)
+	//==============================================================================
+	fn reset_spring_bones(resources: &mut Resources, model_matrix: &[f32; 16]) {
+		for joint_index in 0..resources.spring_joint_list.len() {
+			let child_node_index = resources.spring_joint_list[joint_index].child_node_index;
+			let node_index = resources.spring_joint_list[joint_index].node_index;
+			let tail = ToonShadingScene::get_node_world_position(resources, model_matrix, child_node_index);
+			resources.spring_joint_list[joint_index].current_tail = tail;
+			resources.spring_joint_list[joint_index].previous_tail = tail;
+			let node_name = resources.node_name_list[node_index].clone();
+			resources.model.set_joint_rotation_offset(&node_name, Quaternion::identity());
+		}
+	}
+
+	//==============================================================================
+	// 스프링 본 한 스텝. (베를레 적분 + 콜라이더 밀어내기 + 회전, 체인 안에서는 앞 조인트가 방금 정한 꼬리와 회전을 잇는다)
+	//==============================================================================
+	fn update_spring_bones(resources: &mut Resources, model_matrix: &[f32; 16], model_rotation: Quaternion, delta_time: f64, stiffness_scale: f64, gravity_scale: f64) {
+		for collider_index in 0..resources.spring_collider_list.len() {
+			let (node_index, offset, tail, is_capsule) = {
+				let collider = &resources.spring_collider_list[collider_index];
+				(collider.node_index, collider.offset, collider.tail, collider.is_capsule)
+			};
+			let world_elements = resources.model.get_node_list()[node_index].world_matrix.elements;
+			let world_head = transform_point(model_matrix, transform_point(&world_elements, offset));
+			let world_tail = if is_capsule { transform_point(model_matrix, transform_point(&world_elements, tail)) } else { world_head };
+			resources.spring_collider_list[collider_index].world_head = world_head;
+			resources.spring_collider_list[collider_index].world_tail = world_tail;
+		}
+		for joint_index in 0..resources.spring_joint_list.len() {
+			let node_index = resources.spring_joint_list[joint_index].node_index;
+			let base_rotation = resources.model.get_node_list()[node_index].base_rotation;
+			let previous_joint = resources.spring_joint_list[joint_index].previous_joint;
+			let parent_world_rotation = match previous_joint {
+				Some(previous_index) => resources.spring_joint_list[previous_index].new_world_rotation,
+				None => {
+					let parent_rotation = match resources.parent_index_list[node_index] {
+						Some(parent_index) => ToonShadingScene::get_node_world_rotation(resources, parent_index),
+						None => Quaternion::identity(),
+					};
+					model_rotation.multiply(parent_rotation)
+				}
+			};
+			let world_position = match previous_joint {
+				Some(previous_index) => resources.spring_joint_list[previous_index].current_tail,
+				None => ToonShadingScene::get_node_world_position(resources, model_matrix, node_index),
+			};
+			let joint = &resources.spring_joint_list[joint_index];
+			let rest_direction = rotate_vector(parent_world_rotation.multiply(base_rotation), joint.bone_axis_local);
+			let bone_length = joint.bone_length;
+			let hit_radius = joint.hit_radius;
+			let bone_axis_local = joint.bone_axis_local;
+
+			// 베를레 적분. (관성 + 강성 + 중력)
+			let inertia = vector_scale(vector_subtract(joint.current_tail, joint.previous_tail), 1.0 - joint.drag_force);
+			let mut next_tail = vector_add(joint.current_tail, inertia);
+			next_tail = vector_add(next_tail, vector_scale(rest_direction, joint.stiffness * stiffness_scale * delta_time));
+			next_tail = vector_add(next_tail, vector_scale(joint.gravity_direction, joint.gravity_power * gravity_scale * delta_time));
+			next_tail = vector_add(world_position, vector_scale(normalize_vector(vector_subtract(next_tail, world_position)), bone_length));
+
+			// 콜라이더 밀어내기. (꼬리, 뼈 중간점 순서로 두 번)
+			for probe_pass in 0..2 {
+				for collider_index in joint.collider_index_list.iter() {
+					let collider = &resources.spring_collider_list[*collider_index];
+					let probe_point = if probe_pass == 0 { next_tail } else { vector_scale(vector_add(world_position, next_tail), 0.5) };
+					let mut closest = collider.world_head;
+					if collider.is_capsule {
+						let segment = vector_subtract(collider.world_tail, collider.world_head);
+						let segment_length_squared = vector_dot(segment, segment);
+						let along = if segment_length_squared > 0.000001 { clamp_value(vector_dot(vector_subtract(probe_point, collider.world_head), segment) / segment_length_squared, 0.0, 1.0) } else { 0.0 };
+						closest = vector_add(collider.world_head, vector_scale(segment, along));
+					}
+					let to_probe = vector_subtract(probe_point, closest);
+					let distance = vector_length(to_probe);
+					let minimum_distance = collider.radius + SPRING_COLLIDER_MARGIN + hit_radius;
+					if distance < minimum_distance {
+						let push_direction = normalize_vector(to_probe);
+						let push_amount = minimum_distance - distance;
+						next_tail = vector_add(next_tail, vector_scale(push_direction, if probe_pass == 0 { push_amount } else { push_amount * 2.0 }));
+						next_tail = vector_add(world_position, vector_scale(normalize_vector(vector_subtract(next_tail, world_position)), bone_length));
+					}
+				}
+			}
+			let previous_current_tail = joint.current_tail;
+
+			// 회전. (부모 로컬 프레임에서 기본 방향 → 새 방향)
+			let parent_inverse = quaternion_conjugate(parent_world_rotation);
+			let from_local = rotate_vector(base_rotation, bone_axis_local);
+			let to_local = rotate_vector(parent_inverse, normalize_vector(vector_subtract(next_tail, world_position)));
+			let swing = quaternion_from_to(from_local, to_local);
+			let new_local = swing.multiply(base_rotation);
+			let joint = &mut resources.spring_joint_list[joint_index];
+			joint.previous_tail = previous_current_tail;
+			joint.current_tail = next_tail;
+			joint.new_world_rotation = parent_world_rotation.multiply(new_local);
+			let node_name = resources.node_name_list[node_index].clone();
+			resources.model.set_joint_rotation_offset(&node_name, quaternion_conjugate(base_rotation).multiply(new_local));
+		}
+	}
+
+	//==============================================================================
+	// GPU 메모리 추정. (문서 이미지 밉 포함 + 메시 배열 + 모프 텍스처 + 렌더 타겟 + 섀도우 맵)
+	//==============================================================================
+	fn estimate_gpu_memory_bytes(resources: &Resources) -> f64 {
+		let mut bytes = resources.image_byte_total * 6.0;
+		for drawable in resources.model.get_drawable_list().iter() {
+			let mesh_description = &drawable.mesh_description;
+			bytes += (mesh_description.positions.len() * 4) as f64;
+			bytes += mesh_description.normals.as_ref().map(|array| array.len() * 4).unwrap_or(0) as f64;
+			bytes += mesh_description.texture_coordinates.as_ref().map(|array| array.len() * 4).unwrap_or(0) as f64;
+			bytes += (mesh_description.joints.len() * 2) as f64;
+			bytes += (mesh_description.weights.len() * 4) as f64;
+			bytes += (drawable.index_count * if drawable.index_component_type == glow::UNSIGNED_INT { 4 } else { 2 }) as f64;
+			if drawable.morph_texture.is_some() {
+				bytes += drawable.morph_texture_width as f64 * drawable.morph_rows_per_target as f64 * 2.0 * drawable.morph_target_list.len() as f64 * 16.0;
+			}
+		}
+		let render_pixels = resources.scene_render_target.get_width() as f64 * resources.scene_render_target.get_height() as f64;
+		bytes += render_pixels * (8.0 * 2.0 + 4.0);
+		bytes += render_pixels * (4.0 + 4.0);
+		bytes += render_pixels * 4.0;
+		bytes += render_pixels * 0.25 * 8.0 * 3.0;
+		bytes += SHADOWMAP_RESOLUTION as f64 * SHADOWMAP_RESOLUTION as f64 * 4.0;
+		bytes
+	}
+
+	//==============================================================================
+	// 옵션 패널 바깥 사각형. (오른쪽 위, 접으면 제목만, 높이는 렌더링 정보 위까지, 바닥은 스크롤)
+	//==============================================================================
+	fn compute_panel_rect(&self, native_size: Vector2, scale: f64) -> Rect {
+		let row_list = build_panel_rows();
+		let content_height: f64 = row_list.last().map(|row| row.1 + row.2).unwrap_or(0.0);
+		let width = if self.is_panel_collapsed { 120.0 } else { PANEL_WIDTH };
+		let height = if self.is_panel_collapsed { PANEL_TITLE_HEIGHT - 1.0 } else { (PANEL_TITLE_HEIGHT + content_height + 2.0).min((self.panel_hud_top - 18.0 - 12.0).max(120.0)) };
+		Rect::create(native_size.x - (width + 18.0) * scale, 18.0 * scale, width * scale, height * scale)
+	}
+
+	//==============================================================================
+	// 글자를 폭에 맞춰 자르기. (넘치면 말줄임표)
+	//==============================================================================
+	fn fit_text(graphic: &Graphic, text: &str, maximum_width: f64, spacing: f64) -> String {
+		if ToonShadingScene::measure_spaced(graphic, text, spacing) <= maximum_width {
+			return text.to_string();
+		}
+		let mut characters: Vec<char> = text.chars().collect();
+		while !characters.is_empty() {
+			characters.pop();
+			let candidate: String = characters.iter().collect::<String>() + "\u{2026}";
+			if ToonShadingScene::measure_spaced(graphic, &candidate, spacing) <= maximum_width {
+				return candidate;
+			}
+		}
+		String::new()
+	}
+
+	fn draw_text_right(graphic: &mut Graphic, text: &str, right_x: f64, y: f64, spacing: f64) {
+		let width = ToonShadingScene::measure_spaced(graphic, text, spacing) - spacing;
+		ToonShadingScene::draw_spaced_text(graphic, text, right_x - width, y, spacing, false);
+	}
+
+	//==============================================================================
+	// 옵션 패널 그리기. (제목, 옵션 열둘, 슬라이더 묶음, 스크롤은 클립)
+	//==============================================================================
+	fn draw_option_panel(&mut self, graphic: &mut Graphic, native_size: Vector2, scale: f64) {
+		let engine = Engine::get_engine().unwrap();
+		let pointer = engine.get_input_manager().get_canvas_native_input_position();
+		let row_list = build_panel_rows();
+		let content_height: f64 = row_list.last().map(|row| row.1 + row.2).unwrap_or(0.0);
+		let panel_rect = self.compute_panel_rect(native_size, scale);
+		self.panel_rect = panel_rect;
+		let view_height = (panel_rect.size.y / scale - PANEL_TITLE_HEIGHT - 2.0).max(0.0);
+		let maximum_scroll = (content_height - view_height).max(0.0);
+		self.panel_scroll = clamp_value(self.panel_scroll, 0.0, maximum_scroll);
+		graphic.set_fill_color(Color::create(0.055, 0.047, 0.055, 0.5));
+		graphic.draw_round_rect(panel_rect, 12.0 * scale);
+		graphic.set_stroke_color(Color::create(0.949, 0.925, 0.886, 0.14));
+		graphic.draw_stroke_round_rect(panel_rect, 12.0 * scale, scale.max(1.0));
+		graphic.set_text_baseline(TextBaseline::Middle);
+		// 제목.
+		graphic.set_font_string(&format!("600 {}px sans-serif", 10.0 * scale));
+		graphic.set_fill_color(Color::create(0.91, 0.788, 0.541, 0.95));
+		ToonShadingScene::draw_spaced_text(graphic, "OPTIONS", panel_rect.position.x + 16.0 * scale, panel_rect.position.y + (PANEL_TITLE_HEIGHT - 1.0) * 0.5 * scale, 3.2 * scale, false);
+		if self.is_panel_collapsed {
+			return;
+		}
+		graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.1));
+		graphic.draw_rect(Rect::create(panel_rect.position.x + scale, panel_rect.position.y + (PANEL_TITLE_HEIGHT - 1.0) * scale, panel_rect.size.x - 2.0 * scale, scale.max(1.0)));
+		let clip_rect = Rect::create(panel_rect.position.x, panel_rect.position.y + PANEL_TITLE_HEIGHT * scale, panel_rect.size.x, panel_rect.size.y - PANEL_TITLE_HEIGHT * scale);
+		graphic.begin_clip_rect(clip_rect, 0.0);
+		let content_top = clip_rect.position.y - self.panel_scroll * scale;
+		let left = panel_rect.position.x;
+		for (kind, row_y, row_height) in row_list.iter() {
+			let top = content_top + row_y * scale;
+			if top + row_height * scale < clip_rect.position.y || top > clip_rect.position.y + clip_rect.size.y {
+				continue;
+			}
+			let center_y = top + row_height * 0.5 * scale;
+			let row_rect = Rect::create(left, top, panel_rect.size.x, row_height * scale);
+			let is_hovered = rect_contains(row_rect, pointer) && rect_contains(clip_rect, pointer);
+			match *kind {
+				PanelRowKind::Option(index) => {
+					if is_hovered {
+						graphic.set_fill_color(Color::create(1.0, 1.0, 1.0, 0.06));
+						graphic.draw_rect(row_rect);
+					}
+					let is_on = self.settings.option_state_list[index];
+					if index < 9 {
+						let key_rect = Rect::create(left + 12.0 * scale, center_y - 8.0 * scale, 18.0 * scale, 16.0 * scale);
+						graphic.set_stroke_color(Color::create(0.949, 0.925, 0.886, 0.22));
+						graphic.draw_stroke_round_rect(key_rect, 4.0 * scale, scale.max(1.0));
+						graphic.set_font_string(&format!("{}px sans-serif", 9.0 * scale));
+						graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.6));
+						ToonShadingScene::draw_spaced_text(graphic, &(index + 1).to_string(), key_rect.position.x + key_rect.size.x * 0.5, center_y, 0.0, true);
+					}
+					graphic.set_font_string(&format!("{}px sans-serif", 10.5 * scale));
+					graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.86));
+					ToonShadingScene::draw_spaced_text(graphic, OPTION_DEFINITIONS[index].1, left + 40.0 * scale, center_y, 1.26 * scale, false);
+					graphic.set_font_string(&format!("{}px sans-serif", 9.5 * scale));
+					graphic.set_fill_color(if is_on { Color::create(0.91, 0.788, 0.541, 1.0) } else { Color::create(0.949, 0.925, 0.886, 0.4) });
+					ToonShadingScene::draw_text_right(graphic, if is_on { "ON" } else { "OFF" }, left + panel_rect.size.x - 14.0 * scale, center_y, 1.71 * scale);
+				}
+				PanelRowKind::Group(group_name) => {
+					graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.08));
+					graphic.draw_rect(Rect::create(left + scale, top, panel_rect.size.x - 2.0 * scale, scale.max(1.0)));
+					graphic.set_font_string(&format!("600 {}px sans-serif", 9.0 * scale));
+					graphic.set_fill_color(Color::create(0.91, 0.788, 0.541, 0.7));
+					ToonShadingScene::draw_spaced_text(graphic, group_name, left + 12.0 * scale, top + (9.0 + 6.0) * scale, 2.7 * scale, false);
+				}
+				PanelRowKind::Slider(index) => {
+					let definition = &SLIDER_DEFINITIONS[index];
+					let value = self.settings.slider_value_list[index];
+					graphic.set_font_string(&format!("{}px sans-serif", 9.5 * scale));
+					graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.86));
+					let label = ToonShadingScene::fit_text(graphic, definition.label, PANEL_LABEL_WIDTH * scale, 0.95 * scale);
+					ToonShadingScene::draw_spaced_text(graphic, &label, left + 12.0 * scale, center_y, 0.95 * scale, false);
+					let track_x = left + (12.0 + PANEL_LABEL_WIDTH + 4.0) * scale;
+					let track_width = (PANEL_WIDTH - 12.0 - 14.0 - PANEL_LABEL_WIDTH - PANEL_VALUE_WIDTH - 14.0) * scale;
+					graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.18));
+					graphic.draw_rect(Rect::create(track_x, center_y - scale, track_width, 2.0 * scale));
+					let ratio = clamp_value((value - definition.minimum) / (definition.maximum - definition.minimum), 0.0, 1.0);
+					let thumb_center = Vector2::create(track_x + 5.0 * scale + (track_width - 10.0 * scale) * ratio, center_y);
+					graphic.set_fill_color(Color::create(0.831, 0.69, 0.416, 1.0));
+					graphic.draw_circle(thumb_center, 5.0 * scale);
+					graphic.set_font_string(&format!("{}px sans-serif", 9.0 * scale));
+					graphic.set_fill_color(Color::create(0.91, 0.788, 0.541, 0.9));
+					ToonShadingScene::draw_text_right(graphic, &format_slider_value(definition, value), left + panel_rect.size.x - 14.0 * scale, center_y, 0.72 * scale);
+				}
+			}
+		}
+		graphic.end_clip_rect();
+	}
+
+	//==============================================================================
+	// 우클릭 메뉴. (RESET VIEW, FOCUS FACE, FOCUS BODY, RESET OPTIONS)
+	//==============================================================================
+	fn compute_context_menu_rect(&self, graphic: &mut Graphic, native_size: Vector2, scale: f64) -> Option<Rect> {
+		let position = self.context_menu_position?;
+		graphic.set_font_string(&format!("{}px sans-serif", 10.0 * scale));
+		let widest = CONTEXT_MENU_ITEMS.iter().map(|label| ToonShadingScene::measure_spaced(graphic, label, 1.6 * scale)).fold(0.0, f64::max);
+		let width = (widest + 32.0 * scale).max(168.0 * scale);
+		let height = (12.0 + CONTEXT_MENU_ITEMS.len() as f64 * 28.0) * scale;
+		Some(Rect::create(position.x.min(native_size.x - width - 8.0 * scale), position.y.min(native_size.y - height - 8.0 * scale), width, height))
+	}
+
+	fn draw_context_menu(&mut self, graphic: &mut Graphic, native_size: Vector2, scale: f64) {
+		let menu_rect = match self.compute_context_menu_rect(graphic, native_size, scale) {
+			Some(menu_rect) => menu_rect,
+			None => {
+				self.context_menu_rect = None;
+				return;
+			}
+		};
+		self.context_menu_rect = Some(menu_rect);
+		let engine = Engine::get_engine().unwrap();
+		let pointer = engine.get_input_manager().get_canvas_native_input_position();
+		graphic.set_fill_color(Color::create(0.055, 0.047, 0.055, 0.72));
+		graphic.draw_round_rect(menu_rect, 10.0 * scale);
+		graphic.set_stroke_color(Color::create(0.949, 0.925, 0.886, 0.14));
+		graphic.draw_stroke_round_rect(menu_rect, 10.0 * scale, scale.max(1.0));
+		graphic.set_text_baseline(TextBaseline::Middle);
+		graphic.set_font_string(&format!("{}px sans-serif", 10.0 * scale));
+		for (item_index, label) in CONTEXT_MENU_ITEMS.iter().enumerate() {
+			let item_rect = Rect::create(menu_rect.position.x, menu_rect.position.y + (6.0 + item_index as f64 * 28.0) * scale, menu_rect.size.x, 28.0 * scale);
+			let is_hovered = rect_contains(item_rect, pointer);
+			if is_hovered {
+				graphic.set_fill_color(Color::create(0.831, 0.69, 0.416, 0.16));
+				graphic.draw_rect(item_rect);
+				graphic.set_fill_color(Color::create(0.91, 0.788, 0.541, 1.0));
+			}
+			else {
+				graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.86));
+			}
+			ToonShadingScene::draw_spaced_text(graphic, label, item_rect.position.x + 16.0 * scale, item_rect.position.y + 14.0 * scale, 1.6 * scale, false);
+		}
+	}
+
+	//==============================================================================
+	// 렌더링 정보. (오른쪽 아래 작은 패널)
+	//==============================================================================
+	fn draw_hud(&mut self, graphic: &mut Graphic, native_size: Vector2, scale: f64, link_rect: Rect) {
+		let resources = match self.resources.as_ref() {
+			Some(resources) => resources,
+			None => {
+				return;
+			}
+		};
+		let css_width = native_size.x / scale;
+		let css_height = native_size.y / scale;
+		let mut row_list: Vec<(&str, String)> = vec![
+			("fps", format!("{}", (1.0 / self.smoothed_frame_seconds.max(0.0001)).round())),
+			("display", format!("{} x {}", self.display_size.0, self.display_size.1)),
+			("render buffer", format!("{} x {}", resources.scene_render_target.get_width(), resources.scene_render_target.get_height())),
+			("triangles", format_with_commas(resources.triangle_count.round() as u64)),
+			("vertices", format_with_commas(resources.vertex_total as u64)),
+			("draw calls", self.draw_call_count.to_string()),
+			("morph targets", resources.morph_target_count.to_string()),
+			("spring joints", resources.spring_joint_list.len().to_string()),
+			("cpu frame", format!("{:.2} ms", self.cpu_frame_milliseconds)),
+			("gpu memory (est.)", format!("{:.0} MB", self.gpu_memory_bytes / 1048576.0)),
+		];
+		let is_narrow = css_width < 640.0;
+		if is_narrow {
+			row_list.truncate(4);
+		}
+		let row_height = 16.0;
+		let panel_width = if is_narrow { 150.0 } else { 214.0 };
+		let panel_height = row_list.len() as f64 * row_height + 18.0;
+		let panel_x = css_width - panel_width - 18.0;
+		let mut panel_y = css_height - panel_height - 18.0;
+		let link_right = (link_rect.position.x + link_rect.size.x) / scale;
+		let link_top = link_rect.position.y / scale;
+		if link_right > panel_x && link_top < panel_y + panel_height {
+			panel_y = link_top - panel_height - 12.0;
+		}
+		self.panel_hud_top = panel_y;
+		let panel_rect = Rect::create(panel_x * scale, panel_y * scale, panel_width * scale, panel_height * scale);
+		graphic.set_fill_color(Color::create(0.055, 0.047, 0.055, 0.55));
+		graphic.draw_round_rect(panel_rect, 10.0 * scale);
+		graphic.set_stroke_color(Color::create(0.949, 0.925, 0.886, 0.14));
+		graphic.draw_stroke_round_rect(panel_rect, 10.0 * scale, scale.max(1.0));
+		graphic.set_font_string(&format!("400 {}px sans-serif", 10.5 * scale));
+		graphic.set_text_baseline(TextBaseline::Middle);
+		for (row_index, (name, value)) in row_list.iter().enumerate() {
+			let row_y = (panel_y + 9.0 + row_height * row_index as f64 + row_height * 0.5) * scale;
+			graphic.set_text_align(TextAlign::Left);
+			graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.45));
+			graphic.draw_fill_text(name, (panel_x + 14.0) * scale, row_y);
+			graphic.set_text_align(TextAlign::Right);
+			graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.88));
+			graphic.draw_fill_text(value, (panel_x + panel_width - 14.0) * scale, row_y);
+		}
+		graphic.set_text_align(TextAlign::Left);
+	}
+
+	//==============================================================================
+	// 로딩 화면. (불러오는 동안은 불투명, 다 되면 1.4 초에 걸쳐 사라진다)
+	//==============================================================================
+	fn draw_loading_overlay(graphic: &mut Graphic, native_size: Vector2, scale: f64, alpha: f64, ratio: f64, detail: &str) {
+		graphic.set_fill_color(Color::create(0.031, 0.031, 0.039, alpha));
+		graphic.draw_rect(Rect::create(0.0, 0.0, native_size.x, native_size.y));
+		let top = (native_size.y - 54.0 * scale) * 0.5;
+		graphic.set_text_baseline(TextBaseline::Middle);
+		graphic.set_font_string(&format!("300 {}px sans-serif", 11.0 * scale));
+		graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.6 * alpha));
+		ToonShadingScene::draw_spaced_text(graphic, "LOADING", native_size.x * 0.5, top + 6.5 * scale, 6.6 * scale, true);
+		let bar_rect = Rect::create(native_size.x * 0.5 - 130.0 * scale, top + 27.0 * scale, 260.0 * scale, 2.0 * scale);
+		graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.12 * alpha));
+		graphic.draw_rect(bar_rect);
+		graphic.set_fill_color(Color::create(0.831, 0.69, 0.416, 0.9 * alpha));
+		graphic.draw_rect(Rect::create(bar_rect.position.x, bar_rect.position.y, bar_rect.size.x * clamp_value(ratio, 0.0, 1.0), bar_rect.size.y));
+		graphic.set_font_string(&format!("{}px sans-serif", 9.0 * scale));
+		graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.35 * alpha));
+		ToonShadingScene::draw_spaced_text(graphic, &detail.to_uppercase(), native_size.x * 0.5, top + 48.5 * scale, 2.7 * scale, true);
+	}
+
+	//==============================================================================
+	// 시점 맞추기. (RESET VIEW, FOCUS FACE, FOCUS BODY)
+	//==============================================================================
+	fn focus_face(&mut self) {
+		self.camera_state.is_manual_focus = false;
+		self.camera_state.target_distance = FACE_FOCUS_DISTANCE;
+		self.camera_state.target_focus_height = self.head_position[1];
+	}
+
+	fn focus_body(&mut self) {
+		self.camera_state.is_manual_focus = false;
+		self.camera_state.target_distance = BODY_FOCUS_DISTANCE;
+		self.camera_state.target_focus_height = BODY_FOCUS_HEIGHT;
+	}
+
+	fn reset_view(&mut self) {
+		self.camera_state.target_yaw = DEFAULT_CAMERA_YAW;
+		self.camera_state.target_pitch = DEFAULT_CAMERA_PITCH;
+		self.focus_body();
+	}
+
+	//==============================================================================
+	// 슬라이더 값 설정. (칸 간격에 맞춰 반올림, 범위 안으로)
+	//==============================================================================
+	fn set_slider_from_position(&mut self, slider_index: usize, native_x: f64, scale: f64) {
+		let definition = &SLIDER_DEFINITIONS[slider_index];
+		let track_x = self.panel_rect.position.x + (12.0 + PANEL_LABEL_WIDTH + 4.0) * scale;
+		let track_width = (PANEL_WIDTH - 12.0 - 14.0 - PANEL_LABEL_WIDTH - PANEL_VALUE_WIDTH - 14.0) * scale;
+		let ratio = clamp_value((native_x - track_x - 5.0 * scale) / (track_width - 10.0 * scale), 0.0, 1.0);
+		let raw = definition.minimum + ratio * (definition.maximum - definition.minimum);
+		let snapped = definition.minimum + ((raw - definition.minimum) / definition.step).round() * definition.step;
+		self.settings.slider_value_list[slider_index] = clamp_value(snapped, definition.minimum, definition.maximum);
 	}
 
 	//==============================================================================
@@ -1087,11 +2153,13 @@ impl ToonShadingScene {
 	// 셀 셰이딩 패스. (모든 드로어블, 비침 패스면 눈 부위만)
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
-	fn draw_toon_pass(resources: &Resources, gl: &GlContext, view_projection_elements: &[f32; 16], view_elements: &[f32; 16], model_elements: &[f32; 16], light_view_projection_elements: &[f32; 16], camera_position: [f64; 3], light_direction: [f32; 3], light_color: [f32; 3], light_screen_direction: [f32; 2], render_width: i32, render_height: i32, see_through_alpha: f32, is_see_through_pass: bool) {
+	fn draw_toon_pass(resources: &Resources, gl: &GlContext, view_projection_elements: &[f32; 16], view_elements: &[f32; 16], model_elements: &[f32; 16], light_view_projection_elements: &[f32; 16], camera_position: [f64; 3], light_direction: [f32; 3], light_color: [f32; 3], light_screen_direction: [f32; 2], render_width: i32, render_height: i32, see_through_alpha: f32, is_see_through_pass: bool, settings: &RenderSettings, head_forward: [f64; 3]) {
 		let shader_program = resources.renderer.get_shader_program();
 		shader_program.use_program(gl);
 		let location = |name: &str| shader_program.get_uniform_location(gl, name);
-		let hair_shadow_pixels = (HAIR_SHADOW_OFFSET * render_height as f64 / 1080.0) as f32;
+		let hair_shadow_pixels = (settings.slider("hair_shadow_offset") * render_height as f64 / 1080.0) as f32;
+		let slider = |name: &str| -> f32 { settings.slider(name) as f32 };
+		let ambient = slider("ambient");
 		unsafe {
 			gl.uniform_matrix_4_f32_slice(location("viewProjectionMatrix").as_ref(), false, view_projection_elements);
 			gl.uniform_matrix_4_f32_slice(location("modelMatrix").as_ref(), false, model_elements);
@@ -1101,30 +2169,30 @@ impl ToonShadingScene {
 			gl.uniform_2_f32(location("cameraPlanes").as_ref(), CAMERA_NEAR_DISTANCE as f32, CAMERA_FAR_DISTANCE as f32);
 			gl.uniform_3_f32(location("keyLightDirection").as_ref(), light_direction[0], light_direction[1], light_direction[2]);
 			gl.uniform_3_f32(location("keyLightColor").as_ref(), light_color[0], light_color[1], light_color[2]);
-			gl.uniform_1_f32(location("keyLightIntensity").as_ref(), LIGHT_INTENSITY);
-			gl.uniform_3_f32(location("ambientSkyColor").as_ref(), 0.34 * AMBIENT, 0.36 * AMBIENT, 0.42 * AMBIENT);
-			gl.uniform_3_f32(location("ambientGroundColor").as_ref(), 0.2 * AMBIENT, 0.17 * AMBIENT, 0.17 * AMBIENT);
-			gl.uniform_1_f32(location("shadingToony").as_ref(), SHADING_TOONY);
-			gl.uniform_1_f32(location("shadingShift").as_ref(), SHADING_SHIFT);
-			gl.uniform_1_f32(location("shadeStrength").as_ref(), SHADE_STRENGTH);
-			gl.uniform_1_f32(location("shadeDarkness").as_ref(), SHADE_DARKNESS);
-			gl.uniform_1_f32(location("warmBandStrength").as_ref(), WARM_BAND);
-			gl.uniform_1_f32(location("normalMapStrength").as_ref(), NORMAL_MAP);
-			gl.uniform_3_f32(location("headForward").as_ref(), 0.0, 0.0, 1.0);
-			gl.uniform_1_f32(location("faceFlatten").as_ref(), FACE_FLATTEN as f32);
-			gl.uniform_1_f32(location("faceShadowSoftness").as_ref(), FACE_SHADOW_SOFTNESS);
-			gl.uniform_1_i32(location("useFaceShadow").as_ref(), 1);
-			gl.uniform_1_i32(location("useHairShadow").as_ref(), 1);
+			gl.uniform_1_f32(location("keyLightIntensity").as_ref(), slider("light_intensity"));
+			gl.uniform_3_f32(location("ambientSkyColor").as_ref(), 0.34 * ambient, 0.36 * ambient, 0.42 * ambient);
+			gl.uniform_3_f32(location("ambientGroundColor").as_ref(), 0.2 * ambient, 0.17 * ambient, 0.17 * ambient);
+			gl.uniform_1_f32(location("shadingToony").as_ref(), slider("shading_toony"));
+			gl.uniform_1_f32(location("shadingShift").as_ref(), slider("shading_shift"));
+			gl.uniform_1_f32(location("shadeStrength").as_ref(), slider("shade_strength"));
+			gl.uniform_1_f32(location("shadeDarkness").as_ref(), slider("shade_darkness"));
+			gl.uniform_1_f32(location("warmBandStrength").as_ref(), slider("warm_band"));
+			gl.uniform_1_f32(location("normalMapStrength").as_ref(), slider("normal_map"));
+			gl.uniform_3_f32(location("headForward").as_ref(), head_forward[0] as f32, head_forward[1] as f32, head_forward[2] as f32);
+			gl.uniform_1_f32(location("faceFlatten").as_ref(), slider("face_flatten"));
+			gl.uniform_1_f32(location("faceShadowSoftness").as_ref(), slider("face_shadow_softness"));
+			gl.uniform_1_i32(location("useFaceShadow").as_ref(), i32::from(settings.option("face_shadow")));
+			gl.uniform_1_i32(location("useHairShadow").as_ref(), i32::from(settings.option("hair_shadow")));
 			gl.uniform_2_f32(location("hairShadowOffset").as_ref(), light_screen_direction[0] * hair_shadow_pixels, light_screen_direction[1] * hair_shadow_pixels);
-			gl.uniform_1_f32(location("hairShadowStrength").as_ref(), HAIR_SHADOW_STRENGTH);
-			gl.uniform_1_i32(location("useSpecular").as_ref(), 1);
-			gl.uniform_1_f32(location("specularPower").as_ref(), SPECULAR_POWER);
-			gl.uniform_1_f32(location("specularStrength").as_ref(), SPECULAR_STRENGTH);
-			gl.uniform_1_f32(location("specularSoftness").as_ref(), SPECULAR_SOFTNESS);
-			gl.uniform_1_i32(location("useHairHighlight").as_ref(), 1);
-			gl.uniform_1_f32(location("hairHighlightWidth").as_ref(), HAIR_HIGHLIGHT_WIDTH);
-			gl.uniform_1_f32(location("hairHighlightStrength").as_ref(), HAIR_HIGHLIGHT_STRENGTH);
-			gl.uniform_1_f32(location("hairHighlightShift").as_ref(), HAIR_HIGHLIGHT_SHIFT);
+			gl.uniform_1_f32(location("hairShadowStrength").as_ref(), slider("hair_shadow_strength"));
+			gl.uniform_1_i32(location("useSpecular").as_ref(), i32::from(settings.option("specular")));
+			gl.uniform_1_f32(location("specularPower").as_ref(), slider("specular_power"));
+			gl.uniform_1_f32(location("specularStrength").as_ref(), slider("specular_strength"));
+			gl.uniform_1_f32(location("specularSoftness").as_ref(), slider("specular_softness"));
+			gl.uniform_1_i32(location("useHairHighlight").as_ref(), i32::from(settings.option("hair_highlight")));
+			gl.uniform_1_f32(location("hairHighlightWidth").as_ref(), slider("hair_highlight_width"));
+			gl.uniform_1_f32(location("hairHighlightStrength").as_ref(), slider("hair_highlight_strength"));
+			gl.uniform_1_f32(location("hairHighlightShift").as_ref(), slider("hair_highlight_shift"));
 			gl.uniform_1_i32(location("hairDepthTexture").as_ref(), TEXTURE_UNIT_HAIR_DEPTH as i32);
 			gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_HAIR_DEPTH);
 			gl.bind_texture(glow::TEXTURE_2D, resources.hair_render_target.get_depth_texture());
@@ -1136,8 +2204,8 @@ impl ToonShadingScene {
 			gl.uniform_matrix_4_f32_slice(location("lightViewProjectionMatrix").as_ref(), false, light_view_projection_elements);
 			gl.uniform_1_i32(location("shadowMapTexture").as_ref(), 1);
 			gl.uniform_1_f32(location("shadowTexelSize").as_ref(), 1.0 / SHADOWMAP_RESOLUTION as f32);
-			gl.uniform_1_f32(location("shadowStrength").as_ref(), SHADOW_STRENGTH);
-			gl.uniform_1_f32(location("shadowSoftness").as_ref(), SHADOW_SOFTNESS);
+			gl.uniform_1_f32(location("shadowStrength").as_ref(), slider("shadow_strength"));
+			gl.uniform_1_f32(location("shadowSoftness").as_ref(), slider("shadow_softness"));
 			gl.active_texture(glow::TEXTURE1);
 			gl.bind_texture(glow::TEXTURE_2D, Some(resources.shadow_map.get_depth_texture()));
 			gl.active_texture(glow::TEXTURE0);
@@ -1174,7 +2242,7 @@ impl ToonShadingScene {
 	// 아웃라인 패스. (뒤집힌 껍질, 앞면 컬링)
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
-	fn draw_outline_pass(resources: &Resources, gl: &GlContext, view_projection_elements: &[f32; 16], view_elements: &[f32; 16], model_elements: &[f32; 16], render_width: i32, render_height: i32, projection_scale_y: f32) {
+	fn draw_outline_pass(resources: &Resources, gl: &GlContext, view_projection_elements: &[f32; 16], view_elements: &[f32; 16], model_elements: &[f32; 16], render_width: i32, render_height: i32, projection_scale_y: f32, settings: &RenderSettings) {
 		let program = &resources.outline_program;
 		program.use_program(gl);
 		unsafe {
@@ -1183,9 +2251,9 @@ impl ToonShadingScene {
 			gl.uniform_matrix_4_f32_slice(program.get_uniform_location(gl, "viewMatrix").as_ref(), false, view_elements);
 			gl.uniform_2_f32(program.get_uniform_location(gl, "screenResolution").as_ref(), render_width as f32, render_height as f32);
 			gl.uniform_1_f32(program.get_uniform_location(gl, "projectionScaleY").as_ref(), projection_scale_y);
-			gl.uniform_2_f32(program.get_uniform_location(gl, "outlinePixelRange").as_ref(), OUTLINE_MINIMUM, OUTLINE_MINIMUM.max(OUTLINE_MAXIMUM));
-			gl.uniform_1_f32(program.get_uniform_location(gl, "outlineTint").as_ref(), OUTLINE_TINT);
-			gl.uniform_1_f32(program.get_uniform_location(gl, "outlineBrightness").as_ref(), OUTLINE_BRIGHTNESS);
+			gl.uniform_2_f32(program.get_uniform_location(gl, "outlinePixelRange").as_ref(), settings.slider("outline_minimum") as f32, (settings.slider("outline_minimum").max(settings.slider("outline_maximum"))) as f32);
+			gl.uniform_1_f32(program.get_uniform_location(gl, "outlineTint").as_ref(), settings.slider("outline_tint") as f32);
+			gl.uniform_1_f32(program.get_uniform_location(gl, "outlineBrightness").as_ref(), settings.slider("outline_brightness") as f32);
 		}
 		let joint_matrices_location = program.get_uniform_location(gl, "jointMatrices[0]");
 		let outline_width_location = program.get_uniform_location(gl, "outlineWidth");
@@ -1213,7 +2281,7 @@ impl ToonShadingScene {
 			}
 			unsafe {
 				gl.active_texture(glow::TEXTURE0);
-				gl.uniform_1_f32(outline_width_location.as_ref(), info.outline_width * OUTLINE_WIDTH);
+				gl.uniform_1_f32(outline_width_location.as_ref(), info.outline_width * settings.slider("outline_width") as f32);
 				gl.uniform_1_i32(use_outline_mask_location.as_ref(), i32::from(info.use_outline_mask));
 				gl.uniform_3_f32(outline_color_location.as_ref(), info.outline_color[0], info.outline_color[1], info.outline_color[2]);
 			}
@@ -1242,7 +2310,8 @@ impl ToonShadingScene {
 		let mut blink = 0.0;
 		if elapsed_time >= self.next_blink_time {
 			self.blink_start_time = elapsed_time;
-			let interval = if BLINK_RATE > 0.001 { (2.6 + self.next_random() * 3.4) / BLINK_RATE } else { 1e9 };
+			let blink_rate = self.settings.slider("blink_rate");
+			let interval = if blink_rate > 0.001 { (2.6 + self.next_random() * 3.4) / blink_rate } else { 1e9 };
 			self.next_blink_time = elapsed_time + interval;
 		}
 		let blink_local = elapsed_time - self.blink_start_time;
@@ -1316,6 +2385,7 @@ impl ToonShadingScene {
 	// 신체 동작 갱신. (원본 골격 재생 → 뼈마다 T 포즈 대비 월드 회전 변화를 VRM 뼈에 그대로, 부모부터 처리)
 	//==============================================================================
 	fn apply_body_animation(&mut self, delta_time: f64) {
+		let head_follow_rotation = self.head_follow_rotation;
 		let resources = match self.resources.as_mut() {
 			Some(resources) => resources,
 			None => {
@@ -1328,7 +2398,10 @@ impl ToonShadingScene {
 		let mut offset_list: Vec<(usize, Quaternion)> = Vec::new();
 		for entry in resources.retarget_entry_list.iter() {
 			let source_world = quaternion_from_matrix_elements(&resources.animation_model.get_node_list()[entry.source_index].world_matrix.elements);
-			let world_delta = source_world.multiply(entry.source_rest_inverse);
+			let mut world_delta = source_world.multiply(entry.source_rest_inverse);
+			if Some(entry.target_index) == resources.head_node_index {
+				world_delta = head_follow_rotation.multiply(world_delta);
+			}
 			let desired_world = world_delta.multiply(resources.rest_world_rotation_list[entry.target_index]);
 			desired_world_by_target[entry.target_index] = Some(desired_world);
 			let parent_world = match resources.parent_index_list[entry.target_index] {
@@ -1370,26 +2443,10 @@ impl Scene for ToonShadingScene {
 	// 초기화. (GL 리소스와 모델을 엔진의 그래픽으로 만든다)
 	//==============================================================================
 	fn initialize(&mut self, engine: &Engine) {
-		let graphic = match engine.get_graphic() {
-			Some(graphic) => {
-				graphic
-			}
-			None => {
-				return;
-			}
-		};
-		let load_start_instant = std::time::Instant::now();
-		match self.create_resources(graphic.get_gl()) {
-			Ok(resources) => {
-				println!("toonshading: 준비 {:.2}초, 드로어블 {}, 노드 {}", load_start_instant.elapsed().as_secs_f64(), resources.drawable_info_list.len(), resources.model.get_node_list().len());
-				self.resources = Some(resources);
-				self.select_expression("neutral");
-				self.select_animation("Idle");
-			}
-			Err(error) => {
-				eprintln!("toonshading: {}", error);
-				self.load_error_message = Some(error);
-			}
+		// 로딩 화면을 먼저 그리고 다음 프레임에 만든다. (tick 에서)
+		let native_size = engine.get_view_manager().get_canvas_native_size();
+		if native_size.x < 720.0 {
+			self.is_panel_collapsed = true;
 		}
 	}
 
@@ -1397,11 +2454,75 @@ impl Scene for ToonShadingScene {
 	// 갱신.
 	//==============================================================================
 	fn tick(&mut self, time_delta: f64) {
+		let engine = Engine::get_engine().unwrap();
 		let delta_time = time_delta.min(0.1);
 		self.elapsed_seconds += delta_time;
+		self.smoothed_frame_seconds = self.smoothed_frame_seconds * 0.92 + delta_time * 0.08;
+		if let Some(ready_seconds) = self.ready_seconds {
+			self.ready_seconds = Some(ready_seconds + delta_time);
+		}
+		// 불러오기. (첫 프레임은 로딩 화면, 다음 프레임에 캐릭터를 만든다)
 		if self.resources.is_none() {
+			if self.load_error_message.is_some() {
+				return;
+			}
+			self.load_stage += 1;
+			if self.load_stage == 2 {
+				if let Some(graphic) = engine.get_graphic() {
+					let load_start_instant = std::time::Instant::now();
+					match self.create_resources(graphic.get_gl()) {
+						Ok(resources) => {
+							println!("toonshading: 준비 {:.2}초, 드로어블 {}, 노드 {}", load_start_instant.elapsed().as_secs_f64(), resources.drawable_info_list.len(), resources.model.get_node_list().len());
+							self.resources = Some(resources);
+							self.ready_seconds = Some(0.0);
+							self.last_face_blend = self.settings.slider("face_flatten");
+							self.last_hair_blend = self.settings.slider("hair_smooth");
+							self.select_expression("neutral");
+							self.select_animation("Idle");
+							self.apply_shot_setting();
+						}
+						Err(error) => {
+							eprintln!("toonshading: {}", error);
+							self.load_error_message = Some(error);
+						}
+					}
+				}
+			}
 			return;
 		}
+		let cpu_frame_start = std::time::Instant::now();
+		// 프레임 제한. (FRAME RATE 슬라이더, 데스크탑만)
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			let frame_interval = 1.0 / FRAME_RATE_OPTIONS[(self.settings.slider("frame_rate").round() as usize).min(FRAME_RATE_OPTIONS.len() - 1)] as f64;
+			if let Some(last_instant) = self.last_frame_instant {
+				let remaining = frame_interval - 0.004 - last_instant.elapsed().as_secs_f64();
+				if remaining > 0.0 {
+					std::thread::sleep(std::time::Duration::from_secs_f64(remaining));
+				}
+			}
+			self.last_frame_instant = Some(std::time::Instant::now());
+		}
+		// 숫자 키로 옵션 전환. (앞 9개)
+		{
+			let input_manager = engine.get_input_manager();
+			for option_index in 0..OPTION_KEY_NAMES.len() {
+				if input_manager.is_key_just_pressed(OPTION_KEY_NAMES[option_index]) || input_manager.is_key_just_pressed(OPTION_NUMPAD_KEY_NAMES[option_index]) {
+					self.settings.option_state_list[option_index] = !self.settings.option_state_list[option_index];
+				}
+			}
+		}
+		// 포인터. (끌지 않을 때 움직이면 머리가 따라본다)
+		let native_size = engine.get_view_manager().get_canvas_native_size();
+		let pointer_position = engine.get_input_manager().get_canvas_native_input_position();
+		if (pointer_position.x != self.last_pointer_position.x || pointer_position.y != self.last_pointer_position.y) && self.drag_position.is_none() {
+			self.pointer_normalized = [clamp_value(pointer_position.x / native_size.x.max(1.0) * 2.0 - 1.0, -1.0, 1.0), clamp_value(pointer_position.y / native_size.y.max(1.0) * 2.0 - 1.0, -1.0, 1.0)];
+			self.has_pointer_moved = true;
+		}
+		self.last_pointer_position = pointer_position;
+		let canvas_pixel_size = engine.get_view_manager().get_canvas_pixel_size();
+		self.last_aspect_ratio = canvas_pixel_size.x / canvas_pixel_size.y.max(1.0);
+
 		// 카메라. (목표값 지수 접근)
 		let camera_approach = (delta_time * 5.0).min(1.0);
 		let camera_state = &mut self.camera_state;
@@ -1409,16 +2530,57 @@ impl Scene for ToonShadingScene {
 		camera_state.pitch += (camera_state.target_pitch - camera_state.pitch) * camera_approach;
 		camera_state.distance += (camera_state.target_distance - camera_state.distance) * camera_approach;
 		camera_state.focus_height += (camera_state.target_focus_height - camera_state.focus_height) * camera_approach;
+
+		// 턴테이블. (모델 행렬, 스프링 본은 이 회전을 포함한 월드에서 돈다, 이동은 캐릭터 기준이라 회전과 같이 돈다)
+		if self.settings.option("turntable") {
+			self.turntable_angle += delta_time * self.settings.slider("turntable_speed");
+		}
+		let mut model_matrix = Matrix4::create_rotation_y(self.turntable_angle);
+		model_matrix.multiply(&Matrix4::create_translation(self.hips_offset[0], self.hips_offset[1], self.hips_offset[2]));
+		self.model_matrix_elements = *model_matrix.get_elements();
+		self.model_rotation = quaternion_from_axis_angle([0.0, 1.0, 0.0], self.turntable_angle);
+		let camera_position = compute_camera_position(&self.camera_state, self.elapsed_seconds, self.last_aspect_ratio);
+
+		// 표정, 머리, 시선, 제약, 스프링 → 스키닝 갱신. (직전 프레임 월드 행렬 기준으로 오프셋을 정하고 한 번 갱신한다)
 		self.update_expressions(delta_time);
+		self.update_head_and_eyes(delta_time, camera_position);
 		self.apply_body_animation(delta_time);
 		self.update_constraints();
-		if let Some(resources) = self.resources.as_mut() {
-			resources.model.update(delta_time);
-			if let Some(head_index) = resources.head_node_index {
-				let elements = &resources.model.get_node_list()[head_index].world_matrix.elements;
-				self.head_position = [elements[12] as f64, elements[13] as f64, elements[14] as f64];
+		let model_elements = self.model_matrix_elements;
+		let model_rotation = self.model_rotation;
+		let use_spring_bones = self.settings.option("spring_bones");
+		let stiffness_scale = self.settings.slider("spring_stiffness");
+		let gravity_scale = self.settings.slider("spring_gravity");
+		let is_spring_reset_pending = self.spring_reset_pending;
+		self.spring_reset_pending = false;
+		let resources = self.resources.as_mut().unwrap();
+		// 골격을 한 번 갱신해 이번 프레임의 뼈 위치를 확정한 뒤 스프링을 돌리고, 스프링 회전을 반영해 한 번 더 갱신한다.
+		resources.model.update(delta_time);
+		// 자세가 크게 바뀐 직후(진입, 클립 전환)에는 꼬리를 현재 자세에 맞춰 다시 잡는다.
+		if is_spring_reset_pending {
+			ToonShadingScene::reset_spring_bones(resources, &model_elements);
+		}
+		if use_spring_bones {
+			let mut remaining_time = delta_time;
+			while remaining_time > 0.0001 {
+				let step_time = SPRING_STEP_SECONDS.min(remaining_time);
+				ToonShadingScene::update_spring_bones(resources, &model_elements, model_rotation, step_time, stiffness_scale, gravity_scale);
+				remaining_time -= step_time;
 			}
 		}
+		else {
+			ToonShadingScene::reset_spring_bones(resources, &model_elements);
+		}
+		resources.model.update(0.0);
+		let (head_frame_position, head_frame_forward) = ToonShadingScene::get_head_frame(resources);
+		self.head_forward_world = rotate_vector(model_rotation, head_frame_forward);
+		self.head_position = transform_point(&model_elements, head_frame_position);
+		// 렌더링 정보. (GPU 메모리 추정은 1 초마다)
+		if self.elapsed_seconds - self.gpu_memory_sample_seconds >= 1.0 {
+			self.gpu_memory_sample_seconds = self.elapsed_seconds;
+			self.gpu_memory_bytes = ToonShadingScene::estimate_gpu_memory_bytes(resources);
+		}
+		self.tick_milliseconds = cpu_frame_start.elapsed().as_secs_f64() * 1000.0;
 	}
 
 	//==============================================================================
@@ -1429,10 +2591,12 @@ impl Scene for ToonShadingScene {
 		graphic.flush_batch();
 		let canvas_pixel_size = engine.get_view_manager().get_canvas_pixel_size();
 		if self.resources.is_some() {
+			let render_start = std::time::Instant::now();
 			let gl = graphic.get_gl();
 			if let Err(error) = self.render_scene(gl, canvas_pixel_size.x as i32, canvas_pixel_size.y as i32) {
 				eprintln!("toonshading: {}", error);
 			}
+			self.cpu_frame_milliseconds = self.cpu_frame_milliseconds * 0.9 + (self.tick_milliseconds + render_start.elapsed().as_secs_f64() * 1000.0) * 0.1;
 		}
 		else {
 			let gl = graphic.get_gl();
@@ -1455,10 +2619,9 @@ impl Scene for ToonShadingScene {
 		let scale = native_size.x / 1280.0;
 		graphic.set_text_baseline(TextBaseline::Middle);
 		if self.resources.is_none() {
-			graphic.set_fill_color(Color::create(0.95, 0.93, 0.89, 0.6));
-			graphic.set_font_string(&format!("{}px sans-serif", 11.0 * scale));
-			let message = self.load_error_message.clone().unwrap_or_else(|| String::from("LOADING"));
-			ToonShadingScene::draw_spaced_text(graphic, &message, native_size.x * 0.5, native_size.y * 0.5, 6.0 * scale, true);
+			let detail = self.load_error_message.clone().unwrap_or_else(|| String::from("building character"));
+			let ratio = if self.load_error_message.is_some() { 0.0 } else { 0.9 };
+			ToonShadingScene::draw_loading_overlay(graphic, native_size, scale, 1.0, ratio, &detail);
 			return;
 		}
 		// 제목. (위 7%, 큰 글씨, 가는 줄, 작은 글씨)
@@ -1533,7 +2696,7 @@ impl Scene for ToonShadingScene {
 		graphic.set_font_string(&format!("{}px sans-serif", footer_font_size));
 		graphic.set_fill_color(Color::create(0.949, 0.925, 0.886, 0.42));
 		let footer_line_list = [
-			"DRAG TO ORBIT, WHEEL TO ZOOM, RIGHT-DRAG TO MOVE THE FOCUS",
+			"DRAG TO ORBIT, WHEEL OR PINCH TO ZOOM, RIGHT-DRAG OR TWO FINGERS TO PAN, DOUBLE-CLICK TO FOCUS",
 			"CHARACTER: VRM1 CONSTRAINT TWIST SAMPLE \u{00A9} 2022 PIXIV INC. (VRM PUBLIC LICENSE 1.0)",
 			"ANIMATION: QUATERNIUS UNIVERSAL ANIMATION LIBRARY 1, 2 (CC0)",
 		];
@@ -1542,18 +2705,95 @@ impl Scene for ToonShadingScene {
 			let y = native_size.y - 16.0 * scale - footer_line_height * (footer_line_list.len() - line_index) as f64 + footer_line_height * 0.5;
 			ToonShadingScene::draw_spaced_text(graphic, line, 18.0 * scale, y, footer_font_size * 0.16, false);
 		}
+
+		// 렌더링 정보. (옵션 패널의 높이 한계를 정한다)
+		if self.settings.option("hud") {
+			self.draw_hud(graphic, native_size, scale, link_rect);
+		}
+		else {
+			self.panel_hud_top = native_size.y / scale - 18.0;
+		}
+		// 옵션 패널과 우클릭 메뉴.
+		self.draw_option_panel(graphic, native_size, scale);
+		self.draw_context_menu(graphic, native_size, scale);
+		// 로딩 화면. (다 되면 1.4 초에 걸쳐 사라진다)
+		if let Some(ready_seconds) = self.ready_seconds {
+			if ready_seconds < 1.4 {
+				let progress = ready_seconds / 1.4;
+				let alpha = 1.0 - progress * progress * (3.0 - 2.0 * progress);
+				ToonShadingScene::draw_loading_overlay(graphic, native_size, scale, alpha, 1.0, "ready");
+			}
+		}
 	}
 
 	//==============================================================================
-	// 누름. (단추 또는 끌기 시작)
+	// 누름. (우클릭 메뉴, 옵션 패널, 단추, 끌기 시작)
 	//==============================================================================
 	fn touch_press(&mut self, _view_input_position: Vector2) {
 		let engine = Engine::get_engine().unwrap();
+		if self.resources.is_none() {
+			return;
+		}
 		let native_position = engine.get_input_manager().get_canvas_native_input_position();
+		let scale = engine.get_view_manager().get_canvas_native_size().x / 1280.0;
+		let (is_right, is_shift) = {
+			let input_manager = engine.get_input_manager();
+			(input_manager.is_mouse_button_down(MouseButton::Right), input_manager.is_key_pressed("ShiftLeft") || input_manager.is_key_pressed("ShiftRight"))
+		};
+		// 우클릭 메뉴가 열려 있으면 항목을 고르거나 닫는다.
+		if self.context_menu_position.is_some() {
+			let menu_rect = self.context_menu_rect;
+			self.context_menu_position = None;
+			if let Some(menu_rect) = menu_rect {
+				if rect_contains(menu_rect, native_position) {
+					let item_index = ((native_position.y - menu_rect.position.y - 6.0 * scale) / (28.0 * scale)).floor();
+					if item_index >= 0.0 && (item_index as usize) < CONTEXT_MENU_ITEMS.len() {
+						match item_index as usize {
+							0 => {
+								self.reset_view();
+							}
+							1 => {
+								self.focus_face();
+							}
+							2 => {
+								self.focus_body();
+							}
+							_ => {
+								self.settings.reset();
+							}
+						}
+					}
+					return;
+				}
+			}
+		}
+		// 옵션 패널.
+		if rect_contains(self.panel_rect, native_position) {
+			if native_position.y < self.panel_rect.position.y + PANEL_TITLE_HEIGHT * scale {
+				self.is_panel_collapsed = !self.is_panel_collapsed;
+			}
+			else if !self.is_panel_collapsed {
+				let content_y = (native_position.y - self.panel_rect.position.y - PANEL_TITLE_HEIGHT * scale) / scale + self.panel_scroll;
+				for (kind, row_y, row_height) in build_panel_rows().iter() {
+					if content_y >= *row_y && content_y < row_y + row_height {
+						match *kind {
+							PanelRowKind::Option(index) => {
+								self.settings.option_state_list[index] = !self.settings.option_state_list[index];
+							}
+							PanelRowKind::Slider(index) => {
+								self.active_slider = Some(index);
+								self.set_slider_from_position(index, native_position.x, scale);
+							}
+							PanelRowKind::Group(_) => {}
+						}
+					}
+				}
+			}
+			return;
+		}
 		let mut clicked: Option<(bool, String)> = None;
 		for button in self.button_list.iter() {
-			let rect = button.rect;
-			if native_position.x >= rect.position.x && native_position.x <= rect.position.x + rect.size.x && native_position.y >= rect.position.y && native_position.y <= rect.position.y + rect.size.y {
+			if rect_contains(button.rect, native_position) {
 				clicked = Some((button.is_expression, button.name.clone()));
 			}
 		}
@@ -1565,23 +2805,48 @@ impl Scene for ToonShadingScene {
 				self.select_animation(&name);
 			}
 			None => {
+				// 두 번 누르면 얼굴과 몸 사이를 오간다.
+				let double_dx = native_position.x - self.last_press_position.x;
+				let double_dy = native_position.y - self.last_press_position.y;
+				if !is_right && self.elapsed_seconds - self.last_press_seconds < 0.35 && double_dx * double_dx + double_dy * double_dy < 64.0 * scale * scale {
+					if self.camera_state.target_distance > (FACE_FOCUS_DISTANCE + BODY_FOCUS_DISTANCE) * 0.5 {
+						self.focus_face();
+					}
+					else {
+						self.focus_body();
+					}
+					self.last_press_seconds = -10.0;
+				}
+				else {
+					self.last_press_seconds = self.elapsed_seconds;
+					self.last_press_position = native_position;
+				}
 				self.drag_position = Some(native_position);
-				self.is_panning = false;
+				self.is_panning = is_right || is_shift;
+				self.drag_is_right = is_right;
+				self.has_panned = false;
 			}
 		}
 	}
 
 	//==============================================================================
-	// 끌기. (궤도 회전)
+	// 끌기. (궤도 회전, 오른쪽 끌기나 Shift 끌기는 초점 높이, 슬라이더 끌기)
 	//==============================================================================
 	fn touch_move(&mut self, _view_input_position: Vector2) {
 		let engine = Engine::get_engine().unwrap();
 		let native_position = engine.get_input_manager().get_canvas_native_input_position();
+		let scale = engine.get_view_manager().get_canvas_native_size().x / 1280.0;
+		if let Some(slider_index) = self.active_slider {
+			self.set_slider_from_position(slider_index, native_position.x, scale);
+			return;
+		}
 		if let Some(drag_position) = self.drag_position {
-			let scale = engine.get_view_manager().get_canvas_native_size().x / 1280.0;
 			let delta_x = (native_position.x - drag_position.x) / scale;
 			let delta_y = (native_position.y - drag_position.y) / scale;
 			if self.is_panning {
+				if delta_x != 0.0 || delta_y != 0.0 {
+					self.has_panned = true;
+				}
 				self.camera_state.is_manual_focus = true;
 				self.camera_state.target_focus_height = clamp_value(self.camera_state.target_focus_height + delta_y * 0.0022 * self.camera_state.target_distance, FOCUS_HEIGHT_MINIMUM, FOCUS_HEIGHT_MAXIMUM);
 			}
@@ -1594,16 +2859,32 @@ impl Scene for ToonShadingScene {
 	}
 
 	//==============================================================================
-	// 놓음.
+	// 놓음. (오른쪽 단추를 끌지 않고 놓으면 우클릭 메뉴)
 	//==============================================================================
 	fn touch_release(&mut self, _view_input_position: Vector2) {
+		let engine = Engine::get_engine().unwrap();
+		self.active_slider = None;
+		if self.drag_position.is_some() && self.drag_is_right && !self.has_panned {
+			self.context_menu_position = Some(engine.get_input_manager().get_canvas_native_input_position());
+		}
 		self.drag_position = None;
+		self.drag_is_right = false;
+		self.has_panned = false;
 	}
 
 	//==============================================================================
-	// 휠. (줌)
+	// 휠. (패널 위에서는 스크롤, 그 밖에서는 줌)
 	//==============================================================================
 	fn touch_wheel(&mut self, _view_input_position: Vector2, wheel_delta: Vector2) {
+		let engine = Engine::get_engine().unwrap();
+		let native_position = engine.get_input_manager().get_canvas_native_input_position();
+		if rect_contains(self.panel_rect, native_position) {
+			if !self.is_panel_collapsed {
+				let scale = engine.get_view_manager().get_canvas_native_size().x / 1280.0;
+				self.panel_scroll = (self.panel_scroll + wheel_delta.y / scale).max(0.0);
+			}
+			return;
+		}
 		let target_distance = self.camera_state.target_distance * (1.0 + wheel_delta.y * 0.0012);
 		self.set_target_distance(target_distance);
 	}
