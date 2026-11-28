@@ -107038,8 +107038,8 @@
 								}
 							],
 							"description": {
-								"ko": "멀티샘플을 텍스처로 풀기. (컬러 어태치먼트마다와 깊이 텍스처, 묶여 있던 프레임버퍼로 돌림, 원본 resolve())\n- 그리기를 끝낸 뒤 다시 읽지 않는 첨부(멀티샘플 색과 깊이, 텍스처가 아닌 깊이 렌더버퍼)를 버린다. (invalidate_framebuffer, 모바일 타일 GPU 가 메모리에 쓰지 않는다)\n- 풀고 나서 같은 판에 이어 그리려면 resolve_with_attachment_kept(gl, true).",
-								"en": "Resolves multisample into textures. (each color attachment and the depth texture, returns to the previously bound framebuffer, original resolve())\n- Discards the attachments not read again after drawing (multisample color and depth, a depth renderbuffer that is not a texture). (invalidate_framebuffer, a mobile tile GPU does not write them to memory)\n- To keep drawing on the same pass after resolving, use resolve_with_attachment_kept(gl, true)."
+								"ko": "멀티샘플을 텍스처로 풀기. (컬러 어태치먼트마다와 깊이 텍스처, 묶여 있던 프레임버퍼로 돌림, 원본 resolve())\n- 푼 뒤에도 멀티샘플 색과 깊이는 그대로 남는다. (invalidate_framebuffer 로 버리지 않는다, 아이패드와 아이폰 사파리에서 프레임마다 수 ~ 수십 ms 가 붙고 이득이 재어지지 않았다, 풀고 나서 이어 그리는 것도 된다)",
+								"en": "Resolves multisample into textures. (each color attachment and the depth texture, returns to the previously bound framebuffer, original resolve())\n- The multisample color and depth stay as they are after resolving. (They are not discarded with invalidate_framebuffer, which added several to tens of ms per frame in Safari on iPad and iPhone and showed no measured gain; drawing more after resolving also works)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/rendertarget.rs",
@@ -107067,14 +107067,14 @@
 									"name": "is_attachment_kept",
 									"type": "bool",
 									"description": {
-										"ko": "true 면 첨부를 버리지 않는다. (풀고 나서 같은 판에 이어 그릴 때)",
-										"en": "If true the attachments are not discarded. (when continuing to draw on the same pass after resolving)"
+										"ko": "더는 쓰지 않는다. (어느 쪽이든 푼 뒤에 멀티샘플 색과 깊이를 버리지 않는다)",
+										"en": "No longer used. (Either way the multisample color and depth are not discarded after resolving)"
 									}
 								}
 							],
 							"description": {
-								"ko": "멀티샘플을 텍스처로 풀기. (첨부를 남길지 고른다, 원본 resolve(isAttachmentKept))",
-								"en": "Resolves multisample into textures. (chooses whether to keep the attachments, original resolve(isAttachmentKept))"
+								"ko": "멀티샘플을 텍스처로 풀기. (옛 꼴과 맞추려고 남긴 짝, 원본 resolve(isAttachmentKept))",
+								"en": "Resolves multisample into textures. (Kept to match the old shape, original resolve(isAttachmentKept))"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/rendertarget.rs",

@@ -352,6 +352,8 @@ pub(crate) mod fake_gl {
 		remaining_success_table: HashMap<FakeGlObject, u32>,
 		/// glInvalidateFramebuffer 로 버린 첨부. (대상, 첨부 목록)
 		invalidated_attachment_list: Vec<(u32, Vec<u32>)>,
+		/// glClearBufferfv 로 비운 판. (대상, 판 번호, 값 넷)
+		cleared_float_buffer_list: Vec<(u32, i32, [f32; 4])>,
 	}
 
 	thread_local! {
@@ -392,6 +394,23 @@ pub(crate) mod fake_gl {
 	//==============================================================================
 	pub(crate) fn take_invalidated_attachment_list() -> Vec<(u32, Vec<u32>)> {
 		FAKE_GL_STATE.with(|state_cell| std::mem::take(&mut state_cell.borrow_mut().invalidated_attachment_list))
+	}
+
+	//==============================================================================
+	/// glClearBufferfv 로 비운 판을 꺼내기. (꺼낸 뒤 비운다)
+	//==============================================================================
+	pub(crate) fn take_cleared_float_buffer_list() -> Vec<(u32, i32, [f32; 4])> {
+		FAKE_GL_STATE.with(|state_cell| std::mem::take(&mut state_cell.borrow_mut().cleared_float_buffer_list))
+	}
+
+	//==============================================================================
+	/// 비운 판 적기.
+	//==============================================================================
+	extern "system" fn clear_buffer_f32_slice(target: u32, draw_buffer: i32, values: *const f32) {
+		let value_list = unsafe { std::slice::from_raw_parts(values, 4) };
+		FAKE_GL_STATE.with(|state_cell| {
+			state_cell.borrow_mut().cleared_float_buffer_list.push((target, draw_buffer, [value_list[0], value_list[1], value_list[2], value_list[3]]));
+		});
 	}
 
 	//==============================================================================
@@ -677,6 +696,12 @@ pub(crate) mod fake_gl {
 	}
 
 	//==============================================================================
+	/// 아무것도 하지 않는 그리기와 상태 호출. (인자는 쓰지 않는다, 호출 쪽이 정리하는 호출 규약이라 인자 수가 달라도 안전하다)
+	//==============================================================================
+	extern "system" fn do_nothing() {
+	}
+
+	//==============================================================================
 	/// glTexParameteri 자리. (아무것도 하지 않는다)
 	//==============================================================================
 	extern "system" fn set_enum_enum_integer(_first: u32, _second: u32, _third: i32) {
@@ -748,6 +773,8 @@ pub(crate) mod fake_gl {
 			b"glGetIntegerv" => get_integer as *const c_void,
 			b"glReadPixels" => read_pixels as *const c_void,
 			b"glInvalidateFramebuffer" => invalidate_framebuffer as *const c_void,
+			b"glDisable" | b"glEnable" | b"glActiveTexture" | b"glUseProgram" | b"glBlendFunc" | b"glBlendFuncSeparate" | b"glViewport" | b"glDrawArrays" | b"glUniform1i" | b"glUniform1f" | b"glUniform2f" | b"glUniform2i" | b"glUniform3f" | b"glUniform4f" | b"glScissor" | b"glColorMask" | b"glDepthMask" | b"glBlendEquation" | b"glBlendEquationSeparate" | b"glGetUniformLocation" => do_nothing as *const c_void,
+			b"glClearBufferfv" => clear_buffer_f32_slice as *const c_void,
 			b"glBlitFramebuffer" => blit_framebuffer as *const c_void,
 			b"glRenderbufferStorageMultisample" => renderbuffer_storage_multisample as *const c_void,
 			b"glReadBuffer" => read_buffer as *const c_void,
