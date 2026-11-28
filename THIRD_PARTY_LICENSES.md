@@ -581,6 +581,21 @@ No notice is required for these. They are listed so that the origin of the code 
 - `src/effect/screeneffect.rs`, `src/effect/shadersprite.rs`, `src/graphics3d/toon/toonvfx.rs` (hash21, hashPoint): the fmix32 finalizer of MurmurHash3 by Austin Appleby (https://github.com/aappleby/smhasher/blob/master/src/MurmurHash3.cpp): "MurmurHash3 was written by Austin Appleby, and is placed in the public domain. The author hereby disclaims copyright to this source code."
 - `src/effect/screeneffect.rs` (tonemap), `src/graphics3d/toon/toonpostprocess.rs`: the ACES filmic curve fit by Krzysztof Narkowicz (https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/): "Fitted curve's HLSL source code (free to use under public domain CC0 or MIT license)". Used under CC0.
 - The environment BRDF fit of `src/graphics3d/humanskinrenderer.rs` and the shader hash above are written for this engine. (The split sum integral is fitted by the engine's own least squares, not taken from another fit)
+### Example assets (examples/ancientmountain)
+
+The `ancientmountain` example reads its models and textures from the examples/ancientmountain/assets folder of the original vanilla.js repository (set next to this repository). They are not part of the engine crate, the published package or any build. Their sources are:
+
+| Files | Source | License |
+| --- | --- | --- |
+| `mannequin.fbx`, `mannequin_female.glb`, `anims/*.fbx` | Quaternius, Universal Animation Library (Standard) and Universal Animation Library 2 (Standard), https://opengameart.org/content/universal-animation-library , https://opengameart.org/content/universal-animation-library-2 | CC0 1.0 ("License: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication") |
+| `fox.glb` | Khronos glTF-Sample-Assets, Fox (unmodified), https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Fox | Model by PixelMannen, CC0 1.0. Rigging and animation by tomkranis, CC BY 4.0. glTF conversion by @AsoboStudio and @scurest, CC BY 4.0 |
+| `grass.jpg`, `rock.jpg`, `dirt.jpg`, `boulder.jpg` | Made for the vanilla.js repository with Google generative AI (C2PA record in each file: "Created by Google Generative AI") | Google Terms of Service: "Google won't claim ownership over that content." |
+
+Fox credit, as CC BY 4.0 asks: "Low poly fox" model by PixelMannen (https://opengameart.org/content/fox-and-shiba, CC0), rigged and animated by tomkranis (https://sketchfab.com/3d-models/low-poly-fox-by-pixelmannen-animated-371dea88d7e04a76af5763f2a36866bc, CC BY 4.0), converted to glTF by @AsoboStudio and @scurest (https://github.com/KhronosGroup/glTF-Sample-Models/pull/150#issuecomment-406300118, CC BY 4.0, https://creativecommons.org/licenses/by/4.0/). The example shows the same credit on screen.
+
+### Example assets (examples/assets/neonhorizon)
+
+`battlecruiser.glb` and `escort.glb` are the ship models of the `neonhorizon` example. They were made for the vanilla.js repository by its battlecruiser generator and are under the MIT license of this repository.
 <!-- vanilla-engine-licenses: bundled materials end -->
 
 ## Crates
