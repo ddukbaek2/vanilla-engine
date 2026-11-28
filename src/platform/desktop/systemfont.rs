@@ -39,7 +39,7 @@
 //! ```
 //==============================================================================
 // 옮긴 원문: 스키아 src/ports/SkFontConfigInterface_direct.cpp 의 kFontEquivMap, 크로미엄 locale_settings_*.grd 의 글꼴 표에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
-use crate::core::textstringtexturecache::FontFileSource;
+use crate::core::textstringtexturecache::{FamilyFontFace, FontFileSource};
 
 //==============================================================================
 /// 이어 누르기(두 번 누르기)로 볼 시간. (초, 입력 필드의 두 번, 세 번 누르기)
@@ -130,6 +130,51 @@ pub fn find_family_font_file(family_name: &str, weight: u16, is_italic: bool) ->
 		return platform_font::find_family_font_file(&resolved_family_name, weight, is_italic);
 	}
 	platform_font::find_family_font_file(family_name, weight, is_italic)
+}
+
+//==============================================================================
+/// 글꼴 이름의 모든 굵기, 기울기 얼굴 나열. (CSS 굵기 규칙으로 얼굴을 고르는 후보, 맥 CoreText 의 가족 얼굴, 윈도우 DirectWrite 의 가족 글꼴, 리눅스 fontconfig 의 굵기)
+///
+/// # 인자
+/// - `family_name`: 글꼴 이름 하나. (find_family_font_file 과 같다)
+///
+/// # 돌려줌
+/// 얼굴 목록. 이름의 글꼴이 없거나 얼굴을 나열하지 못하는 이름(맥 system-ui)이면 빈 목록.
+///
+/// # 예제
+/// 굵기와 기울기 얼굴
+/// ```rust
+/// use vanilla::platform::list_family_font_faces;
+///
+/// for face in list_family_font_faces("Helvetica Neue") {
+/// 	assert!((100..=900).contains(&face.weight));
+/// 	assert!(face.source.path.exists());
+/// }
+/// assert!(list_family_font_faces("NoSuchFamily").is_empty());
+/// ```
+//==============================================================================
+pub fn list_family_font_faces(family_name: &str) -> Vec<FamilyFontFace> {
+	let family_name = family_name.trim();
+	if family_name.is_empty() {
+		return Vec::new();
+	}
+	if let Some(quoted_family_name) = family_name.strip_prefix('"').and_then(|family_name| family_name.strip_suffix('"')) {
+		if quoted_family_name.is_empty() {
+			return Vec::new();
+		}
+		return platform_font::list_family_font_faces(quoted_family_name);
+	}
+	if let Some(generic_family) = GenericFamily::from_family_name(family_name) {
+		return match resolve_generic_family_name(generic_family) {
+			Some(resolved_family_name) => {
+				platform_font::list_family_font_faces(&resolved_family_name)
+			}
+			None => {
+				Vec::new()
+			}
+		};
+	}
+	platform_font::list_family_font_faces(family_name)
 }
 
 //==============================================================================
@@ -467,9 +512,9 @@ pub(crate) fn read_system_font_keyword(keyword: &str) -> Option<(String, f32)> {
 //==============================================================================
 #[cfg(target_os = "macos")]
 mod platform_font {
-	use crate::core::textstringtexturecache::FontFileSource;
-	use objc2_core_foundation::{CFDictionary, CFNumber, CFRange, CFRetained, CFString, CFType, CFURL};
-	use objc2_core_text::{kCTFontFamilyNameAttribute, kCTFontSymbolicTrait, kCTFontTraitsAttribute, kCTFontURLAttribute, kCTFontWeightTrait, kCTFontWidthTrait, CTFont, CTFontDescriptor, CTFontSymbolicTraits, CTFontUIFontType};
+	use crate::core::textstringtexturecache::{FamilyFontFace, FontFileSource};
+	use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFRange, CFRetained, CFString, CFType, CFURL};
+	use objc2_core_text::{kCTFontFamilyNameAttribute, kCTFontNameAttribute, kCTFontSymbolicTrait, kCTFontTableOS2, kCTFontTraitsAttribute, kCTFontURLAttribute, kCTFontWeightTrait, kCTFontWidthTrait, CTFont, CTFontDescriptor, CTFontSymbolicTraits, CTFontTableOptions, CTFontUIFontType};
 
 	/// 글꼴을 지을 때의 크기. (파일만 읽으므로 아무 크기나 된다)
 	const LOOKUP_FONT_SIZE: f64 = 16.0;
@@ -582,6 +627,118 @@ mod platform_font {
 			}
 		};
 		read_font_file(&font)
+	}
+
+	//==============================================================================
+	/// CoreText 굵기 특성 → CSS 굵기. (convert_weight_trait 표에서 가장 가까운 것)
+	//==============================================================================
+	fn convert_trait_weight(weight_trait: f64) -> u16 {
+		const WEIGHT_TABLE: [(u16, f64); 9] = [(100, -0.8), (200, -0.6), (300, -0.4), (400, 0.0), (500, 0.23), (600, 0.3), (700, 0.4), (800, 0.56), (900, 0.62)];
+		WEIGHT_TABLE.iter().min_by(|first, second| (first.1 - weight_trait).abs().total_cmp(&(second.1 - weight_trait).abs())).map(|entry| entry.0).unwrap_or(400)
+	}
+
+	//==============================================================================
+	/// 글꼴 이름의 모든 얼굴. (CTFontDescriptorCreateMatchingFontDescriptors 로 가족의 얼굴을 모아 파일, 굵기 특성, 기울임을 읽는다)
+	/// - 너비가 보통에 가장 가까운 얼굴만 둔다. (크롬도 font-stretch normal 로 고른다, Helvetica Neue 의 Condensed 얼굴이 굵기 후보에 끼지 않게)
+	/// - system-ui 와 BlinkMacSystemFont 는 시스템 UI 글꼴이라 나열하지 않는다. (청한 굵기를 wght 축 값으로 짓는다)
+	//==============================================================================
+	pub fn list_family_font_faces(family_name: &str) -> Vec<FamilyFontFace> {
+		if matches!(family_name.to_lowercase().as_str(), "system-ui" | "blinkmacsystemfont") {
+			return Vec::new();
+		}
+		let family_text = CFString::from_str(family_name);
+		let attribute_key_list: [&CFString; 1] = unsafe { [kCTFontFamilyNameAttribute] };
+		let attribute_value_list: [&CFType; 1] = [&family_text];
+		let attribute_dictionary = CFDictionary::<CFString, CFType>::from_slices(&attribute_key_list, &attribute_value_list);
+		let family_descriptor = unsafe { CTFontDescriptor::with_attributes(attribute_dictionary.as_ref()) };
+		let descriptor_array = match unsafe { family_descriptor.matching_font_descriptors(None) } {
+			Some(descriptor_array) => {
+				descriptor_array
+			}
+			None => {
+				return Vec::new();
+			}
+		};
+		let descriptor_array: &CFArray<CTFontDescriptor> = unsafe { descriptor_array.cast_unchecked() };
+		let mut face_list: Vec<(FamilyFontFace, f64, u16)> = Vec::new();
+		for descriptor in descriptor_array.iter() {
+			let found_family_name = match unsafe { descriptor.attribute(kCTFontFamilyNameAttribute) }.and_then(|value| value.downcast::<CFString>().ok()) {
+				Some(found_family_name) => {
+					found_family_name.to_string()
+				}
+				None => {
+					continue;
+				}
+			};
+			if !found_family_name.eq_ignore_ascii_case(family_name) {
+				continue;
+			}
+			let path = match unsafe { descriptor.attribute(kCTFontURLAttribute) }.and_then(|value| value.downcast::<CFURL>().ok()).and_then(|url| url.to_file_path()) {
+				Some(path) => {
+					path
+				}
+				None => {
+					continue;
+				}
+			};
+			let post_script_name = unsafe { descriptor.attribute(kCTFontNameAttribute) }.and_then(|value| value.downcast::<CFString>().ok()).map(|name| name.to_string());
+			let (weight_trait, width_trait, symbolic_traits) = match unsafe { descriptor.attribute(kCTFontTraitsAttribute) }.and_then(|value| value.downcast::<CFDictionary>().ok()) {
+				Some(trait_dictionary) => {
+					let trait_dictionary: &CFDictionary<CFString, CFType> = unsafe { trait_dictionary.cast_unchecked() };
+					let read_number = |key: &CFString| trait_dictionary.get(key).and_then(|value| value.downcast::<CFNumber>().ok()).and_then(|number| number.as_f64()).unwrap_or(0.0);
+					(read_number(unsafe { kCTFontWeightTrait }), read_number(unsafe { kCTFontWidthTrait }), read_number(unsafe { kCTFontSymbolicTrait }) as i64 as u32)
+				}
+				None => {
+					(0.0, 0.0, 0)
+				}
+			};
+			face_list.push((
+				FamilyFontFace {
+					source: FontFileSource {
+						path,
+						face_index: None,
+						post_script_name,
+					},
+					weight: convert_trait_weight(weight_trait),
+					is_italic: symbolic_traits & CTFontSymbolicTraits::ItalicTrait.0 != 0,
+				},
+				width_trait.abs(),
+				read_os2_weight(&descriptor),
+			));
+		}
+		let minimum_width = face_list.iter().map(|face| face.1).fold(f64::MAX, f64::min);
+		let mut face_list: Vec<(FamilyFontFace, f64, u16)> = face_list.into_iter().filter(|face| face.1 <= minimum_width + 0.001).collect();
+		// CoreText 의 굵기 특성은 거칠어 Apple SD Gothic Neo 의 ExtraBold 와 Heavy 가 같은 0.56 이다. 같은 굵기에 얼굴이 여럿이면 OS/2 굵기 차례로 위 굵기에 하나씩 올려 붙인다.
+		// (크롬은 굵기 800 에 ExtraBold, 900 에 Heavy 를 고른다)
+		face_list.sort_by_key(|face| (face.0.is_italic, face.0.weight, face.2));
+		for face_index in 1..face_list.len() {
+			let (previous, current) = (face_list[face_index - 1].0.clone(), face_list[face_index].0.clone());
+			if current.is_italic == previous.is_italic && current.weight <= previous.weight && current.source != previous.source {
+				face_list[face_index].0.weight = (previous.weight + 100).min(900);
+			}
+		}
+		face_list.into_iter().map(|face| face.0).collect()
+	}
+
+	//==============================================================================
+	/// 글꼴 서술자의 OS/2 굵기 분류. (usWeightClass, 못 읽으면 0)
+	//==============================================================================
+	fn read_os2_weight(descriptor: &CTFontDescriptor) -> u16 {
+		let font = unsafe { CTFont::with_font_descriptor(descriptor, LOOKUP_FONT_SIZE, std::ptr::null()) };
+		match unsafe { font.table(kCTFontTableOS2, CTFontTableOptions::NoOptions) } {
+			Some(table_data) => {
+				let bytes = table_data.to_vec();
+				if bytes.len() >= 6 {
+					u16::from_be_bytes([bytes[4], bytes[5]])
+				}
+				else {
+					0
+				}
+			}
+			None => {
+				0
+			}
+		}
 	}
 
 	//==============================================================================
@@ -743,7 +900,7 @@ mod platform_font {
 //==============================================================================
 #[cfg(target_os = "windows")]
 mod platform_font {
-	use crate::core::textstringtexturecache::FontFileSource;
+	use crate::core::textstringtexturecache::{FamilyFontFace, FontFileSource};
 	use std::ffi::{c_void, OsString};
 	use std::os::windows::ffi::OsStringExt;
 	use std::path::PathBuf;
@@ -1134,6 +1291,56 @@ mod platform_font {
 	}
 
 	//==============================================================================
+	/// 글꼴 이름의 모든 얼굴. (IDWriteFontFamily 의 글꼴마다 굵기, 기울기, 파일, 너비가 보통인 것만)
+	//==============================================================================
+	pub fn list_family_font_faces(family_name: &str) -> Vec<FamilyFontFace> {
+		let system_family_name = if family_name.eq_ignore_ascii_case("system-ui") {
+			read_menu_font_family_name()
+		}
+		else {
+			family_name.to_string()
+		};
+		let font_collection = match get_system_font_collection() {
+			Some(font_collection) => {
+				font_collection
+			}
+			None => {
+				return Vec::new();
+			}
+		};
+		let font_family = match find_font_family(&font_collection, &system_family_name) {
+			Some(font_family) => {
+				font_family
+			}
+			None => {
+				return Vec::new();
+			}
+		};
+		let mut face_list: Vec<FamilyFontFace> = Vec::new();
+		for font_index in 0..unsafe { font_family.GetFontCount() } {
+			let font = match unsafe { font_family.GetFont(font_index) } {
+				Ok(font) => {
+					font
+				}
+				Err(_) => {
+					continue;
+				}
+			};
+			if unsafe { font.GetStretch() } != DWRITE_FONT_STRETCH_NORMAL {
+				continue;
+			}
+			if let Some(source) = read_font_file(&font) {
+				face_list.push(FamilyFontFace {
+					source,
+					weight: (unsafe { font.GetWeight() }.0 as u16).clamp(1, 1000),
+					is_italic: unsafe { font.GetStyle() } != DWRITE_FONT_STYLE_NORMAL,
+				});
+			}
+		}
+		face_list
+	}
+
+	//==============================================================================
 	/// 대체 글꼴 파일 찾기. (IDWriteFontFallback.MapCharacters, 윈도우 8.1 보다 옛 판이라 대체 글꼴 기능이 없으면 None)
 	//==============================================================================
 	pub fn find_fallback_font_file(text: &str, weight: u16, is_italic: bool, is_color_wanted: bool) -> Option<FontFileSource> {
@@ -1252,7 +1459,7 @@ mod platform_font {
 //==============================================================================
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 mod platform_font {
-	use crate::core::textstringtexturecache::FontFileSource;
+	use crate::core::textstringtexturecache::{FamilyFontFace, FontFileSource};
 	use fontconfig_sys::constants::{FC_CHARSET, FC_COLOR, FC_FAMILY, FC_FILE, FC_INDEX, FC_SLANT, FC_SLANT_ITALIC, FC_SLANT_ROMAN, FC_WEIGHT};
 	use fontconfig_sys::{Fc, FcMatchPattern, FcPattern, FcResultMatch};
 	use std::ffi::{CStr, CString};
@@ -1489,6 +1696,13 @@ mod platform_font {
 	/// 글꼴 이름으로 파일 찾기. (find_family_font_file 과 같은 차례, `character` 를 주면 고른 얼굴이 그 글자를 가질 때만, 크롬 FontPlatformData::FontContainsCharacter)
 	//==============================================================================
 	fn match_family_font_file(family_name: &str, weight: u16, is_italic: bool, character: Option<u32>) -> Option<FontFileSource> {
+		match_family_font_face(family_name, weight, is_italic, character).map(|(font_file_source, _)| font_file_source)
+	}
+
+	//==============================================================================
+	/// match_family_font_file 에 고른 패턴의 fontconfig 굵기를 더해 돌려준다. (패턴에 굵기가 없으면 FC_WEIGHT_REGULAR 80)
+	//==============================================================================
+	fn match_family_font_face(family_name: &str, weight: u16, is_italic: bool, character: Option<u32>) -> Option<(FontFileSource, i32)> {
 		let library = read_library()?;
 		let lookup_family_name = if family_name.eq_ignore_ascii_case("system-ui") {
 			"sans"
@@ -1531,8 +1745,49 @@ mod platform_font {
 		else {
 			None
 		};
-		unsafe { (library.FcPatternDestroy)(matched_pattern) };
-		font_file_source
+		let mut matched_weight: i32 = 80;
+		unsafe {
+			(library.FcPatternGetInteger)(matched_pattern, FC_WEIGHT.as_ptr(), 0, &mut matched_weight);
+			(library.FcPatternDestroy)(matched_pattern);
+		}
+		font_file_source.map(|font_file_source| (font_file_source, matched_weight))
+	}
+
+	//==============================================================================
+	/// fontconfig 굵기 → CSS 굵기. (convert_weight 표에서 가장 가까운 것)
+	//==============================================================================
+	fn convert_fontconfig_weight(fontconfig_weight: i32) -> u16 {
+		const WEIGHT_TABLE: [(u16, i32); 9] = [(100, 0), (200, 40), (300, 50), (400, 80), (500, 100), (600, 180), (700, 200), (800, 205), (900, 210)];
+		WEIGHT_TABLE.iter().min_by_key(|entry| (entry.1 - fontconfig_weight).abs()).map(|entry| entry.0).unwrap_or(400)
+	}
+
+	//==============================================================================
+	/// 글꼴 이름의 모든 얼굴. (굵기 100 ~ 900 과 바른 꼴, 기울임으로 fontconfig 에 물어 받은 얼굴을 같은 파일끼리 묶고, 굵기는 고른 패턴의 FC_WEIGHT 로 읽는다)
+	/// - 청한 이름이 아닌 글꼴이 와도 받을 만한 글꼴일 때만 둔다. (match_family_font_face 의 acceptable 검사)
+	//==============================================================================
+	pub fn list_family_font_faces(family_name: &str) -> Vec<FamilyFontFace> {
+		let mut face_list: Vec<FamilyFontFace> = Vec::new();
+		for is_italic in [false, true] {
+			for weight in (100..=900).step_by(100) {
+				let (source, fontconfig_weight) = match match_family_font_face(family_name, weight, is_italic, None) {
+					Some(face) => {
+						face
+					}
+					None => {
+						continue;
+					}
+				};
+				if face_list.iter().any(|face| face.source == source) {
+					continue;
+				}
+				face_list.push(FamilyFontFace {
+					source,
+					weight: convert_fontconfig_weight(fontconfig_weight),
+					is_italic,
+				});
+			}
+		}
+		face_list
 	}
 
 	//==============================================================================
@@ -1602,7 +1857,7 @@ mod platform_font {
 //==============================================================================
 #[cfg(not(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android")))))]
 mod platform_font {
-	use crate::core::textstringtexturecache::FontFileSource;
+	use crate::core::textstringtexturecache::{FamilyFontFace, FontFileSource};
 
 	/// 기본 글꼴 표가 없다.
 	pub const BASE_FAMILY_TABLE: [&str; 7] = [""; 7];
@@ -1628,6 +1883,13 @@ mod platform_font {
 	//==============================================================================
 	pub fn find_family_font_file(_family_name: &str, _weight: u16, _is_italic: bool) -> Option<FontFileSource> {
 		None
+	}
+
+	//==============================================================================
+	/// 글꼴 이름의 모든 얼굴. (찾지 않는다)
+	//==============================================================================
+	pub fn list_family_font_faces(_family_name: &str) -> Vec<FamilyFontFace> {
+		Vec::new()
 	}
 
 	//==============================================================================

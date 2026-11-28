@@ -69,4 +69,4 @@ pub(crate) use web::request_clipboard_paste;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::read_renderbuffer_sample_counts;
 #[cfg(not(target_arch = "wasm32"))]
-pub use desktop::systemfont::{find_fallback_font_file, find_family_font_file};
+pub use desktop::systemfont::{find_fallback_font_file, find_family_font_file, list_family_font_faces};
