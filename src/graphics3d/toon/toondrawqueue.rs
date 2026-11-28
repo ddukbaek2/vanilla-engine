@@ -25,7 +25,7 @@
 //!   단계 콜백은 FnMut 이라 RefCell 에 담아 draw(&self) 에서 부른다.
 //==============================================================================
 use crate::core::glcontext::GlContext;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 
@@ -34,7 +34,7 @@ use crate::core::graphic::GlTexture;
 use crate::graphics3d::camera3d::Camera3D;
 use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowCache, ShadowCasterRecord, ShadowMap, ShadowRenderTarget, ShadowUpdateMode};
 use crate::graphics3d::toon::toonmaterial::ToonBlendMode;
-use crate::graphics3d::toon::toonrenderer::{ToonDrawOptions, ToonInstance, ToonMesh, ToonRenderer};
+use crate::graphics3d::toon::toonrenderer::{is_same_batch_state, read_matrix_determinant, ToonDrawOptions, ToonInstance, ToonMesh, ToonRenderer, DRAW_PART_BODY, DRAW_PART_OUTLINE, DRAW_PART_ALL};
 use crate::graphics3d::toon::toonscreenoutline::{ToonLineDrawOptions, ToonScreenOutline, TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID};
 use crate::graphics3d::toon::toonpostprocess::ToonPostProcess;
 
@@ -72,6 +72,31 @@ struct ToonDrawItem<'a> {
 	options: ToonDrawOptions<'a>,
 	is_transparent: bool,
 	depth_position: [f64; 3],
+	/// 재질 블록 번호. (원본 materialBlock, 보통 모형 하나씩인 불투명한 것만, 없으면 0, 정렬과 자동 인스턴싱의 열쇠, 처음 정렬할 때 렌더러에서 읽는다)
+	material_block: Cell<u64>,
+	/// 감기. (원본 mirrorSign, 0 이나 1)
+	mirror_sign: Cell<u8>,
+}
+
+//==============================================================================
+/// 선의 판 묶음 하나. (같은 모형과 선 꼴, 첫 담은 것의 자리와 행렬 목록에서의 자리들)
+//==============================================================================
+struct LineGroup {
+	item_index: usize,
+	position_list: Vec<usize>,
+}
+
+//==============================================================================
+/// 선의 판 자동 인스턴싱의 모은 것. (원본 #lineMatrices, #lineIds, #lineGroupPool, #lineBatchSlotCount)
+//==============================================================================
+#[derive(Default)]
+struct LineBatch {
+	matrix_list: Vec<Matrix4>,
+	id_list: Vec<u32>,
+	group_list: Vec<LineGroup>,
+	group_table: HashMap<(usize, u8, usize, usize), usize>,
+	/// 이 프레임 선의 판에서 지금까지 쓴 묶음 자리 수. (프레임마다 같은 차례로 자리를 준다)
+	slot_count: usize,
 }
 
 //==============================================================================
@@ -121,20 +146,22 @@ pub struct ToonDrawQueue<'a> {
 	post_process: RefCell<Option<&'a mut ToonPostProcess>>,
 	/// 정렬한 불투명한 것의 차례. (원본 opaqueItemList, 담거나 비우면 None, 처음 그릴 때 만든다)
 	opaque_index_list: RefCell<Option<Vec<usize>>>,
+	/// 자동 인스턴싱으로 묶은 행렬. (원본 #batchMatrices, 프레임마다 다시 쓴다)
+	batch_matrix_list: RefCell<Vec<Matrix4>>,
 }
 
 thread_local! {
 	/// 정렬 번호. (원본 sortIdTable, 처음 본 차례로 1 부터, 재질은 번호, 모형은 주소, 텍스처는 GL 이름이 키)
-	static SORT_ID_TABLE: RefCell<(u64, HashMap<u32, u64>, HashMap<usize, u64>, HashMap<GlTexture, u64>)> = RefCell::new((1, HashMap::new(), HashMap::new(), HashMap::new()));
+	static SORT_ID_TABLE: RefCell<(u64, HashMap<u32, u64>, HashMap<usize, u64>, HashMap<GlTexture, u64>, HashMap<u64, u64>)> = RefCell::new((1, HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new()));
 }
 
 //==============================================================================
-/// 정렬 번호 셋 읽기. (원본 readSortId, 재질, 모형, 바탕색 텍스처, 없으면 0)
+/// 정렬 번호 넷 읽기. (원본 readSortId, 재질, 모형, 바탕색 텍스처, 재질 블록, 없으면 0)
 //==============================================================================
-fn read_sort_ids(item: &ToonDrawItem) -> (u64, u64, u64) {
+fn read_sort_ids(item: &ToonDrawItem) -> (u64, u64, u64, u64) {
 	SORT_ID_TABLE.with(|sort_id_table| {
 		let mut sort_id_table = sort_id_table.borrow_mut();
-		let (next_sort_id, material_table, mesh_table, texture_table) = &mut *sort_id_table;
+		let (next_sort_id, material_table, mesh_table, texture_table, block_table) = &mut *sort_id_table;
 		let material_id = match item.options.material {
 			Some(material) => *material_table.entry(material.get_id()).or_insert_with(|| { *next_sort_id += 1; *next_sort_id - 1 }),
 			None => 0,
@@ -144,7 +171,11 @@ fn read_sort_ids(item: &ToonDrawItem) -> (u64, u64, u64) {
 			Some(texture) => *texture_table.entry(texture).or_insert_with(|| { *next_sort_id += 1; *next_sort_id - 1 }),
 			None => 0,
 		};
-		(material_id, mesh_id, texture_id)
+		let block_id = match item.material_block.get() {
+			0 => 0,
+			block => *block_table.entry(block).or_insert_with(|| { *next_sort_id += 1; *next_sort_id - 1 }),
+		};
+		(material_id, mesh_id, texture_id, block_id)
 	})
 }
 
@@ -232,7 +263,7 @@ impl<'a> ToonDrawQueue<'a> {
 	/// 빈 그리기 줄. (화면 공간 바깥선을 맡기지 않은 것)
 	//==============================================================================
 	pub fn new() -> ToonDrawQueue<'a> {
-		ToonDrawQueue { item_list: Vec::new(), pass_list: RefCell::new(Vec::new()), screen_outline: RefCell::new(None), post_process: RefCell::new(None), opaque_index_list: RefCell::new(None) }
+		ToonDrawQueue { item_list: Vec::new(), pass_list: RefCell::new(Vec::new()), screen_outline: RefCell::new(None), post_process: RefCell::new(None), opaque_index_list: RefCell::new(None), batch_matrix_list: RefCell::new(Vec::new()) }
 	}
 
 	//==============================================================================
@@ -358,7 +389,7 @@ impl<'a> ToonDrawQueue<'a> {
 		let (center, _) = mesh.get_bounding_sphere();
 		let depth_point = model_matrix.transform_point(center[0], center[1], center[2]);
 		*self.opaque_index_list.get_mut() = None;
-		self.item_list.push(ToonDrawItem { mesh, model_matrix: *model_matrix, instance_list: None, options, is_transparent: is_transparent_options(&options), depth_position: [depth_point.x, depth_point.y, depth_point.z] });
+		self.item_list.push(ToonDrawItem { mesh, model_matrix: *model_matrix, instance_list: None, options, is_transparent: is_transparent_options(&options), depth_position: [depth_point.x, depth_point.y, depth_point.z], material_block: Cell::new(0), mirror_sign: Cell::new(0) });
 	}
 
 	//==============================================================================
@@ -383,7 +414,7 @@ impl<'a> ToonDrawQueue<'a> {
 			*value /= instance_list.len() as f64;
 		}
 		*self.opaque_index_list.get_mut() = None;
-		self.item_list.push(ToonDrawItem { mesh, model_matrix: Matrix4::create_identity(), instance_list: Some(instance_list), options, is_transparent: is_transparent_options(&options), depth_position });
+		self.item_list.push(ToonDrawItem { mesh, model_matrix: Matrix4::create_identity(), instance_list: Some(instance_list), options, is_transparent: is_transparent_options(&options), depth_position, material_block: Cell::new(0), mirror_sign: Cell::new(0) });
 	}
 
 	//==============================================================================
@@ -402,10 +433,7 @@ impl<'a> ToonDrawQueue<'a> {
 		self.draw_shadow_casters(gl, renderer, shadow_map.get_shadow_cache(), light_key, &|renderer: &mut ToonRenderer| {
 			renderer.begin_shadow_pass(gl, shadow_map);
 		}, &|renderer: &mut ToonRenderer, caster_index_list: &[usize]| {
-			for &item_index in caster_index_list {
-				let item = &self.item_list[item_index];
-				ToonDrawQueue::draw_item(gl, renderer, item, item.options);
-			}
+			self.draw_caster_list(gl, renderer, caster_index_list);
 		});
 	}
 
@@ -434,10 +462,7 @@ impl<'a> ToonDrawQueue<'a> {
 		}, &|renderer: &mut ToonRenderer, caster_index_list: &[usize]| {
 			for tile_index in 0..tile_count {
 				renderer.set_shadow_atlas_tile(gl, shadow_atlas, tile_index);
-				for &item_index in caster_index_list {
-					let item = &self.item_list[item_index];
-					ToonDrawQueue::draw_item(gl, renderer, item, item.options);
-				}
+				self.draw_caster_list(gl, renderer, caster_index_list);
 			}
 		});
 	}
@@ -455,7 +480,7 @@ impl<'a> ToonDrawQueue<'a> {
 	/// - 구운 판을 짓지 못하면(GL 오류) 그 프레임은 전부를 판에 바로 그린다. (원본은 짓기가 늘 된다)
 	//==============================================================================
 	fn draw_shadow_casters(&self, gl: &GlContext, renderer: &mut ToonRenderer, shadow_cache: &RefCell<ShadowCache>, light_key: Vec<f32>, begin_pass: &dyn Fn(&mut ToonRenderer), draw_casters: &dyn Fn(&mut ToonRenderer, &[usize])) {
-		let caster_index_list: Vec<usize> = self.read_opaque_index_list().iter().copied().filter(|&item_index| self.item_list[item_index].options.casts_shadow).collect();
+		let caster_index_list: Vec<usize> = self.read_opaque_index_list(gl, renderer).iter().copied().filter(|&item_index| self.item_list[item_index].options.casts_shadow).collect();
 		let draw_pass = |renderer: &mut ToonRenderer, render_target: ShadowRenderTarget, index_list: &[usize]| {
 			shadow_cache.borrow_mut().render_target = render_target;
 			begin_pass(renderer);
@@ -660,6 +685,10 @@ impl<'a> ToonDrawQueue<'a> {
 			}
 		}
 		if screen_outline.begin_line_ids(gl, view_matrix, projection_matrix) {
+			// 자동 인스턴싱: 보통 모형은 담은 차례로 거르고 초점 거리에 더한 뒤(accept_mesh), 같은 모형과 선 꼴인 것을 모아 인스턴스 그리기 한 번으로.
+			// (번호는 인스턴스마다, 깊이가 같은 곳이 아니면 그리는 차례와 상관없이 같은 판)
+			// 묶지 않는 것(인스턴스 묶음, 뒤집은 감기, 뼈대)을 만나면 모은 것을 먼저 그려 그것과의 차례는 담은 차례 그대로 둔다. (선의 판은 LEQUAL)
+			let mut line_batch = LineBatch::default();
 			for (item_index, item) in self.item_list.iter().enumerate() {
 				if item.is_transparent {
 					continue;
@@ -674,20 +703,69 @@ impl<'a> ToonDrawQueue<'a> {
 					has_screen_outline: item.options.has_screen_outline,
 					has_crease_line: item.options.has_crease_line,
 				};
-				match item.instance_list {
-					Some(instance_list) => {
-						screen_outline.draw_mesh_instanced(gl, item.mesh, instance_list, line_id, line_options);
-					}
-					None => {
-						screen_outline.draw_mesh(gl, item.mesh, &item.model_matrix, line_id, line_options);
-					}
+				if let Some(instance_list) = item.instance_list {
+					self.flush_line_groups(gl, screen_outline, &mut line_batch);
+					screen_outline.draw_mesh_instanced(gl, item.mesh, instance_list, line_id, line_options);
+					continue;
 				}
+				let is_mirrored = item.options.is_mirrored.unwrap_or_else(|| read_matrix_determinant(&item.model_matrix) < 0.0);
+				if is_mirrored || item.options.joint_matrices.is_some() {
+					self.flush_line_groups(gl, screen_outline, &mut line_batch);
+					screen_outline.draw_mesh(gl, item.mesh, &item.model_matrix, line_id, line_options);
+					continue;
+				}
+				if !screen_outline.accept_mesh(item.mesh, &item.model_matrix, item.options.is_culled) {
+					continue;
+				}
+				let line_flags = item.options.has_crease_line as u8 + 2 * item.options.has_screen_outline as u8;
+				let group_key = (item.mesh as *const ToonMesh as usize, line_flags, item.options.index_start, item.options.index_count);
+				let group_index = *line_batch.group_table.entry(group_key).or_insert_with(|| {
+					line_batch.group_list.push(LineGroup { item_index, position_list: Vec::new() });
+					line_batch.group_list.len() - 1
+				});
+				line_batch.group_list[group_index].position_list.push(line_batch.matrix_list.len());
+				line_batch.matrix_list.push(item.model_matrix);
+				line_batch.id_list.push(line_id);
 			}
+			// 묶음마다 이어 담아 그린다.
+			self.flush_line_groups(gl, screen_outline, &mut line_batch);
 			screen_outline.end_line_ids(gl);
 		}
 		unsafe {
 			crate::core::glstatecache::viewport(gl, viewport[0], viewport[1], viewport[2], viewport[3]);
 		}
+	}
+
+	//==============================================================================
+	/// 선의 판 묶음 그리기. (원본 flushLineGroups, 모은 묶음마다 행렬과 번호를 이어 담아 인스턴스 그리기 한 번, 묶음과 모은 것을 비운다)
+	//==============================================================================
+	fn flush_line_groups(&self, gl: &GlContext, screen_outline: &mut ToonScreenOutline, line_batch: &mut LineBatch) {
+		let mut ordered_matrices: Vec<Matrix4> = Vec::new();
+		let mut ordered_ids: Vec<u32> = Vec::new();
+		for group in line_batch.group_list.iter() {
+			ordered_matrices.clear();
+			ordered_ids.clear();
+			for &position in group.position_list.iter() {
+				ordered_matrices.push(line_batch.matrix_list[position]);
+				ordered_ids.push(line_batch.id_list[position]);
+			}
+			let item = &self.item_list[group.item_index];
+			let line_options = ToonLineDrawOptions {
+				joint_matrices: None,
+				is_culled: item.options.is_culled,
+				index_start: item.options.index_start,
+				index_count: if item.options.index_count > 0 { Some(item.options.index_count) } else { None },
+				is_mirrored: item.options.is_mirrored,
+				has_screen_outline: item.options.has_screen_outline,
+				has_crease_line: item.options.has_crease_line,
+			};
+			screen_outline.draw_mesh_batch(gl, item.mesh, &ordered_matrices, &ordered_ids, line_options, line_batch.slot_count);
+			line_batch.slot_count += 1;
+		}
+		line_batch.group_list.clear();
+		line_batch.group_table.clear();
+		line_batch.matrix_list.clear();
+		line_batch.id_list.clear();
 	}
 
 	//==============================================================================
@@ -712,9 +790,24 @@ impl<'a> ToonDrawQueue<'a> {
 	/// 정렬한 불투명한 것의 차례 읽기. (원본 readOpaqueItemList, 재질, 모형, 바탕색 텍스처의 차례, 같으면 담은 차례, 담은 것이 그대로면 앞서 만든 것을 쓴다)
 	/// - 그림자 깊이 판은 차례와 결과가 무관하다. 색 판은 깊이가 꼭 같은 면만 차례가 드러난다.
 	//==============================================================================
-	fn read_opaque_index_list(&self) -> std::cell::Ref<'_, Vec<usize>> {
+	fn read_opaque_index_list(&self, gl: &GlContext, renderer: &ToonRenderer) -> std::cell::Ref<'_, Vec<usize>> {
 		if self.opaque_index_list.borrow().is_none() {
-			let mut key_list: Vec<((u64, u64, u64), usize)> = self.item_list.iter().enumerate().filter(|(_, item)| !item.is_transparent).map(|(item_index, item)| (read_sort_ids(item), item_index)).collect();
+			// 자동 인스턴싱의 열쇠. (보통 모형 하나씩인 불투명한 것만, 재질 블록과 감기)
+			for item in self.item_list.iter() {
+				if item.is_transparent || item.instance_list.is_some() {
+					continue;
+				}
+				item.material_block.set(renderer.read_material_block(gl, &item.options));
+				item.mirror_sign.set(match item.options.is_mirrored {
+					Some(is_mirrored) => {
+						is_mirrored as u8
+					}
+					None => {
+						(read_matrix_determinant(&item.model_matrix) < 0.0) as u8
+					}
+				});
+			}
+			let mut key_list: Vec<((u64, u64, u64, u64), usize)> = self.item_list.iter().enumerate().filter(|(_, item)| !item.is_transparent).map(|(item_index, item)| (read_sort_ids(item), item_index)).collect();
 			key_list.sort_unstable();
 			*self.opaque_index_list.borrow_mut() = Some(key_list.into_iter().map(|(_, item_index)| item_index).collect());
 		}
@@ -727,26 +820,55 @@ impl<'a> ToonDrawQueue<'a> {
 	fn draw_stages(&self, gl: &GlContext, renderer: &mut ToonRenderer, read_depth: &dyn Fn([f64; 3]) -> f64) {
 		self.run_passes(gl, renderer, ToonDrawStage::BeforeOpaque);
 
-		// 1. 불투명한 몸. (인스턴스 묶음은 바깥선까지 한 번에, 화면 밖이면 draw_mesh 가 걸러 센다)
-		let mut outline_index_list: Vec<usize> = Vec::new();
-		for &item_index in self.read_opaque_index_list().iter() {
-			let item = &self.item_list[item_index];
-			if item.instance_list.is_some() || (item.options.is_culled && !renderer.is_visible(item.mesh, &item.model_matrix)) {
-				ToonDrawQueue::draw_item(gl, renderer, item, item.options);
-				continue;
-			}
-			ToonDrawQueue::draw_item(gl, renderer, item, ToonDrawOptions { has_outline: false, ..item.options });
-			if item.options.has_outline {
-				outline_index_list.push(item_index);
+		// 1. 불투명한 몸. (인스턴스 묶음은 바깥선까지 한 번에)
+		// - 자동 인스턴싱: 정렬로 이어진 같은 모형, 같은 재질 블록의 보통 모형은 인스턴스 그리기 한 번으로. (거르기는 하나씩 먼저, 화면 밖이면 draw_mesh 가 걸러 센다)
+		let mut batch_matrices = std::mem::take(&mut *self.batch_matrix_list.borrow_mut());
+		batch_matrices.clear();
+		let mut outline_batches: Vec<(usize, usize, usize, usize)> = Vec::new();
+		{
+			let opaque_index_list = self.read_opaque_index_list(gl, renderer);
+			let mut position = 0;
+			let mut slot_index = 0;
+			while position < opaque_index_list.len() {
+				let first_item_index = opaque_index_list[position];
+				let item = &self.item_list[first_item_index];
+				position += 1;
+				if item.instance_list.is_some() || (item.options.is_culled && !renderer.is_visible(item.mesh, &item.model_matrix)) {
+					ToonDrawQueue::draw_item(gl, renderer, item, item.options);
+					continue;
+				}
+				let start = batch_matrices.len();
+				batch_matrices.push(item.model_matrix);
+				position = self.collect_batch(gl, renderer, &opaque_index_list, position, item, &mut batch_matrices);
+				let count = batch_matrices.len() - start;
+				// 몸만. (바깥선 껍데기는 몸을 다 그린 뒤 몰아 그린다)
+				if count == 1 {
+					renderer.draw_mesh_body(gl, item.mesh, &item.model_matrix, item.options);
+				}
+				else {
+					renderer.draw_mesh_batch(gl, item.mesh, &batch_matrices[start..], item.options, DRAW_PART_BODY, slot_index);
+				}
+				if item.options.has_outline && item.mesh.has_outline() {
+					outline_batches.push((first_item_index, start, count, slot_index));
+				}
+				if count > 1 {
+					slot_index += 1;
+				}
 			}
 		}
 		self.run_passes(gl, renderer, ToonDrawStage::AfterOpaque);
 
-		// 2. 불투명한 것의 바깥선 껍데기와 화면 공간 바깥선.
-		for item_index in outline_index_list {
-			let item = &self.item_list[item_index];
-			renderer.draw_mesh_outline(gl, item.mesh, &item.model_matrix, item.options);
+		// 2. 불투명한 것의 바깥선 껍데기와 화면 공간 바깥선. (몸과 같은 묶음)
+		for &(first_item_index, start, count, slot_index) in outline_batches.iter() {
+			let item = &self.item_list[first_item_index];
+			if count == 1 {
+				renderer.draw_mesh_outline(gl, item.mesh, &item.model_matrix, item.options);
+			}
+			else {
+				renderer.draw_mesh_batch(gl, item.mesh, &batch_matrices[start..start + count], item.options, DRAW_PART_OUTLINE, slot_index);
+			}
 		}
+		*self.batch_matrix_list.borrow_mut() = batch_matrices;
 		if let Some(screen_outline) = self.screen_outline.borrow_mut().as_mut() {
 			screen_outline.draw_outline(gl);
 			renderer.apply_frame_state(gl);
@@ -808,6 +930,66 @@ impl<'a> ToonDrawQueue<'a> {
 			}
 		}
 		self.run_passes(gl, renderer, ToonDrawStage::AfterTransparent);
+	}
+
+	//==============================================================================
+	/// 자동 인스턴싱으로 묶을 수 있는지. (원본 isBatchableItem, 같은 모형, 같은 재질 블록, 같은 감기, 선 번호와 묶음 말고 푼 칸이 모두 같은 보통 모형 하나씩)
+	//==============================================================================
+	fn is_batchable_item(item: &ToonDrawItem, other: &ToonDrawItem) -> bool {
+		std::ptr::eq(other.mesh, item.mesh) && other.instance_list.is_none() && other.material_block.get() == item.material_block.get() && other.mirror_sign.get() == item.mirror_sign.get() && is_same_batch_state(&item.options, &other.options)
+	}
+
+	//==============================================================================
+	/// 자동 인스턴싱으로 묶을 것 모으기. (원본 collectBatch, item 뒤에 이어진 같은 것의 행렬을 batch_matrices 에 더한다, 화면 밖인 것은 draw_item 이 걸러 센다)
+	///
+	/// # 돌려줌
+	/// 묶지 않은 첫 자리.
+	//==============================================================================
+	fn collect_batch(&self, gl: &GlContext, renderer: &mut ToonRenderer, index_list: &[usize], mut position: usize, item: &ToonDrawItem, batch_matrices: &mut Vec<Matrix4>) -> usize {
+		if item.material_block.get() == 0 {
+			return position;
+		}
+		while position < index_list.len() {
+			let other = &self.item_list[index_list[position]];
+			if !ToonDrawQueue::is_batchable_item(item, other) {
+				break;
+			}
+			position += 1;
+			if other.options.is_culled && !renderer.is_visible(other.mesh, &other.model_matrix) {
+				ToonDrawQueue::draw_item(gl, renderer, other, other.options);
+				continue;
+			}
+			batch_matrices.push(other.model_matrix);
+		}
+		position
+	}
+
+	//==============================================================================
+	/// 그림자 드리우개 목록 그리기. (원본 drawCasterList, 이어진 같은 것은 자동 인스턴싱으로 한 번에, 나머지는 draw_item)
+	//==============================================================================
+	fn draw_caster_list(&self, gl: &GlContext, renderer: &mut ToonRenderer, caster_index_list: &[usize]) {
+		let mut batch_matrices = std::mem::take(&mut *self.batch_matrix_list.borrow_mut());
+		let mut position = 0;
+		let mut slot_index = 0;
+		while position < caster_index_list.len() {
+			let item = &self.item_list[caster_index_list[position]];
+			position += 1;
+			if item.instance_list.is_some() || (item.options.is_culled && !renderer.is_visible(item.mesh, &item.model_matrix)) {
+				ToonDrawQueue::draw_item(gl, renderer, item, item.options);
+				continue;
+			}
+			batch_matrices.clear();
+			batch_matrices.push(item.model_matrix);
+			position = self.collect_batch(gl, renderer, caster_index_list, position, item, &mut batch_matrices);
+			if batch_matrices.len() == 1 {
+				ToonDrawQueue::draw_item(gl, renderer, item, item.options);
+			}
+			else {
+				renderer.draw_mesh_batch(gl, item.mesh, &batch_matrices, item.options, DRAW_PART_ALL, slot_index);
+				slot_index += 1;
+			}
+		}
+		*self.batch_matrix_list.borrow_mut() = batch_matrices;
 	}
 
 	//==============================================================================
