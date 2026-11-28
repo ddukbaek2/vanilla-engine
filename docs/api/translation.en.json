@@ -15489,5 +15489,6 @@
 	"텍스처.": "Texture.",
 	"합(캔버스 기본 프레임 버퍼 몫 포함), 캔버스 몫, 종류별 몫, 주인별 몫(큰 것부터, 주인은 지은 호출 스택의 위쪽 세 칸).": "The total (including the canvas default framebuffer share), the canvas share, the share by kind and by owner (largest first; the owner is the top three frames of the creating call stack).",
 	"합, 캔버스 몫, 종류별과 주인별 몫.": "The total, the canvas share, and the shares by kind and by owner.",
-	"합. (캔버스 기본 프레임 버퍼 몫 포함)": "Total. (including the canvas default framebuffer share)"
+	"합. (캔버스 기본 프레임 버퍼 몫 포함)": "Total. (including the canvas default framebuffer share)",
+	"glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
 }

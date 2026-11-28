@@ -120,6 +120,7 @@ thread_local! {
 	static ENTRY_TABLE: RefCell<HashMap<GpuMemoryKey, GpuMemoryEntry>> = RefCell::new(HashMap::new());
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 const STACK_DEPTH: usize = 3;
 
 /// 켜졌는지. (GlContext 의 짓기와 크기 정하기가 먼저 본다)

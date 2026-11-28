@@ -61045,834 +61045,6 @@
 						},
 						{
 							"kind": "method",
-							"name": "tex_image_2d_with_image_bitmap",
-							"signature": "pub unsafe fn tex_image_2d_with_image_bitmap(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, pixels: &web_sys::ImageBitmap)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "pixels",
-									"type": "&web_sys::ImageBitmap",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_2d_with_image_bitmap_and_width_and_height",
-							"signature": "pub unsafe fn tex_image_2d_with_image_bitmap_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, pixels: &web_sys::ImageBitmap)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "width",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "height",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "pixels",
-									"type": "&web_sys::ImageBitmap",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_2d_with_html_canvas",
-							"signature": "pub unsafe fn tex_image_2d_with_html_canvas(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, canvas: &web_sys::HtmlCanvasElement)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "canvas",
-									"type": "&web_sys::HtmlCanvasElement",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_2d_with_html_canvas_and_width_and_height",
-							"signature": "pub unsafe fn tex_image_2d_with_html_canvas_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, canvas: &web_sys::HtmlCanvasElement)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "width",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "height",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "canvas",
-									"type": "&web_sys::HtmlCanvasElement",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_2d_with_html_image",
-							"signature": "pub unsafe fn tex_image_2d_with_html_image(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, image: &web_sys::HtmlImageElement)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "image",
-									"type": "&web_sys::HtmlImageElement",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_2d_with_html_image_and_width_and_height",
-							"signature": "pub unsafe fn tex_image_2d_with_html_image_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, image: &web_sys::HtmlImageElement)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "width",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "height",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "image",
-									"type": "&web_sys::HtmlImageElement",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_2d_with_html_video",
-							"signature": "pub unsafe fn tex_image_2d_with_html_video(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, video: &web_sys::HtmlVideoElement)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "video",
-									"type": "&web_sys::HtmlVideoElement",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_2d_with_html_video_and_width_and_height",
-							"signature": "pub unsafe fn tex_image_2d_with_html_video_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, video: &web_sys::HtmlVideoElement)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "width",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "height",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "video",
-									"type": "&web_sys::HtmlVideoElement",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_2d_with_video_frame",
-							"signature": "pub unsafe fn tex_image_2d_with_video_frame(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, video_frame: &web_sys::VideoFrame)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "video_frame",
-									"type": "&web_sys::VideoFrame",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_2d_with_video_frame_and_width_and_height",
-							"signature": "pub unsafe fn tex_image_2d_with_video_frame_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, video_frame: &web_sys::VideoFrame)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "width",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "height",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "video_frame",
-									"type": "&web_sys::VideoFrame",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_2d_with_image_data",
-							"signature": "pub unsafe fn tex_image_2d_with_image_data(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, pixels: &web_sys::ImageData)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "pixels",
-									"type": "&web_sys::ImageData",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_2d_with_image_data_and_width_and_height",
-							"signature": "pub unsafe fn tex_image_2d_with_image_data_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, pixels: &web_sys::ImageData)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "width",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "height",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "pixels",
-									"type": "&web_sys::ImageData",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
 							"name": "tex_sub_image_2d_with_image_bitmap",
 							"signature": "pub unsafe fn tex_sub_image_2d_with_image_bitmap(&self, target: u32, level: i32, x_offset: i32, y_offset: i32, format: u32, ty: u32, image: &web_sys::ImageBitmap)",
 							"params": [
@@ -62773,564 +61945,6 @@
 								},
 								{
 									"name": "height",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "image",
-									"type": "&web_sys::ImageData",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_3d_with_image_bitmap",
-							"signature": "pub unsafe fn tex_image_3d_with_image_bitmap(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::ImageBitmap)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "width",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "height",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "depth",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "border",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "image",
-									"type": "&web_sys::ImageBitmap",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_3d_with_html_canvas_element",
-							"signature": "pub unsafe fn tex_image_3d_with_html_canvas_element(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::HtmlCanvasElement)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "width",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "height",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "depth",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "border",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "image",
-									"type": "&web_sys::HtmlCanvasElement",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_3d_with_html_image_element",
-							"signature": "pub unsafe fn tex_image_3d_with_html_image_element(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::HtmlImageElement)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "width",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "height",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "depth",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "border",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "image",
-									"type": "&web_sys::HtmlImageElement",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_3d_with_html_video_element",
-							"signature": "pub unsafe fn tex_image_3d_with_html_video_element(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::HtmlVideoElement)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "width",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "height",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "depth",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "border",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "image",
-									"type": "&web_sys::HtmlVideoElement",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_3d_with_video_frame",
-							"signature": "pub unsafe fn tex_image_3d_with_video_frame(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, video_frame: &web_sys::VideoFrame)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "width",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "height",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "depth",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "border",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "format",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "ty",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "video_frame",
-									"type": "&web_sys::VideoFrame",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								}
-							],
-							"description": {
-								"ko": "glow 의 같은 이름 함수를 그대로 부른다. (웹 전용, 상태 캐시와 상관없는 GL 함수)",
-								"en": "Calls glow's function of the same name as is. (web only, a GL function unrelated to the state cache)"
-							},
-							"since": "0.4.0",
-							"source": "src/core/glcontext/generated.rs"
-						},
-						{
-							"kind": "method",
-							"name": "tex_image_3d_with_image_data",
-							"signature": "pub unsafe fn tex_image_3d_with_image_data(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::ImageData)",
-							"params": [
-								{
-									"name": "target",
-									"type": "u32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "level",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "internal_format",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "width",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "height",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "depth",
-									"type": "i32",
-									"description": {
-										"ko": "glow 의 같은 인자.",
-										"en": "The same argument as in glow."
-									}
-								},
-								{
-									"name": "border",
 									"type": "i32",
 									"description": {
 										"ko": "glow 의 같은 인자.",
@@ -66450,6 +65064,1392 @@
 							"description": {
 								"ko": "버퍼 채우기. (glow 의 같은 이름, GPU 메모리 셈이 켜져 있으면 묶인 버퍼의 바이트를 적는다)",
 								"en": "Fills a buffer. (same name as glow; when GPU memory tracking is on, records the bytes of the bound buffer)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_2d_with_image_bitmap",
+							"signature": "pub unsafe fn tex_image_2d_with_image_bitmap(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, pixels: &web_sys::ImageBitmap)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "pixels",
+									"type": "&web_sys::ImageBitmap",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_2d_with_image_bitmap_and_width_and_height",
+							"signature": "pub unsafe fn tex_image_2d_with_image_bitmap_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, pixels: &web_sys::ImageBitmap)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "pixels",
+									"type": "&web_sys::ImageBitmap",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_2d_with_html_canvas",
+							"signature": "pub unsafe fn tex_image_2d_with_html_canvas(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, canvas: &web_sys::HtmlCanvasElement)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "canvas",
+									"type": "&web_sys::HtmlCanvasElement",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_2d_with_html_canvas_and_width_and_height",
+							"signature": "pub unsafe fn tex_image_2d_with_html_canvas_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, canvas: &web_sys::HtmlCanvasElement)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "canvas",
+									"type": "&web_sys::HtmlCanvasElement",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_2d_with_html_image",
+							"signature": "pub unsafe fn tex_image_2d_with_html_image(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, image: &web_sys::HtmlImageElement)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "image",
+									"type": "&web_sys::HtmlImageElement",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_2d_with_html_image_and_width_and_height",
+							"signature": "pub unsafe fn tex_image_2d_with_html_image_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, image: &web_sys::HtmlImageElement)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "image",
+									"type": "&web_sys::HtmlImageElement",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_2d_with_html_video",
+							"signature": "pub unsafe fn tex_image_2d_with_html_video(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, video: &web_sys::HtmlVideoElement)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "video",
+									"type": "&web_sys::HtmlVideoElement",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_2d_with_html_video_and_width_and_height",
+							"signature": "pub unsafe fn tex_image_2d_with_html_video_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, video: &web_sys::HtmlVideoElement)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "video",
+									"type": "&web_sys::HtmlVideoElement",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_2d_with_video_frame",
+							"signature": "pub unsafe fn tex_image_2d_with_video_frame(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, video_frame: &web_sys::VideoFrame)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "video_frame",
+									"type": "&web_sys::VideoFrame",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_2d_with_video_frame_and_width_and_height",
+							"signature": "pub unsafe fn tex_image_2d_with_video_frame_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, video_frame: &web_sys::VideoFrame)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "video_frame",
+									"type": "&web_sys::VideoFrame",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_2d_with_image_data",
+							"signature": "pub unsafe fn tex_image_2d_with_image_data(&self, target: u32, level: i32, internal_format: i32, format: u32, ty: u32, pixels: &web_sys::ImageData)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "pixels",
+									"type": "&web_sys::ImageData",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_2d_with_image_data_and_width_and_height",
+							"signature": "pub unsafe fn tex_image_2d_with_image_data_and_width_and_height(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, format: u32, ty: u32, pixels: &web_sys::ImageData)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "pixels",
+									"type": "&web_sys::ImageData",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_3d_with_image_bitmap",
+							"signature": "pub unsafe fn tex_image_3d_with_image_bitmap(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::ImageBitmap)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "depth",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "border",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "image",
+									"type": "&web_sys::ImageBitmap",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_3d_with_html_canvas_element",
+							"signature": "pub unsafe fn tex_image_3d_with_html_canvas_element(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::HtmlCanvasElement)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "depth",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "border",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "image",
+									"type": "&web_sys::HtmlCanvasElement",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_3d_with_html_image_element",
+							"signature": "pub unsafe fn tex_image_3d_with_html_image_element(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::HtmlImageElement)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "depth",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "border",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "image",
+									"type": "&web_sys::HtmlImageElement",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_3d_with_html_video_element",
+							"signature": "pub unsafe fn tex_image_3d_with_html_video_element(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::HtmlVideoElement)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "depth",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "border",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "image",
+									"type": "&web_sys::HtmlVideoElement",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_3d_with_video_frame",
+							"signature": "pub unsafe fn tex_image_3d_with_video_frame(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, video_frame: &web_sys::VideoFrame)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "depth",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "border",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "video_frame",
+									"type": "&web_sys::VideoFrame",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/glcontext.rs"
+						},
+						{
+							"kind": "method",
+							"name": "tex_image_3d_with_image_data",
+							"signature": "pub unsafe fn tex_image_3d_with_image_data(&self, target: u32, level: i32, internal_format: i32, width: i32, height: i32, depth: i32, border: i32, format: u32, ty: u32, image: &web_sys::ImageData)",
+							"params": [
+								{
+									"name": "target",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "level",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "internal_format",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "width",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "height",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "depth",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "border",
+									"type": "i32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "format",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "ty",
+									"type": "u32",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								},
+								{
+									"name": "image",
+									"type": "&web_sys::ImageData",
+									"description": {
+										"ko": "glow 의 같은 인자.",
+										"en": "The same argument as in glow."
+									}
+								}
+							],
+							"description": {
+								"ko": "glow 의 같은 이름 함수를 부르고, GPU 메모리 셈이 켜져 있으면 올린 크기의 바이트를 적는다. (웹 전용, 원본 texImage2D, texImage3D 의 이미지 원본 꼴)",
+								"en": "Calls the glow function of the same name and, when GPU memory tracking is on, records the bytes of the uploaded size. (web only, the image-source form of the original texImage2D and texImage3D)"
 							},
 							"since": "0.4.0",
 							"source": "src/core/glcontext.rs"
