@@ -30,8 +30,6 @@ const STAGE_Y: f64 = 78.0;
 const STAGE_WIDTH: f64 = 968.0;
 const STAGE_HEIGHT: f64 = 656.0;
 const EFFECT_RANDOM_SEED: u32 = 20260901;
-// 프레임마다 흐르는 시간. (저장한 화면이 실행마다 같게 60 프레임으로 묶는다)
-const FRAME_STEP_SECONDS: f64 = 1.0 / 60.0;
 const MODE_FIRE: usize = 0;
 const MODE_CONFETTI: usize = 4;
 const MODE_EXPLOSION: usize = 5;
@@ -970,18 +968,18 @@ impl ParticleEffectsScene {
 		warp.set_color_over_lifetime(vec![(0.0, Color::create(1.0, 1.0, 1.0, 0.0)), (0.2, Color::create(1.0, 1.0, 1.0, 1.0)), (1.0, Color::create(1.0, 1.0, 1.0, 0.0))]);
 		warp.set_max_particle_count(1400);
 		systems.push((Vector2::create(center_x, center_y), warp));
-		let mut coreGlow = ParticleSystem::new();
-		coreGlow.set_emitter_shape(ParticleEmitterShape::Circle);
-		coreGlow.set_shape_radius(8.0);
-		coreGlow.set_emission_rate(18.0);
-		coreGlow.set_start_lifetime(0.5, 1.0);
-		coreGlow.set_start_speed(0.0, 8.0);
-		coreGlow.set_start_size(26.0, 46.0);
-		coreGlow.set_additive(true);
-		coreGlow.set_start_color(Color::create(0.8, 0.9, 1.0, 0.3), Color::create(0.9, 0.95, 1.0, 0.2));
-		coreGlow.set_color_over_lifetime(vec![(0.0, Color::create(1.0, 1.0, 1.0, 0.0)), (0.4, Color::create(1.0, 1.0, 1.0, 1.0)), (1.0, Color::create(1.0, 1.0, 1.0, 0.0))]);
-		coreGlow.set_max_particle_count(60);
-		systems.push((Vector2::create(center_x, center_y), coreGlow));
+		let mut core_glow = ParticleSystem::new();
+		core_glow.set_emitter_shape(ParticleEmitterShape::Circle);
+		core_glow.set_shape_radius(8.0);
+		core_glow.set_emission_rate(18.0);
+		core_glow.set_start_lifetime(0.5, 1.0);
+		core_glow.set_start_speed(0.0, 8.0);
+		core_glow.set_start_size(26.0, 46.0);
+		core_glow.set_additive(true);
+		core_glow.set_start_color(Color::create(0.8, 0.9, 1.0, 0.3), Color::create(0.9, 0.95, 1.0, 0.2));
+		core_glow.set_color_over_lifetime(vec![(0.0, Color::create(1.0, 1.0, 1.0, 0.0)), (0.4, Color::create(1.0, 1.0, 1.0, 1.0)), (1.0, Color::create(1.0, 1.0, 1.0, 0.0))]);
+		core_glow.set_max_particle_count(60);
+		systems.push((Vector2::create(center_x, center_y), core_glow));
 		systems
 	}
 
