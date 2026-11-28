@@ -515,7 +515,7 @@ fn main() {
 
 ## ScreenEffect
 
-A post-processing chain applied to the whole scene. The scene draws to the screen as usual, and `end` grabs the screen (or a given region), applies the enabled effects in order, and puts the result back in the same place. `ScreenEffectType` has 58 effects (vignette `Vignette`, shockwave `Shockwave`, bloom `Bloom`, color grading `ColorGrade`, chromatic aberration `Chromatic`, grain `Grain`, fog `Fog`, fade `Fade` and so on). Original names convert with `get_name()` and `ScreenEffectType::from_name(name)`.
+A post-processing chain applied to the whole scene. The scene draws to the screen as usual, and `end` grabs the screen (or a given region), applies the enabled effects in order, and puts the result back in the same place. `ScreenEffectType` has 59 effects (vignette `Vignette`, shockwave `Shockwave`, bloom `Bloom`, color grading `ColorGrade`, chromatic aberration `Chromatic`, grain `Grain`, fog `Fog`, fade `Fade` and so on). Original names convert with `get_name()` and `ScreenEffectType::from_name(name)`.
 
 ![ScreenEffect applied only to a rounded stage: bloom, chromatic aberration, vignette and color grading](../images/screen-effect.webp)
 
@@ -547,7 +547,7 @@ screen_effect.set_region(100.0, 80.0, 640.0, 360.0, 24.0);
 assert!(screen_effect.get_region().is_some());
 screen_effect.clear_region();
 assert!(screen_effect.get_region().is_none());
-assert_eq!(ScreenEffect::get_effect_order().len(), 58);
+assert_eq!(ScreenEffect::get_effect_order().len(), 59);
 ```
 
 Below, a vignette stays on and a shockwave spreads from the spot you press.

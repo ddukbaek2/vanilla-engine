@@ -3288,7 +3288,7 @@ const TOON_FRAGMENTSHADER_SOURCE: &str = r####"#version 300 es
 		vec2 screenCoordinate = gl_FragCoord.xy / screenResolution;
 		float fragmentDepth = linearizeDepth(gl_FragCoord.z);
 
-		// 앞머리 너머 비침. (이 픽셀에 머리카락이 있고 그 깊이가 이 픽셀보다 앞일 때만 — 뒤통수에 가려진 눈은 비치지 않는다)
+		// 앞머리 너머 비침. (이 픽셀에 머리카락이 있고 그 깊이가 이 픽셀보다 앞일 때만, 뒤통수에 가려진 눈은 비치지 않는다)
 		if (isSeeThrough == 1) {
 			float hairMask = texture(hairMaskTexture, screenCoordinate).r;
 			float hairDepth = linearizeDepth(texture(hairDepthTexture, screenCoordinate).r);
@@ -3311,7 +3311,7 @@ const TOON_FRAGMENTSHADER_SOURCE: &str = r####"#version 300 es
 		}
 		vec3 lightDirection = normalize(keyLightDirection);
 
-		// 램프. (얼굴 / 머리카락 노멀은 로드 때 구면 노멀로 굽어 있다 — SDF 얼굴 그림자처럼 빛 각도에 따라 한 줄로 쓸리는 경계)
+		// 램프. (얼굴 / 머리카락 노멀은 로드 때 구면 노멀로 굽어 있다, SDF 얼굴 그림자처럼 빛 각도에 따라 한 줄로 쓸리는 경계)
 		vec3 shadingNormal = surfaceNormal;
 		float softness = max(0.5 * (1.0 - shadingToony), 0.004);
 		if (materialType == 2) {
@@ -3327,7 +3327,7 @@ const TOON_FRAGMENTSHADER_SOURCE: &str = r####"#version 300 es
 			litness = min(litness, smoothstep(0.25, 0.75, shadowFactor));
 		}
 
-		// 앞머리 그림자. (화면 공간 — 빛 방향으로 밀린 자리에 머리카락이 있고 그것이 이 픽셀보다 크게 뒤가 아니면 그늘. VRoid 앞머리는 피부에 거의 붙어 있어 깊이 차만으로는 못 가른다)
+		// 앞머리 그림자. (화면 공간, 빛 방향으로 밀린 자리에 머리카락이 있고 그것이 이 픽셀보다 크게 뒤가 아니면 그늘. VRoid 앞머리는 피부에 거의 붙어 있어 깊이 차만으로는 못 가른다)
 		bool receivesHairShadow = materialType == 1 || materialType == 2 || materialType == 5 || materialType == 6 || materialType == 8 || materialType == 9;
 		if (useHairShadow == 1 && receivesHairShadow) {
 			vec2 offsetCoordinate = screenCoordinate + hairShadowOffset / screenResolution;
@@ -3347,7 +3347,7 @@ const TOON_FRAGMENTSHADER_SOURCE: &str = r####"#version 300 es
 		}
 
 		vec3 shadeAlbedo = pow(albedo, vec3(1.18)) * mix(vec3(1.0), shadeColor, shadeStrength) * shadeDarkness;
-		// 3 톤. (밝음 / 그늘 / 깊은 그늘 — 얼굴은 2 톤)
+		// 3 톤. (밝음 / 그늘 / 깊은 그늘, 얼굴은 2 톤)
 		vec3 deepAlbedo = shadeAlbedo * 0.74;
 		vec3 shadeBlend = materialType == 2 ? shadeAlbedo : mix(deepAlbedo, shadeAlbedo, deepLitness);
 		vec3 diffuse = mix(shadeBlend, albedo, litness);
@@ -3367,7 +3367,7 @@ const TOON_FRAGMENTSHADER_SOURCE: &str = r####"#version 300 es
 			color += keyLightColor * stepped * specularStrength * typeScale * litness;
 		}
 
-		// 머리카락 천사 고리. (구면 노멀의 뷰 공간 높이로 잡는 가로 띠 x VRoid 하이라이트 마스크 — 시점에 따라 위아래로 흐른다)
+		// 머리카락 천사 고리. (구면 노멀의 뷰 공간 높이로 잡는 가로 띠 x VRoid 하이라이트 마스크, 시점에 따라 위아래로 흐른다)
 		if (materialType == 3 && useHairHighlight == 1) {
 			vec3 hairViewNormal = normalize(mat3(viewMatrix) * surfaceNormal);
 			float ringCenter = 0.58 + hairHighlightShift;
@@ -3600,7 +3600,7 @@ const COMPOSITE_FRAGMENTSHADER_SOURCE: &str = r####"#version 300 es
 	void main() {
 		vec3 color = texture(sceneTexture, fragmentTextureCoordinate).rgb;
 
-		// 림. (실루엣 안쪽 픽셀에서 노멀 방향으로 조금 떨어진 자리의 깊이가 크게 멀면 가장자리 — 빛 쪽이 밝다)
+		// 림. (실루엣 안쪽 픽셀에서 노멀 방향으로 조금 떨어진 자리의 깊이가 크게 멀면 가장자리, 빛 쪽이 밝다)
 		if (useRim == 1) {
 			vec4 normalSample = texture(normalTexture, fragmentTextureCoordinate);
 			float materialId = normalSample.a * 16.0;
@@ -3626,7 +3626,7 @@ const COMPOSITE_FRAGMENTSHADER_SOURCE: &str = r####"#version 300 es
 		float vignette = 1.0 - smoothstep(0.35, 0.95, length(centered * vec2(1.0, 0.85)) * 1.25);
 		color *= mix(1.0, vignette, vignetteStrength);
 
-		// sRGB 인코딩 뒤 채도 / 대비. (지각 공간에서 중간 회색을 축으로 — 선형 공간에서 하면 어두운 배경이 검게 뭉개진다)
+		// sRGB 인코딩 뒤 채도 / 대비. (지각 공간에서 중간 회색을 축으로, 선형 공간에서 하면 어두운 배경이 검게 뭉개진다)
 		vec3 encoded = mix(color * 12.92, 1.055 * pow(max(color, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, color));
 		float luminance = dot(encoded, vec3(0.299, 0.587, 0.114));
 		encoded = mix(vec3(luminance), encoded, saturation);

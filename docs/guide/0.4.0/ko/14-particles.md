@@ -515,7 +515,7 @@ fn main() {
 
 ## ScreenEffect
 
-씬 전체에 거는 후처리 사슬입니다. 씬은 화면에 그대로 그리고, `end` 에서 화면(또는 정한 영역)을 떠 와 켜진 효과를 차례로 건 뒤 같은 자리에 되돌려 놓습니다. `ScreenEffectType` 에 58 가지 효과가 있습니다(비네트 `Vignette`, 충격파 `Shockwave`, 번짐 `Bloom`, 색 보정 `ColorGrade`, 색수차 `Chromatic`, 그레인 `Grain`, 안개 `Fog`, 페이드 `Fade` 같은 것). 원본 이름은 `get_name()` 과 `ScreenEffectType::from_name(name)` 으로 오갑니다.
+씬 전체에 거는 후처리 사슬입니다. 씬은 화면에 그대로 그리고, `end` 에서 화면(또는 정한 영역)을 떠 와 켜진 효과를 차례로 건 뒤 같은 자리에 되돌려 놓습니다. `ScreenEffectType` 에 59 가지 효과가 있습니다(비네트 `Vignette`, 충격파 `Shockwave`, 번짐 `Bloom`, 색 보정 `ColorGrade`, 색수차 `Chromatic`, 그레인 `Grain`, 안개 `Fog`, 페이드 `Fade` 같은 것). 원본 이름은 `get_name()` 과 `ScreenEffectType::from_name(name)` 으로 오갑니다.
 
 ![둥근 무대에만 건 ScreenEffect: 블룸, 색수차, 비네트, 색 보정](../images/screen-effect.webp)
 
@@ -547,7 +547,7 @@ screen_effect.set_region(100.0, 80.0, 640.0, 360.0, 24.0);
 assert!(screen_effect.get_region().is_some());
 screen_effect.clear_region();
 assert!(screen_effect.get_region().is_none());
-assert_eq!(ScreenEffect::get_effect_order().len(), 58);
+assert_eq!(ScreenEffect::get_effect_order().len(), 59);
 ```
 
 아래는 비네트를 켜 두고, 누른 자리에서 충격파를 퍼뜨립니다.
