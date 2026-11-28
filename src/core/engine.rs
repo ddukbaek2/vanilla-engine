@@ -168,6 +168,10 @@ pub struct EngineConfiguration {
 	/// 캔버스(기본 프레임 버퍼)의 멀티샘플 안티에일리어싱(MSAA)을 켤지. (원본 antialias, 기본 true, 생성 때 정한다)
 	/// - 끄면 도형과 3D 의 가장자리가 계단져 보이는 대신 고해상도 모바일에서 프레임마다 드는 리졸브 비용이 빠진다.
 	/// - 웹은 WebGL 컨텍스트 속성 antialias 로 켬과 끔만 고르고 표본 수는 브라우저가 정한다. 데스크탑은 켜면 표본 4, 끄면 멀티샘플 없는 GL 설정을 고른다.
+	/// - 후처리(ToonPostProcess)가 자기 MSAA 판에 그리므로 그걸 쓰는 게임은 캔버스 antialias 를 false 로 짓는다.
+	///   true 면 캔버스 자체가 MSAA 라 화면에 옮기는 패스와 UI 가 표본마다 섞여 값이 더 든다.
+	///   (맥미니 2560x1440 툰 후처리 장면 GPU 처리량 6.89 → 6.49 ms, 끈 판 6.81 → 5.22 ms, 원본 같은 장면에서 잰 값)
+	/// - 예: engine_configuration.antialias = false; (ToonPostProcess 를 쓰는 게임)
 	pub antialias: bool,
 	/// 화면 키보드: 글자 입력칸이 포커스된 동안 가로가 같고 세로만 줄었으면 크기를 그대로 둔다. (auto_resize_on_window_resize 일 때,
 	/// 데스크탑은 크롬 윈도우처럼 터치 키보드가 visualViewport 를 줄인다. 맥과 리눅스는 크롬처럼 줄지 않는다)
