@@ -36,6 +36,7 @@ const EXAMPLE_LIST = [
 	{ name: "blendmodes", frames: "30,90" },
 	{ name: "effectgallery", frames: "30,150" },
 	{ name: "misctour", frames: "120" },
+	{ name: "cameratour", frames: "90" },
 	{ name: "scenedocument", frames: "60" },
 	{ name: "asyncawait", frames: "120" },
 	{ name: "loadingshowcase", frames: "120" },

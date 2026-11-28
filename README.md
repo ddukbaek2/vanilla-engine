@@ -341,6 +341,7 @@ VANILLA_CAPTURE_PATH=shots/uigallery_{frame}.png VANILLA_CAPTURE_FRAMES=60 VANIL
 | `inputgallery` | 입력 필드, 한글 IME 조합, 선택 영역, 리치텍스트, 게임패드 진동 시험 (패드의 A, B, X, Y) |
 | `effectgallery` | 셰이더 스프라이트 49종, 화면 효과, 트레일, 파티클(렌더 모양 넷, 끌개, 흔들림, edge, 월드 공간) |
 | `misctour` | 카메라, 길찾기, 대화 시스템, 화면 흔들림, 플로팅 텍스트 |
+| `cameratour` | Camera2D 회전 둘러보기: 천천히 도는 카메라, 끌어 팬, 커서 고정 휠 줌, 흔들림, 노드 배율 트윈, Indicator (원본 examples/cameratour) |
 | `timelineshowcase` | 타임라인 문서 재생 |
 | `modelviewer` | 스키닝 3D(glTF, FBX), 그림자, 블룸 |
 | `engineextras` | 테, 진행 고리, 부드러운 그늘, 마우스 커서, 카메라 손짓, 마우스 단추와 손가락 입력 (직접 눌러 본다) |

@@ -121,6 +121,7 @@ cargo run --release --example modelviewer
 | `inputgallery` | Input fields, Korean IME composition, selection, rich text, gamepad vibration test |
 | `effectgallery` | 49 shader sprite effects, screen effects, trails, particles |
 | `misctour` | Camera, path finding, dialogue system, screen shake, floating text |
+| `cameratour` | Camera2D rotation tour: a slowly turning camera, drag to pan, wheel zoom around the cursor, shake, a node scale tween, Indicator |
 | `timelineshowcase` | Timeline document playback |
 | `modelviewer` | Skinned 3D (glTF, FBX), shadows, bloom |
 | `engineextras` | Outlines, progress ring, soft shade, mouse cursor, camera gestures, mouse buttons and finger input |
