@@ -1,6 +1,10 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- 고침(원본과 같게): 여러 줄 입력 필드(UIInputField)의 줄 끝 탭을 크롬 pre-wrap 처럼 공백과 같이 매달리게 했다(줄 나눔 때 줄 폭에서 뺌). 탭 폭보다 좁은 칸에서 "tab\there" 가 크롬은 [0, 4] 인데 엔진은 [0, 3, 4] 로 나뉘던 것이다(textarealayout 의 trim_hanging_spaces 에 탭 추가).
+  - 옮기는 법: 없다. (줄 끝 탭이 든 글의 줄 나눔만 크롬과 같아진다)
+- 고침: UISpinner 점 위치가 리눅스에서 마지막 자리 하나 어긋나던 것(리눅스 glibc 의 cos 가 크롬 V8 과 끝자리가 달라 원본 값과 견주는 시험이 리눅스에서만 실패). cos, sin 을 fdlibm 계열 순수 러스트 libm 크레이트로 불러 맥, 리눅스, 웹이 V8 과 같은 값을 낸다. 새로 받는 의존은 없다(이미 다른 크레이트가 쓰던 판, 라이선스 표기에도 있음).
+  - 옮기는 법: 없다. (스피너 점 위치가 마지막 자리 하나 달라질 수 있다)
 - 예제 toonshading(원본 examples/toonshading 과 같은 장면과 화면 꼴, 제목, 아래 VANILLAPUNCH.COM 링크, 왼쪽 아래 저작권 고지): VRM 1.0 캐릭터(VRM1 Constraint Twist Sample, pixiv Inc., VRM Public License 1.0)를 엔진 SkinnedModel 로 읽고 원본 셰이더 글 그대로 셀 셰이딩한다. 씬 MRT, 머리카락 깊이 패스(앞머리 그림자와 비침), 섀도우 맵, 블룸, 림 라이트와 ACES 합성, FXAA 순서도 같다. 표정 단추 여섯과 깜빡임, Quaternius 동작(CC0) 단추 여덟은 T 포즈 대비 월드 회전 변화를 VRM 뼈에 옮기고, VRMC_node_constraint 의 roll, aim 을 따른다. 끌기는 궤도, 휠은 줌, 오른쪽 끌기는 초점 높이. 자산은 원본 저장소의 것을 읽는다. 아직 없는 것: 스프링 본, 머리와 눈 따라보기, 옵션 패널과 슬라이더(값은 원본 기본값 고정), 와이어프레임, 렌더 정보 표시, 우클릭 메뉴.
 - 예제 cameratour(원본 examples/cameratour 와 같은 화면과 동작): Camera2D 가 천천히 좌우로 돌며 대상을 따라가고 3 초마다 흔들린다(Shaker). 끌면 돌아간 방향 그대로 팬(pan_by_screen), 휠은 커서 아래를 고정한 채 줌(zoom_at). 왼쪽 위 노드는 Tween::create_node_tween 으로 배율이 오가고, 오른쪽 위에 Indicator 가 돈다.
 - 예제 ancientmountain, neonhorizon 을 원본 vanilla.js 에서 옮겼다. ancientmountain 은 3인칭 산 오르기(절차 지형과 풀, 흙길, 절벽 3중 텍스처, 마네킹 달리기, 점프, 등반, 뛰어내리기, 여우 여섯, 정상 깃발, OFF, SIMPLE, REALTIME 그림자, 블룸, 모션 블러, 옵션 패널, 게임패드)이고, 애셋은 원본 저장소 것을 읽는다. neonhorizon 은 네온 그리드 지형 달리기(별, 유성, 함대, 부스트 빛살, 먼지, 블룸, 색수차, 필름 그레인, 옵션 패널)이고 모형 둘을 examples/assets/neonhorizon 에 둔다. 원본과 같은 셰이더와 같은 식을 엔진의 ShaderProgram, FullscreenPass, RenderTarget, ShadowMap, BloomEffect, SkinnedModelRenderer 위에서 돌린다. 애셋 라이선스는 THIRD_PARTY_LICENSES.md 에 적었다.

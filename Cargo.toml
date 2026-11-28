@@ -112,6 +112,8 @@ image = { version = "0.25", default-features = false, features = ["png", "webp",
 # PNG 의 색 청크(cICP, iCCP, sRGB, gAMA, cHRM) 읽기. (크롬의 스키아 SkPngRustCodec 도 같은 png 0.18 로 읽는다. image 가 이미 쓰는 같은 판이라 더 받는 크레이트가 없다)
 # 웹은 image 를 싣지 않고 이것으로 색 글리프(sbix, CBDT)의 PNG 를 풀고 화면 찍기를 PNG 로 쓴다.
 png = "0.18"
+# 순수 러스트 sin, cos. (fdlibm 계열이라 크롬 V8 과 끝자리까지 같다. 리눅스 glibc 의 cos 는 마지막 자리가 어긋난다, 예: UISpinner 점 위치. 이미 다른 크레이트가 쓰는 판이라 새로 받는 것이 없다)
+libm = "0.2"
 # 노드 핸들. (세대 번호가 붙은 키로 씬의 노드 저장소를 가리킨다)
 slotmap = "1"
 # performance.now() 를 쓰는 Instant. (네이티브에서는 std::time 그대로)
