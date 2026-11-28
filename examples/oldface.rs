@@ -7,7 +7,8 @@
 //   → 합성(HDR) → 블룸 → 톤 매핑(LDR) → FXAA(화면) → graphic.restore_render_state() → draw 에서 2D 글.
 // - 원본 OPTIONS 패널(토글 9 개, 슬라이더 38 개, 같은 묶음, 차례, 범위, 기본값, 제목을 눌러 접고 펼침)을 엔진 UI(UISlider, UIScrollView, UIButton)로 짓고
 //   원본이 바꾸는 렌더러 값을 같게 바꾼다. 숫자 키 1 ~ 9 는 토글 전환(원본과 같음). 표정은 4초마다 차례로 바뀌고 단추로 고르면 자동 전환이 멈춘다.
-//   머티리얼 그래프와 RENDERING INFO 는 아직 옮기지 않았다(토글만 있다). 끌기로 궤도 회전, 휠로 줌.
+//   MATERIAL GRAPH(왼쪽 노드 패널, 중간 버퍼 실시간 미리보기, 끌기와 휠 스크롤)와 RENDERING INFO(오른쪽 아래 값 상자, GPU 패스 시간은 타이머 질의가 되는 기계에서만)도 원본처럼 있다.
+//   우클릭은 엔진 UIContextMenu 로 RESET VIEW, RESET OPTIONS, TOGGLE MATERIAL GRAPH. 머리 LOD 와 머리카락 단계 모델은 BlobAsset 으로 비동기로 읽어 화면이 멈추지 않는다. 끌기로 궤도 회전, 휠로 줌.
 // - 원본 FRAME RATE 기본처럼 30fps 로 제한하고, 갱신 시간은 원본처럼 지난 시간(0.1초 상한)을 쓴다.
 //   화면 저장(VANILLA_CAPTURE_PATH)을 켜면 1/30초씩 고정으로 나아간다. (프레임 번호로 같은 장면을 잡도록)
 // - 실행: cargo run --release --example oldface
@@ -2268,6 +2269,10 @@ impl OldFaceScene {
 		// 확인용: VANILLA_OLDFACE_MENU="x,y" 이면 8 프레임째에 그 자리로 메뉴를 연다. (화면 저장으로 메뉴를 찍을 때)
 		self.menu_test_frame += 1;
 		if self.menu_test_frame == 8 {
+			// 확인용: VANILLA_OLDFACE_SCROLL=숫자 이면 머티리얼 그래프를 그만큼 내려 둔다.
+			if let Ok(text) = std::env::var("VANILLA_OLDFACE_SCROLL") {
+				self.graph.scroll_offset = text.parse::<f64>().unwrap_or(0.0);
+			}
 			if let Ok(text) = std::env::var("VANILLA_OLDFACE_MENU") {
 				let numbers: Vec<f64> = text.split(',').filter_map(|part| part.parse::<f64>().ok()).collect();
 				if numbers.len() == 2 {
