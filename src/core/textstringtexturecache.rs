@@ -483,6 +483,19 @@ pub struct FontFileSource {
 }
 
 //==============================================================================
+/// 시스템 글꼴 이름이 가진 얼굴 하나. (운영체제가 알려 주는 굵기와 기울임, 얼굴을 고르는 CSS 굵기 규칙의 후보)
+//==============================================================================
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FamilyFontFace {
+	/// 글꼴 파일과 얼굴.
+	pub source: FontFileSource,
+	/// 얼굴의 CSS 굵기. (100 ~ 900)
+	pub weight: u16,
+	/// 기울인 얼굴이면 true.
+	pub is_italic: bool,
+}
+
+//==============================================================================
 /// 데스크탑 시스템 글꼴의 얼굴 후보 하나. (청한 굵기와 기울기로 운영체제가 찾아 준 파일, 쓸 때 읽는다)
 //==============================================================================
 struct SystemFontCandidate {
@@ -3453,23 +3466,25 @@ fn find_system_font_family(family_key: &str) -> Option<SystemFontFamily> {
 	#[cfg(not(target_arch = "wasm32"))]
 	{
 		let mut system_font_family = SystemFontFamily::default();
-		for (weight, is_italic) in [(400, false), (700, false), (400, true), (700, true)] {
-			let source = match crate::platform::find_family_font_file(family_key, weight, is_italic) {
-				Some(source) => {
-					source
+		// 가족의 모든 굵기 얼굴을 후보로 둔다. (얼굴은 CSS 굵기 규칙으로 고른다, 크롬 FontCache 의 글꼴 고르기) 얼굴을 나열하지 못하는 이름(시스템 UI 글꼴)은 보통, 굵게 둘만 묻는다.
+		let mut face_list = crate::platform::list_family_font_faces(family_key);
+		if face_list.is_empty() {
+			for (weight, is_italic) in [(400, false), (700, false), (400, true), (700, true)] {
+				if let Some(source) = crate::platform::find_family_font_file(family_key, weight, is_italic) {
+					face_list.push(crate::core::textstringtexturecache::FamilyFontFace { source, weight, is_italic });
 				}
-				None => {
-					continue;
-				}
-			};
-			// 같은 얼굴이면 앞(보통 굵기, 바른 꼴)의 것만 둔다. (기울인 얼굴이 없는 글꼴은 바른 얼굴에 가짜 기울임)
-			if system_font_family.candidate_list.iter().any(|candidate| candidate.source == source) {
+			}
+		}
+		// 바른 꼴을 앞에 둔다. (같은 얼굴이 여럿에 나오면 바른 꼴, 보통 굵기에 가까운 쪽으로, 기울인 얼굴이 없는 글꼴은 바른 얼굴에 가짜 기울임)
+		face_list.sort_by_key(|face| (face.is_italic, face.weight.abs_diff(400), face.weight));
+		for face in face_list {
+			if system_font_family.candidate_list.iter().any(|candidate| candidate.source == face.source) {
 				continue;
 			}
 			system_font_family.candidate_list.push(SystemFontCandidate {
-				weight,
-				is_italic,
-				source,
+				weight: face.weight,
+				is_italic: face.is_italic,
+				source: face.source,
 				is_loaded: false,
 			});
 		}
@@ -5139,6 +5154,42 @@ mod tests {
 		assert!((measure_width("16px Menlo", "Hello World Wifi") - 154.125).abs() < 0.01);
 		assert!(measure_width("16px default", "ภาษาไทย") > 50.0);
 		assert!(measure_width("bold 16px default", "Hello World Wifi") > measure_width("16px default", "Hello World Wifi"));
+	}
+
+	//==============================================================================
+	/// 시스템 글꼴 가족의 굵기 얼굴 고르기: 굵기마다 고른 얼굴 이름이 크롬 158 과 같다. (맥만, 글꼴이 있을 때)
+	/// - 크롬 값은 헤드리스 크롬 CDP 의 CSS.getPlatformFontsForNode 가 같은 글꼴 문자열에서 낸 PostScript 이름이다. 굵기 100 ~ 900, 바른 꼴과 기울임.
+	/// - 200, 300, 500 같은 굵기도 가족의 이름 붙은 굵기(UltraLight, Light, Medium)를 CSS 굵기 규칙으로 고르고, 400 과 700 은 전과 같다.
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	#[test]
+	fn system_font_family_weight_faces_match_chrome_on_macos() {
+		let chrome_table: [(&str, bool, [&str; 9]); 6] = [
+			("Helvetica Neue", false, ["HelveticaNeue-UltraLight", "HelveticaNeue-Thin", "HelveticaNeue-Light", "HelveticaNeue", "HelveticaNeue-Medium", "HelveticaNeue-Bold", "HelveticaNeue-Bold", "HelveticaNeue-Bold", "HelveticaNeue-Bold"]),
+			("Helvetica Neue", true, ["HelveticaNeue-UltraLightItalic", "HelveticaNeue-ThinItalic", "HelveticaNeue-LightItalic", "HelveticaNeue-Italic", "HelveticaNeue-MediumItalic", "HelveticaNeue-BoldItalic", "HelveticaNeue-BoldItalic", "HelveticaNeue-BoldItalic", "HelveticaNeue-BoldItalic"]),
+			("Apple SD Gothic Neo", false, ["AppleSDGothicNeo-Thin", "AppleSDGothicNeo-UltraLight", "AppleSDGothicNeo-Light", "AppleSDGothicNeo-Regular", "AppleSDGothicNeo-Medium", "AppleSDGothicNeo-SemiBold", "AppleSDGothicNeo-Bold", "AppleSDGothicNeo-ExtraBold", "AppleSDGothicNeo-Heavy"]),
+			("Avenir Next", false, ["AvenirNext-UltraLight", "AvenirNext-UltraLight", "AvenirNext-UltraLight", "AvenirNext-Regular", "AvenirNext-Medium", "AvenirNext-DemiBold", "AvenirNext-Bold", "AvenirNext-Heavy", "AvenirNext-Heavy"]),
+			("Avenir Next", true, ["AvenirNext-UltraLightItalic", "AvenirNext-UltraLightItalic", "AvenirNext-UltraLightItalic", "AvenirNext-Italic", "AvenirNext-MediumItalic", "AvenirNext-DemiBoldItalic", "AvenirNext-BoldItalic", "AvenirNext-HeavyItalic", "AvenirNext-HeavyItalic"]),
+			("Helvetica", false, ["Helvetica-Light", "Helvetica-Light", "Helvetica-Light", "Helvetica", "Helvetica", "Helvetica-Bold", "Helvetica-Bold", "Helvetica-Bold", "Helvetica-Bold"]),
+		];
+		for (family_name, is_italic, expected_list) in chrome_table {
+			if crate::platform::find_family_font_file(family_name, 400, false).is_none() {
+				continue;
+			}
+			for (weight_index, expected_name) in expected_list.iter().enumerate() {
+				// 굵기마다 새 캐시로 묻는다. (앞서 읽은 얼굴이 섞이지 않게)
+				let text_string_texture_cache = TextStringTextureCache::new();
+				text_string_texture_cache.system_font_state.borrow_mut().is_lookup_enabled = true;
+				let mut face_list: Vec<ResolvedFontFace> = Vec::new();
+				let weight = (weight_index as u16 + 1) * 100;
+				assert!(text_string_texture_cache.append_system_family_faces(&family_name.to_lowercase(), weight, is_italic, &mut face_list));
+				let face = &face_list[0];
+				let post_script_name = rustybuzz::ttf_parser::Face::parse(face.font.get_font_bytes(), face.font.get_face_index()).ok().and_then(|parsed_face| {
+					parsed_face.names().into_iter().find(|name| name.name_id == rustybuzz::ttf_parser::name_id::POST_SCRIPT_NAME).map(|name| name.to_string().unwrap_or_else(|| name.name.iter().map(|byte| *byte as char).collect()))
+				}).unwrap_or_default();
+				assert_eq!(&post_script_name, expected_name, "{} 굵기 {} 기울임 {}", family_name, weight, is_italic);
+			}
+		}
 	}
 
 	//==============================================================================
