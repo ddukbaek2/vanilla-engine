@@ -76,6 +76,8 @@ impl JointBlockBuffer {
 			let buffer = crate::core::glstatecache::create_buffer(gl)?;
 			crate::core::glstatecache::bind_buffer(gl, glow::UNIFORM_BUFFER, Some(buffer));
 			gl.buffer_data_size(glow::UNIFORM_BUFFER, (JOINT_BLOCK_MAXIMUM * 64) as i32, glow::DYNAMIC_DRAW);
+			// 뼈대가 아닌 그리기도 프로그램이 JointBlock 을 쓰는 것으로 잡히므로(셰이더가 분기 안에서 읽어도 블록은 쓰는 것) 바인딩 자리에 버퍼가 늘 묶여 있어야 한다. (안 묶이면 그리기가 INVALID_OPERATION)
+			gl.bind_buffer_base(glow::UNIFORM_BUFFER, JOINT_BLOCK_BINDING, Some(buffer));
 			crate::core::glstatecache::bind_buffer(gl, glow::UNIFORM_BUFFER, None);
 			Ok(JointBlockBuffer { buffer, last_values: RefCell::new(vec![0.0; JOINT_BLOCK_MAXIMUM * 16]), last_count: Cell::new(0) })
 		}
