@@ -140,6 +140,20 @@ const INSTANCE_MATRIX_LOCATION: u32 = 7;
 const INSTANCE_TINT_LOCATION: u32 = 11;
 const UV_LOCATION: u32 = 12;
 
+const MATERIAL_BLOCK_NAME: &str = "ToonDrawMaterial"; // 재질 블록. (몸 프로그램의 재질 값 열아홉을 std140 으로, 유니티 SRP Batcher 의 UnityPerMaterial 꼴)
+const MATERIAL_BLOCK_BINDING: u32 = 0;
+const MATERIAL_BLOCK_FLOAT_COUNT: usize = 44;
+const OUTLINE_BLOCK_NAME: &str = "ToonDrawOutline"; // 바깥선 껍데기의 값 여섯. (vec4, vec3 + float, float 셋 = 12)
+const OUTLINE_BLOCK_BINDING: u32 = 1;
+const OUTLINE_BLOCK_FLOAT_COUNT: usize = 12;
+/// 블록 갈래마다 기억할 블록 수. (넘으면 오래 안 쓴 블록 하나를 내보내고 그 버퍼에 새 값을 buffer_sub_data 로 쓴다, 갈래를 통째 지우지 않는다)
+const MATERIAL_BLOCK_LIMIT: usize = 1024;
+/// 묶음 자리마다 버텍스 어레이를 지어 둘 모형 수. (넘으면 그 자리의 것을 모두 지우고 다시)
+const BATCH_SLOT_MESH_LIMIT: usize = 8;
+/// draw_with_count 가 그릴 것. (바깥선 껍데기, 몸, 둘 다)
+pub(crate) const DRAW_PART_OUTLINE: u32 = 1;
+pub(crate) const DRAW_PART_BODY: u32 = 2;
+pub(crate) const DRAW_PART_ALL: u32 = 3;
 const FRAME_BLOCK_NAME: &str = "ToonFrame"; // 프레임 블록. (FRAME_BLOCK_CHUNK)
 const FRAME_BLOCK_BINDING: u32 = 2;
 const FRAME_BLOCK_FLOAT_COUNT: usize = 172;
@@ -391,29 +405,31 @@ uniform vec4 shadeRimLight;
 #ifdef TOON_AMBIENT_OCCLUSION
 uniform sampler2D ambientOcclusionTexture;
 #endif
-uniform vec4 tintColor;
-uniform float tintAmount;
-uniform float alpha;
-uniform float glowScale;
-uniform float colorScale;
-uniform vec4 emissiveColor;
-uniform float softEdge;
-uniform float alphaCutoff;
-uniform float premultipliedOutput;
-uniform vec3 textureEnabled;
+layout(std140) uniform ToonDrawMaterial {
+	vec4 tintColor;
+	vec4 emissiveColor;
+	vec4 uvTransform;
+	vec4 decalUvTransform;
+	vec4 decalColor;
+	vec4 angelRingSettings;
+	vec3 textureEnabled;
+	float tintAmount;
+	vec3 matcapSettings;
+	float alpha;
+	vec3 angelRingColor;
+	float glowScale;
+	vec2 highlightScale;
+	float colorScale;
+	float softEdge;
+	float alphaCutoff;
+	float premultipliedOutput;
+	float receivesShadow;
+	float shadeOffset;
+};
 uniform sampler2D baseColorTexture;
 uniform sampler2D emissiveTexture;
 uniform sampler2D decalTexture;
-uniform vec4 uvTransform;
-uniform vec4 decalUvTransform;
-uniform vec4 decalColor;
-uniform float receivesShadow;
-uniform float shadeOffset;
-uniform vec2 highlightScale;
-uniform vec3 matcapSettings;
 uniform sampler2D matcapTexture;
-uniform vec4 angelRingSettings;
-uniform vec3 angelRingColor;
 uniform sampler2D angelRingTexture;
 uniform sampler2DShadow shadowTexture;
 out vec4 fragmentColor;
@@ -869,8 +885,14 @@ void main() {
 ";
 
 /// 바깥선 껍데기를 그리는 셰이더. (껍데기는 뒷면만 그려 몸 둘레에 테로 보인다)
-const OUTLINE_VERTEX_BODY: &str = "uniform float outlineWidthScale;
-uniform float outlineOffsetZ;
+const OUTLINE_VERTEX_BODY: &str = "layout(std140) uniform ToonDrawOutline {
+	vec4 outlineColor;
+	vec3 outlineLightColor;
+	float outlineWidthScale;
+	float outlineOffsetZ;
+	float alpha;
+	float premultipliedOutput;
+};
 out float outlineTint;
 void main() {
 	ToonVertex vertex = readVertex();
@@ -895,10 +917,14 @@ void main() {
 const OUTLINE_FRAGMENT_SHADER: &str = concat!("#version 300 es
 precision highp float;
 ", frame_block_chunk!(), "in float outlineTint;
-uniform vec4 outlineColor;
-uniform vec3 outlineLightColor;
-uniform float alpha;
-uniform float premultipliedOutput;
+layout(std140) uniform ToonDrawOutline {
+	vec4 outlineColor;
+	vec3 outlineLightColor;
+	float outlineWidthScale;
+	float outlineOffsetZ;
+	float alpha;
+	float premultipliedOutput;
+};
 out vec4 fragmentColor;
 #ifdef VANILLA_COLOR_SPACE_LINEAR
 vec3 toLinear(vec3 color) {
@@ -1626,6 +1652,176 @@ fn read_block_hash(bits: &[u32]) -> u32 {
 	hash
 }
 
+// 시험이 세는 올림. (묶음 자리 올림, 블록 버퍼 올림(짓기와 내보낸 자리 다시 쓰기), 블록 bind_buffer_base, 선의 판 묶음 자리 올림, 선의 판 드로 콜)
+#[cfg(test)]
+thread_local! {
+	pub(crate) static UPLOAD_COUNTS: Cell<[u32; 5]> = const { Cell::new([0; 5]) };
+}
+
+// 시험이 세는 올림 하나 더하기.
+#[cfg(test)]
+pub(crate) fn count_upload(kind: usize) {
+	UPLOAD_COUNTS.with(|counts| {
+		let mut list = counts.get();
+		list[kind] += 1;
+		counts.set(list);
+	});
+}
+
+//==============================================================================
+/// 유니폼 블록 하나. (값이 같은 블록은 하나, serial 은 지을 때마다 새로 주는 번호라 내보낸 자리에 새 값이 와도 같지 않다)
+//==============================================================================
+struct UniformBlock {
+	buffer: GlBuffer,
+	bits: Vec<u32>,
+	hash: u32,
+	serial: u64,
+	is_used: bool,
+}
+
+//==============================================================================
+/// 블록 갈래. (원본 createBlockCache, 같은 꼴의 유니폼 블록을 값으로 하나씩 기억하는 칸)
+//==============================================================================
+struct BlockCache {
+	binding: u32,
+	/// 이번에 쓴 값. (read_uniform_block 이 해시로 찾는다)
+	values: Vec<f32>,
+	table: HashMap<u32, Vec<usize>>,
+	/// 지은 차례. (내보낼 것을 고르는 고리)
+	blocks: Vec<UniformBlock>,
+	hand: usize,
+	/// 묶었다고 아는 블록의 serial. (같으면 bind_buffer_base 를 건너뛴다)
+	bound_serial: u64,
+	next_serial: u64,
+}
+
+impl BlockCache {
+	fn new(binding: u32, float_count: usize) -> BlockCache {
+		BlockCache { binding, values: vec![0.0; float_count], table: HashMap::new(), blocks: Vec::new(), hand: 0, bound_serial: 0, next_serial: 1 }
+	}
+}
+
+//==============================================================================
+/// 자동 인스턴싱 묶음 자리. (원본 #batchSlots 의 칸, 값이 같으면 다시 올리지 않는다)
+//==============================================================================
+struct BatchSlot {
+	buffer: GlBuffer,
+	values: Vec<f32>,
+	count: usize,
+	/// 모형 번호마다 (몸, 바깥선) 버텍스 어레이.
+	vertex_arrays: Vec<(u64, GlVertexArray, Option<GlVertexArray>)>,
+}
+
+//==============================================================================
+/// 모형과 인스턴스 버퍼를 함께 묶은 몸 버텍스 어레이 짓기. (원본 createMeshInstanceVertexArray, 20 float 걸음의 행렬과 틴트 칸, 선의 판 묶음 자리가 쓴다)
+//==============================================================================
+pub(crate) fn create_mesh_instance_vertex_array(gl: &crate::GlContext, mesh: &ToonMesh, buffer: GlBuffer) -> Option<GlVertexArray> {
+	unsafe {
+		let vertex_array = crate::core::glstatecache::create_vertex_array(gl).ok()?;
+		crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
+		ToonRenderer::attach_body_attributes(gl, mesh);
+		ToonRenderer::attach_instance_attributes(gl, buffer);
+		crate::core::glstatecache::bind_vertex_array(gl, None);
+		Some(vertex_array)
+	}
+}
+
+//==============================================================================
+/// 자동 인스턴싱으로 묶을 수 있는 꼴인지. (원본 isSameBatchState, 그리기 줄이 같은 모형, 같은 재질 블록의 이어진 것을 draw_mesh_batch 한 번으로 그린다)
+/// - 선 번호, 묶음, 깊이 먼저, 그림자 드리우기, 거르기 말고 모든 칸이 같아야 한다. (거르기는 그리기 줄이 하나씩 먼저 한다)
+/// - 뼈대 행렬, 그리기 앞 함수가 있거나 비치는 것은 묶지 않는다. (그리기마다 다를 수 있다)
+//==============================================================================
+pub(crate) fn is_same_batch_state(options: &ToonDrawOptions, other: &ToonDrawOptions) -> bool {
+	if options.joint_matrices.is_some() || options.on_before_draw.is_some() || options.alpha < 1.0 || options.tint_color[3] < 1.0 || options.blend_mode != ToonBlendMode::Alpha {
+		return false;
+	}
+	if other.joint_matrices.is_some() || other.on_before_draw.is_some() {
+		return false;
+	}
+	let is_same_reference = |first: Option<*const ()>, second: Option<*const ()>| first == second;
+	is_same_reference(options.material.map(|material| material as *const ToonMaterial as *const ()), other.material.map(|material| material as *const ToonMaterial as *const ()))
+		&& is_same_reference(options.light_set.map(|light_set| light_set as *const ToonLightSet as *const ()), other.light_set.map(|light_set| light_set as *const ToonLightSet as *const ()))
+		&& options.tint_color == other.tint_color
+		&& options.alpha == other.alpha
+		&& options.has_outline == other.has_outline
+		&& options.is_body_drawn == other.is_body_drawn
+		&& options.tint_amount == other.tint_amount
+		&& options.glow_scale == other.glow_scale
+		&& options.color_scale == other.color_scale
+		&& options.emissive_color == other.emissive_color
+		&& options.emissive_intensity == other.emissive_intensity
+		&& options.base_color_texture == other.base_color_texture
+		&& options.emissive_texture == other.emissive_texture
+		&& options.uv_transform == other.uv_transform
+		&& options.decal_texture == other.decal_texture
+		&& options.decal_color == other.decal_color
+		&& options.decal_emission == other.decal_emission
+		&& options.decal_uv_transform == other.decal_uv_transform
+		&& options.alpha_cutoff == other.alpha_cutoff
+		&& options.blend_mode == other.blend_mode
+		&& options.soft_edge == other.soft_edge
+		&& options.is_mirrored == other.is_mirrored
+		&& options.index_start == other.index_start
+		&& options.index_count == other.index_count
+		&& options.outline_index_start == other.outline_index_start
+		&& options.outline_index_count == other.outline_index_count
+		&& options.textures == other.textures
+		&& options.receives_shadow == other.receives_shadow
+		&& options.shade_offset == other.shade_offset
+		&& options.specular_scale == other.specular_scale
+		&& options.rim_scale == other.rim_scale
+		&& options.matcap_texture == other.matcap_texture
+		&& options.matcap_strength == other.matcap_strength
+		&& options.matcap_blend == other.matcap_blend
+		&& options.outline_color == other.outline_color
+		&& options.outline_width_scale == other.outline_width_scale
+		&& options.outline_offset_z == other.outline_offset_z
+		&& options.angel_ring_texture == other.angel_ring_texture
+		&& options.angel_ring_color == other.angel_ring_color
+		&& options.angel_ring_offset_u == other.angel_ring_offset_u
+		&& options.angel_ring_offset_v == other.angel_ring_offset_v
+		&& options.is_angel_ring_alpha == other.is_angel_ring_alpha
+		&& options.has_screen_outline == other.has_screen_outline
+		&& options.has_crease_line == other.has_crease_line
+}
+
+//==============================================================================
+/// 재질 블록 값 쓰기. (원본 writeMaterialBlockValues, 그리기 꼴을 ToonDrawMaterial 의 float 44 로 푼다, 차례는 셰이더의 블록 선언과 같다)
+//==============================================================================
+fn write_material_block_values(values: &mut [f32], options: &ToonDrawOptions) {
+	let is_given = |texture: Option<GlTexture>| if texture.is_some() { 1.0 } else { 0.0 };
+	let tint_color = options.tint_color;
+	let emissive_color = options.emissive_color;
+	let uv_transform = options.uv_transform;
+	let decal_uv_transform = options.decal_uv_transform;
+	let decal_color = options.decal_color;
+	let angel_ring_color = options.angel_ring_color;
+	let list: [f64; MATERIAL_BLOCK_FLOAT_COUNT] = [
+		tint_color[0], tint_color[1], tint_color[2], tint_color[3],
+		emissive_color[0], emissive_color[1], emissive_color[2], options.emissive_intensity,
+		uv_transform[0], uv_transform[1], uv_transform[2], uv_transform[3],
+		decal_uv_transform[0], decal_uv_transform[1], decal_uv_transform[2], decal_uv_transform[3],
+		decal_color[0], decal_color[1], decal_color[2], options.decal_emission,
+		is_given(options.angel_ring_texture), options.angel_ring_offset_u, options.angel_ring_offset_v, if options.is_angel_ring_alpha { 1.0 } else { 0.0 },
+		is_given(options.base_color_texture), is_given(options.emissive_texture), is_given(options.decal_texture),
+		options.tint_amount.map(|tint_amount| tint_amount.clamp(0.0, 1.0)).unwrap_or(-1.0),
+		is_given(options.matcap_texture), options.matcap_strength, if options.matcap_blend == ToonMatcapBlend::Add { 1.0 } else { 0.0 },
+		options.alpha,
+		angel_ring_color[0], angel_ring_color[1], angel_ring_color[2],
+		options.glow_scale,
+		options.specular_scale.max(0.0), options.rim_scale.max(0.0),
+		options.color_scale,
+		options.soft_edge,
+		options.alpha_cutoff,
+		if options.blend_mode != ToonBlendMode::Alpha { 1.0 } else { 0.0 },
+		if options.receives_shadow { 1.0 } else { 0.0 },
+		options.shade_offset,
+	];
+	for (value, source) in values.iter_mut().zip(list.iter()) {
+		*value = *source as f32;
+	}
+}
+
 //==============================================================================
 /// 프레임 블록 장 하나. (원본 createFrameRing 의 pages 칸, 유니폼 버퍼 하나)
 //==============================================================================
@@ -1742,6 +1938,14 @@ pub struct ToonRenderer {
 	frame_number: u64,
 	/// 프레임 블록(ToonFrame) 고리. (장의 칸마다 한 패스의 값, GPU 가 읽는 장은 고치지 않는다)
 	frame_ring: RefCell<FrameRing>,
+	/// 재질 블록(ToonDrawMaterial)과 바깥선 블록(ToonDrawOutline)의 갈래. (값이 같은 블록은 하나)
+	material_blocks: RefCell<BlockCache>,
+	outline_blocks: RefCell<BlockCache>,
+	/// 자동 인스턴싱 묶음 자리. (색 패스와 그림자 패스가 따로 센다)
+	batch_slots: RefCell<Vec<BatchSlot>>,
+	shadow_batch_slots: RefCell<Vec<BatchSlot>>,
+	/// 자동 인스턴싱 행렬을 담는 칸. (다시 쓴다)
+	batch_data: RefCell<Vec<f32>>,
 	saved_state: Option<SavedState>,
 	instance_data: Vec<f32>,
 	frame_statistics: ToonFrameStatistics,
@@ -2257,6 +2461,11 @@ impl ToonRenderer {
 			frame_serial: 1,
 			frame_number: 0,
 			frame_ring: RefCell::new(FrameRing::new()),
+			material_blocks: RefCell::new(BlockCache::new(MATERIAL_BLOCK_BINDING, MATERIAL_BLOCK_FLOAT_COUNT)),
+			outline_blocks: RefCell::new(BlockCache::new(OUTLINE_BLOCK_BINDING, OUTLINE_BLOCK_FLOAT_COUNT)),
+			batch_slots: RefCell::new(Vec::new()),
+			shadow_batch_slots: RefCell::new(Vec::new()),
+			batch_data: RefCell::new(Vec::new()),
 			saved_state: None,
 			instance_data: Vec::new(),
 			frame_statistics: ToonFrameStatistics::default(),
@@ -2314,6 +2523,8 @@ impl ToonRenderer {
 			for program in [&solid_program, &outline_program, &depth_program] {
 				ToonRenderer::bind_frame_block(gl, program);
 			}
+			ToonRenderer::bind_uniform_block(gl, &solid_program, MATERIAL_BLOCK_NAME, MATERIAL_BLOCK_BINDING);
+			ToonRenderer::bind_uniform_block(gl, &outline_program, OUTLINE_BLOCK_NAME, OUTLINE_BLOCK_BINDING);
 			crate::core::glstatecache::use_program(gl, previous_program);
 		}
 		Ok(ToonProgramSet {
@@ -2328,8 +2539,17 @@ impl ToonRenderer {
 	//==============================================================================
 	unsafe fn bind_frame_block(gl: &crate::GlContext, program: &ShaderProgram) {
 		unsafe {
-			if let Some(block_index) = gl.get_uniform_block_index(program.get_program(), FRAME_BLOCK_NAME) {
-				gl.uniform_block_binding(program.get_program(), block_index, FRAME_BLOCK_BINDING);
+			ToonRenderer::bind_uniform_block(gl, program, FRAME_BLOCK_NAME, FRAME_BLOCK_BINDING);
+		}
+	}
+
+	//==============================================================================
+	/// 프로그램의 유니폼 블록을 바인딩 자리에 잇기. (원본 createProgramSet 의 bindBlock, 블록이 없으면 건너뛴다)
+	//==============================================================================
+	unsafe fn bind_uniform_block(gl: &crate::GlContext, program: &ShaderProgram, name: &str, binding: u32) {
+		unsafe {
+			if let Some(block_index) = gl.get_uniform_block_index(program.get_program(), name) {
+				gl.uniform_block_binding(program.get_program(), block_index, binding);
 			}
 		}
 	}
@@ -2348,6 +2568,7 @@ impl ToonRenderer {
 				gl.uniform_1_i32(solid_program.get_uniform_location(gl, name).as_ref(), unit as i32);
 			}
 			ToonRenderer::bind_frame_block(gl, &solid_program);
+			ToonRenderer::bind_uniform_block(gl, &solid_program, MATERIAL_BLOCK_NAME, MATERIAL_BLOCK_BINDING);
 			crate::core::glstatecache::use_program(gl, previous_program);
 		}
 		Ok(ToonProgramEntry::new(solid_program))
@@ -2647,6 +2868,21 @@ impl ToonRenderer {
 			}
 		}
 		self.uniform_slot_table.borrow_mut().clear();
+		for block_cache in [&self.material_blocks, &self.outline_blocks] {
+			let mut block_cache = block_cache.borrow_mut();
+			for block in block_cache.blocks.drain(..) {
+				unsafe {
+					crate::core::glstatecache::delete_buffer(gl, block.buffer);
+				}
+			}
+			block_cache.table.clear();
+			block_cache.bound_serial = 0;
+		}
+		for slot_list in [&self.batch_slots, &self.shadow_batch_slots] {
+			for slot in slot_list.borrow_mut().drain(..) {
+				ToonRenderer::delete_batch_slot(gl, slot);
+			}
+		}
 		{
 			let mut frame_ring = self.frame_ring.borrow_mut();
 			for page in frame_ring.pages.drain(..) {
@@ -3345,7 +3581,7 @@ impl ToonRenderer {
 			return;
 		}
 		self.frame_statistics.drawn_object_count += 1;
-		self.draw_with_count(gl, mesh, model_matrix, 0, options, None);
+		self.draw_with_count(gl, mesh, model_matrix, 0, options, None, DRAW_PART_ALL, None);
 	}
 
 	//==============================================================================
@@ -3409,7 +3645,7 @@ impl ToonRenderer {
 				crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(mesh.instance_buffer));
 				gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&instance_data), glow::DYNAMIC_DRAW);
 			}
-			self.draw_with_count(gl, mesh, &first_matrix, instance_count as i32, options, None);
+			self.draw_with_count(gl, mesh, &first_matrix, instance_count as i32, options, None, DRAW_PART_ALL, None);
 		}
 		self.instance_data = instance_data;
 	}
@@ -3430,7 +3666,7 @@ impl ToonRenderer {
 			return;
 		}
 		self.frame_statistics.drawn_object_count += count as u32;
-		self.draw_with_count(gl, mesh, &Matrix4::create_identity(), count as i32, options, Some(instance_buffer));
+		self.draw_with_count(gl, mesh, &Matrix4::create_identity(), count as i32, options, Some(instance_buffer), DRAW_PART_ALL, None);
 	}
 
 	//==============================================================================
@@ -3446,7 +3682,7 @@ impl ToonRenderer {
 		if mesh.outline_vertex_array.is_none() || !options.has_outline || self.is_shadow_pass {
 			return;
 		}
-		self.draw_with_count(gl, mesh, model_matrix, 0, ToonDrawOptions { is_body_drawn: false, ..options }, None);
+		self.draw_with_count(gl, mesh, model_matrix, 0, options, None, DRAW_PART_OUTLINE, None);
 	}
 
 	//==============================================================================
@@ -3813,6 +4049,8 @@ impl ToonRenderer {
 	fn forget_all_uniform_values(&self) {
 		self.uniform_serial.set(self.uniform_serial.get() + 1);
 		self.frame_ring.borrow_mut().bound_buffer = None;
+		self.material_blocks.borrow_mut().bound_serial = 0;
+		self.outline_blocks.borrow_mut().bound_serial = 0;
 	}
 
 	//==============================================================================
@@ -3892,9 +4130,260 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
+	/// 꼴의 재질 블록 읽기. (원본 readMaterialBlock, 값이 같은 꼴은 같은 블록이고 번호도 같다, 그리기 줄이 정렬과 자동 인스턴싱의 열쇠로 쓴다)
+	///
+	/// # 돌려줌
+	/// 블록 번호. (지을 때마다 새로 주고 0 은 없음, 한도에서 내보낸 자리에 새 값이 와도 다른 번호)
+	//==============================================================================
+	pub(crate) fn read_material_block(&self, gl: &crate::GlContext, options: &ToonDrawOptions) -> u64 {
+		let mut block_cache = self.material_blocks.borrow_mut();
+		write_material_block_values(&mut block_cache.values, options);
+		let block_index = self.read_uniform_block(gl, &mut block_cache);
+		block_cache.blocks[block_index].serial
+	}
+
+	//==============================================================================
+	/// 값이 같은 블록 찾기. (원본 readUniformBlock, 없으면 지어 올린다, MATERIAL_BLOCK_LIMIT 에 닿으면 오래 안 쓴 블록 하나를 내보내고 그 버퍼에 새 값을 쓴다)
+	/// - 내보낼 블록은 시계 꼴(second chance)로 고른다. 지은 차례의 고리를 돌며 쓴 표시(bind_block)가 있으면 지우고 넘어가고, 없으면 그것을 내보낸다.
+	///
+	/// # 돌려줌
+	/// block_cache.blocks 의 자리.
+	//==============================================================================
+	fn read_uniform_block(&self, gl: &crate::GlContext, block_cache: &mut BlockCache) -> usize {
+		let value_count = block_cache.values.len();
+		let mut bits_storage = [0u32; MATERIAL_BLOCK_FLOAT_COUNT];
+		for (bit, value) in bits_storage[..value_count].iter_mut().zip(block_cache.values.iter()) {
+			*bit = value.to_bits();
+		}
+		let bits = &bits_storage[..value_count];
+		let hash = read_block_hash(bits);
+		if let Some(index_list) = block_cache.table.get(&hash) {
+			for &block_index in index_list {
+				if block_cache.blocks[block_index].bits == bits {
+					return block_index;
+				}
+			}
+		}
+		let serial = block_cache.next_serial;
+		block_cache.next_serial += 1;
+		let block_index;
+		if block_cache.blocks.len() >= MATERIAL_BLOCK_LIMIT {
+			let mut hand = block_cache.hand;
+			loop {
+				if block_cache.blocks[hand].is_used {
+					block_cache.blocks[hand].is_used = false;
+					hand = (hand + 1) % block_cache.blocks.len();
+					continue;
+				}
+				break;
+			}
+			let victim_hash = block_cache.blocks[hand].hash;
+			if let Some(index_list) = block_cache.table.get_mut(&victim_hash) {
+				index_list.retain(|&index| index != hand);
+				if index_list.is_empty() {
+					block_cache.table.remove(&victim_hash);
+				}
+			}
+			if block_cache.bound_serial == block_cache.blocks[hand].serial {
+				block_cache.bound_serial = 0;
+			}
+			let buffer = block_cache.blocks[hand].buffer;
+			#[cfg(test)]
+			count_upload(1);
+			unsafe {
+				crate::core::glstatecache::bind_buffer(gl, glow::UNIFORM_BUFFER, Some(buffer));
+				gl.buffer_sub_data_u8_slice(glow::UNIFORM_BUFFER, 0, float_slice_to_bytes(&block_cache.values));
+				crate::core::glstatecache::bind_buffer(gl, glow::UNIFORM_BUFFER, None);
+			}
+			block_cache.blocks[hand] = UniformBlock { buffer, bits: bits.to_vec(), hash, serial, is_used: true };
+			block_cache.hand = (hand + 1) % block_cache.blocks.len();
+			block_index = hand;
+		}
+		else {
+			let buffer = match unsafe { crate::core::glstatecache::create_buffer(gl) } {
+				Ok(buffer) => {
+					buffer
+				}
+				Err(_) => {
+					// 버퍼를 지을 수 없으면 마지막 블록을 그대로 쓴다. (그릴 수는 있다)
+					return block_cache.blocks.len().saturating_sub(1);
+				}
+			};
+			#[cfg(test)]
+			count_upload(1);
+			unsafe {
+				crate::core::glstatecache::bind_buffer(gl, glow::UNIFORM_BUFFER, Some(buffer));
+				gl.buffer_data_u8_slice(glow::UNIFORM_BUFFER, float_slice_to_bytes(&block_cache.values), glow::STATIC_DRAW);
+				crate::core::glstatecache::bind_buffer(gl, glow::UNIFORM_BUFFER, None);
+			}
+			block_cache.blocks.push(UniformBlock { buffer, bits: bits.to_vec(), hash, serial, is_used: true });
+			block_index = block_cache.blocks.len() - 1;
+		}
+		block_cache.table.entry(hash).or_default().push(block_index);
+		block_index
+	}
+
+	//==============================================================================
+	/// 블록 묶기. (원본 bindBlock, 그 바인딩 자리에 이미 묶였으면 건너뛴다)
+	//==============================================================================
+	fn bind_block(&self, gl: &crate::GlContext, block_cache: &mut BlockCache, block_index: usize) {
+		let block = &mut block_cache.blocks[block_index];
+		block.is_used = true; // 내보낼 블록 고르기의 쓴 표시. (read_uniform_block)
+		if block.serial != block_cache.bound_serial {
+			#[cfg(test)]
+			count_upload(2);
+			unsafe {
+				gl.bind_buffer_base(glow::UNIFORM_BUFFER, block_cache.binding, Some(block.buffer));
+			}
+			block_cache.bound_serial = block.serial;
+		}
+	}
+
+	//==============================================================================
+	/// 모형 하나의 몸만 그리기. (원본 drawMeshBody, 거르지 않고 그린 수만 센다, 그리기 줄이 화면 밖을 걸러낸 뒤 부른다)
+	//==============================================================================
+	pub(crate) fn draw_mesh_body(&mut self, gl: &crate::GlContext, mesh: &ToonMesh, model_matrix: &Matrix4, options: ToonDrawOptions) {
+		self.frame_statistics.drawn_object_count += 1;
+		self.draw_with_count(gl, mesh, model_matrix, 0, options, None, DRAW_PART_BODY, None);
+	}
+
+	//==============================================================================
+	/// 같은 모형과 꼴의 여럿을 인스턴스 그리기 한 번으로. (원본 drawMeshBatch, 그리기 줄의 자동 인스턴싱, 유니티 GPU 인스턴싱과 언리얼 auto-instancing 꼴, 거른 뒤 부른다)
+	/// - 행렬을 묶음 자리의 인스턴스 버퍼에 담고 draw_elements_instanced 하나로 그린다. 틴트는 1, 빛남은 0 이라 그리기마다 그린 것과 화면이 같다. (행렬은 아핀)
+	/// - 묶음 자리(slot_index)는 그리기 줄이 프레임마다 같은 차례로 준다. 자리의 값이 앞과 같으면 다시 올리지 않는다. (몸과 바깥선 껍데기가 같은 자리, 움직이지 않는 것은 올림 없음)
+	/// - 감기는 첫 행렬로 가린다. (그리기 줄이 감기가 같은 것만 묶는다)
+	///
+	/// # 인자
+	/// - `model_matrices`: 모형 행렬 목록. (모두 그린다)
+	/// - `options`: 모두에 같은 그리기 꼴. (is_same_batch_state 로 견준 것)
+	/// - `parts`: 그릴 것. (DRAW_PART_OUTLINE, DRAW_PART_BODY, DRAW_PART_ALL, 그림자 패스면 깊이)
+	/// - `slot_index`: 묶음 자리 번호. (그림자 패스는 따로 센다)
+	//==============================================================================
+	pub(crate) fn draw_mesh_batch(&mut self, gl: &crate::GlContext, mesh: &ToonMesh, model_matrices: &[Matrix4], options: ToonDrawOptions, parts: u32, slot_index: usize) {
+		if model_matrices.is_empty() {
+			return;
+		}
+		let count = model_matrices.len();
+		let float_count = count * TOON_INSTANCE_FLOAT_COUNT;
+		let mut instance_data = std::mem::take(&mut *self.batch_data.borrow_mut());
+		instance_data.clear();
+		for model_matrix in model_matrices {
+			let offset = instance_data.len();
+			instance_data.extend_from_slice(&model_matrix.elements);
+			instance_data[offset + 3] = 0.0;
+			instance_data[offset + 7] = 0.0;
+			instance_data[offset + 11] = 0.0;
+			instance_data[offset + 15] = 1.0;
+			instance_data.extend_from_slice(&[1.0; 4]);
+		}
+		if parts & DRAW_PART_BODY != 0 {
+			self.frame_statistics.drawn_object_count += count as u32;
+		}
+		let vertex_arrays = {
+			let slot_list_cell = if self.is_shadow_pass { &self.shadow_batch_slots } else { &self.batch_slots };
+			let mut slot_list = slot_list_cell.borrow_mut();
+			while slot_list.len() <= slot_index {
+				let Ok(buffer) = (unsafe { crate::core::glstatecache::create_buffer(gl) }) else {
+					self.batch_data.replace(instance_data);
+					return;
+				};
+				slot_list.push(BatchSlot { buffer, values: Vec::new(), count: 0, vertex_arrays: Vec::new() });
+			}
+			let slot = &mut slot_list[slot_index];
+			// 같은 값이면 올리지 않는다. (비트로 견주지 않고 값으로, 원본 isSameNumber 와 같이 0 과 -0 은 같고 NaN 은 같은 것으로)
+			let is_same = slot.count == count && slot.values.len() >= float_count && slot.values[..float_count].iter().zip(instance_data.iter()).all(|(value, other)| value == other || (value.is_nan() && other.is_nan()));
+			if !is_same {
+				slot.values.clear();
+				slot.values.extend_from_slice(&instance_data);
+				slot.count = count;
+				#[cfg(test)]
+				count_upload(0);
+				unsafe {
+					crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(slot.buffer));
+					gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&instance_data), glow::DYNAMIC_DRAW);
+				}
+			}
+			let found = slot.vertex_arrays.iter().find(|entry| entry.0 == mesh.mesh_id).map(|entry| (entry.1, entry.2));
+			match found {
+				Some(vertex_arrays) => {
+					vertex_arrays
+				}
+				None => {
+					if slot.vertex_arrays.len() >= BATCH_SLOT_MESH_LIMIT {
+						for (_, body_vertex_array, outline_vertex_array) in slot.vertex_arrays.drain(..) {
+							unsafe {
+								crate::core::glstatecache::delete_vertex_array(gl, body_vertex_array);
+								if let Some(outline_vertex_array) = outline_vertex_array {
+									crate::core::glstatecache::delete_vertex_array(gl, outline_vertex_array);
+								}
+							}
+						}
+					}
+					let buffer = slot.buffer;
+					let Some(vertex_arrays) = ToonRenderer::create_batch_vertex_arrays(gl, mesh, buffer) else {
+						self.batch_data.replace(instance_data);
+						return;
+					};
+					slot.vertex_arrays.push((mesh.mesh_id, vertex_arrays.0, vertex_arrays.1));
+					vertex_arrays
+				}
+			}
+		};
+		let first_matrix = model_matrices[0];
+		self.batch_data.replace(instance_data);
+		self.draw_with_count(gl, mesh, &first_matrix, count as i32, options, None, parts, Some(vertex_arrays));
+	}
+
+	//==============================================================================
+	/// 모형과 묶음 자리의 버퍼를 함께 묶은 버텍스 어레이 짓기. (원본 createBatchVertexArrays, 모형의 버텍스 어레이와 같은 꼴, 인스턴스 어트리뷰트만 자리의 버퍼에서)
+	//==============================================================================
+	fn create_batch_vertex_arrays(gl: &crate::GlContext, mesh: &ToonMesh, buffer: GlBuffer) -> Option<(GlVertexArray, Option<GlVertexArray>)> {
+		unsafe {
+			let body_vertex_array = crate::core::glstatecache::create_vertex_array(gl).ok()?;
+			crate::core::glstatecache::bind_vertex_array(gl, Some(body_vertex_array));
+			ToonRenderer::attach_body_attributes(gl, mesh);
+			ToonRenderer::attach_instance_attributes(gl, buffer);
+			let mut outline_vertex_array = None;
+			if mesh.outline_vertex_array.is_some() {
+				let vertex_array = match crate::core::glstatecache::create_vertex_array(gl) {
+					Ok(vertex_array) => {
+						vertex_array
+					}
+					Err(_) => {
+						crate::core::glstatecache::bind_vertex_array(gl, None);
+						crate::core::glstatecache::delete_vertex_array(gl, body_vertex_array);
+						return None;
+					}
+				};
+				crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
+				ToonRenderer::attach_outline_attributes(gl, mesh);
+				ToonRenderer::attach_instance_attributes(gl, buffer);
+				outline_vertex_array = Some(vertex_array);
+			}
+			crate::core::glstatecache::bind_vertex_array(gl, None);
+			Some((body_vertex_array, outline_vertex_array))
+		}
+	}
+
+	//==============================================================================
+	/// 묶음 자리 지우기. (버퍼와 버텍스 어레이)
+	//==============================================================================
+	fn delete_batch_slot(gl: &crate::GlContext, slot: BatchSlot) {
+		unsafe {
+			for (_, body_vertex_array, outline_vertex_array) in slot.vertex_arrays {
+				crate::core::glstatecache::delete_vertex_array(gl, body_vertex_array);
+				if let Some(outline_vertex_array) = outline_vertex_array {
+					crate::core::glstatecache::delete_vertex_array(gl, outline_vertex_array);
+				}
+			}
+			crate::core::glstatecache::delete_buffer(gl, slot.buffer);
+		}
+	}
+
+	//==============================================================================
 	/// 그리기 본체. (instance_count 가 0 이면 보통, 아니면 인스턴스로, instance_buffer 가 있으면 그 꼴로)
 	//==============================================================================
-	fn draw_with_count(&mut self, gl: &crate::GlContext, mesh: &ToonMesh, model_matrix: &Matrix4, instance_count: i32, options: ToonDrawOptions, instance_buffer: Option<&ToonInstanceBuffer>) {
+	fn draw_with_count(&mut self, gl: &crate::GlContext, mesh: &ToonMesh, model_matrix: &Matrix4, instance_count: i32, options: ToonDrawOptions, instance_buffer: Option<&ToonInstanceBuffer>, parts: u32, batch_vertex_arrays: Option<(GlVertexArray, Option<GlVertexArray>)>) {
 		let instance_layout = instance_buffer.map(|instance_buffer| &instance_buffer.layout);
 		if !self.ensure_program_set(gl, options.material, instance_layout) {
 			return;
@@ -3923,6 +4412,14 @@ impl ToonRenderer {
 			}
 			None => {
 				(mesh.body_vertex_array, mesh.outline_vertex_array, if is_instanced { 1.0 } else { 0.0 })
+			}
+		};
+		let (body_vertex_array, outline_vertex_array) = match batch_vertex_arrays {
+			Some(batch_vertex_arrays) => {
+				batch_vertex_arrays
+			}
+			None => {
+				(body_vertex_array, outline_vertex_array)
 			}
 		};
 		let key = (options.material.map(|material| material.get_id()).unwrap_or(0), instance_layout.map(|instance_layout| instance_layout.get_id()).unwrap_or(0));
@@ -3999,21 +4496,25 @@ impl ToonRenderer {
 		}
 
 		// 바깥선. (껍데기의 뒷면만)
-		if let (true, Some(outline_vertex_array)) = (options.has_outline, outline_vertex_array) {
+		if let (true, true, Some(outline_vertex_array)) = (parts & DRAW_PART_OUTLINE != 0, options.has_outline, outline_vertex_array) {
 			let outline_entry = &program_set.outline;
 			let outline_program = &outline_entry.program;
 			outline_program.use_program(gl);
 			self.upload_frame_uniforms(gl, outline_entry);
 			self.upload_draw_uniforms(gl, outline_program, model_matrix, is_skinned, instanced_mode, options.joint_matrices);
+			// 선 값은 블록 하나로. (몸의 재질 블록과 같은 꼴)
 			let outline_color = options.outline_color.unwrap_or(self.outline_color);
-			self.write_uniform_floats(gl, outline_program, "outlineColor", 4, [outline_color[0], outline_color[1], outline_color[2], outline_color[3]]);
-			self.write_uniform_floats(gl, outline_program, "outlineWidthScale", 1, [options.outline_width_scale.max(0.0), 0.0, 0.0, 0.0]);
-			self.write_uniform_floats(gl, outline_program, "outlineOffsetZ", 1, [options.outline_offset_z, 0.0, 0.0, 0.0]);
 			let outline_light_set = options.light_set.unwrap_or(&self.light_set);
 			let outline_light_color = if outline_light_set.get_light_color_usage().outline { read_outline_light_color(outline_light_set.get_sun_color()) } else { [1.0; 3] };
-			self.write_uniform_floats(gl, outline_program, "outlineLightColor", 3, [outline_light_color[0], outline_light_color[1], outline_light_color[2], 0.0]);
-			self.write_uniform_floats(gl, outline_program, "alpha", 1, [options.alpha, 0.0, 0.0, 0.0]);
-			self.write_uniform_floats(gl, outline_program, "premultipliedOutput", 1, [premultiplied_output, 0.0, 0.0, 0.0]);
+			{
+				let mut outline_blocks = self.outline_blocks.borrow_mut();
+				let outline_values = [outline_color[0], outline_color[1], outline_color[2], outline_color[3], outline_light_color[0], outline_light_color[1], outline_light_color[2], options.outline_width_scale.max(0.0), options.outline_offset_z, options.alpha, premultiplied_output, 0.0];
+				for (value, source) in outline_blocks.values.iter_mut().zip(outline_values.iter()) {
+					*value = *source as f32;
+				}
+				let block_index = self.read_uniform_block(gl, &mut outline_blocks);
+				self.bind_block(gl, &mut outline_blocks, block_index);
+			}
 			if let Some(on_before_draw) = options.on_before_draw {
 				on_before_draw(outline_program, gl, ToonProgramKind::Outline);
 				self.forget_uniform_values(outline_program);
@@ -4022,7 +4523,7 @@ impl ToonRenderer {
 			ToonRenderer::apply_vertex_array(gl, outline_vertex_array);
 			draw_elements(gl, outline_index_start, outline_index_count);
 		}
-		if !options.is_body_drawn {
+		if parts & DRAW_PART_BODY == 0 || !options.is_body_drawn {
 			unsafe {
 				if is_transparent {
 					crate::core::glstatecache::disable(gl, glow::BLEND);
@@ -4050,31 +4551,13 @@ impl ToonRenderer {
 		ToonRenderer::upload_light_uniforms(gl, solid_entry, light_set);
 		let ramp_texture = light_set.get_ramp_texture();
 		self.upload_draw_uniforms(gl, solid_program, model_matrix, is_skinned, instanced_mode, options.joint_matrices);
-		let tint_color = options.tint_color;
-		let emissive_color = options.emissive_color;
-		let decal_color = options.decal_color;
-		let uv_transform = options.uv_transform;
-		let decal_uv_transform = options.decal_uv_transform;
-		let enabled = |texture: Option<GlTexture>| if texture.is_some() { 1.0 } else { 0.0 };
-		self.write_uniform_floats(gl, solid_program, "tintColor", 4, [tint_color[0], tint_color[1], tint_color[2], tint_color[3]]);
-		self.write_uniform_floats(gl, solid_program, "tintAmount", 1, [options.tint_amount.map(|tint_amount| tint_amount.clamp(0.0, 1.0)).unwrap_or(-1.0), 0.0, 0.0, 0.0]);
-		self.write_uniform_floats(gl, solid_program, "alpha", 1, [options.alpha, 0.0, 0.0, 0.0]);
-		self.write_uniform_floats(gl, solid_program, "glowScale", 1, [options.glow_scale, 0.0, 0.0, 0.0]);
-		self.write_uniform_floats(gl, solid_program, "colorScale", 1, [options.color_scale, 0.0, 0.0, 0.0]);
-		self.write_uniform_floats(gl, solid_program, "emissiveColor", 4, [emissive_color[0], emissive_color[1], emissive_color[2], options.emissive_intensity]);
-		self.write_uniform_floats(gl, solid_program, "softEdge", 1, [options.soft_edge, 0.0, 0.0, 0.0]);
-		self.write_uniform_floats(gl, solid_program, "alphaCutoff", 1, [options.alpha_cutoff, 0.0, 0.0, 0.0]);
-		self.write_uniform_floats(gl, solid_program, "premultipliedOutput", 1, [premultiplied_output, 0.0, 0.0, 0.0]);
-		self.write_uniform_floats(gl, solid_program, "textureEnabled", 3, [enabled(options.base_color_texture), enabled(options.emissive_texture), enabled(options.decal_texture), 0.0]);
-		self.write_uniform_floats(gl, solid_program, "uvTransform", 4, [uv_transform[0], uv_transform[1], uv_transform[2], uv_transform[3]]);
-		self.write_uniform_floats(gl, solid_program, "decalUvTransform", 4, [decal_uv_transform[0], decal_uv_transform[1], decal_uv_transform[2], decal_uv_transform[3]]);
-		self.write_uniform_floats(gl, solid_program, "decalColor", 4, [decal_color[0], decal_color[1], decal_color[2], options.decal_emission]);
-		self.write_uniform_floats(gl, solid_program, "receivesShadow", 1, [if options.receives_shadow { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0]);
-		self.write_uniform_floats(gl, solid_program, "shadeOffset", 1, [options.shade_offset, 0.0, 0.0, 0.0]);
-		self.write_uniform_floats(gl, solid_program, "highlightScale", 2, [options.specular_scale.max(0.0), options.rim_scale.max(0.0), 0.0, 0.0]);
-		self.write_uniform_floats(gl, solid_program, "matcapSettings", 3, [enabled(options.matcap_texture), options.matcap_strength, if options.matcap_blend == ToonMatcapBlend::Add { 1.0 } else { 0.0 }, 0.0]);
-		self.write_uniform_floats(gl, solid_program, "angelRingSettings", 4, [enabled(options.angel_ring_texture), options.angel_ring_offset_u, options.angel_ring_offset_v, if options.is_angel_ring_alpha { 1.0 } else { 0.0 }]);
-		self.write_uniform_floats(gl, solid_program, "angelRingColor", 3, [options.angel_ring_color[0], options.angel_ring_color[1], options.angel_ring_color[2], 0.0]);
+		// 재질 값은 블록 하나로. (값이 같은 블록은 하나, 그리기마다 bind_buffer_base 하나)
+		{
+			let mut material_blocks = self.material_blocks.borrow_mut();
+			write_material_block_values(&mut material_blocks.values, &options);
+			let block_index = self.read_uniform_block(gl, &mut material_blocks);
+			self.bind_block(gl, &mut material_blocks, block_index);
+		}
 		ToonRenderer::bind_texture_2d(gl, SHADOW_TEXTURE_UNIT, self.shadow_input.map(|shadow_input| shadow_input.depth_texture).unwrap_or(self.empty_shadow_texture));
 		self.bind_texture_unit(gl, BASE_COLOR_TEXTURE_UNIT, options.base_color_texture);
 		self.bind_texture_unit(gl, EMISSIVE_TEXTURE_UNIT, options.emissive_texture);

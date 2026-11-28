@@ -50,17 +50,21 @@
 //! <!-- image: toon-style.webp -->
 //==============================================================================
 use crate::core::glcontext::GlContext;
+use std::cell::Cell;
 use crate::core::gluniform::GlUniformF64;
 
 use crate::base::matrix4::Matrix4;
-use crate::core::graphic::{GlProgram, GlTexture, GlVertexArray};
+use crate::core::graphic::{GlBuffer, GlProgram, GlTexture, GlVertexArray};
 use crate::core::shaderprogram::ShaderProgram;
 use crate::core::colorspace::{add_color_space_define, read_engine_color_space, ColorSpace};
-use crate::graphics3d::toon::toonrenderer::{read_matrix_determinant, ToonInstance, ToonMesh, TOON_ATTRIBUTE_LOCATIONS, TOON_INSTANCE_FLOAT_COUNT, TOON_MAXIMUM_JOINTS};
+use crate::graphics3d::toon::toonrenderer::{create_mesh_instance_vertex_array, read_matrix_determinant, ToonInstance, ToonMesh, TOON_ATTRIBUTE_LOCATIONS, TOON_INSTANCE_FLOAT_COUNT, TOON_MAXIMUM_JOINTS};
 use crate::graphics3d::GlFramebuffer;
 
 /// 선 번호의 상한. (선의 판에 14 비트로 쓴다, 0 은 빈 곳)
 pub const TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID: u32 = 16383;
+
+/// 묶음 자리마다 버텍스 어레이를 지어 둘 모형 수. (넘으면 그 자리의 것을 모두 지우고 다시, 몸 묶음 자리와 같은 값)
+const LINE_BATCH_SLOT_MESH_LIMIT: usize = 8;
 
 /// 선의 판과 씨앗 판을 묶는 텍스처 유닛. (툰 렌더러의 그림자 유닛 3 과 겹치지 않게, 섞기는 번호 색 표를 4, 선의 판을 6, 깊이를 7 에)
 const LINE_TEXTURE_UNIT: u32 = 5;
@@ -229,7 +233,18 @@ pub struct ToonLineTarget {
 }
 
 //==============================================================================
-/// 이번 프레임의 카메라.
+/// 선의 판 자동 인스턴싱 묶음 자리. (원본 #batchSlots 의 칸)
+//==============================================================================
+struct LineBatchSlot {
+	buffer: GlBuffer,
+	values: Vec<f32>,
+	count: usize,
+	/// 모형 번호마다 몸 버텍스 어레이.
+	vertex_arrays: Vec<(u64, GlVertexArray)>,
+}
+
+//==============================================================================
+/// 이번 프레임의 카메라. (원본 #frame)
 //==============================================================================
 #[derive(Clone, Copy)]
 struct LineFrame {
@@ -312,6 +327,10 @@ pub struct ToonScreenOutline {
 	saved_state: Option<SavedState>,
 	is_drawing_line_ids: bool,
 	instance_data: Vec<f32>,
+	/// 자동 인스턴싱 묶음 자리. (원본 #batchSlots, 그리기 줄이 프레임마다 같은 차례로 주고 값이 같으면 다시 올리지 않는다)
+	batch_slots: Vec<LineBatchSlot>,
+	/// 선의 판에 올린 instanced, instanceLineIds, skinned, lineFlags. (같으면 건너뜀, begin_line_ids 가 잊는다)
+	line_uniform_values: Cell<[f32; 4]>,
 	drawn_distance_sum: f64,
 	drawn_distance_count: u32,
 	line_widths: [f64; 2],
@@ -533,6 +552,8 @@ impl ToonScreenOutline {
 			saved_state: None,
 			is_drawing_line_ids: false,
 			instance_data: Vec::new(),
+			batch_slots: Vec::new(),
+			line_uniform_values: Cell::new([f32::NAN; 4]),
 			drawn_distance_sum: 0.0,
 			drawn_distance_count: 0,
 			line_widths: [2.0, 1.0],
@@ -912,6 +933,7 @@ impl ToonScreenOutline {
 			self.line_program.use_program(gl);
 			gl.uniform_matrix_4_f32_slice(self.line_program.get_uniform_location(gl, "viewProjectionMatrix").as_ref(), false, &view_projection_matrix.elements);
 		}
+		self.line_uniform_values.set([f32::NAN; 4]);
 		true
 	}
 
@@ -934,7 +956,96 @@ impl ToonScreenOutline {
 		}
 		self.add_drawn_distance(mesh, model_matrix);
 		let is_mirrored = options.is_mirrored.unwrap_or_else(|| read_matrix_determinant(model_matrix) < 0.0);
-		self.draw_with_count(gl, mesh, model_matrix, 0, line_id, false, is_mirrored, options);
+		let (body_vertex_array, _) = mesh.get_body();
+		self.draw_with_count(gl, mesh, model_matrix, 0, line_id, false, is_mirrored, options, body_vertex_array);
+	}
+
+	//==============================================================================
+	/// 모형 하나를 그릴지 가리고 초점 거리에 더하기. (원본 acceptMesh, draw_mesh 가 그리기 앞에 하는 것, 그리기 줄이 담은 차례로 부르고 그리기는 draw_mesh_batch 로 몰아 한다)
+	///
+	/// # 돌려줌
+	/// 그릴 것이면 true.
+	//==============================================================================
+	pub(crate) fn accept_mesh(&mut self, mesh: &ToonMesh, model_matrix: &Matrix4, is_culled: bool) -> bool {
+		if !self.is_drawing_line_ids || (is_culled && !self.is_visible(mesh, model_matrix)) {
+			return false;
+		}
+		self.add_drawn_distance(mesh, model_matrix);
+		true
+	}
+
+	//==============================================================================
+	/// 같은 모형과 꼴의 여럿의 번호를 인스턴스 그리기 한 번으로. (원본 drawMeshBatch, 그리기 줄의 자동 인스턴싱, accept_mesh 로 고른 것, 감기는 뒤집지 않은 것만)
+	/// - 번호는 인스턴스마다 틴트 칸의 x 로. (draw_mesh_instanced 와 같은 길, 하나면 보통 그리기)
+	/// - 묶음 자리(slot_index)의 값이 앞 프레임과 같으면 다시 올리지 않는다. (멈춘 장면은 올림 없음, 몸 묶음 자리와 같은 꼴)
+	///
+	/// # 인자
+	/// - `model_matrices`: 모형 행렬 목록.
+	/// - `line_ids`: 번호 목록. (행렬과 같은 자리)
+	/// - `options`: 모두에 같은 그리기 꼴.
+	/// - `slot_index`: 묶음 자리 번호. (그리기 줄이 프레임마다 같은 차례로 준다)
+	//==============================================================================
+	pub(crate) fn draw_mesh_batch(&mut self, gl: &GlContext, mesh: &ToonMesh, model_matrices: &[Matrix4], line_ids: &[u32], options: ToonLineDrawOptions, slot_index: usize) {
+		if !self.is_drawing_line_ids || model_matrices.is_empty() {
+			return;
+		}
+		let count = model_matrices.len();
+		let (body_vertex_array, _) = mesh.get_body();
+		if count == 1 {
+			self.draw_with_count(gl, mesh, &model_matrices[0], 0, line_ids[0], false, false, options, body_vertex_array);
+			return;
+		}
+		let float_count = count * TOON_INSTANCE_FLOAT_COUNT;
+		let mut instance_data = std::mem::take(&mut self.instance_data);
+		instance_data.clear();
+		for (model_matrix, &line_id) in model_matrices.iter().zip(line_ids.iter()) {
+			instance_data.extend_from_slice(&model_matrix.elements);
+			instance_data.extend_from_slice(&[line_id.min(TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID) as f32, 0.0, 0.0, 1.0]);
+		}
+		while self.batch_slots.len() <= slot_index {
+			let Ok(buffer) = (unsafe { crate::core::glstatecache::create_buffer(gl) }) else {
+				self.instance_data = instance_data;
+				return;
+			};
+			self.batch_slots.push(LineBatchSlot { buffer, values: Vec::new(), count: 0, vertex_arrays: Vec::new() });
+		}
+		let slot = &mut self.batch_slots[slot_index];
+		let is_same = slot.count == count && slot.values.len() >= float_count && slot.values[..float_count].iter().zip(instance_data.iter()).all(|(value, other)| value == other && value.is_sign_negative() == other.is_sign_negative());
+		if !is_same {
+			slot.values.clear();
+			slot.values.extend_from_slice(&instance_data);
+			slot.count = count;
+			#[cfg(test)]
+			crate::graphics3d::toon::toonrenderer::count_upload(3);
+			unsafe {
+				crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(slot.buffer));
+				gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&instance_data), glow::DYNAMIC_DRAW);
+			}
+		}
+		let mesh_id = mesh.get_mesh_id();
+		let found = slot.vertex_arrays.iter().find(|entry| entry.0 == mesh_id).map(|entry| entry.1);
+		let vertex_array = match found {
+			Some(vertex_array) => {
+				vertex_array
+			}
+			None => {
+				if slot.vertex_arrays.len() >= LINE_BATCH_SLOT_MESH_LIMIT {
+					for (_, old_vertex_array) in slot.vertex_arrays.drain(..) {
+						unsafe {
+							crate::core::glstatecache::delete_vertex_array(gl, old_vertex_array);
+						}
+					}
+				}
+				let Some(vertex_array) = create_mesh_instance_vertex_array(gl, mesh, slot.buffer) else {
+					self.instance_data = instance_data;
+					return;
+				};
+				slot.vertex_arrays.push((mesh_id, vertex_array));
+				vertex_array
+			}
+		};
+		self.instance_data = instance_data;
+		self.draw_with_count(gl, mesh, &Matrix4::create_identity(), count as i32, line_ids[0], true, false, options, vertex_array);
 	}
 
 	//==============================================================================
@@ -970,7 +1081,8 @@ impl ToonScreenOutline {
 				crate::core::glstatecache::bind_buffer(gl, glow::ARRAY_BUFFER, Some(mesh.get_instance_buffer()));
 				gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&instance_data), glow::DYNAMIC_DRAW);
 			}
-			self.draw_with_count(gl, mesh, &Matrix4::create_identity(), instance_count as i32, line_id, true, options.is_mirrored == Some(true), options);
+			let (body_vertex_array, _) = mesh.get_body();
+			self.draw_with_count(gl, mesh, &Matrix4::create_identity(), instance_count as i32, line_id, true, options.is_mirrored == Some(true), options, body_vertex_array);
 		}
 		self.instance_data = instance_data;
 	}
@@ -979,21 +1091,39 @@ impl ToonScreenOutline {
 	/// 번호 그리기 본체. (instance_count 가 0 이면 보통 그리기)
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
-	fn draw_with_count(&self, gl: &GlContext, mesh: &ToonMesh, model_matrix: &Matrix4, instance_count: i32, line_id: u32, is_instance_line_id: bool, is_mirrored: bool, options: ToonLineDrawOptions) {
+	fn draw_with_count(&self, gl: &GlContext, mesh: &ToonMesh, model_matrix: &Matrix4, instance_count: i32, line_id: u32, is_instance_line_id: bool, is_mirrored: bool, options: ToonLineDrawOptions, vertex_array: GlVertexArray) {
 		let line_program = &self.line_program;
 		let is_skinned = mesh.is_skinned() && options.joint_matrices.is_some();
-		let (body_vertex_array, body_index_count) = mesh.get_body();
+		let (_, body_index_count) = mesh.get_body();
 		let index_start = options.index_start.min(body_index_count as usize);
 		let remaining_count = body_index_count as usize - index_start;
 		let index_count = options.index_count.unwrap_or(remaining_count).min(remaining_count);
 		let line_flags = if options.has_crease_line { 1.0 } else { 0.0 } + if options.has_screen_outline { 2.0 } else { 0.0 };
 		unsafe {
 			gl.uniform_matrix_4_f32_slice(line_program.get_uniform_location(gl, "modelMatrix").as_ref(), false, &model_matrix.elements);
-			gl.uniform_1_f64(line_program.get_uniform_location(gl, "instanced").as_ref(), if instance_count > 0 { 1.0 } else { 0.0 });
-			gl.uniform_1_f64(line_program.get_uniform_location(gl, "instanceLineIds").as_ref(), if is_instance_line_id { 1.0 } else { 0.0 });
-			gl.uniform_1_f64(line_program.get_uniform_location(gl, "skinned").as_ref(), if is_skinned { 1.0 } else { 0.0 });
+			// 그리기마다 거의 같은 넷은 바뀔 때만 올린다. (begin_line_ids 가 잊는다)
+			let mut line_uniform_values = self.line_uniform_values.get();
+			let instanced_value = if instance_count > 0 { 1.0 } else { 0.0 };
+			let line_id_source_value = if is_instance_line_id { 1.0 } else { 0.0 };
+			let skinned_value = if is_skinned { 1.0 } else { 0.0 };
+			if line_uniform_values[0] != instanced_value {
+				line_uniform_values[0] = instanced_value;
+				gl.uniform_1_f64(line_program.get_uniform_location(gl, "instanced").as_ref(), instanced_value as f64);
+			}
+			if line_uniform_values[1] != line_id_source_value {
+				line_uniform_values[1] = line_id_source_value;
+				gl.uniform_1_f64(line_program.get_uniform_location(gl, "instanceLineIds").as_ref(), line_id_source_value as f64);
+			}
+			if line_uniform_values[2] != skinned_value {
+				line_uniform_values[2] = skinned_value;
+				gl.uniform_1_f64(line_program.get_uniform_location(gl, "skinned").as_ref(), skinned_value as f64);
+			}
 			gl.uniform_1_f64(line_program.get_uniform_location(gl, "lineId").as_ref(), line_id.min(TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID) as f64);
-			gl.uniform_1_f64(line_program.get_uniform_location(gl, "lineFlags").as_ref(), line_flags);
+			if line_uniform_values[3] != line_flags as f32 {
+				line_uniform_values[3] = line_flags as f32;
+				gl.uniform_1_f64(line_program.get_uniform_location(gl, "lineFlags").as_ref(), line_flags);
+			}
+			self.line_uniform_values.set(line_uniform_values);
 			if let (true, Some(joint_matrices)) = (is_skinned, options.joint_matrices) {
 				let joint_float_count = joint_matrices.len().min(TOON_MAXIMUM_JOINTS * 16) / 16 * 16;
 				gl.uniform_matrix_4_f32_slice(line_program.get_uniform_location(gl, "jointMatrices").as_ref(), false, &joint_matrices[..joint_float_count]);
@@ -1004,8 +1134,10 @@ impl ToonScreenOutline {
 			if is_mirrored {
 				crate::core::glstatecache::front_face(gl, glow::CW);
 			}
-			crate::core::glstatecache::bind_vertex_array(gl, Some(body_vertex_array));
+			crate::core::glstatecache::bind_vertex_array(gl, Some(vertex_array));
 			let byte_offset = (index_start * 4) as i32;
+			#[cfg(test)]
+			crate::graphics3d::toon::toonrenderer::count_upload(4);
 			if instance_count > 0 {
 				crate::core::glstatecache::draw_elements_instanced(gl, glow::TRIANGLES, index_count as i32, glow::UNSIGNED_INT, byte_offset, instance_count);
 			}
@@ -1747,6 +1879,14 @@ impl ToonScreenOutline {
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &GlContext) {
 		self.delete_line_target(gl);
+		for slot in self.batch_slots.drain(..) {
+			unsafe {
+				for (_, vertex_array) in slot.vertex_arrays {
+					crate::core::glstatecache::delete_vertex_array(gl, vertex_array);
+				}
+				crate::core::glstatecache::delete_buffer(gl, slot.buffer);
+			}
+		}
 		unsafe {
 			if let Some(line_color_texture) = self.line_color_texture.take() {
 				crate::core::glstatecache::delete_texture(gl, line_color_texture);

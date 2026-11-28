@@ -15,3 +15,5 @@ pub mod toonscreenoutline;
 pub mod toonvfx;
 pub mod toonlightset;
 pub mod toonmaterial;
+#[cfg(all(test, target_os = "macos"))]
+mod toonbatchtests;
