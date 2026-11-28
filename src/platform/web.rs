@@ -1088,6 +1088,17 @@ pub fn open_url(url: &str) -> bool {
 }
 
 //==============================================================================
+/// 현지 시각 읽기. (원본 Engine.readLocalTime, new Date(Date.now() + 오프셋 분) 의 현지 달력 시각)
+///
+/// # 인자
+/// - `minute_offset`: 지금에 더할 분. (음수는 과거, 0 이면 지금)
+//==============================================================================
+pub fn read_local_time(minute_offset: f64) -> crate::platform::LocalTime {
+	let date = js_sys::Date::new(&JsValue::from_f64(js_sys::Date::now() + minute_offset * 60000.0));
+	crate::platform::LocalTime { year: date.get_full_year() as i32, month: date.get_month() + 1, day: date.get_date(), hour: date.get_hours(), minute: date.get_minutes(), second: date.get_seconds(), weekday: date.get_day() }
+}
+
+//==============================================================================
 /// 자바스크립트 오류를 글로.
 //==============================================================================
 fn describe_js_error(error: JsValue) -> String {

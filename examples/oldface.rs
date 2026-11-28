@@ -23,7 +23,7 @@ use vanilla::graphics3d::material::decode_image_bytes;
 
 type GlTexture = <glow::Context as glow::HasContext>::Texture;
 use vanilla::{
-	AmbientOcclusionEffect, AssetLoadHandle, GlContext, ImageSource, Rect, UIContextMenu, UIContextMenuItem, UIContextMenuOptions, BlobAsset, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, Graphic, HumanSkinRenderer, ImageDescription, ImageDescriptionOptions, KeyCode, Material, Matrix4, MouseButton, RenderTarget, RenderTargetOptions, create_bezier_easing, Scene, SceneBase, SeededRandom, ComponentContext, NodeId, NodeTree, Paint, Pivot, TouchRecognizer, UIButton, UILabel, UIScrollView, UISlider, ShadowMap, SkinnedModel, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector2, Vector3, SKIN_SHADING_EYE, SKIN_SHADING_FACIALHAIR, SKIN_SHADING_FLUID, SKIN_SHADING_HAIR, SKIN_SHADING_OCCLUSION, SKIN_SHADING_SKIN, SKIN_TEXTURE_UNIT_DETAILHEIGHT, SKIN_TEXTURE_UNIT_LAYERCOLOR, SKIN_TEXTURE_UNIT_LAYERNORMAL, SKIN_TEXTURE_UNIT_MASKATLAS, SKIN_TEXTURE_UNIT_MICRO,
+	AmbientOcclusionEffect, AssetLoadHandle, GlContext, ImageSource, Rect, UIContextMenu, UIContextMenuItem, UIContextMenuOptions, BlobAsset, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, Graphic, HumanSkinRenderer, ImageDescription, ImageDescriptionOptions, KeyCode, Material, Matrix4, MouseButton, RenderTarget, RenderTargetOptions, create_bezier_easing, Scene, SceneBase, SeededRandom, ComponentContext, NodeId, NodeTree, ButtonState, Paint, Pivot, TouchRecognizer, UIButton, UILabel, UIView, UIScrollView, UISlider, ShadowMap, SkinnedModel, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector2, Vector3, SKIN_SHADING_EYE, SKIN_SHADING_FACIALHAIR, SKIN_SHADING_FLUID, SKIN_SHADING_HAIR, SKIN_SHADING_OCCLUSION, SKIN_SHADING_SKIN, SKIN_TEXTURE_UNIT_DETAILHEIGHT, SKIN_TEXTURE_UNIT_LAYERCOLOR, SKIN_TEXTURE_UNIT_LAYERNORMAL, SKIN_TEXTURE_UNIT_MASKATLAS, SKIN_TEXTURE_UNIT_MICRO,
 };
 
 //==============================================================================
@@ -79,6 +79,9 @@ const THUMBNAIL_FILES: [(&str, &str); 7] = [("albedo", "head_albedo.jpg"), ("nor
 const THUMBNAIL_SIZE: usize = 96;
 const CONTEXT_MENU_LABELS: [&str; 3] = ["RESET VIEW", "RESET OPTIONS", "TOGGLE MATERIAL GRAPH"];
 const CONTEXT_MENU_ITEM_HEIGHT: f64 = 28.0;
+// 우클릭 메뉴 꼴. (원본 #contextMenu: 테두리 1px, 안쪽 위아래 여백 6px, 글자 왼쪽 여백 16px, 높이 98 = 2 + 12 + 28 x 3)
+const CONTEXT_MENU_WIDTH: f64 = 182.59;
+const CONTEXT_MENU_HEIGHT: f64 = 98.0;
 const BLOOM_ITERATION_COUNT: u32 = 3;
 const SLIDER_COUNT: usize = 38;
 const SLIDER_FRAME_RATE: usize = 0;
@@ -233,6 +236,31 @@ impl OptionValues {
 }
 
 // 그림 줄이기. (원본 createThumbnail 의 96x96 drawImage, 알파를 곱해 평균 낸 뒤 되돌린다)
+// PNG, JPEG 헤더에서 크기를 읽는다. (원본 readImageSize, 디코드 없이)
+fn read_image_size(bytes: &[u8]) -> (u32, u32) {
+	if bytes.len() > 24 && bytes[0] == 0x89 && bytes[1] == 0x50 {
+		let width = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+		let height = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+		return (width, height);
+	}
+	let mut offset = 2;
+	while offset + 9 < bytes.len() {
+		if bytes[offset] != 0xFF {
+			offset += 1;
+			continue;
+		}
+		let marker = bytes[offset + 1];
+		let segment_length = ((bytes[offset + 2] as usize) << 8) | bytes[offset + 3] as usize;
+		if (0xC0..=0xCF).contains(&marker) && marker != 0xC4 && marker != 0xC8 && marker != 0xCC {
+			let width = ((bytes[offset + 7] as u32) << 8) | bytes[offset + 8] as u32;
+			let height = ((bytes[offset + 5] as u32) << 8) | bytes[offset + 6] as u32;
+			return (width, height);
+		}
+		offset += 2 + segment_length;
+	}
+	(0, 0)
+}
+
 fn downscale_pixels(width: usize, height: usize, pixels: &[u8]) -> Vec<u8> {
 	let mut result = vec![0u8; THUMBNAIL_SIZE * THUMBNAIL_SIZE * 4];
 	for target_y in 0..THUMBNAIL_SIZE {
@@ -796,9 +824,11 @@ struct OldFaceScene {
 	image_record_list: RefCell<Vec<(String, u32, u32, usize)>>,
 	thumbnail_pixel_list: RefCell<Vec<(String, Vec<u8>)>>,
 	pending_menu_action: Rc<Cell<Option<usize>>>,
+	menu_row_label_ids: Vec<(NodeId, NodeId)>,
 	frame_start_instant: web_time::Instant,
 	last_tick_instant: Option<web_time::Instant>,
 	menu_test_frame: u32,
+	loading_done_instant: Option<web_time::Instant>,
 }
 
 //==============================================================================
@@ -825,6 +855,11 @@ struct OldFaceUi {
 	footer_ids: Vec<NodeId>,
 	slider_ids: Vec<NodeId>,
 	menu_id: NodeId,
+	loading_id: NodeId,
+	loading_label_id: NodeId,
+	loading_bar_id: NodeId,
+	loading_fill_id: NodeId,
+	loading_detail_id: NodeId,
 }
 
 fn create_color(red: f64, green: f64, blue: f64, alpha: f64) -> Color {
@@ -848,18 +883,32 @@ fn create_label_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, si
 	label_id
 }
 
+// 글자 간격이 있는 글 노드. (CSS letter-spacing 값을 픽셀로 준다)
+fn create_spaced_label_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, size: Vector2, text: &str, font_size: f64, color: Color, text_align: TextAlign, letter_spacing: f64) -> NodeId {
+	let label_id = create_label_node(node_tree, parent_id, name, size, text, font_size, color, text_align);
+	if let Some(label) = node_tree[label_id].get_component_mut::<UILabel>() {
+		label.set_letter_spacing(letter_spacing);
+	}
+	label_id
+}
+
 // 테두리 있는 둥근 단추. (바깥 Paint 가 테두리 색, 안쪽 자식 Paint 가 바탕색. 바탕 노드를 돌려준다)
-fn create_pill_button(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, size: Vector2, text: &str, font_size: f64, text_color: Color, border_color: Color, fill_color: Color, round_size: f64) -> (NodeId, NodeId) {
+fn create_pill_button(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, size: Vector2, text: &str, font_size: f64, text_color: Color, border_color: Color, fill_color: Color, round_size: f64, letter_spacing: f64) -> (NodeId, NodeId) {
 	let button_id = create_box_node(node_tree, parent_id, name, size);
 	let border_paint = node_tree[button_id].add_component(Paint::create_with_color(border_color));
 	border_paint.set_round_size(round_size);
 	let fill_size = Vector2::create(size.x - 2.0, size.y - 2.0);
 	let fill_id = create_box_node(node_tree, button_id, "fill", fill_size);
 	node_tree[fill_id].set_local_position(Vector2::create(1.0, 1.0));
+	// 뒤 흐림이 먼저(CSS backdrop-filter: blur(8px)), 바탕색이 그 위에.
+	node_tree.add_component(fill_id, UIView::new()).expect("view").set_backdrop_blur(8.0);
 	let fill_paint = node_tree[fill_id].add_component(Paint::create_with_color(fill_color));
 	fill_paint.set_round_size(round_size - 1.0);
-	let label_id = create_label_node(node_tree, fill_id, "text", fill_size, text, font_size, text_color, TextAlign::Center);
-	let _ = label_id;
+	let label_id = create_spaced_label_node(node_tree, fill_id, "text", fill_size, text, font_size, text_color, TextAlign::Center, letter_spacing);
+	// 원본 text-indent 가 있는 링크는 글자 끝 간격만큼 오른쪽으로 밀어 눈에 가운데로 보이게 한다.
+	if name == "home" {
+		node_tree[label_id].set_local_position(Vector2::create(letter_spacing * 0.5, 0.0));
+	}
 	node_tree.add_component(button_id, UIButton::new());
 	(button_id, fill_id)
 }
@@ -873,15 +922,15 @@ impl OldFaceScene {
 		let node_tree = self.scene_base.get_node_tree_mut();
 		let root_id = node_tree.get_root_id();
 		let light = create_color(242.0, 236.0, 226.0, 0.95);
-		let title_id = create_label_node(node_tree, root_id, "title", Vector2::create(900.0, 80.0), "O\u{2002}L\u{2002}D\u{2002}\u{2002}\u{2002}F\u{2002}A\u{2002}C\u{2002}E", 58.0, create_color(242.0, 236.0, 226.0, 1.0), TextAlign::Center);
+		let title_id = create_spaced_label_node(node_tree, root_id, "title", Vector2::create(900.0, 80.0), "OLD FACE", 58.0, create_color(242.0, 236.0, 226.0, 1.0), TextAlign::Center, 0.5 * 58.0);
 		let divider_id = create_box_node(node_tree, root_id, "divider", Vector2::create(240.0, 1.0));
 		node_tree[divider_id].add_component(Paint::create_with_color(create_color(242.0, 236.0, 226.0, 0.55)));
-		let subtitle_id = create_label_node(node_tree, root_id, "subtitle", Vector2::create(600.0, 20.0), "V A N I L L A   E N G I N E", 12.0, create_color(230.0, 226.0, 220.0, 0.78), TextAlign::Center);
+		let subtitle_id = create_spaced_label_node(node_tree, root_id, "subtitle", Vector2::create(600.0, 20.0), "VANILLA ENGINE", 12.0, create_color(230.0, 226.0, 220.0, 0.78), TextAlign::Center, 0.85 * 12.0);
 		let mut expression_button_ids = Vec::new();
 		let mut expression_fill_ids = Vec::new();
 		for (expression_index, definition) in EXPRESSION_DEFINITIONS.iter().enumerate() {
 			let size = Vector2::create(EXPRESSION_BUTTON_WIDTHS[expression_index], EXPRESSION_BUTTON_HEIGHT);
-			let (button_id, fill_id) = create_pill_button(node_tree, root_id, definition.0, size, definition.1, 10.0, create_color(242.0, 236.0, 226.0, 0.85), create_color(70.0, 67.0, 68.0, 1.0), create_color(30.0, 28.0, 30.0, 0.85), size.y * 0.5);
+			let (button_id, fill_id) = create_pill_button(node_tree, root_id, definition.0, size, definition.1, 10.0, create_color(242.0, 236.0, 226.0, 0.85), create_color(70.0, 67.0, 68.0, 1.0), create_color(30.0, 28.0, 30.0, 0.85), size.y * 0.5, 0.18 * 10.0);
 			let pending = pending_expression_index.clone();
 			if let Some(button) = node_tree[button_id].get_component_mut::<UIButton>() {
 				button.set_click_event(Box::new(move |_button: &mut UIButton, _context: &mut ComponentContext| {
@@ -891,10 +940,18 @@ impl OldFaceScene {
 			expression_button_ids.push(button_id);
 			expression_fill_ids.push(fill_id);
 		}
-		let (home_id, _) = create_pill_button(node_tree, root_id, "home", Vector2::create(244.0, 34.0), "VANILLAPUNCH.COM", 12.0, light, create_color(80.0, 77.0, 76.0, 1.0), create_color(78.0, 72.0, 66.0, 0.75), 17.0);
+		let (home_id, _) = create_pill_button(node_tree, root_id, "home", Vector2::create(245.2, 37.0), "VANILLAPUNCH.COM", 12.0, light, create_color(80.0, 77.0, 76.0, 1.0), create_color(78.0, 72.0, 66.0, 0.75), 18.5, 0.45 * 12.0);
+		// 누르면 새 탭처럼 바닐라펀치 사이트를 연다. (원본 a href, target _blank)
+		if let Some(button) = node_tree[home_id].get_component_mut::<UIButton>() {
+			button.set_click_event(Box::new(move |_button: &mut UIButton, _context: &mut ComponentContext| {
+				if let Ok(engine) = Engine::get_engine() {
+					engine.open_url("https://vanillapunch.com/tools/");
+				}
+			}));
+		}
 		let mut footer_ids = Vec::new();
 		for (line_index, line) in FOOTER_LINES.iter().enumerate() {
-			footer_ids.push(create_label_node(node_tree, root_id, &format!("footer{}", line_index), Vector2::create(1200.0, 18.0), line, 9.5, create_color(242.0, 236.0, 226.0, 0.5), TextAlign::Left));
+			footer_ids.push(create_spaced_label_node(node_tree, root_id, &format!("footer{}", line_index), Vector2::create(1200.0, 18.0), line, 9.5, create_color(242.0, 236.0, 226.0, 0.5), TextAlign::Left, 0.16 * 9.5));
 		}
 		// 옵션 패널은 맨 뒤에 만든다. (원본 z-index 5, 표정 단추 위에 그려진다)
 		let option_values = self.option_values.clone();
@@ -904,8 +961,9 @@ impl OldFaceScene {
 		node_tree[options_id].add_component(Paint::create_with_color(create_color(60.0, 57.0, 59.0, 1.0))).set_round_size(12.0);
 		let options_fill_id = create_box_node(node_tree, options_id, "fill", Vector2::create(120.0, 32.0));
 		node_tree[options_fill_id].set_local_position(Vector2::create(1.0, 1.0));
+		node_tree.add_component(options_fill_id, UIView::new()).expect("view").set_backdrop_blur(10.0);
 		node_tree[options_fill_id].add_component(Paint::create_with_color(create_color(30.0, 28.0, 30.0, 0.9))).set_round_size(11.0);
-		let options_title_id = create_label_node(node_tree, options_fill_id, "text", Vector2::create(120.0, 32.0), "OPTIONS", 10.0, gold, TextAlign::Center);
+		let options_title_id = create_spaced_label_node(node_tree, options_fill_id, "text", Vector2::create(120.0, 32.0), "OPTIONS", 10.0, gold, TextAlign::Center, 0.32 * 10.0);
 		let options_divider_id = create_box_node(node_tree, options_fill_id, "titleDivider", Vector2::create(370.0, 1.0));
 		node_tree[options_divider_id].set_local_position(Vector2::create(0.0, 33.0));
 		node_tree[options_divider_id].add_component(Paint::create_with_color(create_color(242.0, 236.0, 226.0, 0.1)));
@@ -940,10 +998,10 @@ impl OldFaceScene {
 			let key_fill_id = create_box_node(node_tree, key_id, "keyFill", Vector2::create(16.0, 14.0));
 			node_tree[key_fill_id].set_local_position(Vector2::create(1.0, 1.0));
 			node_tree[key_fill_id].add_component(Paint::create_with_color(create_color(28.0, 26.0, 28.0, 1.0))).set_round_size(3.0);
-			create_label_node(node_tree, key_fill_id, "digit", Vector2::create(16.0, 14.0), &format!("{}", toggle_index + 1), 9.0, create_color(242.0, 236.0, 226.0, 0.6), TextAlign::Center);
-			let label_id = create_label_node(node_tree, row_id, "label", Vector2::create(240.0, 28.0), label, 10.5, panel_text, TextAlign::Left);
+			create_spaced_label_node(node_tree, key_fill_id, "digit", Vector2::create(16.0, 14.0), &format!("{}", toggle_index + 1), 9.0, create_color(242.0, 236.0, 226.0, 0.6), TextAlign::Center, 0.12 * 10.5);
+			let label_id = create_spaced_label_node(node_tree, row_id, "label", Vector2::create(240.0, 28.0), label, 10.5, panel_text, TextAlign::Left, 0.12 * 10.5);
 			node_tree[label_id].set_local_position(Vector2::create(40.0, 0.0));
-			let state_id = create_label_node(node_tree, row_id, "state", Vector2::create(60.0, 28.0), "", 9.5, create_color(242.0, 236.0, 226.0, 0.4), TextAlign::Right);
+			let state_id = create_spaced_label_node(node_tree, row_id, "state", Vector2::create(60.0, 28.0), "", 9.5, create_color(242.0, 236.0, 226.0, 0.4), TextAlign::Right, 0.18 * 9.5);
 			node_tree[state_id].set_local_position(Vector2::create(296.0, 0.0));
 			toggle_state_ids.push(state_id);
 			node_tree.add_component(row_id, UIButton::new());
@@ -966,13 +1024,13 @@ impl OldFaceScene {
 				node_tree[group_id].set_local_position(Vector2::create(0.0, content_y));
 				let line_id = create_box_node(node_tree, group_id, "line", Vector2::create(370.0, 1.0));
 				node_tree[line_id].add_component(Paint::create_with_color(create_color(242.0, 236.0, 226.0, 0.08)));
-				let group_label_id = create_label_node(node_tree, group_id, "groupLabel", Vector2::create(340.0, 12.0), definition.group, 9.0, create_color(232.0, 201.0, 138.0, 0.7), TextAlign::Left);
+				let group_label_id = create_spaced_label_node(node_tree, group_id, "groupLabel", Vector2::create(340.0, 12.0), definition.group, 9.0, create_color(232.0, 201.0, 138.0, 0.7), TextAlign::Left, 0.3 * 9.0);
 				node_tree[group_label_id].set_local_position(Vector2::create(12.0, 9.0));
 				content_y += 25.0;
 			}
 			let row_id = create_box_node(node_tree, content_id, "sliderRow", Vector2::create(370.0, 26.0));
 			node_tree[row_id].set_local_position(Vector2::create(0.0, content_y));
-			let label_id = create_label_node(node_tree, row_id, "label", Vector2::create(118.0, 26.0), definition.label, 9.5, panel_text, TextAlign::Left);
+			let label_id = create_spaced_label_node(node_tree, row_id, "label", Vector2::create(118.0, 26.0), definition.label, 9.5, panel_text, TextAlign::Left, 0.1 * 9.5);
 			node_tree[label_id].set_local_position(Vector2::create(12.0, 0.0));
 			let slider_id = create_box_node(node_tree, row_id, "slider", Vector2::create(132.0, 12.0));
 			node_tree[slider_id].set_local_position(Vector2::create(134.0, 7.0));
@@ -1007,7 +1065,7 @@ impl OldFaceScene {
 					option_values.borrow_mut().sliders[slider_index] = snapped;
 				}));
 			}
-			let value_id = create_label_node(node_tree, row_id, "value", Vector2::create(82.0, 26.0), "", 9.0, create_color(232.0, 201.0, 138.0, 0.9), TextAlign::Right);
+			let value_id = create_spaced_label_node(node_tree, row_id, "value", Vector2::create(82.0, 26.0), "", 9.0, create_color(232.0, 201.0, 138.0, 0.9), TextAlign::Right, 0.08 * 9.0);
 			node_tree[value_id].set_local_position(Vector2::create(276.0, 0.0));
 			slider_value_ids.push(value_id);
 			content_y += 26.0;
@@ -1018,8 +1076,27 @@ impl OldFaceScene {
 		}
 		node_tree[options_scroll_id].set_visible(false);
 		// 우클릭 메뉴. (원본 #contextMenu, 맨 위에 둔다)
-		let menu_id = UIContextMenu::create(node_tree, root_id, UIContextMenuOptions { menu_width: 182.0, item_height: CONTEXT_MENU_ITEM_HEIGHT, font_size: 10.0, panel_color: create_color(14.0, 12.0, 14.0, 0.72), text_color: create_color(242.0, 236.0, 226.0, 0.86) });
-		self.ui = Some(OldFaceUi { title_id, divider_id, subtitle_id, options_id, options_fill_id, options_title_id, options_hit_id, options_divider_id, options_scroll_id, options_content_height, toggle_state_ids, slider_value_ids, value_texts: vec![String::new(); SLIDER_COUNT + 9], laid_out_panel: (true, 0.0, 0.0), expression_button_ids, expression_fill_ids, home_id, footer_ids, slider_ids, menu_id });
+		let menu_id = UIContextMenu::create(node_tree, root_id, UIContextMenuOptions { menu_width: CONTEXT_MENU_WIDTH, item_height: CONTEXT_MENU_ITEM_HEIGHT, font_size: 10.0, panel_color: create_color(242.0, 236.0, 226.0, 0.14), text_color: create_color(242.0, 236.0, 226.0, 0.86) });
+		// 판은 테두리 색으로 칠하고, 안쪽 1px 에 뒤 흐림(blur 10)과 바탕색 rgba(14, 12, 14, 0.72)를 둔다. 행은 show 때마다 그 위에 다시 생긴다.
+		if let Some(panel_id) = node_tree[menu_id].get_component::<UIContextMenu>().and_then(|menu| menu.get_panel_node()) {
+			if let Some(paint) = node_tree[panel_id].get_component_mut::<Paint>() {
+				paint.set_round_size(10.0);
+			}
+			let menu_fill_id = create_box_node(node_tree, panel_id, "menuFill", Vector2::create(CONTEXT_MENU_WIDTH - 2.0, CONTEXT_MENU_HEIGHT - 2.0));
+			node_tree[menu_fill_id].set_local_position(Vector2::create(1.0, 1.0));
+			node_tree.add_component(menu_fill_id, UIView::new()).expect("view").set_backdrop_blur(10.0);
+			node_tree[menu_fill_id].add_component(Paint::create_with_color(create_color(14.0, 12.0, 14.0, 0.72))).set_round_size(9.0);
+		}
+		// 로딩 화면. (원본 #loadingOverlay, 막대 260 x 2, 글자 11px 간격 0.6em, 상세 줄 9px 간격 0.3em, 맨 위)
+		let loading_id = create_box_node(node_tree, root_id, "loadingOverlay", Vector2::create(1.0, 1.0));
+		node_tree[loading_id].add_component(Paint::create_with_color(create_color(8.0, 8.0, 10.0, 1.0)));
+		let loading_label_id = create_spaced_label_node(node_tree, loading_id, "loadingLabel", Vector2::create(400.0, 15.0), "LOADING", 11.0, create_color(242.0, 236.0, 226.0, 0.6), TextAlign::Center, 0.6 * 11.0);
+		let loading_bar_id = create_box_node(node_tree, loading_id, "loadingBar", Vector2::create(260.0, 2.0));
+		node_tree[loading_bar_id].add_component(Paint::create_with_color(create_color(242.0, 236.0, 226.0, 0.12)));
+		let loading_fill_id = create_box_node(node_tree, loading_bar_id, "loadingFill", Vector2::create(0.0, 2.0));
+		node_tree[loading_fill_id].add_component(Paint::create_with_color(create_color(212.0, 176.0, 106.0, 0.9)));
+		let loading_detail_id = create_spaced_label_node(node_tree, loading_id, "loadingDetail", Vector2::create(600.0, 11.0), "", 9.0, create_color(242.0, 236.0, 226.0, 0.35), TextAlign::Center, 0.3 * 9.0);
+		self.ui = Some(OldFaceUi { title_id, divider_id, subtitle_id, options_id, options_fill_id, options_title_id, options_hit_id, options_divider_id, options_scroll_id, options_content_height, toggle_state_ids, slider_value_ids, value_texts: vec![String::new(); SLIDER_COUNT + 9], laid_out_panel: (true, 0.0, 0.0), expression_button_ids, expression_fill_ids, home_id, footer_ids, slider_ids, menu_id, loading_id, loading_label_id, loading_bar_id, loading_fill_id, loading_detail_id });
 		self.refresh_expression_buttons();
 	}
 
@@ -1039,14 +1116,19 @@ impl OldFaceScene {
 		let center_x = canvas_size.x * 0.5;
 		let title_font = (canvas_size.x * 0.05).clamp(26.0, 58.0);
 		let sub_font = (canvas_size.x * 0.012).clamp(9.0, 12.0);
-		node_tree[ui.title_id].set_local_position(Vector2::create(center_x - 450.0, canvas_size.y * 0.07 - 5.0));
+		// 제목과 부제는 원본 text-indent 와 같게 글자 간격의 반만큼 오른쪽으로 둔다.
+		let title_spacing = 0.5 * title_font;
+		node_tree[ui.title_id].set_local_position(Vector2::create(center_x - 450.0 + title_spacing * 0.5, canvas_size.y * 0.07 - 5.0));
 		if let Some(label) = node_tree[ui.title_id].get_component_mut::<UILabel>() {
 			label.set_font_size(title_font);
+			label.set_letter_spacing(title_spacing);
 		}
 		node_tree[ui.divider_id].set_local_position(Vector2::create(center_x - 120.0, canvas_size.y * 0.07 - 5.0 + 80.0 + 8.0));
-		node_tree[ui.subtitle_id].set_local_position(Vector2::create(center_x - 300.0, canvas_size.y * 0.07 - 5.0 + 80.0 + 18.0));
+		let sub_spacing = 0.85 * sub_font;
+		node_tree[ui.subtitle_id].set_local_position(Vector2::create(center_x - 300.0 + sub_spacing * 0.5, canvas_size.y * 0.07 - 5.0 + 80.0 + 18.0));
 		if let Some(label) = node_tree[ui.subtitle_id].get_component_mut::<UILabel>() {
 			label.set_font_size(sub_font);
+			label.set_letter_spacing(sub_spacing);
 		}
 		// 옵션 패널. (접힘은 제목 알약, 펼침은 폭 372 에 높이는 화면 높이 - 48 까지(원본 updatePanelLimits). 폭 720 이하는 폭 316, 여백 10)
 		let is_narrow = canvas_size.x <= 720.0;
@@ -1087,7 +1169,13 @@ impl OldFaceScene {
 				x += EXPRESSION_BUTTON_WIDTHS[button_index] + EXPRESSION_BUTTON_GAP;
 			}
 		}
-		node_tree[ui.home_id].set_local_position(Vector2::create(center_x - 122.0, canvas_size.y - canvas_size.y * 0.055 - 34.0));
+		// 로딩 화면은 화면 전체를 덮고, 세 줄(글자 15, 틈 14, 막대 2, 틈 14, 상세 11)을 가운데에 쌓는다. 글자 간격의 반만큼 오른쪽으로 둔다. (원본 text-indent)
+		node_tree[ui.loading_id].set_content_size(canvas_size);
+		let loading_top = (canvas_size.y - 56.0) * 0.5;
+		node_tree[ui.loading_label_id].set_local_position(Vector2::create(center_x - 200.0 + 0.6 * 11.0 * 0.5, loading_top));
+		node_tree[ui.loading_bar_id].set_local_position(Vector2::create(center_x - 130.0, loading_top + 29.0));
+		node_tree[ui.loading_detail_id].set_local_position(Vector2::create(center_x - 300.0 + 0.3 * 9.0 * 0.5, loading_top + 45.0));
+		node_tree[ui.home_id].set_local_position(Vector2::create(center_x - 122.6, canvas_size.y - canvas_size.y * 0.055 - 37.0));
 		for (line_index, footer_id) in ui.footer_ids.iter().enumerate() {
 			node_tree[*footer_id].set_local_position(Vector2::create(18.0, canvas_size.y - 16.0 - 18.0 * (FOOTER_LINES.len() - line_index) as f64));
 		}
@@ -1097,6 +1185,60 @@ impl OldFaceScene {
 	// 등장 애니메이션. (원본 CSS: 제목, 알약, 사이트 단추는 3.2초 titleEntrance(불투명 0 에서 1, 위 14 에서 제자리, 블러는 못 함),
 	// 표정 단추, 옵션 패널, 아래 안내는 2.4초 panelEntrance(불투명). 곡선은 cubic-bezier(0.16, 1, 0.3, 1). 시작은 화면을 만든 때)
 	//==============================================================================
+	fn apply_loading(&mut self) {
+		let ui = match &self.ui {
+			Some(ui) => ui,
+			None => {
+				return;
+			}
+		};
+		let (loading_id, label_id, fill_id, detail_id) = (ui.loading_id, ui.loading_label_id, ui.loading_fill_id, ui.loading_detail_id);
+		// 항목 수는 원본과 같다. (애셋 파일 + 표정 + 주름 + 모델 둘)
+		let total = self.asset_file_names.len() + 4;
+		let node_tree = self.scene_base.get_node_tree_mut();
+		if let Some(error) = &self.load_error_message {
+			if let Some(label) = node_tree[label_id].get_component_mut::<UILabel>() {
+				label.set_text(error);
+			}
+			return;
+		}
+		if self.resources.is_none() {
+			let mut completed = 0;
+			let mut last_name = String::new();
+			for (name, blob_asset) in self.asset_file_names.iter().zip(self.asset_list.iter()) {
+				if blob_asset.get_blob().is_some() {
+					completed += 1;
+					last_name = name.clone();
+				}
+			}
+			let ratio = (completed as f64 / total as f64).min(1.0);
+			node_tree[fill_id].set_content_size(Vector2::create(260.0 * ratio, 2.0));
+			if completed > 0 {
+				if let Some(label) = node_tree[detail_id].get_component_mut::<UILabel>() {
+					label.set_text(&format!("{}  {} / {}", last_name.to_uppercase(), completed, total));
+				}
+			}
+			return;
+		}
+		// 다 되면 막대를 채우고 1.4 초 동안 ease 로 사라진다. (원본 opacity 1.4s ease 뒤 pointer-events none)
+		let is_first_done_frame = self.loading_done_instant.is_none();
+		let done_instant = *self.loading_done_instant.get_or_insert_with(web_time::Instant::now);
+		if is_first_done_frame {
+			node_tree[fill_id].set_content_size(Vector2::create(260.0, 2.0));
+			if let Some(label) = node_tree[detail_id].get_component_mut::<UILabel>() {
+				label.set_text(&format!("WRINKLES.JSON  {} / {}", total, total));
+			}
+		}
+		let progress = (done_instant.elapsed().as_secs_f64() / 1.4).min(1.0);
+		let ease = create_bezier_easing(0.25, 0.1, 0.25, 1.0);
+		if progress >= 1.0 {
+			node_tree[loading_id].set_visible(false);
+		}
+		else {
+			node_tree[loading_id].set_local_opacity(1.0 - ease(progress));
+		}
+	}
+
 	fn apply_intro(&mut self) {
 		let ease = create_bezier_easing(0.16, 1.0, 0.3, 1.0);
 		let seconds = self.intro_start.elapsed().as_secs_f64();
@@ -1349,9 +1491,11 @@ impl OldFaceScene {
 			image_record_list: RefCell::new(Vec::new()),
 			thumbnail_pixel_list: RefCell::new(Vec::new()),
 			pending_menu_action: Rc::new(Cell::new(None)),
+			menu_row_label_ids: Vec::new(),
 			frame_start_instant: web_time::Instant::now(),
 			last_tick_instant: None,
 			menu_test_frame: 0,
+			loading_done_instant: None,
 		}
 	}
 
@@ -1380,13 +1524,14 @@ impl OldFaceScene {
 			}
 		};
 		let bytes = self.read_bytes(file_name)?;
-		// 한 번 풀어 크기를 적어 둔다. (GPU 메모리 셈과 그래프 썸네일에 쓰고, 푼 픽셀은 그대로 텍스처가 된다)
-		let (width, height, pixels) = decode_image_bytes(bytes.as_ref())?;
+		// 헤더에서 크기를 읽어 적어 둔다. (원본 readImageSize, GPU 메모리 셈에 쓴다. 텍스처는 엔진이 바이트에서 직접 푼다)
+		let (width, height) = read_image_size(bytes.as_ref());
 		if !self.image_record_list.borrow().iter().any(|(name, _, _, _)| name == file_name) {
 			self.image_record_list.borrow_mut().push((file_name.to_string(), width, height, bytes.len()));
 		}
 		if THUMBNAIL_FILES.iter().any(|(_, thumbnail_file)| *thumbnail_file == file_name) && !self.thumbnail_pixel_list.borrow().iter().any(|(name, _)| name == file_name) {
-			self.thumbnail_pixel_list.borrow_mut().push((file_name.to_string(), downscale_pixels(width as usize, height as usize, &pixels)));
+			let (thumbnail_width, thumbnail_height, thumbnail_pixels) = decode_image_bytes(bytes.as_ref())?;
+			self.thumbnail_pixel_list.borrow_mut().push((file_name.to_string(), downscale_pixels(thumbnail_width as usize, thumbnail_height as usize, &thumbnail_pixels)));
 		}
 		let mime_type = if file_name.ends_with(".png") {
 			String::from("image/png")
@@ -1395,8 +1540,7 @@ impl OldFaceScene {
 			String::from("image/jpeg")
 		};
 		let options = ImageDescriptionOptions { flip_y: false, is_color_data: false, anisotropy: 8.0 };
-		let mut description = Material::create_image_description(bytes.as_ref().clone(), Some(mime_type), Some(options));
-		description.source = Some(Rc::new(ImageSource { width, height, pixels }));
+		let description = Material::create_image_description(bytes.as_ref().clone(), Some(mime_type), Some(options));
 		Ok(Some(description))
 	}
 
@@ -2235,8 +2379,8 @@ impl OldFaceScene {
 			}
 		};
 		let view_size = Engine::get_engine().unwrap().get_view_manager().get_view_size();
-		let menu_width = 182.0;
-		let menu_height = CONTEXT_MENU_LABELS.len() as f64 * CONTEXT_MENU_ITEM_HEIGHT + 8.0;
+		let menu_width = CONTEXT_MENU_WIDTH;
+		let menu_height = CONTEXT_MENU_HEIGHT;
 		let position = Vector2::create(pointer_position.x.min(view_size.x - menu_width - 8.0), pointer_position.y.min(view_size.y - menu_height - 8.0));
 		let mut item_list = Vec::new();
 		for (item_index, label) in CONTEXT_MENU_LABELS.iter().enumerate() {
@@ -2245,12 +2389,44 @@ impl OldFaceScene {
 				pending_action.set(Some(item_index));
 			})));
 		}
+		let mut row_label_ids = Vec::new();
 		self.scene_base.get_node_tree_mut().with_component_mut::<UIContextMenu, _>(menu_id, |context_menu, tree| {
 			context_menu.show(tree, position, item_list);
+			// 엔진 메뉴를 원본 css 꼴로 다듬는다. 판 높이 98, 행은 테두리와 위 여백 안쪽에 판 너비로 깔고, 글자는 왼쪽 여백 16px 에 글자 간격 0.16em.
+			if let Some(panel_id) = context_menu.get_panel_node() {
+				tree[panel_id].set_content_size(Vector2::create(CONTEXT_MENU_WIDTH, CONTEXT_MENU_HEIGHT));
+			}
+			for (item_index, row_id) in context_menu.get_item_nodes().to_vec().into_iter().enumerate() {
+				tree[row_id].set_local_position(Vector2::create(1.0, 7.0 + item_index as f64 * CONTEXT_MENU_ITEM_HEIGHT));
+				tree[row_id].set_content_size(Vector2::create(CONTEXT_MENU_WIDTH - 2.0, CONTEXT_MENU_ITEM_HEIGHT));
+				if let Some(paint) = tree[row_id].get_component_mut::<Paint>() {
+					paint.set_round_size(0.0);
+				}
+				if let Some(label) = tree[row_id].get_component_mut::<UILabel>() {
+					label.set_text("");
+				}
+				if let Some(button) = tree[row_id].get_component_mut::<UIButton>() {
+					button.set_hover_tint_color(create_color(212.0, 176.0, 106.0, 0.16));
+				}
+				let label_id = create_spaced_label_node(tree, row_id, "itemText", Vector2::create(CONTEXT_MENU_WIDTH - 2.0 - 16.0, CONTEXT_MENU_ITEM_HEIGHT), CONTEXT_MENU_LABELS[item_index], 10.0, create_color(242.0, 236.0, 226.0, 0.86), TextAlign::Left, 0.16 * 10.0);
+				tree[label_id].set_local_position(Vector2::create(16.0, 0.0));
+				row_label_ids.push((row_id, label_id));
+			}
 		});
+		self.menu_row_label_ids = row_label_ids;
 	}
 
 	fn handle_menu_action(&mut self) {
+		// 마우스를 올린 행의 글자는 금색. (원본 .contextItem:hover color rgba(232, 201, 138, 1))
+		if self.is_context_menu_showing() {
+			let node_tree = self.scene_base.get_node_tree_mut();
+			for (row_id, label_id) in self.menu_row_label_ids.iter() {
+				let is_hover = node_tree.get_node(*row_id).is_some() && node_tree[*row_id].get_component::<UIButton>().map(|button| button.get_button_state() == ButtonState::Hover).unwrap_or(false);
+				if let Some(label) = node_tree.get_node_mut(*label_id).and_then(|node| node.get_component_mut::<UILabel>()) {
+					label.set_text_color(if is_hover { create_color(232.0, 201.0, 138.0, 1.0) } else { create_color(242.0, 236.0, 226.0, 0.86) });
+				}
+			}
+		}
 		match self.pending_menu_action.take() {
 			Some(0) => {
 				self.camera_target_yaw = 0.0;
@@ -2265,6 +2441,23 @@ impl OldFaceScene {
 				values.toggles[TOGGLE_GRAPH] = !values.toggles[TOGGLE_GRAPH];
 			}
 			_ => {}
+		}
+		// 확인용: VANILLA_OLDFACE_HOVER=행 번호 이면 메뉴가 열린 뒤 실제 마우스 이동과 같은 길(엔진 입력 관리자의 위치)로 그 행 위에 마우스를 올린다.
+		if self.menu_test_frame >= 12 && self.is_context_menu_showing() {
+			if let Some(row_index) = std::env::var("VANILLA_OLDFACE_HOVER").ok().and_then(|text| text.parse::<usize>().ok()) {
+				if let Some((row_id, _)) = self.menu_row_label_ids.get(row_index) {
+					let node_tree = self.scene_base.get_node_tree();
+					let size = node_tree[*row_id].get_content_size();
+					let center = node_tree.calculate_world_matrix(*row_id).transform_point(size.x * 0.5, size.y * 0.5);
+					let engine = Engine::get_engine().unwrap();
+					let native_size = engine.get_view_manager().get_canvas_native_size();
+					let view_size = engine.get_view_manager().get_view_size();
+					let mut input_manager = engine.get_input_manager_mut();
+					input_manager.set_canvas_native_input_position(Vector2::create(center.x * native_size.x / view_size.x, center.y * native_size.y / view_size.y));
+					input_manager.set_view_input_position(center);
+					input_manager.set_touch_input(false);
+				}
+			}
 		}
 		// 확인용: VANILLA_OLDFACE_MENU="x,y" 이면 8 프레임째에 그 자리로 메뉴를 연다. (화면 저장으로 메뉴를 찍을 때)
 		self.menu_test_frame += 1;
@@ -2700,6 +2893,7 @@ impl Scene for OldFaceScene {
 		self.scene_base.get_root_mut().set_content_size(view_size);
 		self.layout_ui(view_size);
 		self.apply_intro();
+		self.apply_loading();
 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 		self.touch_recognizer.tick_touch(self.scene_base.get_node_tree_mut(), engine);
 		if self.resources.is_none() {
@@ -2768,6 +2962,19 @@ impl Scene for OldFaceScene {
 	}
 
 	//==============================================================================
+	// 로딩 중 출력. (원본 #loadingOverlay, 애셋이 다 오기 전에는 엔진이 tick 과 draw 를 부르지 않으니 로딩 화면 노드만 여기서 갱신해 그린다)
+	//==============================================================================
+	fn draw_on_load(&mut self, graphic: &mut Graphic) {
+		let engine = Engine::get_engine().unwrap();
+		let view_size = engine.get_view_manager().get_view_size();
+		self.scene_base.get_root_mut().set_content_size(view_size);
+		self.layout_ui(view_size);
+		self.apply_loading();
+		self.scene_base.get_node_tree_mut().tick(engine, 0.0);
+		self.scene_base.draw(graphic);
+	}
+
+	//==============================================================================
 	// 2D 글 출력. (표정 이름과 조작 안내)
 	//==============================================================================
 	fn draw(&mut self, graphic: &mut Graphic) {
@@ -2780,15 +2987,6 @@ impl Scene for OldFaceScene {
 		self.scene_base.draw(graphic);
 		self.statistics.cpu_frame_milliseconds = self.statistics.cpu_frame_milliseconds * 0.9 + self.frame_start_instant.elapsed().as_secs_f64() * 1000.0 * 0.1;
 		engine.get_view_manager().apply_canvas_native_rect(graphic);
-		if self.resources.is_none() {
-			let canvas_native_size = engine.get_view_manager().get_canvas_native_size();
-			let status_line = self.load_error_message.clone().unwrap_or_else(|| String::from("LOADING"));
-			graphic.set_font_string("14px default");
-			graphic.set_text_align(TextAlign::Center);
-			graphic.set_text_baseline(TextBaseline::Middle);
-			graphic.set_fill_color(Color::create(0.95, 0.92, 0.86, 0.6));
-			graphic.draw_fill_text(&status_line, canvas_native_size.x * 0.5, canvas_native_size.y * 0.5);
-		}
 	}
 }
 

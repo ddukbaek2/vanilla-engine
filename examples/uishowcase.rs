@@ -112,45 +112,11 @@ fn create_theme_table() -> Vec<Theme> {
 }
 
 //==============================================================================
-// 현지 시각의 시와 분. (원본 Date 의 getHours, getMinutes. 분 오프셋을 더한다)
+// 현지 시각의 시와 분. (엔진 Engine::read_local_time, 분 오프셋을 더한다)
 //==============================================================================
-#[cfg(target_arch = "wasm32")]
 fn local_hour_minute(minute_offset: i64) -> (u32, u32) {
-	let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(js_sys::Date::now() + minute_offset as f64 * 60000.0));
-	(date.get_hours(), date.get_minutes())
-}
-
-#[cfg(all(unix, not(target_arch = "wasm32")))]
-fn local_hour_minute(minute_offset: i64) -> (u32, u32) {
-	#[repr(C)]
-	struct Tm {
-		tm_sec: i32,
-		tm_min: i32,
-		tm_hour: i32,
-		tm_mday: i32,
-		tm_mon: i32,
-		tm_year: i32,
-		tm_wday: i32,
-		tm_yday: i32,
-		tm_isdst: i32,
-		tm_gmtoff: i64,
-		tm_zone: *const u8,
-	}
-	extern "C" {
-		fn localtime_r(time: *const i64, result: *mut Tm) -> *mut Tm;
-	}
-	let epoch_seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_secs() as i64).unwrap_or(0) + minute_offset * 60;
-	let mut local_time = Tm { tm_sec: 0, tm_min: 0, tm_hour: 0, tm_mday: 0, tm_mon: 0, tm_year: 0, tm_wday: 0, tm_yday: 0, tm_isdst: 0, tm_gmtoff: 0, tm_zone: std::ptr::null() };
-	unsafe {
-		localtime_r(&epoch_seconds, &mut local_time);
-	}
-	(local_time.tm_hour as u32, local_time.tm_min as u32)
-}
-
-#[cfg(all(not(unix), not(target_arch = "wasm32")))]
-fn local_hour_minute(minute_offset: i64) -> (u32, u32) {
-	let epoch_seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_secs() as i64).unwrap_or(0) + minute_offset * 60;
-	(((epoch_seconds / 3600) % 24) as u32, ((epoch_seconds / 60) % 60) as u32)
+	let local_time = Engine::get_engine().unwrap().read_local_time(minute_offset as f64);
+	(local_time.hour, local_time.minute)
 }
 
 //==============================================================================
@@ -242,7 +208,6 @@ struct Ui {
 	applied_view_size: Vector2,
 	main_width: f64,
 	random: SeededRandom,
-	pending_theme_index: Option<usize>,
 	pending_tweens: Vec<Tween>,
 	long_press_button_id: Option<NodeId>,
 	mini_chart_phase: f64,
@@ -841,9 +806,15 @@ fn rebuild_dropdowns(tree: &mut NodeTree, shared: &Shared) {
 		tree.with_component_mut::<UIDropdown, _>(dropdown_id, |dropdown, dropdown_tree| {
 			dropdown.set_option_list(dropdown_tree, &option_list);
 			dropdown.set_selected_index(dropdown_tree, previous_theme_index);
-			dropdown.set_changed_event(Box::new(move |dropdown: &mut UIDropdown, _context: &mut ComponentContext| {
-				// 드롭다운 자신을 지우고 다시 만드는 일이라 이 알림 밖(다음 갱신)에서 한다.
-				shared_for_change.borrow_mut().pending_theme_index = Some(dropdown.get_selected_index());
+			dropdown.set_changed_event(Box::new(move |dropdown: &mut UIDropdown, context: &mut ComponentContext| {
+				// 원본처럼 고른 그 자리에서 바꾼다. (드롭다운을 다시 만들어도 노드는 트리 밖으로 떼일 뿐 알림이 끝나면 정리된다)
+				let theme_index = dropdown.get_selected_index();
+				apply_theme(context.get_node_tree_mut(), &shared_for_change, theme_index);
+				let (toast_id, theme_label) = {
+					let ui = shared_for_change.borrow();
+					(ui.toast_id, ui.theme_table[theme_index].label)
+				};
+				show_toast(context.get_node_tree_mut(), toast_id, &format!("Theme: {}", theme_label));
 			}));
 		});
 		apply_font_to_tree(tree, dropdown_id);
@@ -1572,16 +1543,6 @@ fn apply_fluid_components(tree: &mut NodeTree, components_id: NodeId, main_width
 // 갱신. (실시간 지표, 팝업 전환, 타자기, 로딩, 반응형 자리)
 //==============================================================================
 fn update(tree: &mut NodeTree, shared: &Shared, engine: &Engine, time_delta: f64) {
-	// 드롭다운이 맡긴 테마 전환.
-	let pending_theme_index = shared.borrow_mut().pending_theme_index.take();
-	if let Some(theme_index) = pending_theme_index {
-		apply_theme(tree, shared, theme_index);
-		let (toast_id, theme_label) = {
-			let ui = shared.borrow();
-			(ui.toast_id, ui.theme_table[theme_index].label)
-		};
-		show_toast(tree, toast_id, &format!("Theme: {}", theme_label));
-	}
 	shared.borrow_mut().elapsed_seconds += time_delta;
 	let view_size = engine.get_view_manager().get_view_size();
 	apply_responsive_layout(tree, shared, view_size);
@@ -1772,6 +1733,7 @@ fn local_seed() -> u64 {
 struct ShowcaseScene {
 	scene_base: SceneBase,
 	touch_recognizer: TouchRecognizer,
+	test_frame: u32,
 	document_assets: Vec<TextAsset>,
 	shared: Option<Shared>,
 	start_screen_index: usize,
@@ -1787,10 +1749,72 @@ impl ShowcaseScene {
 		ShowcaseScene {
 			scene_base: SceneBase::new(),
 			touch_recognizer: TouchRecognizer::new(),
+			test_frame: 0,
 			document_assets: ASSET_FILE_NAMES.iter().map(|_| TextAsset::new()).collect(),
 			shared: None,
 			start_screen_index,
 			background_color: Color::create(0.078, 0.09, 0.118, 1.0),
+		}
+	}
+}
+
+//==============================================================================
+// 확인용 입력 주입. (데스크탑 창이 마우스 이벤트를 받을 때와 같은 일을 엔진 입력 관리자에 한다)
+//==============================================================================
+fn inject_pointer(engine: &Engine, view_position: Vector2, action: &str) {
+	let view_size = engine.get_view_manager().get_view_size();
+	let native_size = engine.get_view_manager().get_canvas_native_size();
+	let native_position = Vector2::create(view_position.x * native_size.x / view_size.x, view_position.y * native_size.y / view_size.y);
+	let mut input_manager = engine.get_input_manager_mut();
+	input_manager.set_canvas_native_input_position(native_position);
+	input_manager.set_view_input_position(view_position);
+	input_manager.set_touch_input(false);
+	match action {
+		"down" => {
+			input_manager.set_mouse_button_down(MouseButton::Left, true);
+			input_manager.set_touch_pressed(true);
+			input_manager.set_touch_moved(true);
+			input_manager.set_touch_down(true);
+		}
+		"up" => {
+			input_manager.set_mouse_button_down(MouseButton::Left, false);
+			input_manager.set_touch_moved(false);
+			input_manager.set_touch_released(true);
+			input_manager.set_touch_down(false);
+		}
+		_ => {
+		}
+	}
+}
+
+fn drive_theme_pick(engine: &Engine, tree: &NodeTree, shared: &Shared, test_frame: u32, option_index: usize) {
+	let dropdown_id = match shared.borrow().theme_dropdown_id {
+		Some(dropdown_id) => dropdown_id,
+		None => {
+			return;
+		}
+	};
+	let center_of = |node_id: NodeId| {
+		let size = tree[node_id].get_content_size();
+		tree.calculate_world_matrix(node_id).transform_point(size.x * 0.5, size.y * 0.5)
+	};
+	let row_id = tree[dropdown_id].get_component::<UIDropdown>().and_then(|dropdown| dropdown.get_option_nodes().get(option_index).copied());
+	match test_frame {
+		35 => {
+			inject_pointer(engine, center_of(dropdown_id), "move");
+		}
+		36 => {
+			inject_pointer(engine, center_of(dropdown_id), "down");
+		}
+		37 => {
+			inject_pointer(engine, center_of(dropdown_id), "up");
+		}
+		50..=55 => {
+			if let Some(row_id) = row_id {
+				inject_pointer(engine, center_of(row_id), match test_frame { 52 => "down", 53 => "up", _ => "move" });
+			}
+		}
+		_ => {
 		}
 	}
 }
@@ -1930,7 +1954,6 @@ impl Scene for ShowcaseScene {
 			applied_view_size: Vector2::create(0.0, 0.0),
 			main_width: 884.0,
 			random,
-			pending_theme_index: None,
 			pending_tweens: Vec::new(),
 			long_press_button_id: None,
 			mini_chart_phase: 0.0,
@@ -1976,6 +1999,11 @@ impl Scene for ShowcaseScene {
 			Some(shared) => shared.clone(),
 			None => return,
 		};
+		// 확인용: VANILLA_UISHOWCASE_PICK_THEME=번호 이면 실제 마우스 입력과 같은 길(엔진 입력 관리자의 위치와 단추)로 테마 드롭다운을 열고 그 번호를 고른다. (화면 저장으로 바뀐 프레임을 찍을 때)
+		self.test_frame += 1;
+		if let Some(option_index) = std::env::var("VANILLA_UISHOWCASE_PICK_THEME").ok().and_then(|text| text.parse::<usize>().ok()) {
+			drive_theme_pick(engine, self.scene_base.get_node_tree(), &shared, self.test_frame, option_index);
+		}
 		update(self.scene_base.get_node_tree_mut(), &shared, engine, time_delta);
 		let pending_tween_list: Vec<Tween> = std::mem::take(&mut shared.borrow_mut().pending_tweens);
 		for pending_tween in pending_tween_list {
