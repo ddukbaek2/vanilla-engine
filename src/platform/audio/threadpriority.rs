@@ -30,6 +30,9 @@ mod platform {
 	}
 
 	impl Drop for MmcssTask {
+		//==============================================================================
+		/// MMCSS 작업을 풀어 놓는다.
+		//==============================================================================
 		fn drop(&mut self) {
 			unsafe {
 				AvRevertMmThreadCharacteristics(self.handle);
@@ -41,6 +44,9 @@ mod platform {
 		static MMCSS_TASK: std::cell::RefCell<Option<MmcssTask>> = const { std::cell::RefCell::new(None) };
 	}
 
+	//==============================================================================
+	/// 지금 스레드의 우선순위를 오디오용으로 올린다. (이 운영체제에서는 할 일이 없거나 해당 호출을 쓴다)
+	//==============================================================================
 	pub(super) fn promote_current_thread(_buffer_frames: usize, _sample_rate: u32) {
 		unsafe {
 			SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
@@ -80,6 +86,9 @@ mod platform {
 		fn setpriority(which: i32, who: u32, priority: i32) -> i32;
 	}
 
+	//==============================================================================
+	/// 지금 스레드의 우선순위를 오디오용으로 올린다. (이 운영체제에서는 할 일이 없거나 해당 호출을 쓴다)
+	//==============================================================================
 	pub(super) fn promote_current_thread(_buffer_frames: usize, _sample_rate: u32) {
 		// pid, who 가 0 이면 리눅스는 부른 스레드에 건다. (크롬도 지금 스레드는 0 으로 부른다)
 		let parameter = SchedParam { sched_priority: REALTIME_AUDIO_PRIORITY };
@@ -119,6 +128,9 @@ mod platform {
 		fn mach_timebase_info(info: *mut MachTimebaseInfo) -> i32;
 	}
 
+	//==============================================================================
+	/// 지금 스레드의 우선순위를 오디오용으로 올린다. (이 운영체제에서는 할 일이 없거나 해당 호출을 쓴다)
+	//==============================================================================
 	pub(super) fn promote_current_thread(buffer_frames: usize, sample_rate: u32) {
 		let thread = unsafe { pthread_mach_thread_np(pthread_self()) };
 		// [period, computation, constraint, preemptible] (thread_time_constraint_policy_data_t)
@@ -158,5 +170,8 @@ mod platform {
 
 #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 mod platform {
+	//==============================================================================
+	/// 지금 스레드의 우선순위를 오디오용으로 올린다. (이 운영체제에서는 할 일이 없거나 해당 호출을 쓴다)
+	//==============================================================================
 	pub(super) fn promote_current_thread(_buffer_frames: usize, _sample_rate: u32) {}
 }

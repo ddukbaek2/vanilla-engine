@@ -292,8 +292,23 @@ pub enum GraphicErrorKind {
 
 //==============================================================================
 /// 그래픽 오류. (원본의 { kind, name, error })
+///
+/// # 예제
+/// 그래픽 오류를 만들어 갈래와 이름 읽기
+/// ```rust
+/// use vanilla::{GraphicError, GraphicErrorKind};
+///
+/// let error = GraphicError {
+/// 	kind: GraphicErrorKind::ShaderBuildFailed,
+/// 	name: String::from("ScreenEffect.blur"),
+/// 	error: String::from("link failed"),
+/// };
+/// assert_eq!(error.kind, GraphicErrorKind::ShaderBuildFailed);
+/// assert_eq!(error.name, "ScreenEffect.blur");
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq)]
+
 pub struct GraphicError {
 	/// 오류 갈래.
 	pub kind: GraphicErrorKind,
@@ -1347,6 +1362,32 @@ impl Engine {
 	}
 
 	//==============================================================================
+	/// 바깥 주소 열기. (원본 Engine.openUrl)
+	/// - 웹은 window.open(주소, "_blank", "noopener") 로 새 탭에 연다. 사용자 입력(누름, 탭, 키) 처리 안에서 부를 때만 열린다. 브라우저의 팝업 차단 규칙이다. 입력과 상관없이(타이머, 프레임) 부르면 막혀 열리지 않는다.
+	/// - 데스크탑은 운영체제의 기본 프로그램으로 연다. (맥 `open`, 윈도우 ShellExecuteW, 리눅스 xdg-open)
+	/// - 열 수 있는 것은 http, https, mailto, tel 뿐이다. 그 밖의 꼴(javascript:, file: 같은)은 열지 않고 false.
+	///
+	/// # 인자
+	/// - `url`: 열 주소. (http, https, mailto, tel)
+	///
+	/// # 돌려줌
+	/// 열기를 운영체제나 브라우저에 넘겼으면 true. (주소가 맞지 않거나 넘기지 못하면 false)
+	///
+	/// # 예제
+	/// 열 수 없는 꼴은 false
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// assert!(!engine.open_url("javascript:alert(1)"));
+	/// assert!(!engine.open_url("file:///etc/passwd"));
+	/// ```
+	//==============================================================================
+	pub fn open_url(&self, url: &str) -> bool {
+		platform::open_url(url)
+	}
+
+	//==============================================================================
 	/// 종료 요청 여부.
 	///
 	/// # 돌려줌
@@ -2361,8 +2402,24 @@ impl Engine {
 
 //==============================================================================
 /// GPU 처리량 재기의 결과. (원본 measureGpuThroughput 이 돌려주는 { frameCount, chunkFrameCount, millisecondsPerFrame, chunkMillisecondsPerFrame })
+///
+/// # 예제
+/// 덩이 시간의 합과 프레임 수로 프레임당 시간 맞춰 보기
+/// ```rust
+/// use vanilla::GpuThroughput;
+///
+/// let throughput = GpuThroughput {
+/// 	frame_count: 4,
+/// 	chunk_frame_count: 2,
+/// 	milliseconds_per_frame: 1.5,
+/// 	chunk_milliseconds_per_frame: vec![1.0, 2.0],
+/// };
+/// let chunk_total: f64 = throughput.chunk_milliseconds_per_frame.iter().map(|value| value * throughput.chunk_frame_count as f64).sum();
+/// assert_eq!(chunk_total / throughput.frame_count as f64, throughput.milliseconds_per_frame);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
+
 pub struct GpuThroughput {
 	/// 잰 프레임 수. (데움은 빼고 센다)
 	pub frame_count: u32,
@@ -3490,22 +3547,37 @@ mod tests {
 	}
 
 	impl Scene for DirectGameScene {
+		//==============================================================================
+		/// 씬 바탕 상태를 돌려준다.
+		//==============================================================================
 		fn get_scene_base(&self) -> &SceneBase {
 			self.game_scene_base.get_scene_base()
 		}
 
+		//==============================================================================
+		/// 씬 바탕 상태를 고칠 수 있게 돌려준다.
+		//==============================================================================
 		fn get_scene_base_mut(&mut self) -> &mut SceneBase {
 			self.game_scene_base.get_scene_base_mut()
 		}
 
+		//==============================================================================
+		/// 씬을 불러올 때 부른다. (시험용 씬은 할 일이 없다)
+		//==============================================================================
 		fn load(&mut self, engine: &Engine) {
 			self.game_scene_base.set_loading_min_duration_ms(50.0);
 			self.game_scene_base.load(engine);
 		}
 
+		//==============================================================================
+		/// 불러오는 동안의 그리기. (시험용 씬은 그리지 않는다)
+		//==============================================================================
 		fn draw_on_load(&mut self, _graphic: &mut Graphic) {
 		}
 
+		//==============================================================================
+		/// 씬 시작 때 부른다. (시험용 씬은 할 일이 없다)
+		//==============================================================================
 		fn initialize(&mut self, _engine: &Engine) {
 			self.initialize_count.set(self.initialize_count.get() + 1);
 		}
@@ -3795,6 +3867,9 @@ mod tests {
 		assert_eq!(time_manager.get_realtime_since_startup(), 0.5000000000000001);
 	}
 
+	//==============================================================================
+	/// 프레임 찍기 요청과 프레임 번호가 맞게 오가는지 시험한다.
+	//==============================================================================
 	#[test]
 	fn frame_capture_request_and_frame_numbers() {
 		let engine = Engine::new(EngineConfiguration::new());

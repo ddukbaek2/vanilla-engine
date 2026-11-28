@@ -833,6 +833,41 @@ pub fn exit_application() {
 }
 
 //==============================================================================
+/// 바깥 주소 열기. (원본 Engine.openUrl, 운영체제의 기본 프로그램으로 연다)
+/// - 맥은 LaunchServices 를 쓰는 `open`, 윈도우는 ShellExecuteW, 그 밖의 유닉스는 xdg-open 이다.
+/// - 열 수 있는 것은 http, https, mailto, tel 뿐이다. (is_openable_url) 그 밖의 꼴은 열지 않고 false.
+///
+/// # 인자
+/// - `url`: 열 주소. (http, https, mailto, tel 꼴)
+///
+/// # 돌려줌
+/// 운영체제에 열기를 넘겼으면 true.
+//==============================================================================
+pub fn open_url(url: &str) -> bool {
+	if !crate::platform::is_openable_url(url) {
+		return false;
+	}
+	#[cfg(target_os = "windows")]
+	{
+		use windows_sys::Win32::UI::Shell::ShellExecuteW;
+		use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+		let operation_text: Vec<u16> = "open\0".encode_utf16().collect();
+		let url_text: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
+		// ShellExecuteW 는 성공하면 32 보다 큰 값을 돌려준다.
+		let result = unsafe { ShellExecuteW(0, operation_text.as_ptr(), url_text.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
+		return result as isize > 32;
+	}
+	#[cfg(not(target_os = "windows"))]
+	{
+		#[cfg(target_os = "macos")]
+		let program = "open";
+		#[cfg(not(target_os = "macos"))]
+		let program = "xdg-open";
+		return std::process::Command::new(program).arg(url).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().is_ok();
+	}
+}
+
+//==============================================================================
 /// 창 제목 설정.
 ///
 /// # 인자

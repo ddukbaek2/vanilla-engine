@@ -8,6 +8,16 @@
 //!   서브픽셀 자리는 글자 행렬의 dx, 가짜 기울임은 글자 행렬의 m21(-1/4)이다. 그 뒤 스키아처럼 감마 전보정 표로 고친다. (GrayscaleToA8)
 //! - 글자 대비와 감마: 크롬 158 은 HKCU\SOFTWARE\Microsoft\Avalon.Graphics\<주 화면 장치> 키가 있을 때만 IDWriteRenderingParams 의 값을,
 //!   없으면 스키아 기본(대비 1, sRGB)을 쓴다. (ui/gfx/font_util_win.cc GetTextParameters, font_render_params_win.cc, skia/ext/legacy_display_globals.cc 의 SetCachedParams)
+//!
+//! # 예제
+//! 윈도우에서만 쓰는 모듈이라 다른 운영체제에서는 건너뛴다
+//! ```rust
+//! #[cfg(windows)]
+//! {
+//! 	use vanilla::platform::desktop::directwriteglyph::DirectWriteGlyphMask;
+//! 	let _ = std::mem::size_of::<DirectWriteGlyphMask>();
+//! }
+//! ```
 //==============================================================================
 // 옮긴 원문: 스키아 src/ports/SkScalerContext_win_dw.cpp 에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use std::cell::RefCell;
@@ -38,6 +48,17 @@ thread_local! {
 }
 
 /// 글리프 마스크. (덮인 정도와 상자, 위가 양수인 top_y)
+///
+/// # 예제
+/// 마스크의 한 줄 바이트 수는 너비 (윈도우 전용)
+/// ```rust
+/// #[cfg(windows)]
+/// fn read_row_length(mask: &vanilla::platform::desktop::directwriteglyph::DirectWriteGlyphMask) -> usize {
+/// 	mask.width as usize
+/// }
+/// let _ = 0;
+/// ```
+
 pub struct DirectWriteGlyphMask {
 	/// 덮인 정도. (한 줄에 width 바이트, 위 줄부터)
 	pub coverage: Vec<u8>,

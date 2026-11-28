@@ -51,8 +51,19 @@ pub type ToonViewDrawCallback = Box<dyn FnMut(&mut ToonRenderer, &Camera3D, Rect
 //==============================================================================
 /// 그리기 함수의 출력. (원본 화면 사각형 객체의 outputFramebuffer, outputViewport)
 /// - ToonPostProcess::end 처럼 따로 내는 것은 이 둘로 내야 렌더 스케일, 투명도 층과 상관없이 맞는 자리에 낸다.
+///
+/// # 예제
+/// 기본 프레임 버퍼에 그리는 출력
+/// ```rust
+/// use vanilla::ToonViewOutput;
+///
+/// let output = ToonViewOutput { output_framebuffer: None, output_viewport: [0, 0, 960, 540] };
+/// assert!(output.output_framebuffer.is_none());
+/// assert_eq!(output.output_viewport[2], 960);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+
 pub struct ToonViewOutput {
 	/// 지금 묶인 프레임 버퍼. (None 이면 기본 프레임 버퍼)
 	pub output_framebuffer: Option<GlFramebuffer>,

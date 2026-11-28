@@ -49,7 +49,19 @@ fn shader_program_address(shader_program: &Rc<ShaderProgram>) -> usize {
 
 //==============================================================================
 /// 자산에 넣을 자료. (SkinnedModel::upload_meshes_and_materials 가 올린 뒤 채운다, 원본 생성자의 content 객체)
+///
+/// # 예제
+/// 자료의 루트 노드 수 읽기 (자료는 SkinnedModel::upload_meshes_and_materials 가 채운다)
+/// ```rust
+/// use vanilla::SkinnedModelAssetContent;
+///
+/// fn read_root_count(content: &SkinnedModelAssetContent) -> usize {
+/// 	content.root_node_indices.len()
+/// }
+/// let _ = read_root_count;
+/// ```
 //==============================================================================
+
 pub struct SkinnedModelAssetContent {
 	/// 원형 드로어블 목록. (인스턴스는 이것을 베껴 버퍼와 머티리얼 원형을 나눠 쓴다)
 	pub drawable_list: Vec<Drawable>,

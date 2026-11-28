@@ -3802,29 +3802,47 @@ mod tests {
 
 	#[vanilla::reflect]
 	impl Component for NodePointer {
+		//==============================================================================
+		/// 컴포넌트 바탕 상태를 돌려준다.
+		//==============================================================================
 		fn get_component_base(&self) -> &crate::core::component::ComponentBase {
 			&self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 바탕 상태를 고칠 수 있게 돌려준다.
+		//==============================================================================
 		fn get_component_base_mut(&mut self) -> &mut crate::core::component::ComponentBase {
 			&mut self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 종류 이름을 돌려준다.
+		//==============================================================================
 		fn get_component_type(&self) -> &'static str {
 			"NodePointer"
 		}
 	}
 
+	//==============================================================================
+	/// 노드 가리킴 값을 만든다.
+	//==============================================================================
 	fn create_node_pointer() -> NodePointer {
 		NodePointer { component_base: crate::core::component::ComponentBase::new(), target: None }
 	}
 
+	//==============================================================================
+	/// 노드 가리킴 값을 문서 자료로 저장한다.
+	//==============================================================================
 	fn save_node_pointer(node_pointer: &NodePointer, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
 		let mut component_data = Map::new();
 		save_context.write_node_reference(&mut component_data, "target", node_pointer.target);
 		component_data
 	}
 
+	//==============================================================================
+	/// 문서 자료에서 노드 가리킴 값을 읽는다.
+	//==============================================================================
 	fn load_node_pointer(_node_pointer: &mut NodePointer, component_data: &Map<String, Value>, load_context: &mut UIDocumentLoadContext) {
 		load_context.bind_node_reference::<NodePointer>(component_data.get("target"), |node_pointer, node_id| node_pointer.target = Some(node_id));
 	}

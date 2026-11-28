@@ -6,6 +6,18 @@
 //! - 주인은 객체를 지은 호출 스택의 위쪽 세 칸이다. (데스크탑은 지을 때 스택 칸만 잡고 이름은 읽을 때 한 번 푼다. 웹(wasm)은 스택이 없어 지은 소스 자리로 대신한다)
 //! - 기본은 꺼 둔다. 꺼져 있으면 GlContext 의 짓기, 크기 정하기 함수는 깃발 하나만 보고 지나가고 프레임마다 드는 일은 0 이다.
 //!   켜는 길은 EngineConfiguration::track_gpu_memory, Graphic::enable_gpu_memory_tracking, Engine::enable_gpu_memory_tracking 이고 켠 뒤에 지은 것부터 센다.
+//!
+//! # 예제
+//! 추적을 켜고 쓰는 GPU 메모리 합 읽기
+//! ```rust
+//! use vanilla::{Engine, EngineConfiguration};
+//!
+//! let engine = Engine::new(EngineConfiguration::new());
+//! engine.enable_gpu_memory_tracking();
+//! if let Some(usage) = engine.read_gpu_memory_usage() {
+//! 	assert!(usage.total_bytes >= usage.canvas_bytes);
+//! }
+//! ```
 //==============================================================================
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
@@ -57,8 +69,19 @@ impl GpuMemoryKind {
 
 //==============================================================================
 /// 종류 하나의 GPU 메모리. (원본 kindTable 의 { count, bytes })
+///
+/// # 예제
+/// 종류 칸의 기본값은 0 개 0 바이트
+/// ```rust
+/// use vanilla::GpuMemoryKindUsage;
+///
+/// let usage = GpuMemoryKindUsage::default();
+/// assert_eq!(usage.count, 0);
+/// assert_eq!(usage.bytes, 0);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+
 pub struct GpuMemoryKindUsage {
 	/// 살아 있는 객체 수.
 	pub count: u64,
@@ -68,8 +91,24 @@ pub struct GpuMemoryKindUsage {
 
 //==============================================================================
 /// 주인 하나의 GPU 메모리. (원본 ownerList 의 칸)
+///
+/// # 예제
+/// 주인 칸 하나 만들기
+/// ```rust
+/// use vanilla::{GpuMemoryKind, GpuMemoryOwnerUsage};
+///
+/// let usage = GpuMemoryOwnerUsage {
+/// 	owner: String::from("Graphic::new"),
+/// 	kind: GpuMemoryKind::Texture,
+/// 	count: 2,
+/// 	bytes: 4096,
+/// };
+/// assert_eq!(usage.kind, GpuMemoryKind::Texture);
+/// assert_eq!(usage.bytes, 4096);
+/// ```
 //==============================================================================
 #[derive(Clone, PartialEq, Eq, Debug)]
+
 pub struct GpuMemoryOwnerUsage {
 	/// 주인. (지은 호출 스택의 위쪽 세 칸을 " < " 로 이은 이름)
 	pub owner: String,
@@ -83,8 +122,20 @@ pub struct GpuMemoryOwnerUsage {
 
 //==============================================================================
 /// 지금 쓰는 GPU 메모리. (원본 readGpuMemoryUsage 가 주는 { totalBytes, canvasBytes, kindTable, ownerList })
+///
+/// # 예제
+/// 엔진이 그래픽을 가졌으면 합을 읽는다
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// if let Some(usage) = engine.read_gpu_memory_usage() {
+/// 	assert!(usage.total_bytes >= usage.canvas_bytes);
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, PartialEq, Eq, Debug)]
+
 pub struct GpuMemoryUsage {
 	/// 합. (캔버스 기본 프레임 버퍼 몫 포함)
 	pub total_bytes: u64,
@@ -294,6 +345,9 @@ fn read_owner_name(trace: &OwnerTrace) -> String {
 	}
 }
 
+//==============================================================================
+/// 주인 이름 칸을 읽어 글자로 돌려준다.
+//==============================================================================
 #[cfg(target_arch = "wasm32")]
 fn read_owner_name(trace: &OwnerTrace) -> String {
 	format!("{}:{}", trace.file(), trace.line())

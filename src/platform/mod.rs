@@ -53,6 +53,20 @@ pub(crate) mod eventqueue;
 pub use desktop::exit_application;
 #[cfg(target_arch = "wasm32")]
 pub use web::exit_application;
+// 바깥 주소 열기. (Engine::open_url, 웹은 window.open 새 탭, 데스크탑은 운영체제의 기본 프로그램)
+#[cfg(not(target_arch = "wasm32"))]
+pub use desktop::open_url;
+#[cfg(target_arch = "wasm32")]
+pub use web::open_url;
+
+//==============================================================================
+/// 열 수 있는 주소인지. (http, https, mailto, tel 만, 원본 Engine.openUrl 과 같은 검사. file: 이나 javascript: 같은 꼴이 운영체제 프로그램을 띄우지 못하게 한다)
+//==============================================================================
+pub(crate) fn is_openable_url(url: &str) -> bool {
+	let lower_url = url.to_ascii_lowercase();
+	lower_url.starts_with("http://") || lower_url.starts_with("https://") || lower_url.starts_with("mailto:") || lower_url.starts_with("tel:")
+}
+
 // 시스템 클립보드 글을 읽어 콜백에 넘기기. (웹은 navigator.clipboard.readText 가 끝난 뒤, 데스크탑은 그 자리에서)
 #[cfg(not(target_arch = "wasm32"))]
 pub use desktop::read_clipboard_text_with_callback;

@@ -2143,6 +2143,9 @@ fn apply_element_opacity(node_tree: &mut NodeTree, node_id: NodeId, opacity: Opt
 	}
 }
 
+//==============================================================================
+/// 길이를 허용 범위로 자른다.
+//==============================================================================
 fn clamp_length(value: f64, minimum: f64, maximum: f64) -> f64 {
 	value.min(maximum).max(minimum)
 }

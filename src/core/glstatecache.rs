@@ -396,6 +396,9 @@ pub(crate) unsafe fn disable(gl: &impl GlowContextSource, capability: u32) {
 	set_capability(gl, capability, false);
 }
 
+//==============================================================================
+/// 기능(깊이, 블렌드 같은) 켜짐을 바꾸고 기억한다.
+//==============================================================================
 fn set_capability(gl: &glow::Context, capability: u32, is_enabled: bool) {
 	with_state_cache(gl, |state_cache| {
 		if let (Some(state_cache), Some(capability_index)) = (state_cache, GlStateCache::find_capability_index(capability)) {
@@ -1036,6 +1039,9 @@ pub(crate) unsafe fn get_parameter_i32(gl: &impl GlowContextSource, parameter: u
 	})
 }
 
+//==============================================================================
+/// 정수 상태 값을 기억 칸에 적는다.
+//==============================================================================
 fn remember_u32(cell: &Cell<Option<u32>>, query: impl FnOnce() -> i32) -> u32 {
 	if let Some(value) = cell.get() {
 		return value;
@@ -1595,6 +1601,9 @@ pub(crate) mod tests {
 	struct NumberSequence(u64);
 
 	impl NumberSequence {
+		//==============================================================================
+		/// 숫자 열 값을 읽는다.
+		//==============================================================================
 		fn read(&mut self, count: usize) -> usize {
 			self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
 			((self.0 >> 33) as usize) % count

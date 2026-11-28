@@ -26,6 +26,7 @@
 use crate::base::rect::Rect;
 use crate::core::animation::Animation;
 use crate::core::component::sprite::Sprite;
+use crate::effect::shadersprite::ShaderSprite;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::image::Image;
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
@@ -300,11 +301,18 @@ impl SpriteAnimator {
 				return false;
 			}
 		};
-		if let (Some(current_frame), Some(sprite)) = (current_frame, node.get_component_mut::<Sprite>()) {
+		if let Some(current_frame) = current_frame {
 			let frame_image = current_frame.get_image().clone();
 			let frame_rect = current_frame.get_image_rect();
-			sprite.set_image(Some(frame_image));
-			sprite.set_image_rect(frame_rect);
+			// 원본은 ShaderSprite 가 Sprite 를 상속하므로 같은 노드의 ShaderSprite 도 움직인다. (Sprite 가 먼저, 없으면 ShaderSprite)
+			if let Some(sprite) = node.get_component_mut::<Sprite>() {
+				sprite.set_image(Some(frame_image));
+				sprite.set_image_rect(frame_rect);
+			}
+			else if let Some(shader_sprite) = node.get_component_mut::<ShaderSprite>() {
+				shader_sprite.set_image(Some(frame_image));
+				shader_sprite.set_image_rect(frame_rect);
+			}
 		}
 		is_started
 	}
@@ -426,7 +434,7 @@ impl SpriteAnimator {
 	pub fn find_sprite(node_tree: &mut NodeTree, node_id: NodeId) -> Option<&mut Sprite> {
 		let sprite_node_id = {
 			let node = node_tree.get_node_mut(node_id)?;
-			let has_sprite = node.get_component::<Sprite>().is_some();
+			let has_sprite = node.get_component::<Sprite>().is_some() || node.get_component::<ShaderSprite>().is_some();
 			let sprite_animator = node.get_component_mut::<SpriteAnimator>()?;
 			match sprite_animator.sprite_node_id {
 				Some(sprite_node_id) => {
@@ -441,7 +449,12 @@ impl SpriteAnimator {
 				}
 			}
 		};
-		node_tree.get_node_mut(sprite_node_id)?.get_component_mut::<Sprite>()
+		let sprite_node = node_tree.get_node_mut(sprite_node_id)?;
+		if sprite_node.get_component::<Sprite>().is_some() {
+			return sprite_node.get_component_mut::<Sprite>();
+		}
+		// 원본은 ShaderSprite 가 Sprite 를 상속하므로 같은 노드의 ShaderSprite 도 스프라이트로 본다.
+		sprite_node.get_component_mut::<ShaderSprite>().map(|shader_sprite| &mut **shader_sprite)
 	}
 }
 
@@ -496,6 +509,13 @@ impl Component for SpriteAnimator {
 			}
 			self.apply_current_frame(sprite);
 		}
+		else if let Some(shader_sprite) = context.get_node_mut().get_component_mut::<ShaderSprite>() {
+			// 원본은 ShaderSprite 가 Sprite 를 상속하므로 같은 노드의 ShaderSprite 도 움직인다.
+			if self.sprite_node_id.is_none() {
+				self.sprite_node_id = Some(node_id);
+			}
+			self.apply_current_frame(shader_sprite);
+		}
 	}
 }
 
@@ -514,6 +534,24 @@ mod tests {
 	//==============================================================================
 	fn create_sheet_rects(first_column: usize, frame_count: usize) -> Vec<Rect> {
 		(first_column..first_column + frame_count).map(|column| Rect::create(column as f64 * 16.0, 0.0, 16.0, 16.0)).collect()
+	}
+
+	//==============================================================================
+	/// ShaderSprite 가 든 노드: 원본처럼 ShaderSprite 도 Sprite 로 보고 프레임을 넣는다. (재생 시작, tick, find_sprite)
+	//==============================================================================
+	#[test]
+	fn animates_shader_sprite_on_same_node() {
+		let image = Image::create_from_pixels(64, 16, vec![0u8; 64 * 16 * 4]);
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let hero_id = node_tree.create_child(root_id, "hero");
+		node_tree[hero_id].add_component(ShaderSprite::new());
+		node_tree[hero_id].add_component(SpriteAnimator::new()).add_clip("run", image, &create_sheet_rects(1, 2), 10.0, true);
+		SpriteAnimator::play(&mut node_tree[hero_id], "run", SpriteAnimatorPlayOptions::default());
+		assert_eq!(node_tree[hero_id].get_component::<ShaderSprite>().expect("shader sprite").get_image_rect(), Rect::create(16.0, 0.0, 16.0, 16.0));
+		let found_rect = SpriteAnimator::find_sprite(&mut node_tree, hero_id).expect("shader sprite as sprite").get_image_rect();
+		assert_eq!(found_rect, Rect::create(16.0, 0.0, 16.0, 16.0));
+		assert_eq!(node_tree[hero_id].get_component::<SpriteAnimator>().expect("animator").sprite_node_id, Some(hero_id));
 	}
 
 	//==============================================================================

@@ -23,6 +23,9 @@ struct Target<'a> {
 	framebuffer: glow::Framebuffer,
 }
 
+//==============================================================================
+/// 시험용 그릴 대상을 만든다.
+//==============================================================================
 fn create_target<'a>(gl: &'a GlContext) -> Target<'a> {
 	use glow::HasContext;
 	let raw: &glow::Context = gl.get_glow_context_unchecked();
@@ -44,6 +47,9 @@ fn create_target<'a>(gl: &'a GlContext) -> Target<'a> {
 }
 
 impl Target<'_> {
+	//==============================================================================
+	/// 대상을 지운다.
+	//==============================================================================
 	fn clear(&self) {
 		use glow::HasContext;
 		unsafe {
@@ -54,6 +60,9 @@ impl Target<'_> {
 		}
 	}
 
+	//==============================================================================
+	/// 대상의 픽셀을 읽는다.
+	//==============================================================================
 	fn read_pixels(&self) -> Vec<u8> {
 		use glow::HasContext;
 		let mut pixels = vec![0u8; (SIZE * SIZE * 4) as usize];
@@ -65,22 +74,34 @@ impl Target<'_> {
 	}
 }
 
+//==============================================================================
+/// 대상 픽셀의 해시를 읽는다.
+//==============================================================================
 fn read_hash(pixels: &[u8]) -> u64 {
 	pixels.iter().fold(0xcbf29ce484222325u64, |hash, &byte| (hash ^ byte as u64).wrapping_mul(0x100000001b3))
 }
 
+//==============================================================================
+/// 대상 픽셀의 해시를 찍는다.
+//==============================================================================
 fn print_hash(name: &str, pixels: &[u8]) {
 	if std::env::var("TOON_BATCH_HASH").is_ok() {
 		eprintln!("해시 {} {:016x}", name, read_hash(pixels));
 	}
 }
 
+//==============================================================================
+/// 시험용 메시를 만든다.
+//==============================================================================
 fn create_mesh(gl: &GlContext, renderer: &mut ToonRenderer, geometry: &crate::ToonGeometry, color: &str) -> ToonMesh {
 	let mut builder = MeshBuilder::new();
 	builder.add_part(geometry, &Matrix4::create_identity(), color, ToonPartOptions { has_outline: true, ..ToonPartOptions::default() });
 	renderer.create_mesh(gl, &builder.read_arrays()).expect("모형")
 }
 
+//==============================================================================
+/// 시험용 카메라를 만든다.
+//==============================================================================
 fn create_camera() -> Camera3D {
 	let mut camera = Camera3D::new();
 	camera.set_perspective(0.9, 0.1, 50.0);
@@ -154,6 +175,9 @@ fn auto_instancing_batches_and_keeps_pixels() {
 	assert!(stopped_pixels == batch_pixels, "멈춘 프레임도 같은 화면");
 }
 
+//==============================================================================
+/// glow 맥락을 못 만들 때의 오류를 돌려준다.
+//==============================================================================
 unsafe fn glow_context_error(glow_context: &glow::Context) -> u32 {
 	use glow::HasContext;
 	unsafe { glow_context.get_error() }
@@ -396,6 +420,9 @@ fn line_batching_uploads_only_changed_group() {
 	assert_eq!(unsafe { glow_context_error(&glow_context) }, 0, "GL 오류");
 }
 
+//==============================================================================
+/// 바깥선 자원을 지운다.
+//==============================================================================
 fn destroy_outline(gl: &GlContext, mut first: ToonScreenOutline, mut second: ToonScreenOutline) {
 	first.destroy(gl);
 	second.destroy(gl);

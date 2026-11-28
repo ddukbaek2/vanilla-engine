@@ -1318,8 +1318,18 @@ static NEXT_INSTANCE_BUFFER_ID: std::sync::atomic::AtomicU64 = std::sync::atomic
 //==============================================================================
 /// 인스턴스 버퍼 전체의 경계. (꼴에 행렬이 있을 때만, 자리들의 상자 가운데와 가장 먼 자리까지의 거리, 가장 큰 크기, 원본 bounds)
 /// - 어느 모형으로 그려도 쓰도록 모형의 경계 구는 그릴 때 더한다. (read_instance_buffer_sphere)
+///
+/// # 예제
+/// 경계 값 만들기
+/// ```rust
+/// use vanilla::ToonInstanceBounds;
+///
+/// let bounds = ToonInstanceBounds { center: [0.0, 1.0, 0.0], radius: 5.0, scale: 2.0 };
+/// assert_eq!(bounds.radius, 5.0);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
+
 pub struct ToonInstanceBounds {
 	/// 자리들의 상자 가운데.
 	pub center: [f64; 3],
@@ -1942,6 +1952,9 @@ thread_local! {
 	pub(crate) static INSTANCE_UPLOAD_COUNT: Cell<u32> = const { Cell::new(0) };
 }
 
+//==============================================================================
+/// 인스턴스 올리기 횟수를 센다. (시험용)
+//==============================================================================
 #[cfg(test)]
 pub(crate) fn count_instance_upload() {
 	INSTANCE_UPLOAD_COUNT.with(|count| count.set(count.get() + 1));
@@ -1996,6 +2009,9 @@ struct BlockCache {
 }
 
 impl BlockCache {
+	//==============================================================================
+	/// 새로 만든다.
+	//==============================================================================
 	fn new(binding: u32, float_count: usize) -> BlockCache {
 		BlockCache { binding, values: vec![0.0; float_count], table: HashMap::new(), blocks: Vec::new(), hand: 0, bound_serial: 0, next_serial: 1 }
 	}
@@ -2153,6 +2169,9 @@ struct FrameRing {
 }
 
 impl FrameRing {
+	//==============================================================================
+	/// 새로 만든다.
+	//==============================================================================
 	fn new() -> FrameRing {
 		let stride = (FRAME_BLOCK_FLOAT_COUNT * 4).div_ceil(FRAME_RING_ALIGNMENT) * FRAME_RING_ALIGNMENT;
 		FrameRing { values: [0.0; FRAME_BLOCK_FLOAT_COUNT], stride, pages: Vec::new(), write_page: None, bound_buffer: None, bound_offset: -1, block_page: None, block_offset: 0, block_serial: 0 }

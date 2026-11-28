@@ -32,6 +32,9 @@ struct Target<'a> {
 	framebuffer: glow::Framebuffer,
 }
 
+//==============================================================================
+/// 시험용 그릴 대상을 만든다.
+//==============================================================================
 fn create_target<'a>(gl: &'a GlContext) -> Target<'a> {
 	use glow::HasContext;
 	let raw: &glow::Context = gl.get_glow_context_unchecked();
@@ -53,6 +56,9 @@ fn create_target<'a>(gl: &'a GlContext) -> Target<'a> {
 }
 
 impl Target<'_> {
+	//==============================================================================
+	/// 대상을 지운다.
+	//==============================================================================
 	fn clear(&self) {
 		use glow::HasContext;
 		unsafe {
@@ -63,6 +69,9 @@ impl Target<'_> {
 		}
 	}
 
+	//==============================================================================
+	/// 대상의 픽셀을 읽는다.
+	//==============================================================================
 	fn read_pixels(&self) -> Vec<u8> {
 		use glow::HasContext;
 		let mut pixels = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
@@ -74,11 +83,17 @@ impl Target<'_> {
 	}
 }
 
+//==============================================================================
+/// glow 맥락을 못 만들 때의 오류를 돌려준다.
+//==============================================================================
 unsafe fn glow_context_error(glow_context: &glow::Context) -> u32 {
 	use glow::HasContext;
 	unsafe { glow_context.get_error() }
 }
 
+//==============================================================================
+/// 시험용 메시를 만든다.
+//==============================================================================
 fn create_mesh(gl: &GlContext, renderer: &mut ToonRenderer, geometry: &crate::ToonGeometry, matrix: &Matrix4, color: &str, has_outline: bool) -> ToonMesh {
 	let mut builder = MeshBuilder::new();
 	builder.add_part(geometry, matrix, color, ToonPartOptions { has_outline, ..ToonPartOptions::default() });
@@ -124,14 +139,23 @@ fn write_instance(rock: &Rock) -> Vec<f32> {
 	data
 }
 
+//==============================================================================
+/// 파란 선 픽셀 수를 센다.
+//==============================================================================
 fn count_blue_line(pixels: &[u8]) -> usize {
 	pixels.chunks(4).filter(|pixel| pixel[2] as i32 > pixel[0] as i32 + 90 && pixel[2] > 110).count()
 }
 
+//==============================================================================
+/// 두 그림에서 다른 픽셀 수를 센다.
+//==============================================================================
 fn count_different(first: &[u8], second: &[u8]) -> usize {
 	first.chunks(4).zip(second.chunks(4)).filter(|(first_pixel, second_pixel)| first_pixel != second_pixel).count()
 }
 
+//==============================================================================
+/// 올린 인스턴스 자료의 합계를 읽는다.
+//==============================================================================
 fn read_upload_total() -> u32 {
 	UPLOAD_COUNTS.with(|counts| {
 		let list = counts.get();
@@ -271,6 +295,9 @@ fn run_scene(gl: &GlContext, target: &Target, is_buffer: bool, frame_count: usiz
 	result_list
 }
 
+//==============================================================================
+/// 시험용 그리기 맥락을 만든다.
+//==============================================================================
 fn create_context() -> std::rc::Rc<glow::Context> {
 	let Some(glow_context) = crate::core::glstatecache::tests::create_surfaceless_context() else {
 		panic!("창 없는 GL 컨텍스트를 짓지 못함");

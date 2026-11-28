@@ -1241,7 +1241,24 @@ impl Default for GeometryKey {
 
 //==============================================================================
 /// GeometryKey::add 로 적을 수 있는 값. (원본 add 가 받는 수, 글, 참거짓, 객체 참조, null)
+///
+/// # 예제
+/// 수와 참거짓을 적어 지난번과 같은지 보기
+/// ```rust
+/// use vanilla::GeometryKey;
+///
+/// let mut geometry_key = GeometryKey::new();
+/// geometry_key.begin();
+/// geometry_key.add(1.5_f64);
+/// geometry_key.add(true);
+/// geometry_key.end();
+/// geometry_key.begin();
+/// geometry_key.add(1.5_f64);
+/// geometry_key.add(true);
+/// assert!(geometry_key.end());
+/// ```
 //==============================================================================
+
 pub trait GeometryKeyValue {
 	//==============================================================================
 	/// 열쇠에 이 값을 적기.
@@ -1253,60 +1270,90 @@ pub trait GeometryKeyValue {
 }
 
 impl GeometryKeyValue for f64 {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		geometry_key.add_number_bits(self);
 	}
 }
 
 impl GeometryKeyValue for f32 {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		geometry_key.add_number_bits(self as f64);
 	}
 }
 
 impl GeometryKeyValue for i32 {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		geometry_key.add_number_bits(self as f64);
 	}
 }
 
 impl GeometryKeyValue for u32 {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		geometry_key.add_number_bits(self as f64);
 	}
 }
 
 impl GeometryKeyValue for u64 {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		geometry_key.add_number_bits(f64::from_bits(self));
 	}
 }
 
 impl GeometryKeyValue for usize {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		geometry_key.add_number_bits(f64::from_bits(self as u64));
 	}
 }
 
 impl GeometryKeyValue for bool {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		geometry_key.add_number_bits(if self { 1.0 } else { 2.0 });
 	}
 }
 
 impl GeometryKeyValue for &str {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		geometry_key.add_text(self);
 	}
 }
 
 impl GeometryKeyValue for &String {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		geometry_key.add_text(self);
 	}
 }
 
 impl GeometryKeyValue for Color {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		geometry_key.add_number_bits(self.red);
 		geometry_key.add_number_bits(self.green);
@@ -1316,6 +1363,9 @@ impl GeometryKeyValue for Color {
 }
 
 impl GeometryKeyValue for Vector2 {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		geometry_key.add_number_bits(self.x);
 		geometry_key.add_number_bits(self.y);
@@ -1323,6 +1373,9 @@ impl GeometryKeyValue for Vector2 {
 }
 
 impl GeometryKeyValue for Rect {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		geometry_key.add_number_bits(self.position.x);
 		geometry_key.add_number_bits(self.position.y);
@@ -1332,6 +1385,9 @@ impl GeometryKeyValue for Rect {
 }
 
 impl<T: Any> GeometryKeyValue for &Rc<T> {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		let object: Rc<dyn Any> = self.clone();
 		geometry_key.add_object(object);
@@ -1339,6 +1395,9 @@ impl<T: Any> GeometryKeyValue for &Rc<T> {
 }
 
 impl<T: GeometryKeyValue> GeometryKeyValue for Option<T> {
+	//==============================================================================
+	/// 이 값을 도형 캐시 열쇠에 더한다.
+	//==============================================================================
 	fn add_to_geometry_key(self, geometry_key: &mut GeometryKey) {
 		match self {
 			Some(value) => {
@@ -1509,12 +1568,18 @@ pub(crate) struct GeometryCacheSlot {
 }
 
 impl Clone for GeometryCacheSlot {
+	//==============================================================================
+	/// 도형 캐시 칸을 복제한다.
+	//==============================================================================
 	fn clone(&self) -> GeometryCacheSlot {
 		GeometryCacheSlot::default()
 	}
 }
 
 impl std::fmt::Debug for GeometryCacheSlot {
+	//==============================================================================
+	/// 도형 캐시 칸을 디버그 글자로 적는다.
+	//==============================================================================
 	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		formatter.write_str(if self.geometry_cache.is_some() { "GeometryCacheSlot(Some)" } else { "GeometryCacheSlot(None)" })
 	}
@@ -2311,6 +2376,25 @@ impl Graphic {
 		self.release_color_mask();
 		let guard = ExternalPassGuard { graphic: self, shader_clip_count };
 		pass(GlContext::from_context(&guard.graphic.gl))
+	}
+
+	//==============================================================================
+	/// 그래픽을 쓰는 바깥 패스 돌리기. (run_external_pass 와 같은 앞뒤 일을 하고, 패스가 GL 컨텍스트 대신 이 Graphic 을 받는다. ScreenEffect 처럼 Graphic 을 받는 패스가 쓴다)
+	///
+	/// # 인자
+	/// - `is_depth_cleared`: 패스 앞에서 깊이를 비울지.
+	/// - `pass`: 돌릴 패스. (Graphic 을 받는다)
+	//==============================================================================
+	pub(crate) fn run_external_graphic_pass<R>(&mut self, is_depth_cleared: bool, pass: impl FnOnce(&mut Graphic) -> R) -> R {
+		self.break_geometry_record();
+		self.flush_batch();
+		if is_depth_cleared {
+			self.clear_depth_buffer();
+		}
+		let shader_clip_count = self.write_shader_clips_to_stencil(true);
+		self.release_color_mask();
+		let guard = ExternalPassGuard { graphic: self, shader_clip_count };
+		pass(&mut *guard.graphic)
 	}
 
 	//==============================================================================
@@ -8358,6 +8442,9 @@ mod tests {
 			assert_eq!(graphic.batch_vertex_data.len(), BATCH_VERTEX_CAPACITY * BATCH_FLOATS_PER_VERTEX);
 		}
 
+		//==============================================================================
+		/// 바깥에서 GL 상태를 바꾼 뒤에도 그리기가 맞는지 시험한다.
+		//==============================================================================
 		#[test]
 		fn draw_after_outside_gl_change_draws_right() {
 			let Some(mut graphic) = create_test_graphic() else {

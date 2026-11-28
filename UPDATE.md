@@ -445,6 +445,10 @@
 - GameSceneBase 의 바뀐 동작: set_safe_area_insets 로 정하지 않았으면 compute_safe_area_rect 가 플랫폼 env 를 따로 재던 것 대신 ViewManager::get_safe_area_insets 를 읽는다. 지금까지는 set_safe_area_override, 주소의 ?safeArea=, (새) 무시할 쪽이 GameSceneBase 의 세이프 에어리어에 닿지 않았다. 웹 env 값은 정수로 잘리지 않는 것 말고 같고, 데스크탑은 그대로 0 이다. 따로 재던 read_platform_safe_area_insets 와 parse_leading_integer 는 쓰지 않게 되어 뺐다
 - 출시 게임들이 따로 만들어 쓰던 글자, 노드 편의, 그리기 기능과 최적화를 엔진 기본으로 넣는다. (vanilla.js 에 같이 넣은 것과 같은 기능, 게임의 화면 모양과 연출은 가져오지 않았다)
 - Text, UILabel: set_fit_width(width, minimum_ratio), get_fit_width, get_fit_minimum_ratio, get_fitted_font_size, calculate_fitted_font_size. 한 줄 글이 맞출 너비를 넘치면 처음 크기에서 최소 비율까지 0.1 단위로 줄여 그린다. 정한 크기는 그대로이고, 최소 비율로도 넘치면 넘친 채 그리며 화면 밖 거르기의 글 사각형은 줄인 글의 너비를 따른다. 줄을 바꾸는 글과 리치텍스트는 맞추지 않는다. 줄인 크기는 줄을 나눌 때 재므로 Graphic 이 있어야 안다
+- Text: set_letter_spacing, get_letter_spacing (UILabel, RichText 도 같은 이름). 글자 묶음마다 뒤에 더하는 간격(픽셀, CSS letter-spacing 과 같은 뜻, 음수는 좁힘, 처음은 0). 글 너비는 글자 묶음 수 x 간격만큼 늘고 줄바꿈, 맞춤 너비, 정렬, 밑줄이 그 너비로 잰다. 앞뒤 짝을 재어 자리를 잡아 짝 커닝은 남는다. 오른쪽에서 왼쪽으로 쓰는 글은 간격을 쓰지 않는다. 원본 setLetterSpacing 과 같다
+- Engine::open_url(url): 바깥 주소를 연다. 데스크탑은 운영체제의 기본 프로그램(맥 open, 윈도우 ShellExecuteW, 리눅스 xdg-open), 웹은 window.open(주소, "_blank", "noopener") 새 탭이다. 웹은 사용자 입력(누름, 탭, 키) 처리 안에서 부를 때만 열린다(브라우저의 팝업 차단 규칙). http, https, mailto, tel 만 열고 그 밖의 꼴은 false. 원본 Engine.openUrl 과 같다
+- UIView: set_backdrop_blur(blur_radius), get_backdrop_blur. 뒤 화면 흐림(CSS backdrop-filter: blur(), 언리얼 UMG BackgroundBlur 와 같은 뜻, 처음은 0 으로 꺼짐). 켜면 이 뷰가 그려질 때 그보다 먼저 그려진 화면을 이 뷰의 내용 영역만 ScreenEffect 의 Blur 로 흐리고 그 위에 배경색을 얹는다. 화면에 그릴 때만 되고 켜진 동안은 기하 캐시를 쓰지 않는다. 원본 setBackdropBlur 와 같다
+- SpriteAnimator: 같은 노드의 ShaderSprite 도 움직인다(원본은 ShaderSprite 가 Sprite 를 상속해서 같은 노드의 ShaderSprite 도 움직인다). play, tick, find_sprite 가 Sprite 가 없으면 ShaderSprite 를 쓴다
 - Text, UILabel: measure_text(graphic, text, font_size). Graphic: measure_text_with_font_string(font_string, text)
 - TextStringTextureCache: 글 재기(measure_text)를 폰트 문자열과 글이 같으면 다시 재지 않는다. (2048 개, 넘으면 오래 안 쓴 반을 버림, 글꼴을 새로 등록하면 비움) get_measure_count
 - UILabel.set_text: 같은 글이면 건너뛴다. (리치텍스트 모드가 아닐 때) Text.set_text 는 전부터 같은 글을 건너뛴다. 색은 Copy 라 같은 색 건너뛰기는 따로 두지 않았다

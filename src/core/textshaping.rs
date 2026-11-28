@@ -1091,25 +1091,40 @@ impl PathBoundsBuilder {
 }
 
 impl rustybuzz::ttf_parser::OutlineBuilder for PathBoundsBuilder {
+	//==============================================================================
+	/// 경로 시작점을 옮기며 범위에 넣는다.
+	//==============================================================================
 	fn move_to(&mut self, x: f32, y: f32) {
 		self.add_point(x, y);
 	}
 
+	//==============================================================================
+	/// 직선 끝점을 범위에 넣는다.
+	//==============================================================================
 	fn line_to(&mut self, x: f32, y: f32) {
 		self.add_point(x, y);
 	}
 
+	//==============================================================================
+	/// 2차 곡선의 점을 범위에 넣는다.
+	//==============================================================================
 	fn quad_to(&mut self, control_x: f32, control_y: f32, x: f32, y: f32) {
 		self.add_point(control_x, control_y);
 		self.add_point(x, y);
 	}
 
+	//==============================================================================
+	/// 3차 곡선의 점을 범위에 넣는다.
+	//==============================================================================
 	fn curve_to(&mut self, first_control_x: f32, first_control_y: f32, second_control_x: f32, second_control_y: f32, x: f32, y: f32) {
 		self.add_point(first_control_x, first_control_y);
 		self.add_point(second_control_x, second_control_y);
 		self.add_point(x, y);
 	}
 
+	//==============================================================================
+	/// 경로를 닫는다. (범위는 그대로)
+	//==============================================================================
 	fn close(&mut self) {
 	}
 }
@@ -2549,6 +2564,9 @@ fn read_table_u16(table: &[u8], offset: usize) -> Option<u16> {
 	Some(u16::from_be_bytes([*table.get(offset)?, *table.get(offset + 1)?]))
 }
 
+//==============================================================================
+/// 글꼴 표의 32 비트 값을 읽는다.
+//==============================================================================
 #[cfg(any(test, target_os = "windows"))]
 fn read_table_u32(table: &[u8], offset: usize) -> Option<u32> {
 	Some(u32::from_be_bytes([*table.get(offset)?, *table.get(offset + 1)?, *table.get(offset + 2)?, *table.get(offset + 3)?]))

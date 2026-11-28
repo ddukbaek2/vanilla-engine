@@ -9,6 +9,16 @@
 //!   같은 매니저를 RefMut 으로 쥔 채 또 빌리면(get_x 나 get_x_mut) 함수 이름과 매니저 이름을 적은 패닉으로 멈춘다.
 //!   빌린 것은 한 문장 안에서 쓰고 버린다. (let 으로 오래 쥐고 다른 엔진 함수를 부르지 않는다)
 //! - 다른 스레드에서 부르면 Err(EngineAccessError::OtherThread) 다. (엔진은 만든 스레드 전용이다. Engine 은 Sync 가 아니라 &Engine 을 다른 스레드로 보낼 수 없다. 웹은 스레드가 하나)
+//!
+//! # 예제
+//! 만든 직후부터 어디서나 같은 엔진을 꺼낸다
+//! ```rust
+//! use vanilla::{Engine, EngineConfiguration};
+//!
+//! let engine = Engine::new(EngineConfiguration::new());
+//! let global_engine = Engine::get_engine().unwrap();
+//! assert!(std::ptr::eq(engine, global_engine));
+//! ```
 //==============================================================================
 use crate::core::engine::Engine;
 use std::cell::{Cell, Ref, RefCell, RefMut};
@@ -143,6 +153,9 @@ mod tests {
 		Ok(engine as *const Engine as usize)
 	}
 
+	//==============================================================================
+	/// 전역 엔진 자리의 주소를 돌려준다. (시험용)
+	//==============================================================================
 	fn get_engine_address(engine: &Engine) -> usize {
 		engine as *const Engine as usize
 	}
@@ -157,18 +170,30 @@ mod tests {
 
 	#[crate::reflect]
 	impl Component for GlobalReader {
+		//==============================================================================
+		/// 컴포넌트 바탕 상태를 돌려준다.
+		//==============================================================================
 		fn get_component_base(&self) -> &ComponentBase {
 			&self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 바탕 상태를 고칠 수 있게 돌려준다.
+		//==============================================================================
 		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 			&mut self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 종류 이름을 돌려준다.
+		//==============================================================================
 		fn get_component_type(&self) -> &'static str {
 			"GlobalReader"
 		}
 
+		//==============================================================================
+		/// 틱 안에서 전역 엔진을 꺼내 적어 둔다.
+		//==============================================================================
 		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f64) {
 			let read = read_global_engine_address();
 			// 문맥의 엔진과 전역 엔진은 같은 엔진이다.
@@ -179,6 +204,9 @@ mod tests {
 		}
 	}
 
+	//==============================================================================
+	/// Engine::new 직후에 전역 엔진이 나오는지 시험한다.
+	//==============================================================================
 	#[test]
 	fn get_engine_right_after_new() {
 		let engine = Engine::new(EngineConfiguration::new());
@@ -188,6 +216,9 @@ mod tests {
 		assert!(std::ptr::eq(Engine::get_engine().unwrap(), second_engine));
 	}
 
+	//==============================================================================
+	/// 컴포넌트 틱 안에서 맥락 없는 함수로도 전역 엔진이 나오는지 시험한다.
+	//==============================================================================
 	#[test]
 	fn get_engine_inside_component_tick_from_function_without_context() {
 		let engine = Engine::new(EngineConfiguration::new());
@@ -214,14 +245,23 @@ mod tests {
 	}
 
 	impl Scene for RecordingScene {
+		//==============================================================================
+		/// 씬 바탕 상태를 돌려준다.
+		//==============================================================================
 		fn get_scene_base(&self) -> &SceneBase {
 			&self.scene_base
 		}
 
+		//==============================================================================
+		/// 씬 바탕 상태를 고칠 수 있게 돌려준다.
+		//==============================================================================
 		fn get_scene_base_mut(&mut self) -> &mut SceneBase {
 			&mut self.scene_base
 		}
 
+		//==============================================================================
+		/// 씬 불러오기 안에서 전역 엔진을 꺼내 적어 둔다.
+		//==============================================================================
 		fn load(&mut self, engine: &Engine) {
 			// 씬 함수의 engine 인자와 전역 엔진은 같은 엔진이다. 둘을 같이 써도 된다.
 			self.read_list.borrow_mut().push(("create", read_global_engine_address()));
@@ -238,6 +278,9 @@ mod tests {
 			});
 		}
 
+		//==============================================================================
+		/// 틱 안에서 전역 엔진을 꺼내 적어 둔다.
+		//==============================================================================
 		fn tick(&mut self, _time_delta: f64) {
 			let engine = Engine::get_engine().unwrap();
 			self.read_list.borrow_mut().push(("tick", read_global_engine_address()));
@@ -245,6 +288,9 @@ mod tests {
 		}
 	}
 
+	//==============================================================================
+	/// 씬 함수와 async 작업 안에서 전역 엔진이 나오는지 시험한다.
+	//==============================================================================
 	#[test]
 	fn get_engine_inside_scene_functions_and_task() {
 		let read_list = Rc::new(RefCell::new(Vec::new()));
@@ -270,6 +316,9 @@ mod tests {
 		assert_eq!(*read_list.borrow(), expected);
 	}
 
+	//==============================================================================
+	/// 관리자 빌림이 겹치면 이름과 함께 패닉하는지 시험한다.
+	//==============================================================================
 	#[test]
 	#[should_panic(expected = "Engine::get_view_manager: 엔진의 뷰 매니저 칸을 이미 고치는 중이라 빌릴 수 없습니다")]
 	fn overlapping_manager_borrow_panics_with_name() {
@@ -278,6 +327,9 @@ mod tests {
 		let _ = Engine::get_engine().unwrap().get_view_manager().get_view_size();
 	}
 
+	//==============================================================================
+	/// 페이지 이벤트 리스너 안에서 전역 엔진이 나오는지 시험한다.
+	//==============================================================================
 	#[test]
 	fn page_event_listener_gets_engine() {
 		let engine = Engine::new(EngineConfiguration::new());
@@ -292,6 +344,9 @@ mod tests {
 		assert_eq!(read.get(), Some(Ok(engine_address)));
 	}
 
+	//==============================================================================
+	/// 다른 스레드에서는 다른 스레드 오류가 나는지 시험한다.
+	//==============================================================================
 	#[test]
 	fn other_thread_gets_other_thread_error() {
 		let _engine = Engine::new(EngineConfiguration::new());
@@ -299,6 +354,9 @@ mod tests {
 		assert_eq!(result, Err(EngineAccessError::OtherThread));
 	}
 
+	//==============================================================================
+	/// 러스트 이름이 원본 이름과 짝이 맞는지 시험한다.
+	//==============================================================================
 	#[test]
 	fn counterpart_names_match_original() {
 		let counterpart_text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/counterpart.0.4.0.json")).unwrap();
